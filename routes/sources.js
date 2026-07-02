@@ -126,6 +126,44 @@ router.post('/paste', async (req, res) => {
   }
 });
 
+// Crawl an entire website via its sitemap
+router.post('/crawl', async (req, res) => {
+  const { url: baseUrl, maxPages = 25 } = req.body;
+  if (!baseUrl?.trim()) return res.status(400).json({ error: 'URL is required' });
+  let origin;
+  try { origin = new URL(baseUrl.trim()).origin; }
+  catch { return res.status(400).json({ error: 'Invalid URL' }); }
+
+  try {
+    const urls = await discoverSitemapUrls(origin, Math.min(Number(maxPages) || 25, 50));
+    if (!urls.length) {
+      return res.status(404).json({ error: `No sitemap found at ${origin}. Try adding pages individually or using the Paste option.` });
+    }
+
+    const added = [], failed = [];
+    const BATCH = 5;
+    for (let i = 0; i < urls.length; i += BATCH) {
+      await Promise.allSettled(urls.slice(i, i + BATCH).map(async (url) => {
+        try {
+          const { title, text } = await fetchWebText(url);
+          if (!text.trim()) { failed.push({ url, reason: 'No content extracted' }); return; }
+          const id = uuidv4();
+          await getDb().execute({
+            sql: 'INSERT OR IGNORE INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
+            args: [id, 'website', title, url, text.trim(), req.user.email]
+          });
+          added.push({ url, title });
+        } catch (e) { failed.push({ url, reason: e.message }); }
+      }));
+      if (i + BATCH < urls.length) await new Promise(r => setTimeout(r, 400));
+    }
+    res.json({ added, failed, discovered: urls.length });
+  } catch (err) {
+    console.error('Crawl error:', err.message);
+    res.status(500).json({ error: 'Crawl failed: ' + err.message });
+  }
+});
+
 // Delete a source
 router.delete('/:id', async (req, res) => {
   try {
@@ -135,6 +173,54 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Sitemap discovery helper ──────────────────────────────────────
+async function discoverSitemapUrls(origin, max) {
+  const urls = new Set();
+
+  async function parseSitemap(xml) {
+    if (urls.size >= max) return;
+    if (xml.includes('<sitemapindex')) {
+      // Sitemap index — recurse into sub-sitemaps
+      const subs = [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gs)].map(m => m[1].trim());
+      for (const sub of subs.slice(0, 5)) {
+        if (urls.size >= max) break;
+        try {
+          const r = await fetch(sub, { signal: AbortSignal.timeout(8000) });
+          if (r.ok) await parseSitemap(await r.text());
+        } catch {}
+      }
+    } else {
+      const locs = [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gs)].map(m => m[1].trim());
+      for (const u of locs) {
+        if (urls.size >= max) break;
+        if (!u.match(/\.(jpg|jpeg|png|gif|svg|css|js|xml|pdf|zip|gz)(\?.*)?$/i)) urls.add(u);
+      }
+    }
+  }
+
+  // Check robots.txt first — many sites list their sitemap there
+  const candidates = ['/sitemap.xml', '/sitemap_index.xml', '/sitemap/sitemap.xml'];
+  try {
+    const r = await fetch(`${origin}/robots.txt`, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const txt = await r.text();
+      const m = txt.match(/^Sitemap:\s*(.+)$/im);
+      if (m) candidates.unshift(m[1].trim());
+    }
+  } catch {}
+
+  for (const path of candidates) {
+    if (urls.size > 0) break;
+    try {
+      const url = path.startsWith('http') ? path : `${origin}${path}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (r.ok) await parseSitemap(await r.text());
+    } catch {}
+  }
+
+  return [...urls].slice(0, max);
+}
 
 // ── Web fetch helper — uses Jina Reader to bypass bot protection ──
 async function fetchWebText(url) {

@@ -408,6 +408,29 @@
             <div class="admin-page-sub">Documents and websites the AI uses to answer questions</div>
           </div>
         </div>
+        <!-- Crawl entire site -->
+        <div style="background:linear-gradient(135deg,#f0f4ff 0%,#fff 100%);border:1.5px solid rgba(61,111,255,.2);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px">
+              <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔍 Crawl Entire Website</div>
+              <div style="font-size:13px;color:var(--text-muted)">Enter any website URL — the AI will automatically find and add all pages from that site's sitemap. Great for government sites, regulators, and reference portals.</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex:2;min-width:300px">
+              <input type="url" id="crawlUrl" class="form-control" placeholder="https://acecqa.gov.au" style="flex:1">
+              <select id="crawlMax" class="form-control" style="width:110px;flex-shrink:0">
+                <option value="10">Up to 10</option>
+                <option value="25" selected>Up to 25</option>
+                <option value="50">Up to 50</option>
+              </select>
+              <button class="btn-primary" id="crawlBtn" onclick="crawlSite()" style="flex-shrink:0;white-space:nowrap">Crawl Site</button>
+            </div>
+          </div>
+          <div id="crawlStatus" style="display:none;margin-top:14px;border-top:1px solid rgba(61,111,255,.15);padding-top:14px">
+            <div id="crawlStatusText" style="font-size:13px;color:var(--text-muted);margin-bottom:8px"></div>
+            <div id="crawlResults" style="font-size:12px;line-height:1.8;color:var(--text-muted);max-height:160px;overflow-y:auto"></div>
+          </div>
+        </div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px">
           <div style="background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:22px">
             <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:12px">📄 Upload Document</div>
@@ -1660,6 +1683,36 @@
         toast(`"${data.title}" added to AI sources`, 'success');
         loadSources();
       } catch { toast('Upload failed', 'error'); } finally { status.style.display = 'none'; }
+    }
+
+    async function crawlSite() {
+      const url = document.getElementById('crawlUrl').value.trim();
+      const maxPages = document.getElementById('crawlMax').value;
+      if (!url) { toast('Please enter a website URL', 'error'); return; }
+      const btn = document.getElementById('crawlBtn');
+      const statusEl = document.getElementById('crawlStatus');
+      const statusText = document.getElementById('crawlStatusText');
+      const resultsEl = document.getElementById('crawlResults');
+      btn.disabled = true;
+      btn.textContent = 'Crawling…';
+      statusEl.style.display = 'block';
+      statusText.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Discovering pages from sitemap…';
+      resultsEl.innerHTML = '';
+      try {
+        const res = await fetch('/api/sources/crawl', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, maxPages: Number(maxPages) })
+        });
+        const data = await res.json();
+        if (!res.ok) { statusText.textContent = ''; toast(data.error || 'Crawl failed', 'error'); return; }
+        const { added = [], failed = [], discovered = 0 } = data;
+        statusText.innerHTML = `<strong style="color:var(--navy)">${added.length} pages added</strong> from ${discovered} discovered${failed.length ? ` · ${failed.length} failed` : ''}`;
+        resultsEl.innerHTML = added.map(p => `<div>✅ ${p.title || p.url}</div>`).join('') +
+          failed.map(p => `<div style="color:#e57373">❌ ${p.url} — ${p.reason}</div>`).join('');
+        if (added.length) { toast(`${added.length} pages crawled and added`, 'success'); loadSources(); }
+      } catch { statusText.textContent = ''; toast('Crawl failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Crawl Site'; }
     }
 
     async function addWebSource() {
