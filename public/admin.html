@@ -409,25 +409,27 @@
           </div>
         </div>
         <!-- Crawl entire site -->
-        <div style="background:linear-gradient(135deg,#f0f4ff 0%,#fff 100%);border:1.5px solid rgba(61,111,255,.2);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px">
-          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
-            <div style="flex:1;min-width:220px">
-              <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔍 Crawl Entire Website</div>
-              <div style="font-size:13px;color:var(--text-muted)">Enter any website URL — the AI will automatically find and add all pages from that site's sitemap. Great for government sites, regulators, and reference portals.</div>
+        <div style="background:linear-gradient(135deg,#f0f4ff 0%,#fff 100%);border:1.5px solid rgba(61,111,255,.2);border-radius:var(--radius-lg);padding:24px;margin-bottom:16px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔍 Crawl Entire Website</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Enter any website URL and the AI will automatically find and add all pages using that site's sitemap. Great for government sites and reference portals.</div>
+          <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">WEBSITE URL</label>
+              <input type="url" id="crawlUrl" class="form-control" placeholder="https://www.startingblocks.gov.au">
             </div>
-            <div style="display:flex;gap:10px;align-items:center;flex:2;min-width:300px">
-              <input type="url" id="crawlUrl" class="form-control" placeholder="https://acecqa.gov.au" style="flex:1">
-              <select id="crawlMax" class="form-control" style="width:110px;flex-shrink:0">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">MAX PAGES</label>
+              <select id="crawlMax" class="form-control" style="width:120px">
                 <option value="10">Up to 10</option>
                 <option value="25" selected>Up to 25</option>
                 <option value="50">Up to 50</option>
               </select>
-              <button class="btn-primary" id="crawlBtn" onclick="crawlSite()" style="flex-shrink:0;white-space:nowrap">Crawl Site</button>
             </div>
+            <button class="btn-primary" id="crawlBtn" onclick="crawlSite()" style="height:40px;padding:0 20px;white-space:nowrap">Crawl Site</button>
           </div>
-          <div id="crawlStatus" style="display:none;margin-top:14px;border-top:1px solid rgba(61,111,255,.15);padding-top:14px">
+          <div id="crawlStatus" style="display:none;margin-top:16px;border-top:1px solid rgba(61,111,255,.15);padding-top:14px">
             <div id="crawlStatusText" style="font-size:13px;color:var(--text-muted);margin-bottom:8px"></div>
-            <div id="crawlResults" style="font-size:12px;line-height:1.8;color:var(--text-muted);max-height:160px;overflow-y:auto"></div>
+            <div id="crawlResults" style="font-size:12px;line-height:1.9;color:var(--text-muted);max-height:180px;overflow-y:auto"></div>
           </div>
         </div>
 
