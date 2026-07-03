@@ -102,7 +102,8 @@ Other rules:
 - **Typos**: Correct obvious typos or misspellings (e.g. "ACEQA" → ACECQA) and briefly note the correction.
 - **Unknown internal processes**: If the question is about a RawTalent-specific process and no [INTERNAL] source covers it, say so — don't guess.
 - Be practical and direct. Team members need actionable answers fast.
-- For regulatory questions, always recommend verifying with the official source (ACECQA, state regulator, etc.) as requirements change.`;
+- For regulatory questions, always recommend verifying with the official source (ACECQA, state regulator, etc.) as requirements change.
+- Use Australian English spelling throughout (e.g. recognise, organise, colour, behaviour, centre, programme).`;
 
 async function askQuestion(question, askedBy, history = []) {
   const client = getClient();

@@ -303,7 +303,28 @@
       font-size: 15px;
       line-height: 1.85;
       color: var(--text);
-      white-space: pre-wrap;
+    }
+    .ai-answer-text .ai-h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 18px 0 6px;
+      line-height: 1.3;
+    }
+    .ai-answer-text .ai-h3:first-child { margin-top: 0; }
+    .ai-answer-text .ai-h4 {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin: 16px 0 6px;
+    }
+    .ai-answer-text .ai-h4:first-child { margin-top: 0; }
+    .ai-answer-text .ai-hr {
+      border: none;
+      border-top: 1px solid var(--gray-200);
+      margin: 14px 0;
     }
     .ai-sources-label {
       font-size: 11px;
@@ -641,21 +662,60 @@
     }
 
     function processAnswer(text, sources) {
-      let html = text
+      // 1. Escape HTML
+      let s = text
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      html = html.replace(/\[Source (\d+)\]/g, (match, n) => {
+
+      // 2. Source reference badges
+      s = s.replace(/\[Source (\d+)\]/g, (_, n) => {
         const num = parseInt(n);
-        const s = (sources || [])[num - 1];
-        if (!s) return match;
-        const href = s.type === 'article' ? `/article?id=${s.id}` : (s.origin || '#');
-        const target = s.type !== 'article' ? 'target="_blank" rel="noopener"' : '';
-        return `<a class="source-ref" href="${href.replace(/"/g,'&quot;')}" ${target} title="${escHtml(s.title)}">${num}</a>`;
+        const src = (sources || [])[num - 1];
+        if (!src) return `[Source ${n}]`;
+        const href = src.type === 'article' ? `/article?id=${src.id}` : (src.origin || '#');
+        const tgt = src.type !== 'article' ? 'target="_blank" rel="noopener"' : '';
+        return `<a class="source-ref" href="${href.replace(/"/g,'&quot;')}" ${tgt} title="${escHtml(src.title)}">${num}</a>`;
       });
-      const paras = html.split(/\n{2,}/);
-      return paras.length > 1
-        ? paras.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
-        : `<p>${html.replace(/\n/g, '<br>')}</p>`;
+
+      // 3. Bold
+      s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+      // 4. Line-by-line → structured HTML
+      const parts = [];
+      let listItems = [], listType = 'ul', paraLines = [];
+
+      function flushPara() {
+        if (paraLines.length) { parts.push(`<p>${paraLines.join('<br>')}</p>`); paraLines = []; }
+      }
+      function flushList() {
+        if (listItems.length) {
+          parts.push(`<${listType}>${listItems.map(li => `<li>${li}</li>`).join('')}</${listType}>`);
+          listItems = [];
+        }
+      }
+
+      for (const line of s.split('\n')) {
+        const t = line.trim();
+        if (t.startsWith('## ') || t.startsWith('### ')) {
+          flushPara(); flushList();
+          parts.push(`<h4 class="ai-h4">${t.replace(/^#{2,3} /, '')}</h4>`);
+        } else if (t.startsWith('# ')) {
+          flushPara(); flushList();
+          parts.push(`<h3 class="ai-h3">${t.slice(2)}</h3>`);
+        } else if (t === '---' || t === '***') {
+          flushPara(); flushList();
+          parts.push('<hr class="ai-hr">');
+        } else if (/^[-*] /.test(t)) {
+          flushPara(); listType = 'ul'; listItems.push(t.slice(2));
+        } else if (/^\d+\. /.test(t)) {
+          flushPara(); listType = 'ol'; listItems.push(t.replace(/^\d+\. /, ''));
+        } else if (t === '') {
+          flushList(); flushPara();
+        } else {
+          flushList(); paraLines.push(t);
+        }
+      }
+      flushPara(); flushList();
+      return parts.join('');
     }
 
     function renderSourceChips(sources) {
