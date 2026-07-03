@@ -15,50 +15,57 @@ function buildFtsTerm(text) {
     .join(' OR ');
 }
 
-async function searchKnowledge(db, question, limit = 5) {
+async function searchKnowledge(db, question, limit = 6) {
   const term = buildFtsTerm(question);
-  const results = [];
-  const seen = new Set();
+  const PER_TYPE = 3; // up to 3 from each source type, guaranteeing both contribute
 
-  async function runSearch(ftsQuery) {
-    try {
-      const r1 = await db.execute({
-        sql: `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
-              FROM articles a JOIN articles_fts fts ON a.id = fts.id
-              WHERE articles_fts MATCH ? AND a.published = 1
-              ORDER BY rank LIMIT ?`,
-        args: [ftsQuery, limit]
-      });
-      for (const row of r1.rows) {
-        if (!seen.has(row.id)) { seen.add(row.id); results.push(row); }
-      }
-    } catch {}
-
-    try {
-      const r2 = await db.execute({
-        sql: `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
-              FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-              WHERE knowledge_sources_fts MATCH ?
-              ORDER BY rank LIMIT ?`,
-        args: [ftsQuery, limit]
-      });
-      for (const row of r2.rows) {
-        if (!seen.has(row.id)) { seen.add(row.id); results.push(row); }
-      }
-    } catch {}
+  async function query(sql, args) {
+    try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
 
-  await runSearch(term);
+  // Query both tables in parallel — each gets its own independent limit
+  const [artRows, srcRows] = await Promise.all([
+    query(
+      `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
+       FROM articles a JOIN articles_fts fts ON a.id = fts.id
+       WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT ?`,
+      [term, PER_TYPE]
+    ),
+    query(
+      `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
+       FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
+       WHERE knowledge_sources_fts MATCH ? ORDER BY rank LIMIT ?`,
+      [term, PER_TYPE]
+    )
+  ]);
 
-  // Fallback: if fewer than 3 results, try searching individual keywords separately
+  // Web/document sources first so they appear at the top of Claude's context
+  let results = [...srcRows, ...artRows];
+
+  // Fallback: if fewer than 3 total, try individual keywords across both tables
   if (results.length < 3) {
-    const words = question
-      .replace(/[^\w\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length > 3);
-    for (const word of words) {
+    const seen = new Set(results.map(r => r.id));
+    const words = question.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+    for (const word of words.slice(0, 4)) {
       if (results.length >= limit) break;
-      await runSearch(`"${word}"*`);
+      const wt = `"${word}"*`;
+      const [wa, ws] = await Promise.all([
+        query(
+          `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
+           FROM articles a JOIN articles_fts fts ON a.id = fts.id
+           WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 2`,
+          [wt]
+        ),
+        query(
+          `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
+           FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
+           WHERE knowledge_sources_fts MATCH ? ORDER BY rank LIMIT 2`,
+          [wt]
+        )
+      ]);
+      for (const r of [...ws, ...wa]) {
+        if (!seen.has(r.id)) { seen.add(r.id); results.push(r); }
+      }
     }
   }
 
