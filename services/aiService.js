@@ -17,53 +17,68 @@ function buildFtsTerm(text) {
 
 async function searchKnowledge(db, question, limit = 6) {
   const term = buildFtsTerm(question);
-  const PER_TYPE = 3; // up to 3 from each source type, guaranteeing both contribute
 
   async function query(sql, args) {
     try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
 
-  // Query both tables in parallel — each gets its own independent limit
-  const [artRows, srcRows] = await Promise.all([
+  // Three independent search lanes — internal sources always get their own slots
+  // and can never be displaced by external websites
+  const [artRows, docRows, webRows] = await Promise.all([
+    // Lane 1 — Internal: published KB articles / SOPs
     query(
       `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
        FROM articles a JOIN articles_fts fts ON a.id = fts.id
-       WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT ?`,
-      [term, PER_TYPE]
+       WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 2`,
+      [term]
     ),
+    // Lane 2 — Internal: uploaded documents (PDF, DOCX, TXT)
     query(
       `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
        FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-       WHERE knowledge_sources_fts MATCH ? ORDER BY rank LIMIT ?`,
-      [term, PER_TYPE]
+       WHERE knowledge_sources_fts MATCH ? AND s.type = 'document' ORDER BY rank LIMIT 2`,
+      [term]
+    ),
+    // Lane 3 — External: crawled websites (regulatory / industry)
+    query(
+      `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
+       FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
+       WHERE knowledge_sources_fts MATCH ? AND s.type = 'website' ORDER BY rank LIMIT 2`,
+      [term]
     )
   ]);
 
-  // Web/document sources first so they appear at the top of Claude's context
-  let results = [...srcRows, ...artRows];
+  // Internal first (articles → docs → websites), so Claude sees internal context first
+  let results = [...artRows, ...docRows, ...webRows];
 
-  // Fallback: if fewer than 3 total, try individual keywords across both tables
+  // Fallback: if fewer than 3 total results, broaden to individual keywords
   if (results.length < 3) {
     const seen = new Set(results.map(r => r.id));
     const words = question.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
     for (const word of words.slice(0, 4)) {
       if (results.length >= limit) break;
       const wt = `"${word}"*`;
-      const [wa, ws] = await Promise.all([
+      const [wa, wd, ww] = await Promise.all([
         query(
           `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
            FROM articles a JOIN articles_fts fts ON a.id = fts.id
-           WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 2`,
+           WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 1`,
           [wt]
         ),
         query(
           `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
            FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-           WHERE knowledge_sources_fts MATCH ? ORDER BY rank LIMIT 2`,
+           WHERE knowledge_sources_fts MATCH ? AND s.type = 'document' ORDER BY rank LIMIT 1`,
+          [wt]
+        ),
+        query(
+          `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
+           FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
+           WHERE knowledge_sources_fts MATCH ? AND s.type = 'website' ORDER BY rank LIMIT 1`,
           [wt]
         )
       ]);
-      for (const r of [...ws, ...wa]) {
+      for (const r of [...wa, ...wd, ...ww]) {
         if (!seen.has(r.id)) { seen.add(r.id); results.push(r); }
       }
     }
@@ -74,13 +89,20 @@ async function searchKnowledge(db, question, limit = 6) {
 
 const SYSTEM_PROMPT = `You are an internal AI assistant for RawTalent, an Australian ECEC (early childhood education and care) staffing agency. Your job is to answer team members' questions accurately and concisely.
 
-Rules:
-1. **Typos and near-matches**: If a question contains an obvious typo or misspelling of a known ECEC term or acronym (e.g. "ACEQA" → ACECQA, "certifcate" → Certificate III), silently correct it and answer for the intended term. Briefly note the correction at the start of your answer so the team member knows what you understood.
-2. **Prefer provided sources**: When the sources contain relevant information, use them and cite inline as [Source N].
-3. **Use ECEC domain knowledge as a fallback**: If the provided sources don't fully cover the question, you may use your general knowledge of Australian ECEC, NQF, ACECQA, state regulations, childcare compliance, and staffing — but clearly begin that section with "Based on general ECEC knowledge (not in your knowledge base):" so the team member knows to verify it.
-4. **Internal processes**: For questions about RawTalent-specific internal processes, procedures, or policies — if not covered by the sources, say so rather than guessing.
-5. Be practical and direct — team members need actionable answers fast.
-6. For compliance or regulatory questions, always recommend verifying with the official source (ACECQA, state regulator, etc.) as requirements can change.`;
+Sources are tagged so you know what to prioritise:
+- [INTERNAL] = RawTalent's own SOPs, articles, or uploaded documents. These define what RawTalent requires and how the team operates.
+- [REGULATORY] = External government or industry websites. These provide the legal/compliance backdrop.
+
+Answer in this priority order:
+1. **RawTalent's internal process first**: If any [INTERNAL] source covers the question, lead with that. Frame it as "RawTalent requires..." or "Our process is...". Cite inline as [Source N].
+2. **Regulatory context second**: If [REGULATORY] sources add relevant legal or compliance detail, add them after the internal answer. Frame as "The regulatory requirement is..." or "Under [regulation]...". Cite inline as [Source N].
+3. **General ECEC knowledge as a last resort**: If neither source type covers it, you may use your knowledge of Australian ECEC, NQF, ACECQA, and state regulations — but label it "Based on general ECEC knowledge (not in your knowledge base):" so the team member knows to verify it.
+
+Other rules:
+- **Typos**: Correct obvious typos or misspellings (e.g. "ACEQA" → ACECQA) and briefly note the correction.
+- **Unknown internal processes**: If the question is about a RawTalent-specific process and no [INTERNAL] source covers it, say so — don't guess.
+- Be practical and direct. Team members need actionable answers fast.
+- For regulatory questions, always recommend verifying with the official source (ACECQA, state regulator, etc.) as requirements change.`;
 
 async function askQuestion(question, askedBy, history = []) {
   const client = getClient();
@@ -101,9 +123,14 @@ async function askQuestion(question, askedBy, history = []) {
       origin: m.origin || null
     }));
     const contextBlocks = matches.map((m, i) => {
-      const label = m.source_type === 'article'
-        ? `Article: ${m.title}${m.category ? ` (${m.category})` : ''}`
-        : `${m.source_type === 'website' ? 'Website' : 'Document'}: ${m.title}${m.origin ? ` — ${m.origin}` : ''}`;
+      let label;
+      if (m.source_type === 'article') {
+        label = `[INTERNAL] RawTalent SOP/Article: ${m.title}${m.category ? ` (${m.category})` : ''}`;
+      } else if (m.source_type === 'document') {
+        label = `[INTERNAL] Uploaded Document: ${m.title}`;
+      } else {
+        label = `[REGULATORY] External Website: ${m.title}${m.origin ? ` — ${m.origin}` : ''}`;
+      }
       const preview = (m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500);
       return `[Source ${i + 1}: ${label}]\n${preview}`;
     }).join('\n\n---\n\n');
