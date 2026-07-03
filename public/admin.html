@@ -461,9 +461,16 @@
         </div>
         <div class="admin-table-card">
           <div class="admin-table-header">
-            <span style="font-weight:600;font-size:14px;color:var(--navy)">Indexed Sources</span>
-            <span id="sourcesCount" style="font-size:13px;color:var(--text-muted)"></span>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">Indexed Sources</span>
+              <span id="sourcesCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-secondary" id="dedupBtn" onclick="removeDuplicates()" style="font-size:12px;padding:5px 12px">Remove Duplicates</button>
+              <button class="btn-primary" id="refreshAllBtn" onclick="refreshAllSources()" style="font-size:12px;padding:5px 14px">↻ Refresh All</button>
+            </div>
           </div>
+          <div id="refreshAllStatus" style="display:none;padding:10px 16px;font-size:13px;background:#f8faff;border-bottom:1px solid var(--gray-200);color:var(--text-muted)"></div>
           <div id="sourcesList" style="padding:8px 0">
             <div class="loading-spinner"><div class="spinner"></div></div>
           </div>
@@ -1778,6 +1785,43 @@
         toast('Source removed', 'success');
         loadSources();
       } catch { toast('Delete failed', 'error'); }
+    }
+
+    async function refreshAllSources() {
+      const btn = document.getElementById('refreshAllBtn');
+      const statusEl = document.getElementById('refreshAllStatus');
+      btn.disabled = true; btn.textContent = '↻ Refreshing…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;width:13px;height:13px;margin-right:6px"></span> Refreshing all website sources — this may take a minute…';
+      try {
+        const res = await fetch('/api/sources/refresh-all', { method: 'POST' });
+        const data = await res.json();
+        statusEl.innerHTML = `✅ Done — ${data.refreshed} refreshed${data.failed ? `, ${data.failed} failed` : ''} (${data.total} total)`;
+        toast(`${data.refreshed} sources refreshed`, 'success');
+        loadSources();
+      } catch {
+        statusEl.innerHTML = '⚠ Refresh failed — please try again';
+        toast('Refresh all failed', 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = '↻ Refresh All';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 6000);
+      }
+    }
+
+    async function removeDuplicates() {
+      const btn = document.getElementById('dedupBtn');
+      btn.disabled = true; btn.textContent = 'Checking…';
+      try {
+        const res = await fetch('/api/sources/dedup', { method: 'POST' });
+        const data = await res.json();
+        if (data.removed === 0) {
+          toast('No duplicates found — all sources are unique', 'success');
+        } else {
+          toast(`Removed ${data.removed} duplicate${data.removed !== 1 ? 's' : ''} across ${data.duplicateGroups} URL${data.duplicateGroups !== 1 ? 's' : ''}`, 'success');
+          loadSources();
+        }
+      } catch { toast('Dedup failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Remove Duplicates'; }
     }
 
     init();

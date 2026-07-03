@@ -78,10 +78,13 @@ router.post('/website', async (req, res) => {
   const { url, title: customTitle } = req.body;
   if (!url?.trim()) return res.status(400).json({ error: 'URL is required' });
   try {
+    const db = getDb();
+    const dup = await db.execute({ sql: 'SELECT id FROM knowledge_sources WHERE origin = ?', args: [url.trim()] });
+    if (dup.rows.length) return res.status(409).json({ error: 'This URL is already in your knowledge base. Use Refresh to update its content.' });
     const { title, text } = await fetchWebText(url.trim());
     if (!text.trim()) return res.status(400).json({ error: 'No readable content found at that URL' });
     const id = uuidv4();
-    await getDb().execute({
+    await db.execute({
       sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
       args: [id, 'website', customTitle?.trim() || title, url.trim(), text.trim(), req.user.email]
     });
@@ -147,9 +150,12 @@ router.post('/crawl', async (req, res) => {
         try {
           const { title, text } = await fetchWebText(url);
           if (!text.trim()) { failed.push({ url, reason: 'No content extracted' }); return; }
+          const db = getDb();
+          const dup = await db.execute({ sql: 'SELECT id FROM knowledge_sources WHERE origin = ?', args: [url] });
+          if (dup.rows.length) { added.push({ url, title, skipped: true }); return; }
           const id = uuidv4();
-          await getDb().execute({
-            sql: 'INSERT OR IGNORE INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
+          await db.execute({
+            sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
             args: [id, 'website', title, url, text.trim(), req.user.email]
           });
           added.push({ url, title });
@@ -164,6 +170,51 @@ router.post('/crawl', async (req, res) => {
   }
 });
 
+// Refresh all website sources
+router.post('/refresh-all', async (req, res) => {
+  const db = getDb();
+  const result = await db.execute('SELECT id, origin FROM knowledge_sources WHERE type = "website" AND origin != ""');
+  const sources = result.rows;
+  const refreshed = [], failed = [];
+  const BATCH = 3;
+  for (let i = 0; i < sources.length; i += BATCH) {
+    await Promise.allSettled(sources.slice(i, i + BATCH).map(async (src) => {
+      try {
+        const { title, text } = await fetchWebText(src.origin);
+        await db.execute({
+          sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=datetime('now') WHERE id=?",
+          args: [title, text.trim(), src.id]
+        });
+        refreshed.push(src.origin);
+      } catch (e) { failed.push({ origin: src.origin, reason: e.message }); }
+    }));
+    if (i + BATCH < sources.length) await new Promise(r => setTimeout(r, 600));
+  }
+  res.json({ refreshed: refreshed.length, failed: failed.length, total: sources.length });
+});
+
+// Remove duplicate sources (same origin URL — keep newest)
+router.post('/dedup', async (req, res) => {
+  const db = getDb();
+  const result = await db.execute(
+    `SELECT origin, COUNT(*) as cnt, MIN(created_at) as oldest_created
+     FROM knowledge_sources WHERE origin != '' GROUP BY origin HAVING cnt > 1`
+  );
+  let removed = 0;
+  for (const row of result.rows) {
+    const dupes = await db.execute({
+      sql: 'SELECT id FROM knowledge_sources WHERE origin = ? ORDER BY created_at DESC',
+      args: [row.origin]
+    });
+    // Keep the first (newest), delete the rest
+    for (const dupe of dupes.rows.slice(1)) {
+      await db.execute({ sql: 'DELETE FROM knowledge_sources WHERE id = ?', args: [dupe.id] });
+      removed++;
+    }
+  }
+  res.json({ removed, duplicateGroups: result.rows.length });
+});
+
 // Delete a source
 router.delete('/:id', async (req, res) => {
   try {
@@ -175,37 +226,66 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ── Sitemap discovery helper ──────────────────────────────────────
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 async function discoverSitemapUrls(origin, max) {
   const urls = new Set();
 
-  async function parseSitemap(xml) {
+  function extractLocs(text) {
+    // Try standard <loc> tags first
+    const locs = [...text.matchAll(/<loc>\s*(https?:\/\/[^\s<>"]+?)\s*<\/loc>/gi)].map(m => m[1].trim());
+    if (locs.length) return locs;
+    // Fallback: any https URL in the text (Jina text output strips tags but keeps URLs)
+    return [...text.matchAll(/https?:\/\/[^\s<>"']+/g)]
+      .map(m => m[0].replace(/[.,;>)]+$/, ''))
+      .filter(u => !u.match(/\.(jpg|jpeg|png|gif|svg|css|js|xml|pdf|zip|gz|ico|woff2?)(\?.*)?$/i));
+  }
+
+  async function fetchRaw(url) {
+    // 1. Try direct with browser headers (fixes Railway plain-fetch blocking)
+    try {
+      const r = await fetch(url, {
+        headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/xml,application/xml,*/*' },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (r.ok) return await r.text();
+    } catch {}
+    // 2. Fallback: Jina Reader bypasses Cloudflare / WAF
+    const jr = await fetch(`https://r.jina.ai/${url}`, {
+      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text', 'X-Timeout': '20' },
+      signal: AbortSignal.timeout(25000)
+    });
+    if (!jr.ok) throw new Error(`Cannot fetch sitemap at ${url}`);
+    return await jr.text();
+  }
+
+  async function parseSitemap(text) {
     if (urls.size >= max) return;
-    if (xml.includes('<sitemapindex')) {
-      // Sitemap index — recurse into sub-sitemaps
-      const subs = [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gs)].map(m => m[1].trim());
-      for (const sub of subs.slice(0, 5)) {
+    const locs = extractLocs(text);
+    // Sitemap index: entries point to other sitemaps
+    const isIndex = text.includes('<sitemapindex') || locs.every(u => u.includes('sitemap'));
+    if (isIndex && locs.length) {
+      for (const sub of locs.slice(0, 5)) {
         if (urls.size >= max) break;
-        try {
-          const r = await fetch(sub, { signal: AbortSignal.timeout(8000) });
-          if (r.ok) await parseSitemap(await r.text());
-        } catch {}
+        try { await parseSitemap(await fetchRaw(sub)); } catch {}
       }
     } else {
-      const locs = [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gs)].map(m => m[1].trim());
       for (const u of locs) {
         if (urls.size >= max) break;
-        if (!u.match(/\.(jpg|jpeg|png|gif|svg|css|js|xml|pdf|zip|gz)(\?.*)?$/i)) urls.add(u);
+        urls.add(u);
       }
     }
   }
 
-  // Check robots.txt first — many sites list their sitemap there
+  // Priority order: robots.txt Sitemap directive, then common paths
   const candidates = ['/sitemap.xml', '/sitemap_index.xml', '/sitemap/sitemap.xml'];
   try {
-    const r = await fetch(`${origin}/robots.txt`, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${origin}/robots.txt`, {
+      headers: { 'User-Agent': BROWSER_UA },
+      signal: AbortSignal.timeout(8000)
+    });
     if (r.ok) {
-      const txt = await r.text();
-      const m = txt.match(/^Sitemap:\s*(.+)$/im);
+      const m = (await r.text()).match(/^Sitemap:\s*(.+)$/im);
       if (m) candidates.unshift(m[1].trim());
     }
   } catch {}
@@ -214,8 +294,7 @@ async function discoverSitemapUrls(origin, max) {
     if (urls.size > 0) break;
     try {
       const url = path.startsWith('http') ? path : `${origin}${path}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (r.ok) await parseSitemap(await r.text());
+      await parseSitemap(await fetchRaw(url));
     } catch {}
   }
 
