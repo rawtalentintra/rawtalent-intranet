@@ -12,6 +12,18 @@ const { load: cheerioLoad } = require('cheerio');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
+// Explicitly sync FTS index — Turso cloud doesn't fire SQLite triggers
+async function upsertKsFts(id, title, content) {
+  const db = getDb();
+  try {
+    await db.execute({ sql: 'DELETE FROM knowledge_sources_fts WHERE id = ?', args: [id] });
+    await db.execute({ sql: 'INSERT INTO knowledge_sources_fts(id, title, content) VALUES (?, ?, ?)', args: [id, title, content] });
+  } catch {}
+}
+async function deleteKsFts(id) {
+  try { await getDb().execute({ sql: 'DELETE FROM knowledge_sources_fts WHERE id = ?', args: [id] }); } catch {}
+}
+
 // ── Ask AI — available to all authenticated users ─────────────────
 router.post('/ask', requireAuth, async (req, res) => {
   const { question, history } = req.body;
@@ -66,6 +78,7 @@ router.post('/document', upload.single('document'), async (req, res) => {
       sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
       args: [id, 'document', title, req.file.originalname, text.trim(), req.user.email]
     });
+    await upsertKsFts(id, title, text.trim());
     res.json({ success: true, id, title });
   } catch (err) {
     console.error('Document ingest error:', err.message);
@@ -84,11 +97,13 @@ router.post('/website', async (req, res) => {
     const { title, text } = await fetchWebText(url.trim());
     if (!text.trim()) return res.status(400).json({ error: 'No readable content found at that URL' });
     const id = uuidv4();
+    const finalTitle = customTitle?.trim() || title;
     await db.execute({
       sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [id, 'website', customTitle?.trim() || title, url.trim(), text.trim(), req.user.email]
+      args: [id, 'website', finalTitle, url.trim(), text.trim(), req.user.email]
     });
-    res.json({ success: true, id, title: customTitle?.trim() || title });
+    await upsertKsFts(id, finalTitle, text.trim());
+    res.json({ success: true, id, title: finalTitle });
   } catch (err) {
     console.error('Website ingest error:', err.message);
     res.status(500).json({ error: 'Failed to fetch website: ' + err.message });
@@ -107,6 +122,7 @@ router.post('/:id/refresh', async (req, res) => {
       sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=datetime('now') WHERE id=?",
       args: [title, text.trim(), req.params.id]
     });
+    await upsertKsFts(req.params.id, title, text.trim());
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to refresh: ' + err.message });
@@ -123,6 +139,7 @@ router.post('/paste', async (req, res) => {
       sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
       args: [id, 'website', title.trim(), origin?.trim() || '', content.trim(), req.user.email]
     });
+    await upsertKsFts(id, title.trim(), content.trim());
     res.json({ success: true, id, title: title.trim() });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -158,6 +175,7 @@ router.post('/crawl', async (req, res) => {
             sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
             args: [id, 'website', title, url, text.trim(), req.user.email]
           });
+          await upsertKsFts(id, title, text.trim());
           added.push({ url, title });
         } catch (e) { failed.push({ url, reason: e.message }); }
       }));
@@ -185,6 +203,7 @@ router.post('/refresh-all', async (req, res) => {
           sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=datetime('now') WHERE id=?",
           args: [title, text.trim(), src.id]
         });
+        await upsertKsFts(src.id, title, text.trim());
         refreshed.push(src.origin);
       } catch (e) { failed.push({ origin: src.origin, reason: e.message }); }
     }));
@@ -219,6 +238,7 @@ router.post('/dedup', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM knowledge_sources WHERE id = ?', args: [req.params.id] });
+    await deleteKsFts(req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -182,6 +182,26 @@ async function initDatabase() {
     await db.execute(sql);
   }
 
+  // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
+  // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,
+  // recreate it as a standalone table, and populate it directly on every startup.
+  await db.execute('DROP TRIGGER IF EXISTS ks_ai');
+  await db.execute('DROP TRIGGER IF EXISTS ks_au');
+  await db.execute('DROP TRIGGER IF EXISTS ks_ad');
+  await db.execute('DROP TABLE IF EXISTS knowledge_sources_fts');
+  await db.execute('CREATE VIRTUAL TABLE knowledge_sources_fts USING fts5(id UNINDEXED, title, content)');
+  const ksSources = await db.execute('SELECT id, title, content FROM knowledge_sources');
+  if (ksSources.rows.length > 0) {
+    await db.batch(
+      ksSources.rows.map(r => ({
+        sql: 'INSERT INTO knowledge_sources_fts(id, title, content) VALUES (?, ?, ?)',
+        args: [r.id, r.title, r.content]
+      })),
+      'write'
+    );
+  }
+  console.log(`✓ knowledge_sources_fts rebuilt (${ksSources.rows.length} entries)`);
+
   const countRes = await db.execute('SELECT COUNT(*) as n FROM glossary');
   if (Number(countRes.rows[0].n) === 0) {
     await db.batch(
