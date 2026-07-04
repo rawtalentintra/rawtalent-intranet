@@ -6,7 +6,7 @@
   <title>RawTalent Knowledge Base</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <style>
     .hero-wrap {
@@ -308,8 +308,10 @@
       font-size: 15px;
       font-weight: 700;
       color: var(--navy);
-      margin: 18px 0 6px;
+      margin: 18px 0 20px;
       line-height: 1.3;
+      border-bottom: 2px solid #e8621a;
+      padding-bottom: 14px;
     }
     .ai-answer-text .ai-h3:first-child { margin-top: 0; }
     .ai-answer-text .ai-h4 {
@@ -318,9 +320,11 @@
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.6px;
-      margin: 16px 0 6px;
+      margin: 28px 0 8px;
+      border-top: 1px solid #e8eaf0;
+      padding-top: 20px;
     }
-    .ai-answer-text .ai-h4:first-child { margin-top: 0; }
+    .ai-answer-text .ai-h4:first-child { margin-top: 0; border-top: none; padding-top: 0; }
     .ai-answer-text .ai-hr {
       border: none;
       border-top: 1px solid var(--gray-200);
@@ -374,7 +378,28 @@
     .ai-answer-text p:last-child { margin-bottom: 0; }
     .ai-answer-text strong { color: var(--navy); }
     .ai-answer-text ul, .ai-answer-text ol { margin: 8px 0 14px 22px; }
-    .ai-answer-text li { margin-bottom: 6px; }
+    .ai-answer-text li { margin-bottom: 10px; }
+    .ai-callout {
+      background: rgba(61,111,255,.07);
+      border-left: 3.5px solid #3d6fff;
+      border-radius: 0 8px 8px 0;
+      padding: 11px 15px;
+      margin: 14px 0;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .ai-callout strong { color: #1a4fd6; }
+    .stream-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: var(--orange);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink .7s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
     .ai-disclaimer {
       margin-top: 18px;
       padding: 10px 14px;
@@ -638,22 +663,59 @@
     async function sendToAI(question) {
       const btn = document.getElementById('aiBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
-      conversationTurns.push({ question, answer: null });
+      conversationTurns.push({ question, answer: null, streaming: false });
       renderThread();
+      const turnIdx = conversationTurns.length - 1;
+      let streamingText = '';
+      let streamingEl = null;
       try {
         const res = await fetch('/api/sources/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, history: conversationHistory })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Request failed');
-        conversationHistory = data.history;
-        if (data.sources && data.sources.length > 0) conversationSources = data.sources;
-        conversationTurns[conversationTurns.length - 1].answer = data.answer;
-        renderThread();
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: 'Request failed' }));
+          throw new Error(errData.error || 'Request failed');
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+          for (const part of parts) {
+            if (!part.startsWith('data: ')) continue;
+            let data;
+            try { data = JSON.parse(part.slice(6)); } catch { continue; }
+            if (data.type === 'sources') {
+              if (data.sources?.length) conversationSources = data.sources;
+            } else if (data.type === 'delta') {
+              streamingText += data.text;
+              if (!streamingEl) {
+                conversationTurns[turnIdx].answer = streamingText;
+                conversationTurns[turnIdx].streaming = true;
+                renderThread();
+                streamingEl = document.getElementById('streaming-answer');
+              } else {
+                streamingEl.innerHTML = processAnswer(streamingText, conversationSources) + '<span class="stream-cursor"></span>';
+              }
+            } else if (data.type === 'done') {
+              conversationHistory = data.history;
+              conversationTurns[turnIdx].answer = streamingText;
+              conversationTurns[turnIdx].streaming = false;
+              renderThread();
+            } else if (data.type === 'error') {
+              throw new Error(data.error);
+            }
+          }
+        }
       } catch (err) {
-        conversationTurns[conversationTurns.length - 1].answer = `Something went wrong: ${err.message}`;
+        conversationTurns[turnIdx].answer = `Something went wrong: ${err.message}`;
+        conversationTurns[turnIdx].streaming = false;
         renderThread();
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Ask AI'; }
@@ -704,6 +766,9 @@
         } else if (t === '---' || t === '***') {
           flushPara(); flushList();
           parts.push('<hr class="ai-hr">');
+        } else if (t.startsWith('&gt; ')) {
+          flushPara(); flushList();
+          parts.push(`<div class="ai-callout">${t.slice(5)}</div>`);
         } else if (/^[-*] /.test(t)) {
           flushPara(); listType = 'ul'; listItems.push(t.slice(2));
         } else if (/^\d+\. /.test(t)) {
@@ -730,19 +795,21 @@
 
     function renderThread() {
       const list = document.getElementById('resultsList');
-      const isWaiting = conversationTurns.length > 0 && conversationTurns[conversationTurns.length - 1].answer === null;
+      const lastTurn = conversationTurns[conversationTurns.length - 1];
+      const isWaiting = conversationTurns.length > 0 && (lastTurn.answer === null || lastTurn.streaming);
       let html = '<div class="conv-thread">';
       conversationTurns.forEach((turn, idx) => {
         html += `<div class="conv-user-msg">${escHtml(turn.question)}</div>`;
         if (turn.answer === null) {
           html += `<div class="ai-thinking">✨ Thinking<span class="thinking-dots"></span></div>`;
         } else {
+          const isStreaming = !!turn.streaming;
           html += `<div class="ai-answer-wrap">
             <div class="ai-answer-header">✨ AI Answer</div>
             <div class="ai-answer-body">
-              <div class="ai-answer-text">${processAnswer(turn.answer, conversationSources)}</div>
-              ${idx === 0 ? renderSourceChips(conversationSources) : ''}
-              <div class="ai-disclaimer">⚠ AI answers are generated from your knowledge base. Always verify compliance or regulatory information with official sources before acting on it.</div>
+              <div class="ai-answer-text"${isStreaming ? ' id="streaming-answer"' : ''}>${processAnswer(turn.answer, conversationSources)}${isStreaming ? '<span class="stream-cursor"></span>' : ''}</div>
+              ${!isStreaming && idx === 0 ? renderSourceChips(conversationSources) : ''}
+              ${!isStreaming ? '<div class="ai-disclaimer">⚠ AI answers are generated from your knowledge base. Always verify compliance or regulatory information with official sources before acting on it.</div>' : ''}
             </div>
           </div>`;
         }

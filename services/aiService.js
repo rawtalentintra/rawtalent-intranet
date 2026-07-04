@@ -175,7 +175,83 @@ DNU = Do Not Use (educator barred from placement), Red Zone = serious non-compli
 2. **[REGULATORY] sources** — crawled government/industry sites. Add: "The regulatory requirement under [regulation] is..." Cite as [Source N].
 3. **General ECEC expertise** — only when sources don't cover it. Label clearly: "Based on general ECEC knowledge (not in your knowledge base):"
 
-**Format**: Use ## headings and bullet points for multi-part answers. Australian English throughout (recognise, organise, behaviour, centre, programme). For compliance topics, always note that requirements can change and recommend verifying with the relevant regulator.`;
+**Format**: Use ## headings and bullet points for multi-part answers. For important warnings or must-know callout items, start the line with "> " (e.g. > **Important:** All educators must have a valid WWCC before their first shift.). Australian English throughout (recognise, organise, behaviour, centre, programme). For compliance topics, always note that requirements can change and recommend verifying with the relevant regulator.`;
+
+function buildMessages(matches, question) {
+  const sources = matches.map((m, i) => ({
+    index: i + 1,
+    title: m.title,
+    type: m.source_type,
+    id: m.id,
+    origin: m.origin || null
+  }));
+  const contextBlocks = matches.map((m, i) => {
+    let label;
+    if (m.source_type === 'article') {
+      label = `[INTERNAL] RawTalent SOP/Article: ${m.title}${m.category ? ` (${m.category})` : ''}`;
+    } else if (m.source_type === 'document') {
+      label = `[INTERNAL] Uploaded Document: ${m.title}`;
+    } else {
+      label = `[REGULATORY] External Website: ${m.title}${m.origin ? ` — ${m.origin}` : ''}`;
+    }
+    const preview = (m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    return `[Source ${i + 1}: ${label}]\n${preview}`;
+  }).join('\n\n---\n\n');
+  const userContent = matches.length > 0
+    ? `Sources:\n\n${contextBlocks}\n\n---\n\nQuestion: ${question}`
+    : `No matching documents were found in the knowledge base for this question.\n\nQuestion: ${question}\n\nIf you can answer this from your general ECEC/Australian childcare knowledge, please do so and clearly label it as general knowledge. If it is an internal RawTalent-specific question that you cannot answer without sources, say so.`;
+  return { sources, messages: [{ role: 'user', content: userContent }] };
+}
+
+async function streamQuestion(question, askedBy, history, res) {
+  const client = getClient();
+  if (!client) {
+    res.write(`data: ${JSON.stringify({ type: 'error', error: 'AI is not configured. Please contact your administrator.' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  const db = getDb();
+  let sources = [];
+  let messages;
+
+  if (history.length === 0) {
+    const matches = await searchKnowledge(db, question);
+    const built = buildMessages(matches, question);
+    sources = built.sources;
+    messages = built.messages;
+  } else {
+    messages = [...history, { role: 'user', content: question }];
+  }
+
+  res.write(`data: ${JSON.stringify({ type: 'sources', sources })}\n\n`);
+
+  let fullAnswer = '';
+  const stream = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 700,
+    system: SYSTEM_PROMPT,
+    messages,
+    stream: true
+  });
+
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      const chunk = event.delta.text;
+      fullAnswer += chunk;
+      res.write(`data: ${JSON.stringify({ type: 'delta', text: chunk })}\n\n`);
+    }
+  }
+
+  await db.execute({
+    sql: 'INSERT INTO ai_query_log (question, answer, sources_used, asked_by) VALUES (?, ?, ?, ?)',
+    args: [question, fullAnswer, JSON.stringify(sources), askedBy]
+  });
+
+  const updatedHistory = [...messages, { role: 'assistant', content: fullAnswer }];
+  res.write(`data: ${JSON.stringify({ type: 'done', history: updatedHistory })}\n\n`);
+  res.end();
+}
 
 async function askQuestion(question, askedBy, history = []) {
   const client = getClient();
@@ -186,39 +262,17 @@ async function askQuestion(question, askedBy, history = []) {
   let messages;
 
   if (history.length === 0) {
-    // First turn: search knowledge base and build source context
     const matches = await searchKnowledge(db, question);
-    sources = matches.map((m, i) => ({
-      index: i + 1,
-      title: m.title,
-      type: m.source_type,
-      id: m.id,
-      origin: m.origin || null
-    }));
-    const contextBlocks = matches.map((m, i) => {
-      let label;
-      if (m.source_type === 'article') {
-        label = `[INTERNAL] RawTalent SOP/Article: ${m.title}${m.category ? ` (${m.category})` : ''}`;
-      } else if (m.source_type === 'document') {
-        label = `[INTERNAL] Uploaded Document: ${m.title}`;
-      } else {
-        label = `[REGULATORY] External Website: ${m.title}${m.origin ? ` — ${m.origin}` : ''}`;
-      }
-      const preview = (m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500);
-      return `[Source ${i + 1}: ${label}]\n${preview}`;
-    }).join('\n\n---\n\n');
-    const userContent = matches.length > 0
-      ? `Sources:\n\n${contextBlocks}\n\n---\n\nQuestion: ${question}`
-      : `No matching documents were found in the knowledge base for this question.\n\nQuestion: ${question}\n\nIf you can answer this from your general ECEC/Australian childcare knowledge, please do so and clearly label it as general knowledge. If it is an internal RawTalent-specific question that you cannot answer without sources, say so.`;
-    messages = [{ role: 'user', content: userContent }];
+    const built = buildMessages(matches, question);
+    sources = built.sources;
+    messages = built.messages;
   } else {
-    // Follow-up turn: sources already in history context, just append the new question
     messages = [...history, { role: 'user', content: question }];
   }
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 900,
+    max_tokens: 700,
     system: SYSTEM_PROMPT,
     messages
   });
@@ -234,4 +288,4 @@ async function askQuestion(question, askedBy, history = []) {
   return { answer, sources, history: updatedHistory };
 }
 
-module.exports = { askQuestion };
+module.exports = { askQuestion, streamQuestion };

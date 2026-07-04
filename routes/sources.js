@@ -7,7 +7,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
-const { askQuestion } = require('../services/aiService');
+const { streamQuestion } = require('../services/aiService');
 const { load: cheerioLoad } = require('cheerio');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -28,12 +28,20 @@ async function deleteKsFts(id) {
 router.post('/ask', requireAuth, async (req, res) => {
   const { question, history } = req.body;
   if (!question?.trim()) return res.status(400).json({ error: 'Question is required' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
   try {
-    const result = await askQuestion(question.trim(), req.user.email, Array.isArray(history) ? history : []);
-    res.json(result);
+    await streamQuestion(question.trim(), req.user.email, Array.isArray(history) ? history : [], res);
   } catch (err) {
     console.error('AI ask error:', err.message);
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      try { res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`); res.end(); } catch {}
+    }
   }
 });
 
