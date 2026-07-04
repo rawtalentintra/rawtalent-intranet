@@ -390,6 +390,33 @@
       color: var(--text);
     }
     .ai-callout strong { color: #1a4fd6; }
+    .ai-table-wrap {
+      overflow-x: auto;
+      margin: 14px 0;
+      border: 1px solid var(--gray-200);
+      border-radius: 10px;
+    }
+    .ai-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    .ai-table th, .ai-table td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--gray-200);
+      white-space: normal;
+    }
+    .ai-table th {
+      background: var(--gray-100);
+      font-weight: 700;
+      color: var(--navy);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .ai-table tr:last-child td { border-bottom: none; }
+    .ai-table td strong { color: var(--navy); }
     .stream-cursor {
       display: inline-block;
       width: 2px;
@@ -743,7 +770,7 @@
 
       // 4. Line-by-line → structured HTML
       const parts = [];
-      let listItems = [], listType = 'ul', paraLines = [];
+      let listItems = [], listType = 'ul', paraLines = [], tableRows = [];
 
       function flushPara() {
         if (paraLines.length) { parts.push(`<p>${paraLines.join('<br>')}</p>`); paraLines = []; }
@@ -754,9 +781,37 @@
           listItems = [];
         }
       }
+      function flushTable() {
+        if (tableRows.length >= 2) {
+          const header = tableRows[0];
+          const body = tableRows.slice(1);
+          let tbl = '<div class="ai-table-wrap"><table class="ai-table"><thead><tr>' +
+            header.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+          body.forEach(row => {
+            tbl += '<tr>' + row.map(c => `<td>${c}</td>`).join('') + '</tr>';
+          });
+          tbl += '</tbody></table></div>';
+          parts.push(tbl);
+        }
+        tableRows = [];
+      }
+      function isTableRow(line) { return /^\|.*\|$/.test(line); }
+      function isSeparatorRow(line) { return /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(line); }
+      function parseTableRow(line) {
+        return line.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      }
 
-      for (const line of s.split('\n')) {
-        const t = line.trim();
+      const lines = s.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        const nextT = (lines[i + 1] || '').trim();
+        if (isTableRow(t) && !isSeparatorRow(t) && (tableRows.length > 0 || isSeparatorRow(nextT))) {
+          flushPara(); flushList();
+          tableRows.push(parseTableRow(t));
+          continue;
+        }
+        if (isSeparatorRow(t) && tableRows.length === 1) { continue; }
+        flushTable();
         if (t.startsWith('## ') || t.startsWith('### ')) {
           flushPara(); flushList();
           parts.push(`<h4 class="ai-h4">${t.replace(/^#{2,3} /, '')}</h4>`);
@@ -779,7 +834,7 @@
           flushList(); paraLines.push(t);
         }
       }
-      flushPara(); flushList();
+      flushPara(); flushList(); flushTable();
       return parts.join('');
     }
 

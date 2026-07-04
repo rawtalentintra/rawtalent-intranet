@@ -175,7 +175,9 @@ DNU = Do Not Use (educator barred from placement), Red Zone = serious non-compli
 2. **[REGULATORY] sources** — crawled government/industry sites. Add: "The regulatory requirement under [regulation] is..." Cite as [Source N].
 3. **General ECEC expertise** — only when sources don't cover it. Label clearly: "Based on general ECEC knowledge (not in your knowledge base):"
 
-**Format**: Use ## headings and bullet points for multi-part answers. For important warnings or must-know callout items, start the line with "> " (e.g. > **Important:** All educators must have a valid WWCC before their first shift.). Australian English throughout (recognise, organise, behaviour, centre, programme). For compliance topics, always note that requirements can change and recommend verifying with the relevant regulator.`;
+**Format**: Use ## headings and bullet points for multi-part answers. For important warnings or must-know callout items, start the line with "> " (e.g. > **Important:** All educators must have a valid WWCC before their first shift.). Australian English throughout (recognise, organise, behaviour, centre, programme). For compliance topics, always note that requirements can change and recommend verifying with the relevant regulator.
+
+**End the answer immediately after the last piece of information.** Do not add a closing question, offer of further help, or "let me know if..." line — the coordinator will ask a follow-up themselves if they need one.`;
 
 function buildMessages(matches, question) {
   const sources = matches.map((m, i) => ({
