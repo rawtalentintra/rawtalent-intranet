@@ -1715,11 +1715,16 @@
         });
         const data = await res.json();
         if (!res.ok) { statusText.textContent = ''; toast(data.error || 'Crawl failed', 'error'); return; }
-        const { added = [], failed = [], discovered = 0 } = data;
-        statusText.innerHTML = `<strong style="color:var(--navy)">${added.length} pages added</strong> from ${discovered} discovered${failed.length ? ` · ${failed.length} failed` : ''}`;
+        const { added = [], failed = [], duplicates = [], discovered = 0, remainingFresh = 0 } = data;
+        statusText.innerHTML = `<strong style="color:var(--navy)">${added.length} new pages added</strong> from ${discovered} discovered` +
+          (duplicates.length ? ` · ${duplicates.length} already in knowledge base (skipped)` : '') +
+          (failed.length ? ` · ${failed.length} failed` : '') +
+          (remainingFresh > 0 ? ` · ${remainingFresh} more new pages available — run crawl again to add them` : '');
         resultsEl.innerHTML = added.map(p => `<div>✅ ${p.title || p.url}</div>`).join('') +
+          duplicates.map(p => `<div style="color:var(--text-muted)">⚠ Already indexed: ${p.title || p.url}</div>`).join('') +
           failed.map(p => `<div style="color:#e57373">❌ ${p.url} — ${p.reason}</div>`).join('');
-        if (added.length) { toast(`${added.length} pages crawled and added`, 'success'); loadSources(); }
+        if (added.length) { toast(`${added.length} new pages crawled and added`, 'success'); loadSources(); }
+        else if (duplicates.length) { toast(`No new pages — all ${duplicates.length} discovered pages are already indexed`, 'info'); }
       } catch { statusText.textContent = ''; toast('Crawl failed', 'error'); }
       finally { btn.disabled = false; btn.textContent = 'Crawl Site'; }
     }

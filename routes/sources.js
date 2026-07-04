@@ -162,22 +162,43 @@ router.post('/crawl', async (req, res) => {
   try { origin = new URL(baseUrl.trim()).origin; }
   catch { return res.status(400).json({ error: 'Invalid URL' }); }
 
+  const wanted = Math.min(Number(maxPages) || 25, 50);
+
   try {
-    const urls = await discoverSitemapUrls(origin, Math.min(Number(maxPages) || 25, 50));
-    if (!urls.length) {
+    // Discover a larger pool than requested — some of these will already be
+    // indexed, so over-discovering lets us backfill with fresh pages instead
+    // of coming back short of `wanted` after duplicates are filtered out.
+    const pool = await discoverSitemapUrls(origin, Math.min(wanted * 4, 200));
+    if (!pool.length) {
       return res.status(404).json({ error: `No sitemap found at ${origin}. Try adding pages individually or using the Paste option.` });
     }
 
+    // Check which discovered URLs are already indexed, in one batched query
+    const db = getDb();
+    const placeholders = pool.map(() => '?').join(',');
+    const existingRes = await db.execute({
+      sql: `SELECT origin, title FROM knowledge_sources WHERE origin IN (${placeholders})`,
+      args: pool
+    });
+    const existingMap = new Map(existingRes.rows.map(r => [r.origin, r.title]));
+
+    const duplicates = [];
+    const fresh = [];
+    for (const url of pool) {
+      if (existingMap.has(url)) duplicates.push({ url, title: existingMap.get(url) });
+      else fresh.push(url);
+    }
+
+    // Only crawl as many fresh pages as were actually requested
+    const toFetch = fresh.slice(0, wanted);
+
     const added = [], failed = [];
     const BATCH = 5;
-    for (let i = 0; i < urls.length; i += BATCH) {
-      await Promise.allSettled(urls.slice(i, i + BATCH).map(async (url) => {
+    for (let i = 0; i < toFetch.length; i += BATCH) {
+      await Promise.allSettled(toFetch.slice(i, i + BATCH).map(async (url) => {
         try {
           const { title, text } = await fetchWebText(url);
           if (!text.trim()) { failed.push({ url, reason: 'No content extracted' }); return; }
-          const db = getDb();
-          const dup = await db.execute({ sql: 'SELECT id FROM knowledge_sources WHERE origin = ?', args: [url] });
-          if (dup.rows.length) { added.push({ url, title, skipped: true }); return; }
           const id = uuidv4();
           await db.execute({
             sql: 'INSERT INTO knowledge_sources (id, type, title, origin, content, added_by) VALUES (?, ?, ?, ?, ?, ?)',
@@ -187,9 +208,15 @@ router.post('/crawl', async (req, res) => {
           added.push({ url, title });
         } catch (e) { failed.push({ url, reason: e.message }); }
       }));
-      if (i + BATCH < urls.length) await new Promise(r => setTimeout(r, 400));
+      if (i + BATCH < toFetch.length) await new Promise(r => setTimeout(r, 400));
     }
-    res.json({ added, failed, discovered: urls.length });
+    res.json({
+      added,
+      failed,
+      duplicates,
+      discovered: pool.length,
+      remainingFresh: fresh.length - toFetch.length
+    });
   } catch (err) {
     console.error('Crawl error:', err.message);
     res.status(500).json({ error: 'Crawl failed: ' + err.message });
