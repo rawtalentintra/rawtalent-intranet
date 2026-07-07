@@ -4,6 +4,7 @@ const multer = require('multer');
 const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
 const path = require('path');
+const zlib = require('zlib');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
@@ -290,10 +291,16 @@ async function discoverSitemapUrls(origin, max) {
     // Try standard <loc> tags first
     const locs = [...text.matchAll(/<loc>\s*(https?:\/\/[^\s<>"]+?)\s*<\/loc>/gi)].map(m => m[1].trim());
     if (locs.length) return locs;
-    // Fallback: any https URL in the text (Jina text output strips tags but keeps URLs)
-    return [...text.matchAll(/https?:\/\/[^\s<>"']+/g)]
-      .map(m => m[0].replace(/[.,;>)]+$/, ''))
-      .filter(u => !u.match(/\.(jpg|jpeg|png|gif|svg|css|js|xml|pdf|zip|gz|ico|woff2?)(\?.*)?$/i));
+    // Fallback: Jina's plain-text output strips XML tags entirely, so
+    // "<loc>URL</loc><lastmod>TIME</lastmod>" can become "URLTIME" with no
+    // separator. Split on URL boundaries first, then strip any ISO-8601
+    // timestamp (or other junk) glued onto the end of each one.
+    return text
+      .split(/(?=https?:\/\/)/)
+      .map(chunk => chunk.match(/^https?:\/\/[^\s<>"']*/)?.[0] || '')
+      .map(u => u.replace(/\d{4}-\d{2}-\d{2}T[\d:+-]+$/, ''))
+      .map(u => u.replace(/[.,;>)]+$/, ''))
+      .filter(u => u && !u.match(/\.(jpg|jpeg|png|gif|svg|css|js|pdf|zip|gz|ico|woff2?)(\?.*)?$/i));
   }
 
   async function fetchRaw(url) {
@@ -303,7 +310,13 @@ async function discoverSitemapUrls(origin, max) {
         headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/xml,application/xml,*/*' },
         signal: AbortSignal.timeout(10000)
       });
-      if (r.ok) return await r.text();
+      if (r.ok) {
+        const bytes = Buffer.from(await r.arrayBuffer());
+        // Some sitemaps are served as raw gzip (magic bytes 1f 8b) without a
+        // Content-Encoding header, so fetch() won't auto-decompress them
+        const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+        return isGzip ? zlib.gunzipSync(bytes).toString('utf8') : bytes.toString('utf8');
+      }
     } catch {}
     // 2. Fallback: Jina Reader bypasses Cloudflare / WAF
     const jr = await fetch(`https://r.jina.ai/${url}`, {
@@ -318,7 +331,7 @@ async function discoverSitemapUrls(origin, max) {
     if (urls.size >= max) return;
     const locs = extractLocs(text);
     // Sitemap index: entries point to other sitemaps
-    const isIndex = text.includes('<sitemapindex') || locs.every(u => u.includes('sitemap'));
+    const isIndex = text.includes('<sitemapindex') || (locs.length > 0 && locs.every(u => u.includes('sitemap')));
     if (isIndex && locs.length) {
       for (const sub of locs.slice(0, 5)) {
         if (urls.size >= max) break;
@@ -333,17 +346,28 @@ async function discoverSitemapUrls(origin, max) {
   }
 
   // Priority order: robots.txt Sitemap directive, then common paths
-  const candidates = ['/sitemap.xml', '/sitemap_index.xml', '/sitemap/sitemap.xml'];
+  const candidates = ['/sitemap.xml', '/sitemap_index.xml', '/sitemap/sitemap.xml', '/wp-sitemap.xml'];
+  let robotsText = '';
   try {
     const r = await fetch(`${origin}/robots.txt`, {
       headers: { 'User-Agent': BROWSER_UA },
       signal: AbortSignal.timeout(8000)
     });
-    if (r.ok) {
-      const m = (await r.text()).match(/^Sitemap:\s*(.+)$/im);
-      if (m) candidates.unshift(m[1].trim());
-    }
+    if (r.ok) robotsText = await r.text();
   } catch {}
+  if (!robotsText) {
+    // robots.txt itself can be blocked by a WAF (e.g. Cloudflare) even when
+    // the rest of the site isn't — fall back to Jina Reader before giving up
+    try {
+      const jr = await fetch(`https://r.jina.ai/${origin}/robots.txt`, {
+        headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text', 'X-Timeout': '15' },
+        signal: AbortSignal.timeout(20000)
+      });
+      if (jr.ok) robotsText = await jr.text();
+    } catch {}
+  }
+  const sitemapDirective = robotsText.match(/^Sitemap:\s*(.+)$/im);
+  if (sitemapDirective) candidates.unshift(sitemapDirective[1].trim());
 
   for (const path of candidates) {
     if (urls.size > 0) break;

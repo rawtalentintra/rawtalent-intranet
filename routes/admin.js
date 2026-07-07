@@ -13,6 +13,19 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 
 router.use(requireAdmin);
 
+// Records an entry in the system activity log (user + glossary management actions).
+// Article changes have their own dedicated article_logs table/history.
+async function logActivity(entityType, entityLabel, action, summary, changedBy) {
+  try {
+    await getDb().execute({
+      sql: 'INSERT INTO system_logs (entity_type, entity_label, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
+      args: [entityType, entityLabel, action, summary, changedBy]
+    });
+  } catch (err) {
+    console.error('Failed to write system log:', err.message);
+  }
+}
+
 // ── Stats ─────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
@@ -63,6 +76,7 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
       sql: 'INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, ?)',
       args: [email.toLowerCase(), name, hash, role]
     });
+    await logActivity('user', email.toLowerCase(), 'created', `User "${name}" (${role}) created`, req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -73,7 +87,7 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
   const { name, role, active, password } = req.body;
   try {
     const db = getDb();
-    const targetRes = await db.execute({ sql: 'SELECT email FROM users WHERE id = ?', args: [req.params.id] });
+    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active FROM users WHERE id = ?', args: [req.params.id] });
     const target = targetRes.rows[0];
     if (!target) return res.status(404).json({ error: 'User not found' });
 
@@ -82,14 +96,17 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Cannot change the primary admin role' });
     }
 
+    const changes = [];
     if (password) {
       const hash = await bcrypt.hash(password, 12);
       await db.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [hash, req.params.id] });
+      changes.push('Password reset');
     }
-    if (name !== undefined) await db.execute({ sql: 'UPDATE users SET name = ? WHERE id = ?', args: [name, req.params.id] });
-    if (role !== undefined) await db.execute({ sql: 'UPDATE users SET role = ? WHERE id = ?', args: [role, req.params.id] });
-    if (active !== undefined) await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [active ? 1 : 0, req.params.id] });
+    if (name !== undefined && name !== target.name) { await db.execute({ sql: 'UPDATE users SET name = ? WHERE id = ?', args: [name, req.params.id] }); changes.push(`Name: "${target.name}" → "${name}"`); }
+    if (role !== undefined && role !== target.role) { await db.execute({ sql: 'UPDATE users SET role = ? WHERE id = ?', args: [role, req.params.id] }); changes.push(`Role: "${target.role}" → "${role}"`); }
+    if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [active ? 1 : 0, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
 
+    await logActivity('user', target.email, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -106,6 +123,7 @@ router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete the primary admin account' });
     }
     await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [req.params.id] });
+    await logActivity('user', target.email, 'deleted', `User "${target.email}" removed`, req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -260,8 +278,8 @@ router.get('/drive-status', async (req, res) => {
   }
 });
 
-// ── Glossary (super_admin only) ───────────────────────────────────
-router.get('/glossary', requireSuperAdmin, async (req, res) => {
+// ── Glossary (admin can view + edit; plain users get read-only via /api/articles/glossary) ──
+router.get('/glossary', async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM glossary ORDER BY term ASC');
     res.json(result.rows);
@@ -270,37 +288,42 @@ router.get('/glossary', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.post('/glossary', requireSuperAdmin, async (req, res) => {
+router.post('/glossary', async (req, res) => {
   const { term, definition } = req.body;
   if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
   try {
     await getDb().execute({ sql: 'INSERT INTO glossary (term, definition) VALUES (?, ?)', args: [term.trim(), definition.trim()] });
+    await logActivity('glossary', term.trim(), 'created', `Term "${term.trim()}" added`, req.user.email);
     res.json({ success: true });
   } catch {
     res.status(409).json({ error: 'That term already exists' });
   }
 });
 
-router.put('/glossary/:id', requireSuperAdmin, async (req, res) => {
+router.put('/glossary/:id', async (req, res) => {
   const { term, definition } = req.body;
   if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
   try {
     const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT id FROM glossary WHERE id = ?', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT id, term FROM glossary WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Term not found' });
     await db.execute({
       sql: "UPDATE glossary SET term=?, definition=?, updated_at=datetime('now') WHERE id=?",
       args: [term.trim(), definition.trim(), req.params.id]
     });
+    await logActivity('glossary', term.trim(), 'updated', `Term "${existing.rows[0].term}" updated`, req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.delete('/glossary/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/glossary/:id', async (req, res) => {
   try {
-    await getDb().execute({ sql: 'DELETE FROM glossary WHERE id = ?', args: [req.params.id] });
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT term FROM glossary WHERE id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM glossary WHERE id = ?', args: [req.params.id] });
+    if (existing.rows[0]) await logActivity('glossary', existing.rows[0].term, 'deleted', `Term "${existing.rows[0].term}" removed`, req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -355,6 +378,25 @@ router.get('/article-logs', requireSuperAdmin, async (req, res) => {
 router.delete('/article-logs/:id', requireSuperAdmin, async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM article_logs WHERE id = ?', args: [req.params.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── System Logs — user & glossary activity (super_admin only) ────
+router.get('/system-logs', requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await getDb().execute('SELECT * FROM system_logs ORDER BY created_at DESC LIMIT 200');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/system-logs/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    await getDb().execute({ sql: 'DELETE FROM system_logs WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

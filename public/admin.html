@@ -86,7 +86,7 @@
           <span class="admin-nav-icon">👥</span> Users
         </div>
       </div>
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Knowledge</div>
         <div class="admin-nav-item" onclick="showSection('glossary', this)">
           <span class="admin-nav-icon">📖</span> Glossary
@@ -372,19 +372,20 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Change Logs</div>
-            <div class="admin-page-sub">Track what was changed in each article, by whom, and when</div>
+            <div class="admin-page-sub">Track article, user, and glossary activity — who changed what, and when</div>
           </div>
         </div>
         <div class="admin-table-card">
           <div class="admin-table-header">
-            <input type="text" class="admin-search-input" placeholder="Filter by article title…" oninput="filterLogs(this.value)">
+            <input type="text" class="admin-search-input" placeholder="Filter by title or type…" oninput="filterLogs(this.value)">
             <span id="logsCount" style="font-size:13px;color:var(--text-muted)"></span>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Article</th>
+                  <th style="width:80px">Type</th>
+                  <th>Item</th>
                   <th style="width:80px">Action</th>
                   <th>What Changed</th>
                   <th style="width:160px">By</th>
@@ -393,7 +394,7 @@
                 </tr>
               </thead>
               <tbody id="logsTableBody">
-                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -466,8 +467,9 @@
               <span id="sourcesCount" style="font-size:13px;color:var(--text-muted)"></span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn-secondary" id="dedupBtn" onclick="removeDuplicates()" style="font-size:12px;padding:5px 12px">Remove Duplicates</button>
-              <button class="btn-primary" id="refreshAllBtn" onclick="refreshAllSources()" style="font-size:12px;padding:5px 14px">↻ Refresh All</button>
+              <button class="btn-secondary source-action-btn" id="dedupBtn" onclick="removeDuplicates()">Remove Duplicates</button>
+              <button class="btn-secondary source-action-btn" id="exportCsvBtn" onclick="exportSourcesToCsv()">Export to CSV</button>
+              <button class="btn-primary source-action-btn" id="refreshAllBtn" onclick="refreshAllSources()">↻ Refresh All</button>
             </div>
           </div>
           <div id="refreshAllStatus" style="display:none;padding:10px 16px;font-size:13px;background:#f8faff;border-bottom:1px solid var(--gray-200);color:var(--text-muted)"></div>
@@ -786,7 +788,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'glossary', 'feedback', 'logs', 'sources'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -1505,9 +1507,24 @@
     // ── Change Logs ───────────────────────────────────────────────
     let allLogs = [];
 
+    const logTypeMeta = {
+      article: { label: 'Article', badge: 'badge-published' },
+      user: { label: 'User', badge: 'badge-admin' },
+      glossary: { label: 'Glossary', badge: 'badge-user' }
+    };
+
     async function loadLogs() {
       try {
-        allLogs = await fetch('/api/admin/article-logs').then(r => r.json());
+        const [articleLogs, systemLogs] = await Promise.all([
+          fetch('/api/admin/article-logs').then(r => r.json()),
+          fetch('/api/admin/system-logs').then(r => r.json())
+        ]);
+        const normalized = [
+          ...articleLogs.map(l => ({ id: l.id, source: 'article', entityType: 'article', title: l.article_title, action: l.action, summary: l.changes_summary, changed_by: l.changed_by, created_at: l.created_at })),
+          ...systemLogs.map(l => ({ id: l.id, source: 'system', entityType: l.entity_type, title: l.entity_label, action: l.action, summary: l.changes_summary, changed_by: l.changed_by, created_at: l.created_at }))
+        ];
+        normalized.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        allLogs = normalized;
         renderLogs(allLogs);
       } catch { toast('Failed to load logs', 'error'); }
     }
@@ -1517,31 +1534,37 @@
       const countEl = document.getElementById('logsCount');
       if (countEl) countEl.textContent = `${logs.length} entr${logs.length !== 1 ? 'ies' : 'y'}`;
       if (logs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted)">No change logs yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)">No change logs yet.</td></tr>`;
         return;
       }
-      tbody.innerHTML = logs.map(l => `
+      tbody.innerHTML = logs.map(l => {
+        const meta = logTypeMeta[l.entityType] || { label: l.entityType, badge: 'badge-user' };
+        return `
         <tr>
-          <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(l.article_title)}</td>
+          <td><span class="badge ${meta.badge}">${meta.label}</span></td>
+          <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(l.title)}</td>
           <td><span class="badge ${l.action === 'created' ? 'badge-published' : 'badge-user'}">${l.action}</span></td>
-          <td style="font-size:13px;color:var(--text-muted);max-width:320px">${escHtml(l.changes_summary || '—')}</td>
+          <td style="font-size:13px;color:var(--text-muted);max-width:320px">${escHtml(l.summary || '—')}</td>
           <td style="font-size:13px;color:var(--text-muted)">${escHtml(l.changed_by || '—')}</td>
           <td style="font-size:13px;color:var(--text-muted);white-space:nowrap">${fmtDate(l.created_at)}</td>
-          <td><button class="action-btn delete" onclick="deleteLog(${l.id})">Delete</button></td>
+          <td><button class="action-btn delete" onclick="deleteLog(${l.id},'${l.source}')">Delete</button></td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function filterLogs(q) {
-      const filtered = q ? allLogs.filter(l => l.article_title.toLowerCase().includes(q.toLowerCase())) : allLogs;
+      const term = q.toLowerCase();
+      const filtered = q ? allLogs.filter(l => l.title.toLowerCase().includes(term) || (logTypeMeta[l.entityType]?.label || '').toLowerCase().includes(term)) : allLogs;
       renderLogs(filtered);
     }
 
-    async function deleteLog(id) {
+    async function deleteLog(id, source) {
       if (!confirm('Delete this log entry?')) return;
       try {
-        await fetch(`/api/admin/article-logs/${id}`, { method: 'DELETE' });
-        allLogs = allLogs.filter(l => l.id !== id);
+        const endpoint = source === 'system' ? `/api/admin/system-logs/${id}` : `/api/admin/article-logs/${id}`;
+        await fetch(endpoint, { method: 'DELETE' });
+        allLogs = allLogs.filter(l => !(l.id === id && l.source === source));
         renderLogs(allLogs);
         toast('Log entry deleted', 'success');
       } catch { toast('Delete failed', 'error'); }
@@ -1790,6 +1813,26 @@
         toast('Source removed', 'success');
         loadSources();
       } catch { toast('Delete failed', 'error'); }
+    }
+
+    function exportSourcesToCsv() {
+      if (!allSources.length) { toast('No sources to export', 'error'); return; }
+      const headers = ['Title', 'Type', 'Source URL', 'Added By', 'Created', 'Updated'];
+      const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const rows = allSources.map(s => [
+        s.title, s.type, s.origin || '', s.added_by || '', s.created_at || '', s.updated_at || ''
+      ].map(csvEscape).join(','));
+      const csv = [headers.map(csvEscape).join(','), ...rows].join('\r\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai-sources-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast(`Exported ${allSources.length} sources to CSV`, 'success');
     }
 
     async function refreshAllSources() {

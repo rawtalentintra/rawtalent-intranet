@@ -276,6 +276,19 @@
     }
     .card-date { font-size: 12px; color: var(--gray-400); flex-shrink: 0; }
 
+    /* Glossary */
+    .glossary-search-wrap { margin-bottom: 16px; }
+    .glossary-search-wrap .hero-input { height: 46px; color: var(--text); background: white; border: 1px solid var(--gray-200); }
+    .glossary-list { display: grid; gap: 10px; }
+    .glossary-item {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius-lg);
+      padding: 16px 22px;
+    }
+    .glossary-term { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .glossary-definition { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+
     /* AI answer */
     .ai-answer-wrap {
       background: white;
@@ -534,6 +547,7 @@
       <div class="mode-tabs">
         <button class="mode-tab active" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
         <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
+        <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -626,15 +640,21 @@
     function setMode(mode) {
       currentMode = mode;
       const isAI = mode === 'ai';
-      document.getElementById('tabSearch').classList.toggle('active', !isAI);
+      const isGlossary = mode === 'glossary';
+      document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
-      document.getElementById('searchArea').style.display = isAI ? 'none' : '';
+      document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
+      document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
-      document.getElementById('catBar').style.display = isAI ? 'none' : '';
+      document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiBanner').classList.toggle('show', isAI);
-      document.getElementById('heroTitle').textContent = isAI ? 'Ask the AI anything' + String.fromCharCode(8203) : 'How can we help you?';
+      document.getElementById('heroTitle').textContent = isAI
+        ? 'Ask the AI anything' + String.fromCharCode(8203)
+        : isGlossary ? 'Glossary of terms'
+        : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Powered by Claude AI — searches across all articles, documents, and reference sites'
+        : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -645,10 +665,71 @@
             <p style="font-size:14px;margin-top:4px">Try: "What are the WWCC requirements for Victoria?" or "How do I handle a no-show?"</p>
           </div>`;
         setTimeout(() => document.getElementById('aiInput').focus(), 50);
+      } else if (isGlossary) {
+        loadGlossaryView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
       }
+    }
+
+    // ── Glossary ──────────────────────────────────────────────────
+    let allGlossaryTerms = [];
+
+    async function loadGlossaryView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        const terms = await fetch('/api/articles/glossary').then(r => r.json());
+        allGlossaryTerms = terms.slice().sort((a, b) => a.term.localeCompare(b.term));
+        renderGlossaryList(allGlossaryTerms);
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load glossary.</div></div>';
+      }
+    }
+
+    function renderGlossaryList(terms) {
+      const list = document.getElementById('resultsList');
+      const header = `
+        <div class="glossary-search-wrap">
+          <input type="text" id="glossarySearchInput" class="hero-input" placeholder="Filter terms…" oninput="filterGlossaryView(this.value)" autocomplete="off">
+        </div>`;
+      if (terms.length === 0) {
+        list.innerHTML = header + `
+          <div class="empty-wrap">
+            <div class="empty-icon">📖</div>
+            <div class="empty-title">No matching terms</div>
+          </div>`;
+        return;
+      }
+      const items = terms.map(t => `
+        <div class="glossary-item">
+          <div class="glossary-term">${escHtml(t.term)}</div>
+          <div class="glossary-definition">${escHtml(t.definition)}</div>
+        </div>`).join('');
+      list.innerHTML = header + `<div class="glossary-list">${items}</div>`;
+    }
+
+    function filterGlossaryView(q) {
+      const term = q.trim().toLowerCase();
+      const filtered = term
+        ? allGlossaryTerms.filter(t => t.term.toLowerCase().includes(term) || t.definition.toLowerCase().includes(term))
+        : allGlossaryTerms;
+      const list = document.getElementById('resultsList');
+      const listEl = list.querySelector('.glossary-list');
+      const emptyEl = list.querySelector('.empty-wrap');
+      if (filtered.length === 0) {
+        if (listEl) listEl.remove();
+        if (!emptyEl) list.insertAdjacentHTML('beforeend', `<div class="empty-wrap"><div class="empty-icon">📖</div><div class="empty-title">No matching terms</div></div>`);
+        return;
+      }
+      if (emptyEl) emptyEl.remove();
+      const items = filtered.map(t => `
+        <div class="glossary-item">
+          <div class="glossary-term">${escHtml(t.term)}</div>
+          <div class="glossary-definition">${escHtml(t.definition)}</div>
+        </div>`).join('');
+      if (listEl) listEl.innerHTML = items;
+      else list.insertAdjacentHTML('beforeend', `<div class="glossary-list">${items}</div>`);
     }
 
     // ── Ask AI ────────────────────────────────────────────────────

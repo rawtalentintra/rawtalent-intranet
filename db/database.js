@@ -176,6 +176,15 @@ async function initDatabase() {
       asked_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS system_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_type TEXT NOT NULL,
+      entity_label TEXT NOT NULL,
+      action TEXT NOT NULL,
+      changes_summary TEXT DEFAULT '',
+      changed_by TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of schema) {

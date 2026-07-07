@@ -850,6 +850,14 @@ button { cursor: pointer; font-family: inherit; }
 }
 .btn-secondary:hover { border-color: var(--gray-400); }
 
+.source-action-btn {
+  width: auto;
+  font-size: 12px;
+  padding: 5px 14px;
+  min-width: 140px;
+  justify-content: center;
+}
+
 /* ─── Modal ───────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
