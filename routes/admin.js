@@ -9,23 +9,11 @@ const pdfParse = require('pdf-parse');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
+const { logActivity } = require('../services/activityLog');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 router.use(requireAdmin);
-
-// Records an entry in the system activity log (user + glossary management actions).
-// Article changes have their own dedicated article_logs table/history.
-async function logActivity(entityType, entityLabel, action, summary, changedBy) {
-  try {
-    await getDb().execute({
-      sql: 'INSERT INTO system_logs (entity_type, entity_label, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
-      args: [entityType, entityLabel, action, summary, changedBy]
-    });
-  } catch (err) {
-    console.error('Failed to write system log:', err.message);
-  }
-}
 
 // ── Stats ─────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {

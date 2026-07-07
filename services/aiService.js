@@ -22,9 +22,9 @@ async function searchKnowledge(db, question, limit = 6) {
     try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
 
-  // Three independent search lanes — internal sources always get their own slots
+  // Independent search lanes — internal sources always get their own slots
   // and can never be displaced by external websites
-  const [artRows, docRows, webRows] = await Promise.all([
+  const [artRows, faqRows, docRows, webRows] = await Promise.all([
     // Lane 1 — Internal: published KB articles / SOPs
     query(
       `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
@@ -32,14 +32,21 @@ async function searchKnowledge(db, question, limit = 6) {
        WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 2`,
       [term]
     ),
-    // Lane 2 — Internal: uploaded documents (PDF, DOCX, TXT)
+    // Lane 2 — Internal: super_admin-approved FAQs (e.g. from Slack, scrubbed of PII)
+    query(
+      `SELECT f.id, f.question as title, f.answer as content, NULL as category, 'faq' as source_type, NULL as origin, f.source as faq_source, f.source_date
+       FROM faqs f JOIN faqs_fts fts ON f.id = fts.id
+       WHERE faqs_fts MATCH ? ORDER BY rank LIMIT 2`,
+      [term]
+    ),
+    // Lane 3 — Internal: uploaded documents (PDF, DOCX, TXT)
     query(
       `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
        FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
        WHERE knowledge_sources_fts MATCH ? AND s.type = 'document' ORDER BY rank LIMIT 2`,
       [term]
     ),
-    // Lane 3 — External: crawled websites (regulatory / industry)
+    // Lane 4 — External: crawled websites (regulatory / industry)
     query(
       `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
        FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
@@ -48,8 +55,8 @@ async function searchKnowledge(db, question, limit = 6) {
     )
   ]);
 
-  // Internal first (articles → docs → websites), so Claude sees internal context first
-  let results = [...artRows, ...docRows, ...webRows];
+  // Internal first (articles → FAQs → docs → websites), so Claude sees internal context first
+  let results = [...artRows, ...faqRows, ...docRows, ...webRows];
 
   // Fallback: if fewer than 3 total results, broaden to individual keywords
   if (results.length < 3) {
@@ -58,11 +65,17 @@ async function searchKnowledge(db, question, limit = 6) {
     for (const word of words.slice(0, 4)) {
       if (results.length >= limit) break;
       const wt = `"${word}"*`;
-      const [wa, wd, ww] = await Promise.all([
+      const [wa, wf, wd, ww] = await Promise.all([
         query(
           `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
            FROM articles a JOIN articles_fts fts ON a.id = fts.id
            WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 1`,
+          [wt]
+        ),
+        query(
+          `SELECT f.id, f.question as title, f.answer as content, NULL as category, 'faq' as source_type, NULL as origin, f.source as faq_source, f.source_date
+           FROM faqs f JOIN faqs_fts fts ON f.id = fts.id
+           WHERE faqs_fts MATCH ? ORDER BY rank LIMIT 1`,
           [wt]
         ),
         query(
@@ -78,7 +91,7 @@ async function searchKnowledge(db, question, limit = 6) {
           [wt]
         )
       ]);
-      for (const r of [...wa, ...wd, ...ww]) {
+      for (const r of [...wa, ...wf, ...wd, ...ww]) {
         if (!seen.has(r.id)) { seen.add(r.id); results.push(r); }
       }
     }
@@ -171,9 +184,11 @@ DNU = Do Not Use (educator barred from placement), Red Zone = serious non-compli
 **Be the expert in the room.** Even when sources are limited, apply your ECEC knowledge to give a complete, useful answer. A coordinator asking this question needs to act on your answer — give them what they need.
 
 **Source priority** (always follow this order):
-1. **[INTERNAL] sources** — RawTalent SOPs, articles, uploaded documents. Lead with: "RawTalent's process requires..." Cite as [Source N].
+1. **[INTERNAL] sources** — RawTalent SOPs, articles, uploaded documents, and approved FAQs (real questions team members have asked before, reviewed and approved by a super admin). Lead with: "RawTalent's process requires..." Cite as [Source N].
 2. **[REGULATORY] sources** — crawled government/industry sites. Add: "The regulatory requirement under [regulation] is..." Cite as [Source N].
 3. **General ECEC expertise** — only when sources don't cover it. Label clearly: "Based on general ECEC knowledge (not in your knowledge base):"
+
+**Approved FAQs carry a date — use it.** These come from real Slack/Fathom conversations that a super admin scrubbed and approved, but the date shown is when that conversation happened, not today. Pay rates, compliance requirements, and internal processes all change over time. If an FAQ touches on something that plausibly could have changed since its date, say so and recommend confirming the current position — don't present it as unconditionally current just because it's an approved internal source.
 
 **Format**: Use ## headings and bullet points for multi-part answers. For important warnings or must-know callout items, start the line with "> " (e.g. > **Important:** All educators must have a valid WWCC before their first shift.). Australian English throughout (recognise, organise, behaviour, centre, programme). For compliance topics, always note that requirements can change and recommend verifying with the relevant regulator.
 
@@ -191,6 +206,9 @@ function buildMessages(matches, question) {
     let label;
     if (m.source_type === 'article') {
       label = `[INTERNAL] RawTalent SOP/Article: ${m.title}${m.category ? ` (${m.category})` : ''}`;
+    } else if (m.source_type === 'faq') {
+      const dateStr = m.source_date ? new Date(m.source_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'an unknown date';
+      label = `[INTERNAL] Approved FAQ (from a ${m.faq_source || 'team'} conversation on ${dateStr} — note the date: if this touches on something that can change over time such as pay, compliance, or process, check whether it might be outdated before treating it as current): ${m.title}`;
     } else if (m.source_type === 'document') {
       label = `[INTERNAL] Uploaded Document: ${m.title}`;
     } else {

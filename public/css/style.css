@@ -857,6 +857,11 @@ button { cursor: pointer; font-family: inherit; }
   min-width: 140px;
   justify-content: center;
 }
+.source-action-btn.active {
+  background: var(--orange-glow);
+  border-color: var(--orange);
+  color: var(--orange);
+}
 
 /* ─── Modal ───────────────────────────────────────────────────── */
 .modal-overlay {

@@ -548,6 +548,7 @@
         <button class="mode-tab active" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
         <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
         <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
+        <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -644,9 +645,11 @@
       currentMode = mode;
       const isAI = mode === 'ai';
       const isGlossary = mode === 'glossary';
+      const isFaq = mode === 'faq';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
+      document.getElementById('tabFaq').classList.toggle('active', isFaq);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -654,10 +657,12 @@
       document.getElementById('heroTitle').textContent = isAI
         ? 'Ask the AI anything' + String.fromCharCode(8203)
         : isGlossary ? 'Glossary of terms'
+        : isFaq ? 'Frequently asked questions'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Powered by Claude AI — searches across all articles, documents, and reference sites'
         : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
+        : isFaq ? 'Real questions from the team, reviewed and approved'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -670,6 +675,8 @@
         setTimeout(() => document.getElementById('aiInput').focus(), 50);
       } else if (isGlossary) {
         loadGlossaryView();
+      } else if (isFaq) {
+        loadFaqView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
@@ -730,6 +737,65 @@
         <div class="glossary-item">
           <div class="glossary-term">${escHtml(t.term)}</div>
           <div class="glossary-definition">${escHtml(t.definition)}</div>
+        </div>`).join('');
+      if (listEl) listEl.innerHTML = items;
+      else list.insertAdjacentHTML('beforeend', `<div class="glossary-list">${items}</div>`);
+    }
+
+    // ── FAQ ───────────────────────────────────────────────────────
+    let allFaqs = [];
+
+    async function loadFaqView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        allFaqs = await fetch('/api/faq').then(r => r.json());
+        renderFaqList(allFaqs);
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load FAQs.</div></div>';
+      }
+    }
+
+    function renderFaqList(faqs) {
+      const list = document.getElementById('resultsList');
+      const header = `
+        <div class="glossary-search-wrap">
+          <input type="text" id="faqSearchInput" class="hero-input" placeholder="Filter questions…" oninput="filterFaqView(this.value)" autocomplete="off">
+        </div>`;
+      if (faqs.length === 0) {
+        list.innerHTML = header + `
+          <div class="empty-wrap">
+            <div class="empty-icon">❓</div>
+            <div class="empty-title">No FAQs yet</div>
+            <p style="font-size:14px;margin-top:4px">Approved questions and answers will appear here.</p>
+          </div>`;
+        return;
+      }
+      const items = faqs.map(f => `
+        <div class="glossary-item">
+          <div class="glossary-term">${escHtml(f.question)}</div>
+          <div class="glossary-definition">${escHtml(f.answer)}</div>
+        </div>`).join('');
+      list.innerHTML = header + `<div class="glossary-list">${items}</div>`;
+    }
+
+    function filterFaqView(q) {
+      const term = q.trim().toLowerCase();
+      const filtered = term
+        ? allFaqs.filter(f => f.question.toLowerCase().includes(term) || f.answer.toLowerCase().includes(term))
+        : allFaqs;
+      const list = document.getElementById('resultsList');
+      const listEl = list.querySelector('.glossary-list');
+      const emptyEl = list.querySelector('.empty-wrap');
+      if (filtered.length === 0) {
+        if (listEl) listEl.remove();
+        if (!emptyEl) list.insertAdjacentHTML('beforeend', `<div class="empty-wrap"><div class="empty-icon">❓</div><div class="empty-title">No matching questions</div></div>`);
+        return;
+      }
+      if (emptyEl) emptyEl.remove();
+      const items = filtered.map(f => `
+        <div class="glossary-item">
+          <div class="glossary-term">${escHtml(f.question)}</div>
+          <div class="glossary-definition">${escHtml(f.answer)}</div>
         </div>`).join('');
       if (listEl) listEl.innerHTML = items;
       else list.insertAdjacentHTML('beforeend', `<div class="glossary-list">${items}</div>`);
@@ -925,7 +991,7 @@
     function renderSourceChips(sources) {
       if (!sources || !sources.length) return '';
       return `<div class="ai-sources-label">Sources used</div><div>${sources.map((s, i) => {
-        const icon = s.type === 'website' ? '🌐' : s.type === 'document' ? '📄' : '📋';
+        const icon = s.type === 'website' ? '🌐' : s.type === 'document' ? '📄' : s.type === 'faq' ? '❓' : '📋';
         const href = s.type === 'article' ? `/article?id=${s.id}` : (s.origin || '#');
         const ext = s.type !== 'article' ? 'target="_blank" rel="noopener"' : '';
         return `<a class="ai-source-tag" href="${escHtml(href)}" ${ext}><span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:var(--orange);color:white;border-radius:50%;font-size:9px;font-weight:700;flex-shrink:0">${i+1}</span>${icon} ${escHtml(s.title)}</a>`;

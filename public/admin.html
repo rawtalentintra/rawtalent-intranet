@@ -97,6 +97,9 @@
         <div class="admin-nav-item" onclick="showSection('sources', this)">
           <span class="admin-nav-icon">🧠</span> AI Sources
         </div>
+        <div class="admin-nav-item" onclick="showSection('faq', this)">
+          <span class="admin-nav-icon">❓</span> FAQ Review
+        </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label">Insights</div>
@@ -482,6 +485,69 @@
         </div>
       </div>
 
+      <!-- FAQ Review -->
+      <div class="admin-section" id="section-faq">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">FAQ Review</div>
+            <div class="admin-page-sub">Slack and Fathom conversations are never used as AI sources directly — Claude only flags genuinely reusable, scrubbed Q&amp;As here for your approval. This whole page is visible to you as super admin only.</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">💬 Scan Slack</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checks channels the bot has access to for new threads — never auto-joins a channel, so it never surprises anyone.</div>
+            <button class="btn-add" id="faqScanSlackBtn" onclick="scanSource('slack')">Scan Slack Now</button>
+            <div id="faqScanSlackStatus" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius);font-size:13px;background:#f8faff;color:var(--text-muted)"></div>
+          </div>
+          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🎥 Scan Fathom</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checks meeting transcripts since the last scan for reusable Q&amp;A material.</div>
+            <button class="btn-add" id="faqScanFathomBtn" onclick="scanSource('fathom')">Scan Fathom Now</button>
+            <div id="faqScanFathomStatus" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius);font-size:13px;background:#f8faff;color:var(--text-muted)"></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:24px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">Pending Candidates</span>
+            <span id="faqCandidatesCount" style="font-size:13px;color:var(--text-muted)"></span>
+          </div>
+          <div id="faqCandidatesList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:24px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">Approved FAQs</span>
+            <span id="faqApprovedCount" style="font-size:13px;color:var(--text-muted)"></span>
+          </div>
+          <div id="faqApprovedList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">All Scanned Conversations</span>
+              <span id="faqScannedCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-secondary source-action-btn active" id="faqScannedFilterAll" onclick="setFaqScannedFilter('all', this)">All Sources</button>
+              <button class="btn-secondary source-action-btn" id="faqScannedFilterSlack" onclick="setFaqScannedFilter('slack', this)">Slack</button>
+              <button class="btn-secondary source-action-btn" id="faqScannedFilterFathom" onclick="setFaqScannedFilter('fathom', this)">Fathom</button>
+            </div>
+          </div>
+          <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--gray-200)">Every conversation Claude looked at, including ones it auto-rejected before you ever saw them — for your own visibility into what these integrations are reading.</div>
+          <div id="faqScannedList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -791,7 +857,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -810,6 +876,7 @@
       if (id === 'logs') loadLogs();
       if (id === 'glossary') loadGlossary();
       if (id === 'sources') loadSources();
+      if (id === 'faq') loadFaqSection();
     }
 
     // ── Stats ─────────────────────────────────────────────────────
@@ -1929,6 +1996,190 @@
         }
       } catch { toast('Dedup failed', 'error'); }
       finally { btn.disabled = false; btn.textContent = 'Remove Duplicates'; }
+    }
+
+    // ── FAQ Review ────────────────────────────────────────────────
+    function loadFaqSection() {
+      loadFaqCandidates();
+      loadApprovedFaqs();
+      loadFaqScannedSources();
+    }
+
+    async function scanSource(source) {
+      const btn = document.getElementById(`faqScan${source === 'slack' ? 'Slack' : 'Fathom'}Btn`);
+      const statusEl = document.getElementById(`faqScan${source === 'slack' ? 'Slack' : 'Fathom'}Status`);
+      const label = source === 'slack' ? 'Slack channels' : 'Fathom meetings';
+      btn.disabled = true; btn.textContent = 'Scanning…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Checking ${label} for new conversations…`;
+      try {
+        const res = await fetch(`/api/faq/scan/${source}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { statusEl.textContent = ''; toast(data.error || 'Scan failed', 'error'); return; }
+        const scannedCount = source === 'slack' ? data.channelsScanned : data.meetingsScanned;
+        const scannedLabel = source === 'slack' ? 'channels checked' : 'meetings checked';
+        const processedLabel = source === 'slack' ? `${data.threadsProcessed} threads reviewed` : `${data.meetingsProcessed} meetings reviewed`;
+        statusEl.innerHTML = `<strong style="color:var(--navy)">${data.candidatesFound} new candidate${data.candidatesFound !== 1 ? 's' : ''} found</strong> — ${scannedCount} ${scannedLabel}, ${processedLabel}` +
+          (data.truncated ? ' · scan truncated, click Scan Now again to continue' : '') +
+          (data.errors?.length ? ` · ${data.errors.length} failed` : '');
+        toast(`Scan complete — ${data.candidatesFound} new candidate${data.candidatesFound !== 1 ? 's' : ''}`, 'success');
+        loadFaqCandidates();
+        loadFaqScannedSources();
+      } catch { statusEl.textContent = ''; toast('Scan failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = `Scan ${source === 'slack' ? 'Slack' : 'Fathom'} Now`; }
+    }
+
+    async function loadFaqCandidates() {
+      const list = document.getElementById('faqCandidatesList');
+      try {
+        const candidates = await fetch('/api/faq/candidates?status=pending').then(r => r.json());
+        document.getElementById('faqCandidatesCount').textContent = `${candidates.length} pending`;
+        if (candidates.length === 0) {
+          list.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">No pending candidates. Run a scan to check for new ones.</div>';
+          return;
+        }
+        list.innerHTML = candidates.map(c => `
+          <div style="padding:18px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">From ${escHtml(c.source)}${c.source_channel ? ` · ${escHtml(c.source_channel)}` : ''} · conversation on ${fmtDate(c.source_date) || 'unknown date'}</div>
+            <div style="margin-bottom:8px">
+              <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Question</label>
+              <textarea id="faq-q-${c.id}" class="form-control" style="margin-top:4px;min-height:44px;resize:vertical">${escHtml(c.suggested_question)}</textarea>
+            </div>
+            <div style="margin-bottom:10px">
+              <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Answer</label>
+              <textarea id="faq-a-${c.id}" class="form-control" style="margin-top:4px;min-height:70px;resize:vertical">${escHtml(c.suggested_answer)}</textarea>
+            </div>
+            <details style="margin-bottom:12px">
+              <summary style="font-size:12px;color:var(--orange);cursor:pointer;font-weight:600">View original excerpt</summary>
+              <div style="margin-top:8px;padding:12px 14px;background:var(--gray-100);border-radius:var(--radius);font-size:12px;color:var(--text-muted);white-space:pre-wrap;max-height:180px;overflow-y:auto">${escHtml(c.raw_excerpt || '')}</div>
+            </details>
+            <div style="display:flex;gap:8px">
+              <button class="btn-add" style="padding:7px 16px;font-size:13px" onclick="approveFaqCandidate('${c.id}')">✓ Approve</button>
+              <button class="action-btn delete" onclick="rejectFaqCandidate('${c.id}')">Reject</button>
+            </div>
+          </div>
+        `).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load candidates.</div>'; }
+    }
+
+    let faqScannedFilter = 'all';
+
+    function setFaqScannedFilter(source, el) {
+      faqScannedFilter = source;
+      document.querySelectorAll('#faqScannedFilterAll, #faqScannedFilterSlack, #faqScannedFilterFathom').forEach(b => b.classList.remove('active'));
+      if (el) el.classList.add('active');
+      loadFaqScannedSources();
+    }
+
+    async function loadFaqScannedSources() {
+      const list = document.getElementById('faqScannedList');
+      try {
+        const params = new URLSearchParams({ status: 'all' });
+        if (faqScannedFilter !== 'all') params.set('source', faqScannedFilter);
+        const scanned = await fetch(`/api/faq/candidates?${params}`).then(r => r.json());
+        document.getElementById('faqScannedCount').textContent = `${scanned.length} scanned`;
+        if (scanned.length === 0) {
+          list.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Nothing scanned yet.</div>';
+          return;
+        }
+        const statusMeta = {
+          pending: { label: 'Pending review', badge: 'badge-user' },
+          approved: { label: 'Approved', badge: 'badge-published' },
+          rejected: { label: 'Rejected by you', badge: 'badge-draft' },
+          auto_rejected: { label: 'Auto-rejected by AI', badge: 'badge-draft' }
+        };
+        list.innerHTML = scanned.map(c => {
+          const meta = statusMeta[c.status] || { label: c.status, badge: 'badge-user' };
+          return `
+          <div style="padding:16px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+              <span class="badge ${meta.badge}">${meta.label}</span>
+              <span style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted)">${escHtml(c.source)}${c.source_channel ? ` · ${escHtml(c.source_channel)}` : ''} · conversation on ${fmtDate(c.source_date) || 'unknown date'}</span>
+            </div>
+            ${c.suggested_question ? `<div style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:4px">${escHtml(c.suggested_question)}</div>` : ''}
+            ${c.classification_reason ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Claude's reasoning: ${escHtml(c.classification_reason)}</div>` : ''}
+            <details>
+              <summary style="font-size:12px;color:var(--orange);cursor:pointer;font-weight:600">View original excerpt</summary>
+              <div style="margin-top:8px;padding:12px 14px;background:var(--gray-100);border-radius:var(--radius);font-size:12px;color:var(--text-muted);white-space:pre-wrap;max-height:180px;overflow-y:auto">${escHtml(c.raw_excerpt || '')}</div>
+            </details>
+          </div>`;
+        }).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load scanned conversations.</div>'; }
+    }
+
+    async function approveFaqCandidate(id) {
+      const question = document.getElementById(`faq-q-${id}`).value.trim();
+      const answer = document.getElementById(`faq-a-${id}`).value.trim();
+      if (!question || !answer) { toast('Question and answer cannot be empty', 'error'); return; }
+      try {
+        const res = await fetch(`/api/faq/candidates/${id}/approve`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
+        });
+        if (!res.ok) { toast('Approve failed', 'error'); return; }
+        toast('FAQ approved and published', 'success');
+        loadFaqCandidates();
+        loadApprovedFaqs();
+      } catch { toast('Approve failed', 'error'); }
+    }
+
+    async function rejectFaqCandidate(id) {
+      if (!confirm('Reject this candidate? It will be removed from the pending queue.')) return;
+      try {
+        await fetch(`/api/faq/candidates/${id}/reject`, { method: 'PUT' });
+        toast('Candidate rejected', 'success');
+        loadFaqCandidates();
+      } catch { toast('Reject failed', 'error'); }
+    }
+
+    async function loadApprovedFaqs() {
+      const list = document.getElementById('faqApprovedList');
+      try {
+        const faqs = await fetch('/api/faq/manage/all').then(r => r.json());
+        document.getElementById('faqApprovedCount').textContent = `${faqs.length} approved`;
+        if (faqs.length === 0) {
+          list.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">No approved FAQs yet.</div>';
+          return;
+        }
+        list.innerHTML = faqs.map(f => `
+          <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px;color:var(--navy);margin-bottom:4px">${escHtml(f.question)}</div>
+              <div style="font-size:13px;color:var(--text-muted)">${escHtml(f.answer)}</div>
+              <div style="font-size:11px;color:var(--gray-400);margin-top:6px">From a ${escHtml(f.source || 'team')} conversation on ${fmtDate(f.source_date) || 'unknown date'} · approved by ${escHtml(f.approved_by || '—')} on ${fmtDate(f.created_at)}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="action-btn edit" onclick="editFaqPrompt('${f.id}','${escHtml(f.question)}','${escHtml(f.answer)}')">Edit</button>
+              <button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>
+            </div>
+          </div>
+        `).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load FAQs.</div>'; }
+    }
+
+    async function editFaqPrompt(id, currentQuestion, currentAnswer) {
+      const question = prompt('Edit question:', currentQuestion);
+      if (question === null) return;
+      const answer = prompt('Edit answer:', currentAnswer);
+      if (answer === null) return;
+      try {
+        const res = await fetch(`/api/faq/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
+        });
+        if (!res.ok) { toast('Update failed', 'error'); return; }
+        toast('FAQ updated', 'success');
+        loadApprovedFaqs();
+      } catch { toast('Update failed', 'error'); }
+    }
+
+    async function deleteFaq(id) {
+      if (!confirm('Remove this FAQ? It will no longer be visible to users or the AI.')) return;
+      try {
+        await fetch(`/api/faq/${id}`, { method: 'DELETE' });
+        toast('FAQ removed', 'success');
+        loadApprovedFaqs();
+      } catch { toast('Remove failed', 'error'); }
     }
 
     init();

@@ -185,6 +185,48 @@ async function initDatabase() {
       changed_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // Slack and Fathom conversations are never used as AI sources directly. Every
+    // scanned conversation lands here — including ones Claude auto-rejected — so a
+    // super_admin has full visibility into what was looked at. Only a 'pending' row
+    // that a super_admin explicitly approves becomes a real, visible FAQ.
+    // suggested_question/suggested_answer are null when Claude auto-rejects.
+    `CREATE TABLE IF NOT EXISTS faq_candidates (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_channel TEXT,
+      source_ref TEXT,
+      source_date TEXT,
+      raw_excerpt TEXT,
+      suggested_question TEXT,
+      suggested_answer TEXT,
+      classification_reason TEXT,
+      status TEXT DEFAULT 'pending',
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS faqs (
+      id TEXT PRIMARY KEY,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      source TEXT,
+      source_date TEXT,
+      approved_by TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE VIRTUAL TABLE IF NOT EXISTS faqs_fts USING fts5(id UNINDEXED, question, answer)`,
+    `CREATE TABLE IF NOT EXISTS slack_scan_state (
+      channel_id TEXT PRIMARY KEY,
+      channel_name TEXT,
+      last_ts TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS fathom_scan_state (
+      id INTEGER PRIMARY KEY,
+      last_synced_at TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of schema) {
