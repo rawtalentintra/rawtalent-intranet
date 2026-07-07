@@ -185,7 +185,7 @@
 
         <!-- Document upload drop zone (hidden during edit) -->
         <div id="docUploadZone" style="margin-bottom:20px">
-          <input type="file" id="docFileInput" accept=".docx,.txt" style="display:none" onchange="handleDocUpload(this)">
+          <input type="file" id="docFileInput" accept=".pdf,.docx,.txt" style="display:none" onchange="handleDocUpload(this)">
           <div id="docDropZone"
             style="border:2px dashed var(--gray-200);border-radius:var(--radius-lg);padding:28px 24px;text-align:center;background:white;cursor:pointer;transition:all .2s"
             onclick="document.getElementById('docFileInput').click()"
@@ -194,7 +194,7 @@
             ondrop="handleDocDrop(event)">
             <div style="font-size:32px;margin-bottom:8px">📄</div>
             <div style="font-weight:700;color:var(--navy);font-size:15px;margin-bottom:4px">Upload a document to auto-fill this article</div>
-            <div style="font-size:13px;color:var(--text-muted)">Click to browse or drag & drop a <strong>.docx</strong> or <strong>.txt</strong> file — you can edit everything before saving</div>
+            <div style="font-size:13px;color:var(--text-muted)">Click to browse or drag & drop a <strong>.pdf</strong>, <strong>.docx</strong>, or <strong>.txt</strong> file — you can edit everything before saving</div>
           </div>
           <div id="docParsingMsg" style="display:none;text-align:center;padding:20px;font-size:14px;color:var(--text-muted)">
             <div class="spinner" style="margin:0 auto 10px"></div>
@@ -472,6 +472,9 @@
               <button class="btn-primary source-action-btn" id="refreshAllBtn" onclick="refreshAllSources()">↻ Refresh All</button>
             </div>
           </div>
+          <div style="padding:12px 20px;border-bottom:1px solid var(--gray-200)">
+            <input type="text" id="sourcesSearchInput" class="admin-search-input" placeholder="Search sources by title or URL…" oninput="filterSources(this.value)" style="width:100%;max-width:400px">
+          </div>
           <div id="refreshAllStatus" style="display:none;padding:10px 16px;font-size:13px;background:#f8faff;border-bottom:1px solid var(--gray-200);color:var(--text-muted)"></div>
           <div id="sourcesList" style="padding:8px 0">
             <div class="loading-spinner"><div class="spinner"></div></div>
@@ -715,8 +718,8 @@
 
     async function processDocFile(file) {
       const ext = file.name.split('.').pop().toLowerCase();
-      if (!['docx', 'txt'].includes(ext)) {
-        toast('Only .docx and .txt files are supported', 'error'); return;
+      if (!['pdf', 'docx', 'txt'].includes(ext)) {
+        toast('Only .pdf, .docx, and .txt files are supported', 'error'); return;
       }
 
       const dropZone = document.getElementById('docDropZone');
@@ -821,21 +824,35 @@
     }
 
     // ── Articles ──────────────────────────────────────────────────
+    let articlesFilter = '';
+    let articlesPage = 1;
+    const ARTICLES_PER_PAGE = 10;
+
     async function loadArticles() {
       try {
         allArticles = await fetch('/api/admin/articles').then(r => r.json());
-        renderArticlesTable(allArticles);
+        articlesPage = 1;
+        renderArticlesTable();
       } catch { toast('Failed to load articles', 'error'); }
     }
 
-    function renderArticlesTable(articles) {
+    function renderArticlesTable() {
       const tbody = document.getElementById('articlesTableBody');
-      document.getElementById('articleCount').textContent = `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
+      const articles = articlesFilter
+        ? allArticles.filter(a => a.title.toLowerCase().includes(articlesFilter) || (a.category || '').toLowerCase().includes(articlesFilter))
+        : allArticles;
+      document.getElementById('articleCount').textContent = articlesFilter
+        ? `${articles.length} of ${allArticles.length} article${allArticles.length !== 1 ? 's' : ''}`
+        : `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
       if (articles.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">No articles yet. <a href="#" onclick="showSection('new-article',null);return false" style="color:var(--orange)">Create your first article →</a></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">${allArticles.length === 0 ? `No articles yet. <a href="#" onclick="showSection('new-article',null);return false" style="color:var(--orange)">Create your first article →</a>` : 'No articles match your search.'}</td></tr>`;
         return;
       }
-      tbody.innerHTML = articles.map(a => `
+      const totalPages = Math.max(1, Math.ceil(articles.length / ARTICLES_PER_PAGE));
+      if (articlesPage > totalPages) articlesPage = totalPages;
+      const start = (articlesPage - 1) * ARTICLES_PER_PAGE;
+      const pageItems = articles.slice(start, start + ARTICLES_PER_PAGE);
+      const rows = pageItems.map(a => `
         <tr>
           <td>
             <div style="font-weight:600;color:var(--text);margin-bottom:2px">${escHtml(a.title)}</div>
@@ -853,14 +870,26 @@
           </td>
         </tr>
       `).join('');
+      const pagination = totalPages > 1 ? `
+        <tr><td colspan="5">
+          <div style="display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 0">
+            <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeArticlesPage(-1)" ${articlesPage === 1 ? 'disabled' : ''}>← Prev</button>
+            <span style="font-size:13px;color:var(--text-muted)">Page ${articlesPage} of ${totalPages}</span>
+            <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeArticlesPage(1)" ${articlesPage === totalPages ? 'disabled' : ''}>Next →</button>
+          </div>
+        </td></tr>` : '';
+      tbody.innerHTML = rows + pagination;
+    }
+
+    function changeArticlesPage(delta) {
+      articlesPage += delta;
+      renderArticlesTable();
     }
 
     function filterArticles(q) {
-      const filtered = q ? allArticles.filter(a =>
-        a.title.toLowerCase().includes(q.toLowerCase()) ||
-        (a.category || '').toLowerCase().includes(q.toLowerCase())
-      ) : allArticles;
-      renderArticlesTable(filtered);
+      articlesFilter = q.trim().toLowerCase();
+      articlesPage = 1;
+      renderArticlesTable();
     }
 
     async function editArticle(id) {
@@ -1660,26 +1689,56 @@
     const _origInit = init;
     // ── AI Sources ────────────────────────────────────────────────
     let allSources = [];
+    let sourcesFilter = '';
+    let sourcesPage = 1;
+    const SOURCES_PER_PAGE = 20;
 
     async function loadSources() {
       document.getElementById('sourcesList').innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const res = await fetch('/api/sources').then(r => r.json());
         allSources = res;
-        renderSourcesList(res);
+        sourcesPage = 1;
+        renderSourcesList();
       } catch {
         document.getElementById('sourcesList').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load sources.</div>';
       }
     }
 
-    function renderSourcesList(sources) {
+    function filterSources(q) {
+      sourcesFilter = q.trim().toLowerCase();
+      sourcesPage = 1;
+      renderSourcesList();
+    }
+
+    function changeSourcesPage(delta) {
+      sourcesPage += delta;
+      renderSourcesList();
+    }
+
+    function renderSourcesList() {
       const el = document.getElementById('sourcesList');
-      document.getElementById('sourcesCount').textContent = `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
+      const sources = sourcesFilter
+        ? allSources.filter(s => s.title.toLowerCase().includes(sourcesFilter) || (s.origin || '').toLowerCase().includes(sourcesFilter))
+        : allSources;
+      document.getElementById('sourcesCount').textContent = sourcesFilter
+        ? `${sources.length} of ${allSources.length} source${allSources.length !== 1 ? 's' : ''}`
+        : `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
       if (sources.length === 0) {
-        el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">No sources yet. Upload a document or add a website URL above.</div>';
+        el.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">${allSources.length === 0 ? 'No sources yet. Upload a document or add a website URL above.' : 'No sources match your search.'}</div>`;
         return;
       }
-      el.innerHTML = sources.map(s => `
+      const totalPages = Math.max(1, Math.ceil(sources.length / SOURCES_PER_PAGE));
+      if (sourcesPage > totalPages) sourcesPage = totalPages;
+      const start = (sourcesPage - 1) * SOURCES_PER_PAGE;
+      const pageItems = sources.slice(start, start + SOURCES_PER_PAGE);
+      const pagination = totalPages > 1 ? `
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 20px">
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeSourcesPage(-1)" ${sourcesPage === 1 ? 'disabled' : ''}>← Prev</button>
+          <span style="font-size:13px;color:var(--text-muted)">Page ${sourcesPage} of ${totalPages}</span>
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeSourcesPage(1)" ${sourcesPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>` : '';
+      el.innerHTML = pageItems.map(s => `
         <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--gray-100)">
           <span style="font-size:22px">${s.type === 'website' ? '🌐' : '📄'}</span>
           <div style="flex:1;min-width:0">
@@ -1694,7 +1753,7 @@
             <button class="action-btn delete" onclick="deleteSource('${s.id}', '${escHtml(s.title)}')">Remove</button>
           </div>
         </div>
-      `).join('');
+      `).join('') + pagination;
     }
 
     async function uploadSourceDoc(input) {

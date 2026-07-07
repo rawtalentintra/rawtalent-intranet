@@ -599,6 +599,9 @@
     let currentMode = 'search';
     let currentCat = '';
     let searchTimer;
+    let currentArticleResults = [];
+    let articlesPage = 1;
+    const ARTICLES_PER_PAGE = 10;
     let conversationHistory = [];   // Claude messages array (for multi-turn)
     let conversationSources = [];   // sources from first turn (reused throughout)
 
@@ -991,41 +994,64 @@
 
     async function loadResults() {
       const q = document.getElementById('searchInput').value.trim();
-      const label = document.getElementById('resultsLabel');
       const list = document.getElementById('resultsList');
       list.innerHTML = `<div class="spinner-wrap"><div class="spinner"></div></div>`;
-      label.style.display = 'none';
+      document.getElementById('resultsLabel').style.display = 'none';
       try {
-        const params = new URLSearchParams({ limit: 50 });
+        const params = new URLSearchParams({ limit: 500 });
         if (q) params.set('q', q);
         if (currentCat) params.set('category', currentCat);
         const data = await fetch(`/api/articles/search?${params}`).then(r => r.json());
         if (data.error) { location.href = '/login.html'; return; }
-        if (!data.length) {
-          list.innerHTML = `<div class="empty-wrap">
-            <div class="empty-icon">🔍</div>
-            <div class="empty-title">${q ? `No results for "${escHtml(q)}"` : 'No articles yet'}</div>
-            <p style="font-size:14px;margin-top:4px">${q ? `Try different keywords — or <button onclick="setMode('ai')" style="background:none;border:none;color:var(--orange);font-weight:600;cursor:pointer;font-family:inherit;font-size:inherit;padding:0">ask the AI ✨</button>` : 'Check back soon — content is being added.'}</p>
-          </div>`;
-          return;
-        }
-        if (q) {
-          label.style.display = '';
-          label.innerHTML = `<strong>${data.length}</strong> result${data.length !== 1 ? 's' : ''} for "<strong>${escHtml(q)}</strong>"`;
-        }
-        list.innerHTML = `<div class="results-grid">${data.map(a => `
-          <a class="article-card" href="/article?id=${a.id}">
-            ${a.category ? `<div class="card-cat">${escHtml(a.category)}</div>` : ''}
-            <div class="card-title">${escHtml(a.title)}</div>
-            ${a.summary ? `<div class="card-summary">${escHtml(a.summary)}</div>` : ''}
-            <div class="card-footer">
-              <div class="card-tags">${(a.tags || []).slice(0, 3).map(t => `<span class="card-tag">${escHtml(t)}</span>`).join('')}</div>
-              <span class="card-date">${fmtDate(a.updated_at)}</span>
-            </div>
-          </a>`).join('')}</div>`;
+        currentArticleResults = data;
+        articlesPage = 1;
+        renderArticleResults(q);
       } catch {
         list.innerHTML = `<div class="empty-wrap"><div class="empty-icon">⚠️</div><div class="empty-title">Something went wrong</div><p>Please refresh and try again.</p></div>`;
       }
+    }
+
+    function renderArticleResults(q) {
+      const label = document.getElementById('resultsLabel');
+      const list = document.getElementById('resultsList');
+      const data = currentArticleResults;
+      if (!data.length) {
+        list.innerHTML = `<div class="empty-wrap">
+          <div class="empty-icon">🔍</div>
+          <div class="empty-title">${q ? `No results for "${escHtml(q)}"` : 'No articles yet'}</div>
+          <p style="font-size:14px;margin-top:4px">${q ? `Try different keywords — or <button onclick="setMode('ai')" style="background:none;border:none;color:var(--orange);font-weight:600;cursor:pointer;font-family:inherit;font-size:inherit;padding:0">ask the AI ✨</button>` : 'Check back soon — content is being added.'}</p>
+        </div>`;
+        return;
+      }
+      if (q) {
+        label.style.display = '';
+        label.innerHTML = `<strong>${data.length}</strong> result${data.length !== 1 ? 's' : ''} for "<strong>${escHtml(q)}</strong>"`;
+      }
+      const totalPages = Math.max(1, Math.ceil(data.length / ARTICLES_PER_PAGE));
+      if (articlesPage > totalPages) articlesPage = totalPages;
+      const start = (articlesPage - 1) * ARTICLES_PER_PAGE;
+      const pageItems = data.slice(start, start + ARTICLES_PER_PAGE);
+      const pagination = totalPages > 1 ? `
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-top:20px">
+          <button class="cat-pill" onclick="changeArticlesPage(-1)" ${articlesPage === 1 ? 'disabled style="opacity:.4;cursor:not-allowed"' : ''}>← Prev</button>
+          <span style="font-size:13px;color:var(--text-muted)">Page ${articlesPage} of ${totalPages}</span>
+          <button class="cat-pill" onclick="changeArticlesPage(1)" ${articlesPage === totalPages ? 'disabled style="opacity:.4;cursor:not-allowed"' : ''}>Next →</button>
+        </div>` : '';
+      list.innerHTML = `<div class="results-grid">${pageItems.map(a => `
+        <a class="article-card" href="/article?id=${a.id}">
+          ${a.category ? `<div class="card-cat">${escHtml(a.category)}</div>` : ''}
+          <div class="card-title">${escHtml(a.title)}</div>
+          ${a.summary ? `<div class="card-summary">${escHtml(a.summary)}</div>` : ''}
+          <div class="card-footer">
+            <div class="card-tags">${(a.tags || []).slice(0, 3).map(t => `<span class="card-tag">${escHtml(t)}</span>`).join('')}</div>
+            <span class="card-date">${fmtDate(a.updated_at)}</span>
+          </div>
+        </a>`).join('')}</div>${pagination}`;
+    }
+
+    function changeArticlesPage(delta) {
+      articlesPage += delta;
+      renderArticleResults(document.getElementById('searchInput').value.trim());
     }
 
     document.getElementById('searchInput').addEventListener('input', () => {

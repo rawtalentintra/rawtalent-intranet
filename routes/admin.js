@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const multer = require('multer');
 const mammoth = require('mammoth');
+const pdfParse = require('pdf-parse');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
@@ -415,7 +416,29 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
     let html = '';
     let title = baseName;
 
-    if (ext === '.docx') {
+    if (ext === '.pdf') {
+      const data = await pdfParse(req.file.buffer);
+      const text = data.text;
+      const lines = text.split(/\r?\n/);
+
+      const firstNonEmpty = lines.findIndex(l => l.trim());
+      if (firstNonEmpty >= 0) title = lines[firstNonEmpty].trim();
+
+      const body = lines.slice(firstNonEmpty + 1);
+      let paragraph = [];
+      const paragraphs = [];
+      for (const line of body) {
+        if (line.trim()) {
+          paragraph.push(line.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+        } else if (paragraph.length) {
+          paragraphs.push(`<p>${paragraph.join(' ')}</p>`);
+          paragraph = [];
+        }
+      }
+      if (paragraph.length) paragraphs.push(`<p>${paragraph.join(' ')}</p>`);
+      html = paragraphs.join('\n');
+
+    } else if (ext === '.docx') {
       const result = await mammoth.convertToHtml(
         { buffer: req.file.buffer },
         {
@@ -464,7 +487,7 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
       html = paragraphs.join('\n');
 
     } else {
-      return res.status(400).json({ error: 'Unsupported file type. Please upload a .docx or .txt file.' });
+      return res.status(400).json({ error: 'Unsupported file type. Please upload a .pdf, .docx, or .txt file.' });
     }
 
     const summaryMatch = html.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
