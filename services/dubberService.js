@@ -82,17 +82,33 @@ async function getRecording(recordingId) {
   return dubberCall(`/recordings/${recordingId}`);
 }
 
-// PENDING: fill this in once Find Transcript confirms which endpoint actually
-// returns transcript data, and what shape it's in (plain text vs timestamped/
-// speaker-labeled segments). Throws clearly rather than guessing at a shape.
+// BLOCKED: Dubber's official "Get Recordings Details" doc confirms no transcript
+// field exists on the recording resource, and error code 3014 ("Invalid
+// Transcription") appears alongside *recording-creation* errors — meaning
+// Dubber's transcription concept is for external systems submitting a
+// transcript INTO Dubber, not Dubber generating and returning one. Transcript
+// access likely requires a separate product/plan (e.g. a conversational-
+// intelligence add-on) that isn't confirmed enabled on this account. Ask
+// Dubber support directly rather than guessing further.
 async function getTranscript(recordingId) {
-  throw new Error('Transcript source not yet confirmed — run Find Transcript in Call Quality Evaluator first.');
+  throw new Error('Transcript is not available via the standard recordings API on this account/plan — confirmed against Dubber\'s official docs. Ask Dubber support whether AI transcription is enabled and what endpoint exposes it.');
 }
 
-// PENDING: fill this in once Find Playback confirms which endpoint returns a
-// fetchable audio URL/stream. Should return { data: base64String, mimetype }.
+const LISTENER_EMAIL = process.env.DUBBER_LISTENER_EMAIL || 'joy@rawtalent.com.au';
+
+// Confirmed via Dubber's official "Get Recording Link" doc:
+// GET /recordings/{id}?listener=<email> returns a recording_url (presigned S3
+// link) alongside the usual recording fields. We fetch that link directly
+// (no Dubber auth needed — the URL itself is pre-signed) and store the bytes.
 async function downloadRecordingAudio(recordingId) {
-  throw new Error('Audio source not yet confirmed — run Find Playback in Call Quality Evaluator first.');
+  const detail = await dubberCall(`/recordings/${recordingId}`, { listener: LISTENER_EMAIL });
+  if (!detail.recording_url) throw new Error('Recording detail response did not include a recording_url — listener email may not be authorized for this call.');
+
+  const audioRes = await fetch(detail.recording_url);
+  if (!audioRes.ok) throw new Error(`Failed to download recording audio (${audioRes.status})`);
+  const buffer = Buffer.from(await audioRes.arrayBuffer());
+  const mimetype = audioRes.headers.get('content-type') || 'audio/mpeg';
+  return { data: buffer.toString('base64'), mimetype };
 }
 
 function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -263,10 +279,7 @@ async function findPlayback(recordingId) {
   const token = await getAccessToken();
   const candidates = [
     { label: 'GET /recordings/{id}', path: `/recordings/${recordingId}` },
-    { label: 'GET /recordings/{id}?listener=me', path: `/recordings/${recordingId}`, params: { listener: 'me' } },
-    { label: 'GET /recordings/{id}/audio', path: `/recordings/${recordingId}/audio` },
-    { label: 'GET /recordings/{id}/media', path: `/recordings/${recordingId}/media` },
-    { label: 'GET /recordings/{id}/download', path: `/recordings/${recordingId}/download` }
+    { label: `GET /recordings/{id}?listener=${LISTENER_EMAIL}`, path: `/recordings/${recordingId}`, params: { listener: LISTENER_EMAIL } }
   ];
 
   const results = [];
