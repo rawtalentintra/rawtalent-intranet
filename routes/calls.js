@@ -108,13 +108,25 @@ router.get('/:recordingId/playback-info', async (req, res) => {
 });
 
 // Diagnostic step: tries every plausible transcript endpoint for one real
-// recording and reports which one(s) actually return data.
+// recording and reports which one(s) actually return data. Requests are spaced
+// out to respect Dubber's 2 calls/second limit.
 router.get('/find-transcript/:recordingId', async (req, res) => {
   try {
     const result = await dubberService.findTranscript(req.params.recordingId);
     res.json(result);
   } catch (err) {
     console.error('Dubber find-transcript error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diagnostic step: same approach, but for finding a playable audio URL.
+router.get('/find-playback/:recordingId', async (req, res) => {
+  try {
+    const result = await dubberService.findPlayback(req.params.recordingId);
+    res.json(result);
+  } catch (err) {
+    console.error('Dubber find-playback error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -164,6 +164,29 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Dubber's rate limit is 2 calls/second — firing several diagnostic requests
+// back-to-back would trip "Forbidden: Account Over Queries Per Second Limit"
+// (code 1021), which looks like a real rejection but actually means we never
+// got a conclusive answer. This spaces requests out and retries once on a
+// rate-limit response before giving up on that candidate.
+async function rateLimitedFetch(url, token) {
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = text.slice(0, 500); }
+  if (res.status === 403 && body?.code === 1021) {
+    await sleep(1200);
+    const retryRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const retryText = await retryRes.text();
+    let retryBody;
+    try { retryBody = JSON.parse(retryText); } catch { retryBody = retryText.slice(0, 500); }
+    return { status: retryRes.status, ok: retryRes.ok, body: retryBody, rateLimitedFirstTry: true };
+  }
+  return { status: res.status, ok: res.ok, body };
+}
+
 // Diagnostic only — the recordings endpoint returns a document_sentiment score,
 // proving Dubber transcribes calls behind the scenes, but no public docs confirm
 // where the actual transcript text lives. Rather than guess, try every plausible
@@ -181,13 +204,11 @@ async function findTranscript(recordingId) {
 
   const results = [];
   for (const c of candidates) {
+    if (results.length > 0) await sleep(600); // stay under 2 calls/second
     const qs = c.params ? `?${new URLSearchParams(c.params).toString()}` : '';
     try {
-      const res = await fetch(`${BASE_URL}${c.path}${qs}`, { headers: { 'Authorization': `Bearer ${token}` } });
-      const text = await res.text();
-      let body;
-      try { body = JSON.parse(text); } catch { body = text.slice(0, 500); }
-      results.push({ label: c.label, status: res.status, ok: res.ok, body });
+      const result = await rateLimitedFetch(`${BASE_URL}${c.path}${qs}`, token);
+      results.push({ label: c.label, ...result });
     } catch (err) {
       results.push({ label: c.label, status: null, ok: false, body: err.message });
     }
@@ -195,4 +216,30 @@ async function findTranscript(recordingId) {
   return { recordingId, attempts: results };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript, syncRecordings, getRecordingPlaybackInfo };
+// Diagnostic only — same rate-limit-aware approach as findTranscript, but for
+// finding which field/endpoint holds a playable audio URL.
+async function findPlayback(recordingId) {
+  const token = await getAccessToken();
+  const candidates = [
+    { label: 'GET /recordings/{id}', path: `/recordings/${recordingId}` },
+    { label: 'GET /recordings/{id}?listener=me', path: `/recordings/${recordingId}`, params: { listener: 'me' } },
+    { label: 'GET /recordings/{id}/audio', path: `/recordings/${recordingId}/audio` },
+    { label: 'GET /recordings/{id}/media', path: `/recordings/${recordingId}/media` },
+    { label: 'GET /recordings/{id}/download', path: `/recordings/${recordingId}/download` }
+  ];
+
+  const results = [];
+  for (const c of candidates) {
+    if (results.length > 0) await sleep(600);
+    const qs = c.params ? `?${new URLSearchParams(c.params).toString()}` : '';
+    try {
+      const result = await rateLimitedFetch(`${BASE_URL}${c.path}${qs}`, token);
+      results.push({ label: c.label, ...result });
+    } catch (err) {
+      results.push({ label: c.label, status: null, ok: false, body: err.message });
+    }
+  }
+  return { recordingId, attempts: results };
+}
+
+module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript, findPlayback, syncRecordings, getRecordingPlaybackInfo };
