@@ -1,4 +1,5 @@
 const { getDb } = require('../db/database');
+const groqTranscription = require('./groqTranscriptionService');
 
 const REGION = process.env.DUBBER_REGION || 'au';
 const BASE_URL = `https://api.dubber.net/${REGION}/v1`;
@@ -164,11 +165,12 @@ async function syncRecordings() {
     offset += SYNC_PAGE_SIZE;
   }
 
-  // Content pass — audio and transcript are fetched independently, since one
-  // failing (transcript is currently blocked account-side) must never prevent
-  // the other from succeeding. Gated on has_audio specifically, so rows that
-  // already have audio don't get re-fetched forever just because transcript
-  // still fails — only rows still missing audio come up for another attempt.
+  // Content pass — download audio, then immediately transcribe it ourselves via
+  // Groq (Dubber's own transcript API is confirmed unavailable). Using the
+  // bytes already in memory from the download avoids a second fetch. Audio and
+  // transcription are still independent try/catches, so Groq being unconfigured
+  // (or a transient failure) never blocks audio from being saved. Gated on
+  // has_audio, so already-completed rows don't get re-fetched forever.
   const pending = await db.execute({
     sql: 'SELECT id, transcript FROM call_recordings WHERE has_audio = 0 ORDER BY start_time_iso DESC LIMIT ?',
     args: [MAX_CONTENT_FETCH_PER_RUN]
@@ -177,9 +179,10 @@ async function syncRecordings() {
   let audioFetched = 0, transcriptFetched = 0;
   const contentErrors = [];
   for (const row of pending.rows) {
-    if (audioFetched + transcriptFetched > 0) await sleepMs(600);
+    if (audioFetched + transcriptFetched > 0) await sleepMs(600); // paces the Dubber-side download only
+    let audio = null;
     try {
-      const audio = await downloadRecordingAudio(row.id);
+      audio = await downloadRecordingAudio(row.id);
       await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [row.id] });
       await db.execute({
         sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
@@ -191,10 +194,9 @@ async function syncRecordings() {
       contentErrors.push({ recordingId: row.id, type: 'audio', reason: err.message });
     }
 
-    if (!row.transcript) {
-      await sleepMs(600);
+    if (audio && !row.transcript) {
       try {
-        const transcript = await getTranscript(row.id);
+        const transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
         await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, row.id] });
         transcriptFetched++;
       } catch (err) {
@@ -210,7 +212,7 @@ async function syncRecordings() {
     args: [totalNew]
   });
 
-  return { totalSeen, totalNew, contentFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3) };
+  return { totalSeen, totalNew, contentFetched, transcriptFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3) };
 }
 
 // Diagnostic only — the recording detail endpoint hasn't shown a playback URL

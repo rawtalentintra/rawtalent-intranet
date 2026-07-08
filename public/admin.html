@@ -563,11 +563,18 @@
           </div>
         </div>
 
-        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">📞 Dubber Connection</div>
-          <div id="callsConfigStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checking configuration…</div>
-          <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()">Test Connection</button>
-          <div id="callsTestStatus" style="display:none;margin-top:14px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">📞 Dubber Connection</div>
+            <div id="callsConfigStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checking configuration…</div>
+            <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()">Test Connection</button>
+            <div id="callsTestStatus" style="display:none;margin-top:14px"></div>
+          </div>
+          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🗣️ Groq Transcription</div>
+            <div id="groqConfigStatus" style="font-size:13px;color:var(--text-muted)">Checking configuration…</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:10px">Runs automatically right after each call's audio is synced — no manual step needed.</div>
+          </div>
         </div>
 
         <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
@@ -601,7 +608,24 @@
             <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
             <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
           </div>
-          <div id="callsListBody"><div class="loading-spinner"><div class="spinner"></div></div></div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead>
+                <tr>
+                  <th>Rep</th>
+                  <th style="width:70px">Dir.</th>
+                  <th>Contact</th>
+                  <th style="width:60px">Dur.</th>
+                  <th style="width:150px">Date</th>
+                  <th style="width:110px">Status</th>
+                  <th style="width:280px"></th>
+                </tr>
+              </thead>
+              <tbody id="callsListBody">
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
           <div id="callsPagination" style="display:flex;justify-content:center;gap:14px;padding:14px;align-items:center"></div>
         </div>
 
@@ -2264,11 +2288,15 @@
     // ── Call Quality Evaluator ──────────────────────────────────────
     async function loadCallsSection() {
       const statusEl = document.getElementById('callsConfigStatus');
+      const groqStatusEl = document.getElementById('groqConfigStatus');
       try {
-        const { dubberConfigured } = await fetch('/api/calls/status').then(r => r.json());
+        const { dubberConfigured, groqConfigured } = await fetch('/api/calls/status').then(r => r.json());
         statusEl.innerHTML = dubberConfigured
           ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
           : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
+        groqStatusEl.innerHTML = groqConfigured
+          ? '<span style="color:#1a8a4a">✓ Groq API key configured</span>'
+          : '<span style="color:#c0392b">✗ Groq is not configured — add GROQ_API_KEY as an environment variable</span>';
       } catch { statusEl.textContent = 'Failed to check status.'; }
       loadSyncStatus();
       loadCallsList();
@@ -2302,7 +2330,7 @@
         const data = await res.json();
         if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
         statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">
-          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio this run${data.contentPending > 0 ? `, ${data.contentPending} still pending audio — click Sync again` : ''}
+          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio, ${data.transcriptFetched} transcribed this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}
         </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.slice(0, 3).map(e => `${escHtml(e.type)}: ${escHtml(e.reason)}`).join(' · ')}</div>` : '');
         loadSyncStatus();
         loadCallsList();
@@ -2326,7 +2354,7 @@
 
     async function loadCallsList() {
       const list = document.getElementById('callsListBody');
-      list.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      list.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
         const params = new URLSearchParams({ page: callsCurrentPage, pageSize: 25 });
         const rep = document.getElementById('callsFilterRep').value.trim();
@@ -2339,7 +2367,7 @@
         if (to) params.set('dateTo', to);
 
         const data = await fetch(`/api/calls/local?${params}`).then(r => r.json());
-        if (data.error) { list.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</div>`; return; }
+        if (data.error) { list.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</td></tr>`; return; }
         const recordings = data.recordings || [];
         document.getElementById('callsListCount').textContent = `${data.total} call${data.total !== 1 ? 's' : ''} stored`;
 
@@ -2351,34 +2379,39 @@
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(1)" ${callsCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
 
         if (recordings.length === 0) {
-          list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</div>';
+          list.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</td></tr>';
           return;
         }
         list.innerHTML = recordings.map(r => {
           const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
           const gradeReady = !!r.transcript;
           const badge = gradeReady
-            ? { cls: 'badge-published', label: '✓ Ready to grade' }
+            ? { cls: 'badge-published', label: '✓ Ready' }
             : r.has_audio
-            ? { cls: 'badge-user', label: '🎧 Audio only' }
+            ? { cls: 'badge-user', label: '🎧 Audio' }
             : { cls: 'badge-draft', label: '⏳ Pending' };
           return `
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13.5px;color:var(--navy)">${escHtml(r.rep_name || 'Unknown rep')}</div>
-              <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(r.call_type || '—')} · ${escHtml(contact || '—')} · ${fmtDuration(r.duration_seconds)} · ${escHtml(r.start_time || '—')}</div>
-            </div>
-            <span class="badge ${badge.cls}" style="flex-shrink:0">${badge.label}</span>
-            <button class="action-btn edit" style="flex-shrink:0" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
-            ${r.has_audio ? `<button class="action-btn edit" style="flex-shrink:0" onclick="playRecording('${r.id}')">▶ Play</button>` : ''}
-            <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px;flex-shrink:0;width:140px">
-              <option value="educator">Educator-Facing</option>
-              <option value="centre">Centre-Facing</option>
-            </select>
-            <button class="action-btn edit" style="flex-shrink:0" onclick="evaluateCall('${r.id}')">Evaluate</button>
-          </div>`;
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || 'Unknown')}</td>
+            <td style="text-transform:capitalize;color:var(--text-muted)">${escHtml(r.call_type || '—')}</td>
+            <td>${escHtml(contact || '—')}</td>
+            <td style="color:var(--text-muted)">${fmtDuration(r.duration_seconds)}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
+            <td><span class="badge ${badge.cls}">${badge.label}</span></td>
+            <td>
+              <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
+                <button class="action-btn edit" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
+                ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
+                <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:11px;padding:4px 6px;width:100px">
+                  <option value="educator">Educator</option>
+                  <option value="centre">Centre</option>
+                </select>
+                <button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate</button>
+              </div>
+            </td>
+          </tr>`;
         }).join('');
-      } catch { list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</div>'; }
+      } catch { list.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
     }
 
     function playRecording(recordingId) {

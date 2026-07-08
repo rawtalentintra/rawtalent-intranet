@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
+const groqTranscription = require('../services/groqTranscriptionService');
 const { RUBRICS, gradeCall, saveEvaluation } = require('../services/callGradingService');
 
 // Call recordings are confidential — everything here is super_admin only,
@@ -10,7 +11,7 @@ const { RUBRICS, gradeCall, saveEvaluation } = require('../services/callGradingS
 router.use(requireSuperAdmin);
 
 router.get('/status', (req, res) => {
-  res.json({ dubberConfigured: dubberService.isConfigured() });
+  res.json({ dubberConfigured: dubberService.isConfigured(), groqConfigured: groqTranscription.isConfigured() });
 });
 
 // Diagnostic step: confirms the connection works and shows the real API
@@ -166,7 +167,21 @@ router.post('/:recordingId/evaluate', async (req, res) => {
 
     let transcript = local?.transcript;
     if (!transcript) {
-      transcript = await dubberService.getTranscript(req.params.recordingId);
+      // Transcribe ourselves via Groq using whatever audio we have (or can get) —
+      // Dubber's own transcript API is confirmed unavailable on this account.
+      let audioRes = await db.execute({ sql: 'SELECT data, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
+      let audio = audioRes.rows[0];
+      if (!audio) {
+        const fetched = await dubberService.downloadRecordingAudio(req.params.recordingId);
+        audio = { data: fetched.data, mimetype: fetched.mimetype };
+        await db.execute({
+          sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
+                ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
+          args: [req.params.recordingId, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
+        });
+        if (local) await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [req.params.recordingId] });
+      }
+      transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
       if (local) {
         await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, req.params.recordingId] });
       }
