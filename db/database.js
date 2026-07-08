@@ -242,6 +242,7 @@ async function initDatabase() {
       outcome TEXT NOT NULL,
       summary TEXT,
       evaluated_by TEXT,
+      source TEXT DEFAULT 'ai',
       created_at TEXT DEFAULT (datetime('now'))
     )`,
     // Local cache of Dubber recording metadata, fetched eagerly at sync time
@@ -294,6 +295,9 @@ async function initDatabase() {
   for (const col of ['has_audio INTEGER DEFAULT 0', 'content_synced INTEGER DEFAULT 0']) {
     try { await db.execute(`ALTER TABLE call_recordings ADD COLUMN ${col}`); } catch {}
   }
+
+  // call_evaluations shipped before source (ai vs human grading) existed.
+  try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN source TEXT DEFAULT 'ai'`); } catch {}
 
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
   // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,

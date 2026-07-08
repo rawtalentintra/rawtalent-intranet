@@ -4,7 +4,7 @@ const { getDb } = require('../db/database');
 const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
-const { RUBRICS, gradeCall, saveEvaluation } = require('../services/callGradingService');
+const { RUBRICS, gradeCall, gradeManual, saveEvaluation } = require('../services/callGradingService');
 
 // Call recordings are confidential — everything here is super_admin only,
 // same as the FAQ Review / Slack+Fathom review queue.
@@ -198,12 +198,56 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       callDate: recording.start_time,
       durationSeconds: recording.duration_seconds ?? recording.duration,
       result,
-      evaluatedBy: req.user.email
+      evaluatedBy: req.user.email,
+      source: 'ai'
     });
 
-    res.json({ id, repName, ...result });
+    res.json({ id, repName, rubricType, source: 'ai', ...result });
   } catch (err) {
     console.error('Call evaluation error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Human grading via the manual form — reuses the same rubric weighting/
+// zero-tolerance logic as the AI path so scores stay comparable.
+router.post('/:recordingId/evaluate-manual', async (req, res) => {
+  const { rubricType, scores, summary } = req.body;
+  if (!rubricType || !RUBRICS[rubricType]) {
+    return res.status(400).json({ error: 'A valid rubricType ("educator" or "centre") is required' });
+  }
+  if (!Array.isArray(scores) || scores.length === 0) {
+    return res.status(400).json({ error: 'scores must be a non-empty array of {key, score, notes}' });
+  }
+  const validKeys = new Set(RUBRICS[rubricType].categories.map(c => c.key));
+  for (const s of scores) {
+    if (!validKeys.has(s.key)) return res.status(400).json({ error: `Unknown category key: ${s.key}` });
+    const n = Number(s.score);
+    if (!Number.isInteger(n) || n < 1 || n > 5) return res.status(400).json({ error: `Score for ${s.key} must be an integer 1-5` });
+  }
+  try {
+    const db = getDb();
+    const localRes = await db.execute({ sql: 'SELECT * FROM call_recordings WHERE id = ?', args: [req.params.recordingId] });
+    const local = localRes.rows[0];
+    const recording = local || await dubberService.getRecording(req.params.recordingId);
+
+    const result = gradeManual(rubricType, scores, summary);
+    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
+    const id = await saveEvaluation({
+      recordingId: req.params.recordingId,
+      repName,
+      callType: recording.call_type,
+      rubricType,
+      callDate: recording.start_time,
+      durationSeconds: recording.duration_seconds ?? recording.duration,
+      result,
+      evaluatedBy: req.user.email,
+      source: 'human'
+    });
+
+    res.json({ id, repName, rubricType, source: 'human', ...result });
+  } catch (err) {
+    console.error('Manual call evaluation error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -97,32 +97,17 @@ A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/comp
 
 Base every score strictly on what is actually in the transcript. Do not invent behaviour that isn't there. If the transcript is too short or unclear to judge a category, score it 3 and say so in the notes.
 
+For every category, write 2-4 sentences of specific, evidence-based reasoning: quote or paraphrase the exact moment in the call that drove the score, explain why it earned that number rather than one point higher or lower, and name anything the rep could have done differently. Generic notes like "handled the call well" are not acceptable — reference what was actually said.
+
 Respond with ONLY valid JSON, no other text, in this exact shape:
-{"scores": [{"key": "opening", "score": 1-5, "notes": "one sentence, specific to this call"}, ...one entry per category key...], "summary": "2-3 sentence overall summary of how the call went"}`;
+{"scores": [{"key": "opening", "score": 1-5, "notes": "2-4 sentences of specific reasoning, referencing what was actually said in the call"}, ...one entry per category key...], "summary": "3-4 sentence overall summary of how the call went, referencing specific moments"}`;
 }
 
-async function gradeCall(transcriptText, rubricType) {
-  const rubric = RUBRICS[rubricType];
-  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
-
-  const client = getClient();
-  if (!client) throw new Error('AI is not configured. Please contact your administrator.');
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: 1200,
-    system: buildSystemPrompt(rubric),
-    messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
-  });
-
-  const raw = response.content[0]?.text || '{}';
-  const match = raw.match(/\{[\s\S]*\}/);
-  let parsed;
-  try { parsed = JSON.parse(match ? match[0] : raw); }
-  catch { throw new Error('Could not parse the AI grading response'); }
-
+// Shared by AI grading and manual (human) grading so both produce comparable
+// weighted scores/outcomes for the future Call Quality Reporting rollup.
+function computeResult(rubric, rawScores, summary) {
   const categoryScores = rubric.categories.map(c => {
-    const found = (parsed.scores || []).find(s => s.key === c.key);
+    const found = (rawScores || []).find(s => s.key === c.key);
     return {
       category: c.label,
       key: c.key,
@@ -145,22 +130,58 @@ async function gradeCall(transcriptText, rubricType) {
   else if (overallScore >= 70) outcome = 'coaching';
   else outcome = 'escalate';
 
-  return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: parsed.summary || '' };
+  return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: summary || '' };
 }
 
-async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy }) {
+async function gradeCall(transcriptText, rubricType) {
+  const rubric = RUBRICS[rubricType];
+  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
+
+  const client = getClient();
+  if (!client) throw new Error('AI is not configured. Please contact your administrator.');
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 2500,
+    system: buildSystemPrompt(rubric),
+    messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
+  });
+
+  // Sonnet 5 can emit a thinking block before the actual text block, so the
+  // final answer isn't reliably content[0] — find the text block explicitly.
+  // (Grabbing content[0] blindly silently defaulted every score to 3 with
+  // empty notes whenever a thinking block came first.)
+  const textBlock = response.content.find(b => b.type === 'text');
+  const raw = textBlock?.text || '{}';
+  const match = raw.match(/\{[\s\S]*\}/);
+  let parsed;
+  try { parsed = JSON.parse(match ? match[0] : raw); }
+  catch { throw new Error('Could not parse the AI grading response'); }
+
+  return computeResult(rubric, parsed.scores, parsed.summary);
+}
+
+// Human grading via the manual evaluation form — same weighting/zero-tolerance
+// logic as the AI path so scores stay comparable in Call Quality Reporting.
+function gradeManual(rubricType, rawScores, summary) {
+  const rubric = RUBRICS[rubricType];
+  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
+  return computeResult(rubric, rawScores, summary);
+}
+
+async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source }) {
   const db = getDb();
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO call_evaluations
-          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id, recordingId, repName || null, callType || null, rubricType, callDate || null, durationSeconds || null,
-      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null
+      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai'
     ]
   });
   return id;
 }
 
-module.exports = { RUBRICS, gradeCall, saveEvaluation };
+module.exports = { RUBRICS, gradeCall, gradeManual, saveEvaluation };

@@ -597,6 +597,15 @@
 
         <div class="admin-table-card" style="margin-bottom:20px">
           <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">📖 Grading Rubric Reference</span>
+          </div>
+          <div id="rubricReferenceBody" style="padding:20px">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
               <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
               <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
@@ -618,7 +627,7 @@
                   <th style="width:60px">Dur.</th>
                   <th style="width:150px">Date</th>
                   <th style="width:110px">Status</th>
-                  <th style="width:280px"></th>
+                  <th style="width:420px"></th>
                 </tr>
               </thead>
               <tbody id="callsListBody">
@@ -761,6 +770,41 @@
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeUserModal()">Cancel</button>
         <button class="btn-add" onclick="saveUser()">Save User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transcript Modal -->
+  <div class="modal-overlay" id="transcriptModal" onclick="if(event.target===this)closeTranscriptModal()">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-header">
+        <div class="modal-title" id="transcriptModalTitle">Transcript</div>
+        <button class="modal-close" onclick="closeTranscriptModal()">×</button>
+      </div>
+      <div class="modal-body" id="transcriptModalBody" style="max-height:60vh;overflow-y:auto">
+        <div class="loading-spinner"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Grade Modal -->
+  <div class="modal-overlay" id="manualGradeModal" onclick="if(event.target===this)closeManualGradeModal()">
+    <div class="modal" style="max-width:760px">
+      <div class="modal-header">
+        <div class="modal-title" id="manualGradeModalTitle">Grade Manually</div>
+        <button class="modal-close" onclick="closeManualGradeModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+        <input type="hidden" id="manualGradeRubricType">
+        <div id="manualGradeForm"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Overall Summary <span class="optional">(optional)</span></label>
+          <textarea id="manualGradeSummary" class="form-control textarea" placeholder="Overall thoughts on how the call went…" style="min-height:70px"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeManualGradeModal()">Cancel</button>
+        <button class="btn-add" id="manualGradeSubmitBtn" onclick="submitManualGrade()">Save Evaluation</button>
       </div>
     </div>
   </div>
@@ -2286,6 +2330,8 @@
     }
 
     // ── Call Quality Evaluator ──────────────────────────────────────
+    let callRubrics = {}; // { educator: {label, description, categories:[{key,label,weight,critical,criteria}]}, centre: {...} }
+
     async function loadCallsSection() {
       const statusEl = document.getElementById('callsConfigStatus');
       const groqStatusEl = document.getElementById('groqConfigStatus');
@@ -2301,6 +2347,36 @@
       loadSyncStatus();
       loadCallsList();
       loadEvaluationHistory();
+      loadRubricReference();
+    }
+
+    async function loadRubricReference() {
+      const container = document.getElementById('rubricReferenceBody');
+      try {
+        if (Object.keys(callRubrics).length === 0) {
+          callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+        }
+        container.innerHTML = Object.entries(callRubrics).map(([type, rubric]) => `
+          <div style="margin-bottom:18px">
+            <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:2px">${escHtml(rubric.label)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(rubric.description)}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
+              ${rubric.categories.map(c => `
+                <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 14px">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px">
+                    <span style="font-weight:700;font-size:12.5px;color:var(--navy)">${escHtml(c.label)}</span>
+                    <span style="font-size:11px;font-weight:700;color:var(--orange);flex-shrink:0">${c.weight}%</span>
+                  </div>
+                  ${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;display:inline-block;margin-bottom:6px">⛔ Zero-tolerance</div>' : ''}
+                  <ul style="margin:0;padding-left:16px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+                    ${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}
+                  </ul>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('');
+      } catch { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Failed to load rubric definitions.</div>'; }
     }
 
     function fmtDuration(seconds) {
@@ -2402,11 +2478,13 @@
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
                 <button class="action-btn edit" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
                 ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
+                ${r.transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
                 <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:11px;padding:4px 6px;width:100px">
                   <option value="educator">Educator</option>
                   <option value="centre">Centre</option>
                 </select>
-                <button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate</button>
+                <button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate (AI)</button>
+                ${r.transcript ? `<button class="action-btn edit" onclick="openManualGradeModal('${r.id}')">Grade Manually</button>` : ''}
               </div>
             </td>
           </tr>`;
@@ -2426,6 +2504,20 @@
       document.body.appendChild(player);
     }
 
+    async function viewTranscript(recordingId) {
+      document.getElementById('transcriptModal').classList.add('open');
+      const body = document.getElementById('transcriptModalBody');
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const rec = await fetch(`/api/calls/local/${recordingId}`).then(r => r.json());
+        document.getElementById('transcriptModalTitle').textContent = `Transcript — ${rec.rep_name || 'Unknown rep'}`;
+        body.innerHTML = rec.transcript
+          ? `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13.5px;line-height:1.7;color:var(--text);margin:0">${escHtml(rec.transcript)}</pre>`
+          : '<div style="color:var(--text-muted)">No transcript available for this call.</div>';
+      } catch { body.innerHTML = '<div style="color:#c0392b">Failed to load transcript.</div>'; }
+    }
+    function closeTranscriptModal() { document.getElementById('transcriptModal').classList.remove('open'); }
+
     const outcomeMeta = {
       pass: { label: 'Pass', badge: 'badge-published' },
       coaching: { label: 'Coaching recommended', badge: 'badge-user' },
@@ -2434,6 +2526,9 @@
 
     async function evaluateCall(recordingId) {
       const rubricType = document.getElementById(`rubric-${recordingId}`).value;
+      if (Object.keys(callRubrics).length === 0) {
+        callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+      }
       const card = document.getElementById('callEvalResultCard');
       const body = document.getElementById('callEvalResultBody');
       const outcomeEl = document.getElementById('callEvalOutcome');
@@ -2460,15 +2555,25 @@
       const body = document.getElementById('callEvalResultBody');
       const outcomeEl = document.getElementById('callEvalOutcome');
       const meta = outcomeMeta[data.outcome] || { label: data.outcome, badge: 'badge-user' };
-      outcomeEl.innerHTML = `<span class="badge ${meta.badge}">${meta.label}</span>`;
-      const rows = data.categoryScores.map(c => `
+      const sourceBadge = data.source === 'human'
+        ? '<span class="badge badge-user" style="margin-left:6px">🧑 Your evaluation</span>'
+        : '<span class="badge badge-published" style="margin-left:6px">🤖 AI-graded</span>';
+      outcomeEl.innerHTML = `<span class="badge ${meta.badge}">${meta.label}</span>${sourceBadge}`;
+      const rubric = callRubrics[data.rubricType];
+      const rows = data.categoryScores.map(c => {
+        const def = rubric?.categories.find(x => x.key === c.key);
+        return `
         <tr>
           <td style="width:50px;text-align:center;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums">${c.weight}%</td>
-          <td style="font-weight:700;color:var(--navy);width:170px">${escHtml(c.category)}${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}</td>
-          <td style="font-size:12.5px;color:var(--text-muted)">${escHtml(c.notes)}</td>
+          <td style="font-weight:700;color:var(--navy);width:190px">
+            ${escHtml(c.category)}${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}
+            ${def ? `<ul style="margin:6px 0 0;padding-left:14px;font-size:10.5px;color:var(--text-muted);font-weight:400;line-height:1.5">${def.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}</ul>` : ''}
+          </td>
+          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(c.notes)}</td>
           <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${c.score}/5</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
       body.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <div style="font-size:13px;color:var(--text-muted)">${escHtml(data.summary)}</div>
@@ -2481,6 +2586,75 @@
           </table>
         </div>
       `;
+    }
+
+    // ── Manual (human) grading form ──────────────────────────────────
+    let manualGradeRecordingId = null;
+
+    async function openManualGradeModal(recordingId) {
+      manualGradeRecordingId = recordingId;
+      const rubricType = document.getElementById(`rubric-${recordingId}`).value;
+      if (Object.keys(callRubrics).length === 0) {
+        callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+      }
+      const rubric = callRubrics[rubricType];
+      document.getElementById('manualGradeRubricType').value = rubricType;
+      document.getElementById('manualGradeModalTitle').textContent = `Grade Manually — ${rubric.label}`;
+      document.getElementById('manualGradeForm').innerHTML = rubric.categories.map(c => `
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px">
+            <span style="font-weight:700;font-size:13.5px;color:var(--navy)">${escHtml(c.label)} <span style="font-weight:400;color:var(--text-muted);font-size:12px">(${c.weight}%)</span></span>
+            ${c.critical ? '<span style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;flex-shrink:0">⛔ Zero-tolerance</span>' : ''}
+          </div>
+          <ul style="margin:0 0 10px;padding-left:16px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
+            ${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}
+          </ul>
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <select id="manual-score-${c.key}" class="form-control" style="width:170px;flex-shrink:0">
+              <option value="1">1 — Absent</option>
+              <option value="2">2 — Weak</option>
+              <option value="3" selected>3 — Adequate</option>
+              <option value="4">4 — Strong</option>
+              <option value="5">5 — Exemplary</option>
+            </select>
+            <textarea id="manual-notes-${c.key}" class="form-control textarea" placeholder="Your comments on this category — what specifically did you hear?" style="flex:1;min-width:220px;min-height:60px"></textarea>
+          </div>
+        </div>
+      `).join('');
+      document.getElementById('manualGradeSummary').value = '';
+      document.getElementById('manualGradeModal').classList.add('open');
+    }
+
+    function closeManualGradeModal() { document.getElementById('manualGradeModal').classList.remove('open'); }
+
+    async function submitManualGrade() {
+      const rubricType = document.getElementById('manualGradeRubricType').value;
+      const rubric = callRubrics[rubricType];
+      const scores = rubric.categories.map(c => ({
+        key: c.key,
+        score: Number(document.getElementById(`manual-score-${c.key}`).value),
+        notes: document.getElementById(`manual-notes-${c.key}`).value.trim()
+      }));
+      const summary = document.getElementById('manualGradeSummary').value.trim();
+
+      const btn = document.getElementById('manualGradeSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const res = await fetch(`/api/calls/${manualGradeRecordingId}/evaluate-manual`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rubricType, scores, summary })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
+        closeManualGradeModal();
+        const card = document.getElementById('callEvalResultCard');
+        card.style.display = 'block';
+        renderEvalResult(data);
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        loadEvaluationHistory();
+        toast('Evaluation saved', 'success');
+      } catch { toast('Network error', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Save Evaluation'; }
     }
 
     async function loadEvaluationHistory() {
@@ -2498,7 +2672,7 @@
           <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
             <span class="badge ${meta.badge}" style="flex-shrink:0">${meta.label}</span>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')} <span style="font-weight:400;color:var(--text-muted)">· ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}</span></div>
+              <div style="font-weight:600;font-size:13px;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')} <span style="font-weight:400;color:var(--text-muted)">· ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}</span> ${e.source === 'human' ? '<span style="font-size:10px;font-weight:700;color:var(--text-muted)">🧑 manual</span>' : '<span style="font-size:10px;font-weight:700;color:var(--text-muted)">🤖 AI</span>'}</div>
               <div style="font-size:11.5px;color:var(--text-muted)">${fmtDate(e.created_at)} · evaluated by ${escHtml(e.evaluated_by || '—')}</div>
             </div>
             <div style="font-size:16px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0">${e.overall_score}%</div>
