@@ -267,8 +267,6 @@ async function initDatabase() {
 
   const adminEmail = process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au';
   const adminPassword = process.env.ADMIN_PASSWORD || 'RawTalent2024!';
-  // Upgrade any legacy 'admin' accounts to 'super_admin' (safe — future admins are created as 'admin' via the UI)
-  await db.execute("UPDATE users SET role = 'super_admin' WHERE role = 'admin'");
 
   const existRes = await db.execute({ sql: 'SELECT id FROM users WHERE email = ?', args: [adminEmail] });
   if (!existRes.rows[0]) {

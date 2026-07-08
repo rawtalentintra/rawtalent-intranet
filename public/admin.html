@@ -102,6 +102,12 @@
         </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
+        <div class="admin-nav-label">Call Quality</div>
+        <div class="admin-nav-item" onclick="showSection('calls', this)">
+          <span class="admin-nav-icon">📞</span> Call Quality Evaluator
+        </div>
+      </div>
+      <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label">Insights</div>
         <div class="admin-nav-item" onclick="showSection('feedback', this)">
           <span class="admin-nav-icon">💬</span> Feedback
@@ -548,6 +554,30 @@
         </div>
       </div>
 
+      <!-- Call Quality Evaluator -->
+      <div class="admin-section" id="section-calls">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Call Quality Evaluator</div>
+            <div class="admin-page-sub">Connects to Dubber call recordings for AI-assisted quality evaluation. Visible to you as super admin only.</div>
+          </div>
+        </div>
+
+        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">📞 Dubber Connection</div>
+          <div id="callsConfigStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checking configuration…</div>
+          <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()">Test Connection</button>
+          <div id="callsTestStatus" style="display:none;margin-top:14px"></div>
+        </div>
+
+        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🚧 Next steps</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Random-call sampling per rep, the AI grading form, and scored results are being built next — once the connection test above confirms the real data shape (especially where the transcript lives on each recording), the grading logic will be built against that confirmed structure. Call Quality Reporting (the performance dashboard) comes after that.
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -857,7 +887,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'calls'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -877,6 +907,7 @@
       if (id === 'glossary') loadGlossary();
       if (id === 'sources') loadSources();
       if (id === 'faq') loadFaqSection();
+      if (id === 'calls') loadCallsSection();
     }
 
     // ── Stats ─────────────────────────────────────────────────────
@@ -2180,6 +2211,39 @@
         toast('FAQ removed', 'success');
         loadApprovedFaqs();
       } catch { toast('Remove failed', 'error'); }
+    }
+
+    // ── Call Quality Evaluator ──────────────────────────────────────
+    async function loadCallsSection() {
+      const statusEl = document.getElementById('callsConfigStatus');
+      try {
+        const { dubberConfigured } = await fetch('/api/calls/status').then(r => r.json());
+        statusEl.innerHTML = dubberConfigured
+          ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
+          : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
+      } catch { statusEl.textContent = 'Failed to check status.'; }
+    }
+
+    async function testDubberConnection() {
+      const btn = document.getElementById('callsTestBtn');
+      const resultEl = document.getElementById('callsTestStatus');
+      btn.disabled = true; btn.textContent = 'Testing…';
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Connecting to Dubber…';
+      try {
+        const res = await fetch('/api/calls/test-connection');
+        const data = await res.json();
+        if (!res.ok) {
+          resultEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Connection failed')}</div>`;
+          return;
+        }
+        resultEl.innerHTML = `
+          <div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px;margin-bottom:10px">✓ Connected successfully — account ID used: ${escHtml(data.accountId || '(none)')}</div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Raw response (for inspecting the real data shape)</div>
+          <pre style="background:var(--gray-100);border-radius:var(--radius);padding:14px;font-size:11px;line-height:1.5;overflow:auto;max-height:400px;white-space:pre-wrap">${escHtml(JSON.stringify(data, null, 2))}</pre>
+        `;
+      } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Connection test failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Test Connection'; }
     }
 
     init();
