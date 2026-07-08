@@ -601,26 +601,7 @@
             <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
             <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
           </div>
-          <div style="overflow-x:auto">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width:110px">Recording ID</th>
-                  <th>Rep</th>
-                  <th>Direction</th>
-                  <th>Contact</th>
-                  <th>Date</th>
-                  <th style="width:70px">Duration</th>
-                  <th style="width:80px">Transcript</th>
-                  <th style="width:150px">Rubric</th>
-                  <th style="width:100px"></th>
-                </tr>
-              </thead>
-              <tbody id="callsListBody">
-                <tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-              </tbody>
-            </table>
-          </div>
+          <div id="callsListBody"><div class="loading-spinner"><div class="spinner"></div></div></div>
           <div id="callsPagination" style="display:flex;justify-content:center;gap:14px;padding:14px;align-items:center"></div>
         </div>
 
@@ -2320,7 +2301,9 @@
         const res = await fetch('/api/calls/sync', { method: 'POST' });
         const data = await res.json();
         if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
-        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked). Click Sync again to keep going further back.</div>`;
+        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">
+          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got transcript+audio this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}
+        </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.map(e => escHtml(e.reason)).join(' · ')}</div>` : '');
         loadSyncStatus();
         loadCallsList();
       } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Sync failed.</div>'; }
@@ -2337,9 +2320,13 @@
     function filterCalls() { callsCurrentPage = 1; loadCallsList(); }
     function changeCallsPage(delta) { callsCurrentPage += delta; loadCallsList(); }
 
+    function copyRecordingId(id) {
+      navigator.clipboard.writeText(id).then(() => toast('Recording ID copied', 'success')).catch(() => toast('Copy failed', 'error'));
+    }
+
     async function loadCallsList() {
-      const tbody = document.getElementById('callsListBody');
-      tbody.innerHTML = '<tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      const list = document.getElementById('callsListBody');
+      list.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const params = new URLSearchParams({ page: callsCurrentPage, pageSize: 25 });
         const rep = document.getElementById('callsFilterRep').value.trim();
@@ -2352,7 +2339,7 @@
         if (to) params.set('dateTo', to);
 
         const data = await fetch(`/api/calls/local?${params}`).then(r => r.json());
-        if (data.error) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</td></tr>`; return; }
+        if (data.error) { list.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</div>`; return; }
         const recordings = data.recordings || [];
         document.getElementById('callsListCount').textContent = `${data.total} call${data.total !== 1 ? 's' : ''} stored`;
 
@@ -2364,30 +2351,41 @@
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(1)" ${callsCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
 
         if (recordings.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</td></tr>';
+          list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</div>';
           return;
         }
-        tbody.innerHTML = recordings.map(r => {
+        list.innerHTML = recordings.map(r => {
           const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
+          const ready = !!r.transcript && !!r.has_audio;
           return `
-          <tr>
-            <td style="font-family:monospace;font-size:11px;color:var(--text-muted)" title="${escHtml(r.id)}">${escHtml(r.id.slice(-8))}</td>
-            <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || '—')}</td>
-            <td style="font-size:12px;color:var(--text-muted);text-transform:capitalize">${escHtml(r.call_type || '—')}</td>
-            <td style="font-size:13px">${escHtml(contact || '—')}</td>
-            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
-            <td style="font-size:12px;color:var(--text-muted)">${fmtDuration(r.duration_seconds)}</td>
-            <td>${r.transcript ? '<span class="badge badge-published">Cached</span>' : '<span class="badge badge-draft">Not fetched</span>'}</td>
-            <td>
-              <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px">
-                <option value="educator">Educator-Facing</option>
-                <option value="centre">Centre-Facing</option>
-              </select>
-            </td>
-            <td><button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate</button></td>
-          </tr>`;
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13.5px;color:var(--navy)">${escHtml(r.rep_name || 'Unknown rep')}</div>
+              <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(r.call_type || '—')} · ${escHtml(contact || '—')} · ${fmtDuration(r.duration_seconds)} · ${escHtml(r.start_time || '—')}</div>
+            </div>
+            <span class="badge ${ready ? 'badge-published' : 'badge-draft'}" style="flex-shrink:0">${ready ? '✓ Ready' : '⏳ Pending'}</span>
+            <button class="action-btn edit" style="flex-shrink:0" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
+            ${r.has_audio ? `<button class="action-btn edit" style="flex-shrink:0" onclick="playRecording('${r.id}')">▶ Play</button>` : ''}
+            <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px;flex-shrink:0;width:140px">
+              <option value="educator">Educator-Facing</option>
+              <option value="centre">Centre-Facing</option>
+            </select>
+            <button class="action-btn edit" style="flex-shrink:0" onclick="evaluateCall('${r.id}')">Evaluate</button>
+          </div>`;
         }).join('');
-      } catch { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
+      } catch { list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</div>'; }
+    }
+
+    function playRecording(recordingId) {
+      const existing = document.getElementById('callAudioPlayer');
+      if (existing) existing.remove();
+      const player = document.createElement('audio');
+      player.id = 'callAudioPlayer';
+      player.controls = true;
+      player.autoplay = true;
+      player.src = `/api/calls/local/${recordingId}/audio`;
+      player.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:1000;background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15)';
+      document.body.appendChild(player);
     }
 
     const outcomeMeta = {

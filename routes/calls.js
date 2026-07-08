@@ -95,6 +95,21 @@ router.get('/local/:id', async (req, res) => {
   }
 });
 
+// Serves audio that was already fetched and stored at sync time.
+router.get('/local/:id/audio', async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'SELECT * FROM call_recording_audio WHERE recording_id = ?', args: [req.params.id] });
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: 'Audio not synced for this call yet' });
+    const buffer = Buffer.from(row.data, 'base64');
+    res.setHeader('Content-Type', row.mimetype || 'audio/mpeg');
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Diagnostic only — surfaces the raw recording detail response so we can find
 // which field actually holds a playable audio URL before building real
 // playback controls into the UI.

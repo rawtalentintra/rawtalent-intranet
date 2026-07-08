@@ -244,10 +244,12 @@ async function initDatabase() {
       evaluated_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
-    // Local cache of Dubber recording metadata — audio itself stays hosted on
-    // Dubber and is streamed on demand; only metadata and (once fetched) the
-    // transcript text are stored here, so browsing/filtering never has to hit
-    // Dubber's rate-limited API.
+    // Local cache of Dubber recording metadata, fetched eagerly at sync time
+    // along with the transcript — so browsing never has to hit Dubber's
+    // rate-limited API, and a call is ready to evaluate the moment it's synced.
+    // has_audio is a fast flag for list display; the audio bytes themselves live
+    // in call_recording_audio (kept separate so listing/filtering never has to
+    // scan large blobs), mirroring how article attachments are stored.
     `CREATE TABLE IF NOT EXISTS call_recordings (
       id TEXT PRIMARY KEY,
       to_number TEXT,
@@ -262,8 +264,17 @@ async function initDatabase() {
       status TEXT,
       sentiment_score REAL,
       transcript TEXT,
+      has_audio INTEGER DEFAULT 0,
+      content_synced INTEGER DEFAULT 0,
       meta_tags TEXT,
       synced_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS call_recording_audio (
+      recording_id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      mimetype TEXT DEFAULT 'audio/mpeg',
+      filesize INTEGER,
+      fetched_at TEXT DEFAULT (datetime('now'))
     )`,
     `CREATE TABLE IF NOT EXISTS dubber_sync_state (
       id INTEGER PRIMARY KEY,
@@ -275,6 +286,13 @@ async function initDatabase() {
 
   for (const sql of schema) {
     await db.execute(sql);
+  }
+
+  // call_recordings shipped before has_audio/content_synced existed — add them
+  // to any table created by an earlier deploy. "Duplicate column" errors are
+  // expected (and ignored) on a fresh table where CREATE TABLE already has them.
+  for (const col of ['has_audio INTEGER DEFAULT 0', 'content_synced INTEGER DEFAULT 0']) {
+    try { await db.execute(`ALTER TABLE call_recordings ADD COLUMN ${col}`); } catch {}
   }
 
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources

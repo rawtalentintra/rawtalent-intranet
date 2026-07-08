@@ -82,22 +82,37 @@ async function getRecording(recordingId) {
   return dubberCall(`/recordings/${recordingId}`);
 }
 
-// PENDING: fill this in once findTranscript() confirms which endpoint actually
+// PENDING: fill this in once Find Transcript confirms which endpoint actually
 // returns transcript data, and what shape it's in (plain text vs timestamped/
 // speaker-labeled segments). Throws clearly rather than guessing at a shape.
 async function getTranscript(recordingId) {
   throw new Error('Transcript source not yet confirmed — run Find Transcript in Call Quality Evaluator first.');
 }
 
-const SYNC_PAGE_SIZE = 100;
-const SYNC_MAX_PAGES = 5; // caps a single sync click at ~500 recordings, well under Dubber's daily rate limit
+// PENDING: fill this in once Find Playback confirms which endpoint returns a
+// fetchable audio URL/stream. Should return { data: base64String, mimetype }.
+async function downloadRecordingAudio(recordingId) {
+  throw new Error('Audio source not yet confirmed — run Find Playback in Call Quality Evaluator first.');
+}
 
-// Pulls recent recordings and stores metadata locally so browsing/filtering never
-// has to hit Dubber's rate-limited API. Only "count" is confirmed from public
-// docs — "offset" is a best-effort guess at pagination. If the API ignores it and
-// keeps returning the same page, every recording on it will already be stored and
-// the loop stops itself (0 new = done), so an unsupported param degrades safely
-// instead of looping or duplicating data. Click Sync again later to keep going.
+function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+const SYNC_PAGE_SIZE = 100;
+const SYNC_MAX_PAGES = 5; // metadata-only pass: caps a click at ~500 recordings checked, cheap (1 API call/page)
+const MAX_CONTENT_FETCH_PER_RUN = 25; // transcript+audio pass: bounds a click's runtime and rate-limit exposure
+
+// Two-phase sync:
+//  1. Metadata pass — pages through recent recordings (only "count" is a
+//     confirmed param; "offset" is best-effort and degrades safely if
+//     unsupported, since already-stored IDs are simply skipped) and stores
+//     anything new, marked content_synced=0.
+//  2. Content pass — for up to MAX_CONTENT_FETCH_PER_RUN rows still missing
+//     transcript/audio (from this run or any earlier one), fetches both and
+//     marks content_synced=1 only once that succeeds. Until the real
+//     transcript/audio endpoints are confirmed, this pass will keep retrying
+//     the same rows on every sync click and finding nothing — that's expected;
+//     the moment they're confirmed, the very next click starts filling them in
+//     with no further changes needed here.
 async function syncRecordings() {
   const db = getDb();
   let totalSeen = 0, totalNew = 0, offset = 0;
@@ -133,13 +148,39 @@ async function syncRecordings() {
     offset += SYNC_PAGE_SIZE;
   }
 
+  // Content pass — fetch transcript + audio for whatever's still missing them
+  const pending = await db.execute({
+    sql: 'SELECT id FROM call_recordings WHERE content_synced = 0 ORDER BY start_time_iso DESC LIMIT ?',
+    args: [MAX_CONTENT_FETCH_PER_RUN]
+  });
+
+  let contentFetched = 0;
+  const contentErrors = [];
+  for (const row of pending.rows) {
+    if (contentFetched > 0) await sleepMs(600); // stay under 2 calls/second across the two fetches below
+    try {
+      const transcript = await getTranscript(row.id);
+      await sleepMs(600);
+      const audio = await downloadRecordingAudio(row.id);
+      await db.execute({ sql: 'UPDATE call_recordings SET transcript = ?, has_audio = 1, content_synced = 1 WHERE id = ?', args: [transcript, row.id] });
+      await db.execute({
+        sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
+              ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
+        args: [row.id, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
+      });
+      contentFetched++;
+    } catch (err) {
+      contentErrors.push({ recordingId: row.id, reason: err.message });
+    }
+  }
+
   await db.execute({
     sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, datetime('now'), ?, datetime('now'))
           ON CONFLICT(id) DO UPDATE SET last_synced_at = datetime('now'), total_synced = total_synced + excluded.total_synced, updated_at = datetime('now')`,
     args: [totalNew]
   });
 
-  return { totalSeen, totalNew };
+  return { totalSeen, totalNew, contentFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3) };
 }
 
 // Diagnostic only — the recording detail endpoint hasn't shown a playback URL
@@ -242,4 +283,4 @@ async function findPlayback(recordingId) {
   return { recordingId, attempts: results };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript, findPlayback, syncRecordings, getRecordingPlaybackInfo };
+module.exports = { isConfigured, listRecordings, getRecording, getTranscript, downloadRecordingAudio, testConnection, findTranscript, findPlayback, syncRecordings, getRecordingPlaybackInfo };
