@@ -244,6 +244,33 @@ async function initDatabase() {
       evaluated_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // Local cache of Dubber recording metadata — audio itself stays hosted on
+    // Dubber and is streamed on demand; only metadata and (once fetched) the
+    // transcript text are stored here, so browsing/filtering never has to hit
+    // Dubber's rate-limited API.
+    `CREATE TABLE IF NOT EXISTS call_recordings (
+      id TEXT PRIMARY KEY,
+      to_number TEXT,
+      from_number TEXT,
+      to_label TEXT,
+      from_label TEXT,
+      rep_name TEXT,
+      call_type TEXT,
+      duration_seconds INTEGER,
+      start_time TEXT,
+      start_time_iso TEXT,
+      status TEXT,
+      sentiment_score REAL,
+      transcript TEXT,
+      meta_tags TEXT,
+      synced_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS dubber_sync_state (
+      id INTEGER PRIMARY KEY,
+      last_synced_at TEXT,
+      total_synced INTEGER DEFAULT 0,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of schema) {

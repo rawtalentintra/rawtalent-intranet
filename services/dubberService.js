@@ -1,3 +1,5 @@
+const { getDb } = require('../db/database');
+
 const REGION = process.env.DUBBER_REGION || 'au';
 const BASE_URL = `https://api.dubber.net/${REGION}/v1`;
 
@@ -87,6 +89,67 @@ async function getTranscript(recordingId) {
   throw new Error('Transcript source not yet confirmed — run Find Transcript in Call Quality Evaluator first.');
 }
 
+const SYNC_PAGE_SIZE = 100;
+const SYNC_MAX_PAGES = 5; // caps a single sync click at ~500 recordings, well under Dubber's daily rate limit
+
+// Pulls recent recordings and stores metadata locally so browsing/filtering never
+// has to hit Dubber's rate-limited API. Only "count" is confirmed from public
+// docs — "offset" is a best-effort guess at pagination. If the API ignores it and
+// keeps returning the same page, every recording on it will already be stored and
+// the loop stops itself (0 new = done), so an unsupported param degrades safely
+// instead of looping or duplicating data. Click Sync again later to keep going.
+async function syncRecordings() {
+  const db = getDb();
+  let totalSeen = 0, totalNew = 0, offset = 0;
+
+  for (let page = 0; page < SYNC_MAX_PAGES; page++) {
+    const data = await listRecordings({ count: SYNC_PAGE_SIZE, offset });
+    const recordings = data.recordings || data.items || [];
+    if (!recordings.length) break;
+    totalSeen += recordings.length;
+
+    let newInPage = 0;
+    for (const r of recordings) {
+      const existing = await db.execute({ sql: 'SELECT id FROM call_recordings WHERE id = ?', args: [r.id] });
+      if (existing.rows[0]) continue;
+      newInPage++; totalNew++;
+
+      let startIso = null;
+      try { startIso = r.start_time ? new Date(r.start_time).toISOString() : null; } catch {}
+
+      await db.execute({
+        sql: `INSERT INTO call_recordings
+              (id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds, start_time, start_time_iso, status, sentiment_score, meta_tags)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          r.id, r.to || null, r.from || null, r.to_label || null, r.from_label || null,
+          r.from_label || r.to_label || r.channel || null, r.call_type || null, r.duration ?? null,
+          r.start_time || null, startIso, r.status || null, r.document_sentiment?.score ?? null,
+          JSON.stringify(r.meta_tags || {})
+        ]
+      });
+    }
+    if (newInPage === 0) break; // caught up, or offset isn't real — either way, stop
+    offset += SYNC_PAGE_SIZE;
+  }
+
+  await db.execute({
+    sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, datetime('now'), ?, datetime('now'))
+          ON CONFLICT(id) DO UPDATE SET last_synced_at = datetime('now'), total_synced = total_synced + excluded.total_synced, updated_at = datetime('now')`,
+    args: [totalNew]
+  });
+
+  return { totalSeen, totalNew };
+}
+
+// Diagnostic only — the recording detail endpoint hasn't shown a playback URL
+// field in samples so far; this surfaces the raw response so we can find it
+// (e.g. by passing ?listener=, per third-party docs) before building real
+// playback into the UI.
+async function getRecordingPlaybackInfo(recordingId, listener) {
+  return dubberCall(`/recordings/${recordingId}`, listener ? { listener } : {});
+}
+
 // Diagnostic only — pulls a very small sample so a super_admin can inspect the
 // real response shape (especially where transcript data lives) before we build
 // any grading logic against it.
@@ -132,4 +195,4 @@ async function findTranscript(recordingId) {
   return { recordingId, attempts: results };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript };
+module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript, syncRecordings, getRecordingPlaybackInfo };

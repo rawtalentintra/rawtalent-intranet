@@ -37,6 +37,76 @@ router.get('/recordings', async (req, res) => {
   }
 });
 
+// Pulls recent recordings from Dubber and stores metadata locally. Click again
+// later to keep extending how far back the local store goes.
+router.post('/sync', async (req, res) => {
+  try {
+    const result = await dubberService.syncRecordings();
+    res.json(result);
+  } catch (err) {
+    console.error('Dubber sync error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/sync-status', async (req, res) => {
+  try {
+    const [state, count] = await Promise.all([
+      getDb().execute('SELECT * FROM dubber_sync_state WHERE id = 1'),
+      getDb().execute('SELECT COUNT(*) as n FROM call_recordings')
+    ]);
+    res.json({ ...(state.rows[0] || {}), totalStored: Number(count.rows[0].n) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Browses the local cache — filterable, paginated, never hits Dubber's API.
+router.get('/local', async (req, res) => {
+  try {
+    const { repName, phone, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
+    const conditions = [];
+    const args = [];
+    if (repName) { conditions.push('rep_name LIKE ?'); args.push(`%${repName}%`); }
+    if (phone) { conditions.push('(to_number LIKE ? OR from_number LIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
+    if (dateFrom) { conditions.push('start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
+    if (dateTo) { conditions.push('start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const offset = (Math.max(1, Number(page)) - 1) * Number(pageSize);
+    const db = getDb();
+    const [rows, countRes] = await Promise.all([
+      db.execute({ sql: `SELECT * FROM call_recordings ${where} ORDER BY start_time_iso DESC LIMIT ? OFFSET ?`, args: [...args, Number(pageSize), offset] }),
+      db.execute({ sql: `SELECT COUNT(*) as n FROM call_recordings ${where}`, args })
+    ]);
+    res.json({ recordings: rows.rows, total: Number(countRes.rows[0].n), page: Number(page), pageSize: Number(pageSize) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/local/:id', async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'SELECT * FROM call_recordings WHERE id = ?', args: [req.params.id] });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Call not found in local store' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diagnostic only — surfaces the raw recording detail response so we can find
+// which field actually holds a playable audio URL before building real
+// playback controls into the UI.
+router.get('/:recordingId/playback-info', async (req, res) => {
+  try {
+    const result = await dubberService.getRecordingPlaybackInfo(req.params.recordingId, req.query.listener);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Diagnostic step: tries every plausible transcript endpoint for one real
 // recording and reports which one(s) actually return data.
 router.get('/find-transcript/:recordingId', async (req, res) => {
@@ -59,19 +129,32 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     return res.status(400).json({ error: 'A valid rubricType ("educator" or "centre") is required' });
   }
   try {
-    const recording = await dubberService.getRecording(req.params.recordingId);
-    const transcript = await dubberService.getTranscript(req.params.recordingId);
+    const db = getDb();
+    const localRes = await db.execute({ sql: 'SELECT * FROM call_recordings WHERE id = ?', args: [req.params.recordingId] });
+    const local = localRes.rows[0];
+
+    // Prefer the local cache for metadata (avoids an extra Dubber call); fall
+    // back to a live fetch if this call hasn't been synced yet.
+    const recording = local || await dubberService.getRecording(req.params.recordingId);
+
+    let transcript = local?.transcript;
+    if (!transcript) {
+      transcript = await dubberService.getTranscript(req.params.recordingId);
+      if (local) {
+        await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, req.params.recordingId] });
+      }
+    }
 
     const result = await gradeCall(transcript, rubricType);
 
-    const repName = recording.from_label || recording.to_label || recording.channel || null;
+    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
       repName,
       callType: recording.call_type,
       rubricType,
       callDate: recording.start_time,
-      durationSeconds: recording.duration,
+      durationSeconds: recording.duration_seconds ?? recording.duration,
       result,
       evaluatedBy: req.user.email
     });

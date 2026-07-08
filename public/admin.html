@@ -580,32 +580,47 @@
           <div id="callsFindTranscriptStatus" style="display:none;margin-top:10px"></div>
         </div>
 
+        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">⬇️ Sync Calls</div>
+          <div id="callsSyncStatusLine" style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Checking local store…</div>
+          <button class="btn-add" id="callsSyncBtn" onclick="syncCalls()">Sync Calls Now</button>
+          <div id="callsSyncStatus" style="display:none;margin-top:12px"></div>
+        </div>
+
         <div class="admin-table-card" style="margin-bottom:20px">
           <div class="admin-table-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
               <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
               <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
             </div>
-            <button class="btn-secondary source-action-btn" onclick="loadCallsList()">↻ Refresh</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
+            <input type="text" id="callsFilterRep" class="form-control" placeholder="Filter by rep name…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
+            <input type="text" id="callsFilterPhone" class="form-control" placeholder="Filter by phone #…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
+            <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
+            <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
           </div>
           <div style="overflow-x:auto">
             <table class="data-table">
               <thead>
                 <tr>
+                  <th style="width:110px">Recording ID</th>
                   <th>Rep</th>
                   <th>Direction</th>
                   <th>Contact</th>
                   <th>Date</th>
                   <th style="width:70px">Duration</th>
+                  <th style="width:80px">Transcript</th>
                   <th style="width:150px">Rubric</th>
                   <th style="width:100px"></th>
                 </tr>
               </thead>
               <tbody id="callsListBody">
-                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
+          <div id="callsPagination" style="display:flex;justify-content:center;gap:14px;padding:14px;align-items:center"></div>
         </div>
 
         <div id="callEvalResultCard" class="admin-table-card" style="display:none;margin-bottom:20px">
@@ -2273,6 +2288,7 @@
           ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
           : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
       } catch { statusEl.textContent = 'Failed to check status.'; }
+      loadSyncStatus();
       loadCallsList();
       loadEvaluationHistory();
     }
@@ -2283,28 +2299,84 @@
       return `${m}:${String(s).padStart(2, '0')}`;
     }
 
+    async function loadSyncStatus() {
+      const line = document.getElementById('callsSyncStatusLine');
+      try {
+        const s = await fetch('/api/calls/sync-status').then(r => r.json());
+        line.textContent = s.totalStored > 0
+          ? `${s.totalStored} calls stored locally${s.last_synced_at ? ` · last synced ${fmtDate(s.last_synced_at)}` : ''}`
+          : 'No calls synced yet — click below to pull recent calls from Dubber.';
+      } catch { line.textContent = 'Failed to check sync status.'; }
+    }
+
+    async function syncCalls() {
+      const btn = document.getElementById('callsSyncBtn');
+      const statusEl = document.getElementById('callsSyncStatus');
+      btn.disabled = true; btn.textContent = 'Syncing…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Pulling recent calls from Dubber…';
+      try {
+        const res = await fetch('/api/calls/sync', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
+        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked). Click Sync again to keep going further back.</div>`;
+        loadSyncStatus();
+        loadCallsList();
+      } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Sync failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Sync Calls Now'; }
+    }
+
+    let callsFilterTimer, callsCurrentPage = 1;
+
+    function debounceFilterCalls() {
+      clearTimeout(callsFilterTimer);
+      callsFilterTimer = setTimeout(() => filterCalls(), 350);
+    }
+
+    function filterCalls() { callsCurrentPage = 1; loadCallsList(); }
+    function changeCallsPage(delta) { callsCurrentPage += delta; loadCallsList(); }
+
     async function loadCallsList() {
       const tbody = document.getElementById('callsListBody');
-      tbody.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
-        const data = await fetch('/api/calls/recordings?count=25').then(r => r.json());
-        if (data.error) { tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</td></tr>`; return; }
-        const recordings = data.recordings || data.items || [];
-        document.getElementById('callsListCount').textContent = `${recordings.length} recent calls`;
+        const params = new URLSearchParams({ page: callsCurrentPage, pageSize: 25 });
+        const rep = document.getElementById('callsFilterRep').value.trim();
+        const phone = document.getElementById('callsFilterPhone').value.trim();
+        const from = document.getElementById('callsFilterFrom').value;
+        const to = document.getElementById('callsFilterTo').value;
+        if (rep) params.set('repName', rep);
+        if (phone) params.set('phone', phone);
+        if (from) params.set('dateFrom', from);
+        if (to) params.set('dateTo', to);
+
+        const data = await fetch(`/api/calls/local?${params}`).then(r => r.json());
+        if (data.error) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</td></tr>`; return; }
+        const recordings = data.recordings || [];
+        document.getElementById('callsListCount').textContent = `${data.total} call${data.total !== 1 ? 's' : ''} stored`;
+
+        const pager = document.getElementById('callsPagination');
+        const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
+        pager.innerHTML = totalPages > 1 ? `
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(-1)" ${callsCurrentPage === 1 ? 'disabled' : ''}>← Prev</button>
+          <span style="font-size:13px;color:var(--text-muted)">Page ${callsCurrentPage} of ${totalPages}</span>
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(1)" ${callsCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
+
         if (recordings.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No recordings found.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</td></tr>';
           return;
         }
         tbody.innerHTML = recordings.map(r => {
-          const rep = r.from_label || r.to_label || r.channel || '—';
-          const contact = r.call_type === 'outbound' ? r.to : r.from;
+          const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
           return `
           <tr>
-            <td style="font-weight:600;color:var(--navy)">${escHtml(rep)}</td>
+            <td style="font-family:monospace;font-size:11px;color:var(--text-muted)" title="${escHtml(r.id)}">${escHtml(r.id.slice(-8))}</td>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || '—')}</td>
             <td style="font-size:12px;color:var(--text-muted);text-transform:capitalize">${escHtml(r.call_type || '—')}</td>
             <td style="font-size:13px">${escHtml(contact || '—')}</td>
             <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
-            <td style="font-size:12px;color:var(--text-muted)">${fmtDuration(r.duration)}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${fmtDuration(r.duration_seconds)}</td>
+            <td>${r.transcript ? '<span class="badge badge-published">Cached</span>' : '<span class="badge badge-draft">Not fetched</span>'}</td>
             <td>
               <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px">
                 <option value="educator">Educator-Facing</option>
@@ -2314,7 +2386,7 @@
             <td><button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate</button></td>
           </tr>`;
         }).join('');
-      } catch { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
+      } catch { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
     }
 
     const outcomeMeta = {
