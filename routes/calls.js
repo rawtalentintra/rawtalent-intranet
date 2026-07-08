@@ -35,4 +35,16 @@ router.get('/recordings', async (req, res) => {
   }
 });
 
+// Diagnostic step: tries every plausible transcript endpoint for one real
+// recording and reports which one(s) actually return data.
+router.get('/find-transcript/:recordingId', async (req, res) => {
+  try {
+    const result = await dubberService.findTranscript(req.params.recordingId);
+    res.json(result);
+  } catch (err) {
+    console.error('Dubber find-transcript error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

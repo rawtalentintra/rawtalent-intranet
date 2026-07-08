@@ -94,4 +94,35 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, testConnection };
+// Diagnostic only — the recordings endpoint returns a document_sentiment score,
+// proving Dubber transcribes calls behind the scenes, but no public docs confirm
+// where the actual transcript text lives. Rather than guess, try every plausible
+// path for one real recording and report which ones actually return data.
+async function findTranscript(recordingId) {
+  const token = await getAccessToken();
+  const candidates = [
+    { label: 'GET /recordings/{id}/transcript', path: `/recordings/${recordingId}/transcript` },
+    { label: 'GET /recordings/{id}/transcription', path: `/recordings/${recordingId}/transcription` },
+    { label: 'GET /recordings/{id}/document', path: `/recordings/${recordingId}/document` },
+    { label: 'GET /recordings/{id}/insights', path: `/recordings/${recordingId}/insights` },
+    { label: 'GET /recordings/{id}?include_transcript=true', path: `/recordings/${recordingId}`, params: { include_transcript: 'true' } },
+    { label: 'GET /documents/{id}', path: `/documents/${recordingId}` }
+  ];
+
+  const results = [];
+  for (const c of candidates) {
+    const qs = c.params ? `?${new URLSearchParams(c.params).toString()}` : '';
+    try {
+      const res = await fetch(`${BASE_URL}${c.path}${qs}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const text = await res.text();
+      let body;
+      try { body = JSON.parse(text); } catch { body = text.slice(0, 500); }
+      results.push({ label: c.label, status: res.status, ok: res.ok, body });
+    } catch (err) {
+      results.push({ label: c.label, status: null, ok: false, body: err.message });
+    }
+  }
+  return { recordingId, attempts: results };
+}
+
+module.exports = { isConfigured, listRecordings, getRecording, testConnection, findTranscript };

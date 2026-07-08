@@ -570,10 +570,20 @@
           <div id="callsTestStatus" style="display:none;margin-top:14px"></div>
         </div>
 
+        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🔎 Find the Transcript</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">The recordings list includes a sentiment score, which means Dubber transcribes calls behind the scenes — but no public docs confirm where that transcript actually lives. This tries several likely paths on one real recording and reports which one(s) work.</div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input type="text" id="callsTranscriptRecordingId" class="form-control" placeholder="Recording ID (from Test Connection above)" style="flex:1">
+            <button class="btn-add" id="callsFindTranscriptBtn" onclick="findTranscript()">Find Transcript</button>
+          </div>
+          <div id="callsFindTranscriptStatus" style="display:none;margin-top:10px"></div>
+        </div>
+
         <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
           <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🚧 Next steps</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Random-call sampling per rep, the AI grading form, and scored results are being built next — once the connection test above confirms the real data shape (especially where the transcript lives on each recording), the grading logic will be built against that confirmed structure. Call Quality Reporting (the performance dashboard) comes after that.
+            Random-call sampling per rep, the AI grading form, and scored results are being built next — once the transcript source above is confirmed, the grading logic will be built against that confirmed structure. Call Quality Reporting (the performance dashboard) comes after that.
           </div>
         </div>
       </div>
@@ -2242,8 +2252,35 @@
           <div style="font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Raw response (for inspecting the real data shape)</div>
           <pre style="background:var(--gray-100);border-radius:var(--radius);padding:14px;font-size:11px;line-height:1.5;overflow:auto;max-height:400px;white-space:pre-wrap">${escHtml(JSON.stringify(data, null, 2))}</pre>
         `;
+        const sampleId = data.listResponse?.recordings?.[0]?.id;
+        if (sampleId) document.getElementById('callsTranscriptRecordingId').value = sampleId;
       } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Connection test failed.</div>'; }
       finally { btn.disabled = false; btn.textContent = 'Test Connection'; }
+    }
+
+    async function findTranscript() {
+      const recordingId = document.getElementById('callsTranscriptRecordingId').value.trim();
+      if (!recordingId) { toast('Enter a recording ID first (or run Test Connection above)', 'error'); return; }
+      const btn = document.getElementById('callsFindTranscriptBtn');
+      const resultEl = document.getElementById('callsFindTranscriptStatus');
+      btn.disabled = true; btn.textContent = 'Searching…';
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Trying transcript endpoints…';
+      try {
+        const res = await fetch(`/api/calls/find-transcript/${encodeURIComponent(recordingId)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          resultEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Search failed')}</div>`;
+          return;
+        }
+        resultEl.innerHTML = data.attempts.map(a => `
+          <div style="padding:10px 14px;margin-bottom:6px;border-radius:var(--radius);background:${a.ok ? '#f0fdf4' : 'var(--gray-100)'};border:1px solid ${a.ok ? '#1a8a4a' : 'var(--gray-200)'}">
+            <div style="font-size:12px;font-weight:700;color:${a.ok ? '#1a8a4a' : 'var(--text-muted)'};margin-bottom:4px">${a.ok ? '✓' : '✗'} ${escHtml(a.label)} — HTTP ${a.status ?? 'error'}</div>
+            <pre style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;margin:0;max-height:200px;overflow:auto">${escHtml(typeof a.body === 'string' ? a.body : JSON.stringify(a.body, null, 2))}</pre>
+          </div>
+        `).join('');
+      } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Search failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Find Transcript'; }
     }
 
     init();
