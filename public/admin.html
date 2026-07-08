@@ -2302,8 +2302,8 @@
         const data = await res.json();
         if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
         statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">
-          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got transcript+audio this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}
-        </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.map(e => escHtml(e.reason)).join(' · ')}</div>` : '');
+          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio this run${data.contentPending > 0 ? `, ${data.contentPending} still pending audio — click Sync again` : ''}
+        </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.slice(0, 3).map(e => `${escHtml(e.type)}: ${escHtml(e.reason)}`).join(' · ')}</div>` : '');
         loadSyncStatus();
         loadCallsList();
       } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Sync failed.</div>'; }
@@ -2356,14 +2356,19 @@
         }
         list.innerHTML = recordings.map(r => {
           const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
-          const ready = !!r.transcript && !!r.has_audio;
+          const gradeReady = !!r.transcript;
+          const badge = gradeReady
+            ? { cls: 'badge-published', label: '✓ Ready to grade' }
+            : r.has_audio
+            ? { cls: 'badge-user', label: '🎧 Audio only' }
+            : { cls: 'badge-draft', label: '⏳ Pending' };
           return `
           <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;font-size:13.5px;color:var(--navy)">${escHtml(r.rep_name || 'Unknown rep')}</div>
               <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(r.call_type || '—')} · ${escHtml(contact || '—')} · ${fmtDuration(r.duration_seconds)} · ${escHtml(r.start_time || '—')}</div>
             </div>
-            <span class="badge ${ready ? 'badge-published' : 'badge-draft'}" style="flex-shrink:0">${ready ? '✓ Ready' : '⏳ Pending'}</span>
+            <span class="badge ${badge.cls}" style="flex-shrink:0">${badge.label}</span>
             <button class="action-btn edit" style="flex-shrink:0" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
             ${r.has_audio ? `<button class="action-btn edit" style="flex-shrink:0" onclick="playRecording('${r.id}')">▶ Play</button>` : ''}
             <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px;flex-shrink:0;width:140px">

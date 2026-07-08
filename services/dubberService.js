@@ -164,31 +164,45 @@ async function syncRecordings() {
     offset += SYNC_PAGE_SIZE;
   }
 
-  // Content pass — fetch transcript + audio for whatever's still missing them
+  // Content pass — audio and transcript are fetched independently, since one
+  // failing (transcript is currently blocked account-side) must never prevent
+  // the other from succeeding. Gated on has_audio specifically, so rows that
+  // already have audio don't get re-fetched forever just because transcript
+  // still fails — only rows still missing audio come up for another attempt.
   const pending = await db.execute({
-    sql: 'SELECT id FROM call_recordings WHERE content_synced = 0 ORDER BY start_time_iso DESC LIMIT ?',
+    sql: 'SELECT id, transcript FROM call_recordings WHERE has_audio = 0 ORDER BY start_time_iso DESC LIMIT ?',
     args: [MAX_CONTENT_FETCH_PER_RUN]
   });
 
-  let contentFetched = 0;
+  let audioFetched = 0, transcriptFetched = 0;
   const contentErrors = [];
   for (const row of pending.rows) {
-    if (contentFetched > 0) await sleepMs(600); // stay under 2 calls/second across the two fetches below
+    if (audioFetched + transcriptFetched > 0) await sleepMs(600);
     try {
-      const transcript = await getTranscript(row.id);
-      await sleepMs(600);
       const audio = await downloadRecordingAudio(row.id);
-      await db.execute({ sql: 'UPDATE call_recordings SET transcript = ?, has_audio = 1, content_synced = 1 WHERE id = ?', args: [transcript, row.id] });
+      await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [row.id] });
       await db.execute({
         sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
               ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
         args: [row.id, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
       });
-      contentFetched++;
+      audioFetched++;
     } catch (err) {
-      contentErrors.push({ recordingId: row.id, reason: err.message });
+      contentErrors.push({ recordingId: row.id, type: 'audio', reason: err.message });
+    }
+
+    if (!row.transcript) {
+      await sleepMs(600);
+      try {
+        const transcript = await getTranscript(row.id);
+        await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, row.id] });
+        transcriptFetched++;
+      } catch (err) {
+        contentErrors.push({ recordingId: row.id, type: 'transcript', reason: err.message });
+      }
     }
   }
+  const contentFetched = audioFetched; // audio is the currently-achievable metric
 
   await db.execute({
     sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, datetime('now'), ?, datetime('now'))
