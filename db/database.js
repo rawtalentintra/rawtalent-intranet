@@ -227,6 +227,23 @@ async function initDatabase() {
       last_synced_at TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // One row per AI-graded call, feeding the future Call Quality Reporting dashboard.
+    // category_scores is a JSON array of {category, weight, score, notes}.
+    `CREATE TABLE IF NOT EXISTS call_evaluations (
+      id TEXT PRIMARY KEY,
+      recording_id TEXT NOT NULL,
+      rep_name TEXT,
+      call_type TEXT,
+      rubric_type TEXT NOT NULL,
+      call_date TEXT,
+      duration_seconds INTEGER,
+      category_scores TEXT NOT NULL,
+      overall_score REAL NOT NULL,
+      outcome TEXT NOT NULL,
+      summary TEXT,
+      evaluated_by TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of schema) {

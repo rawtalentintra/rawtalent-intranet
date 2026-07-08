@@ -580,10 +580,51 @@
           <div id="callsFindTranscriptStatus" style="display:none;margin-top:10px"></div>
         </div>
 
-        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🚧 Next steps</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Random-call sampling per rep, the AI grading form, and scored results are being built next — once the transcript source above is confirmed, the grading logic will be built against that confirmed structure. Call Quality Reporting (the performance dashboard) comes after that.
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
+              <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+            <button class="btn-secondary source-action-btn" onclick="loadCallsList()">↻ Refresh</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Rep</th>
+                  <th>Direction</th>
+                  <th>Contact</th>
+                  <th>Date</th>
+                  <th style="width:70px">Duration</th>
+                  <th style="width:150px">Rubric</th>
+                  <th style="width:100px"></th>
+                </tr>
+              </thead>
+              <tbody id="callsListBody">
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="callEvalResultCard" class="admin-table-card" style="display:none;margin-bottom:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">Evaluation Result</span>
+            <span id="callEvalOutcome"></span>
+          </div>
+          <div id="callEvalResultBody" style="padding:20px"></div>
+        </div>
+
+        <div class="admin-table-card">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">Recent Evaluations</span>
+              <span id="callEvalHistoryCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+          </div>
+          <div id="callEvalHistoryList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
           </div>
         </div>
       </div>
@@ -2232,6 +2273,129 @@
           ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
           : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
       } catch { statusEl.textContent = 'Failed to check status.'; }
+      loadCallsList();
+      loadEvaluationHistory();
+    }
+
+    function fmtDuration(seconds) {
+      if (seconds == null) return '—';
+      const m = Math.floor(seconds / 60), s = seconds % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    async function loadCallsList() {
+      const tbody = document.getElementById('callsListBody');
+      tbody.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        const data = await fetch('/api/calls/recordings?count=25').then(r => r.json());
+        if (data.error) { tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">${escHtml(data.error)}</td></tr>`; return; }
+        const recordings = data.recordings || data.items || [];
+        document.getElementById('callsListCount').textContent = `${recordings.length} recent calls`;
+        if (recordings.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No recordings found.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = recordings.map(r => {
+          const rep = r.from_label || r.to_label || r.channel || '—';
+          const contact = r.call_type === 'outbound' ? r.to : r.from;
+          return `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(rep)}</td>
+            <td style="font-size:12px;color:var(--text-muted);text-transform:capitalize">${escHtml(r.call_type || '—')}</td>
+            <td style="font-size:13px">${escHtml(contact || '—')}</td>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${fmtDuration(r.duration)}</td>
+            <td>
+              <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:12px;padding:5px 8px">
+                <option value="educator">Educator-Facing</option>
+                <option value="centre">Centre-Facing</option>
+              </select>
+            </td>
+            <td><button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate</button></td>
+          </tr>`;
+        }).join('');
+      } catch { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
+    }
+
+    const outcomeMeta = {
+      pass: { label: 'Pass', badge: 'badge-published' },
+      coaching: { label: 'Coaching recommended', badge: 'badge-user' },
+      escalate: { label: 'Escalate', badge: 'badge-draft' }
+    };
+
+    async function evaluateCall(recordingId) {
+      const rubricType = document.getElementById(`rubric-${recordingId}`).value;
+      const card = document.getElementById('callEvalResultCard');
+      const body = document.getElementById('callEvalResultBody');
+      const outcomeEl = document.getElementById('callEvalOutcome');
+      card.style.display = 'block';
+      outcomeEl.innerHTML = '';
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Grading call against the ' + (rubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing') + ' rubric…</div>';
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      try {
+        const res = await fetch(`/api/calls/${recordingId}/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rubricType })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          body.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Evaluation failed')}</div>`;
+          return;
+        }
+        renderEvalResult(data);
+        loadEvaluationHistory();
+      } catch { body.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Evaluation failed.</div>'; }
+    }
+
+    function renderEvalResult(data) {
+      const body = document.getElementById('callEvalResultBody');
+      const outcomeEl = document.getElementById('callEvalOutcome');
+      const meta = outcomeMeta[data.outcome] || { label: data.outcome, badge: 'badge-user' };
+      outcomeEl.innerHTML = `<span class="badge ${meta.badge}">${meta.label}</span>`;
+      const rows = data.categoryScores.map(c => `
+        <tr>
+          <td style="width:50px;text-align:center;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums">${c.weight}%</td>
+          <td style="font-weight:700;color:var(--navy);width:170px">${escHtml(c.category)}${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}</td>
+          <td style="font-size:12.5px;color:var(--text-muted)">${escHtml(c.notes)}</td>
+          <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${c.score}/5</td>
+        </tr>
+      `).join('');
+      body.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:13px;color:var(--text-muted)">${escHtml(data.summary)}</div>
+          <div style="font-size:26px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:20px">${data.overallScore}%</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" style="font-size:12.5px">
+            <thead><tr><th>Wt.</th><th>Category</th><th>Notes</th><th>Score</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function loadEvaluationHistory() {
+      const list = document.getElementById('callEvalHistoryList');
+      try {
+        const evals = await fetch('/api/calls/evaluations').then(r => r.json());
+        document.getElementById('callEvalHistoryCount').textContent = `${evals.length} saved`;
+        if (evals.length === 0) {
+          list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No evaluations yet.</div>';
+          return;
+        }
+        list.innerHTML = evals.map(e => {
+          const meta = outcomeMeta[e.outcome] || { label: e.outcome, badge: 'badge-user' };
+          return `
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+            <span class="badge ${meta.badge}" style="flex-shrink:0">${meta.label}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13px;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')} <span style="font-weight:400;color:var(--text-muted)">· ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}</span></div>
+              <div style="font-size:11.5px;color:var(--text-muted)">${fmtDate(e.created_at)} · evaluated by ${escHtml(e.evaluated_by || '—')}</div>
+            </div>
+            <div style="font-size:16px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0">${e.overall_score}%</div>
+          </div>`;
+        }).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load evaluations.</div>'; }
     }
 
     async function testDubberConnection() {

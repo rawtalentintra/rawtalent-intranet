@@ -80,6 +80,13 @@ async function getRecording(recordingId) {
   return dubberCall(`/recordings/${recordingId}`);
 }
 
+// PENDING: fill this in once findTranscript() confirms which endpoint actually
+// returns transcript data, and what shape it's in (plain text vs timestamped/
+// speaker-labeled segments). Throws clearly rather than guessing at a shape.
+async function getTranscript(recordingId) {
+  throw new Error('Transcript source not yet confirmed — run Find Transcript in Call Quality Evaluator first.');
+}
+
 // Diagnostic only — pulls a very small sample so a super_admin can inspect the
 // real response shape (especially where transcript data lives) before we build
 // any grading logic against it.
@@ -125,4 +132,4 @@ async function findTranscript(recordingId) {
   return { recordingId, attempts: results };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, testConnection, findTranscript };
+module.exports = { isConfigured, listRecordings, getRecording, getTranscript, testConnection, findTranscript };
