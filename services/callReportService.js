@@ -136,10 +136,14 @@ Respond with ONLY valid JSON, no other text:
 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 3000,
+    max_tokens: 4096,
     system,
     messages: [{ role: 'user', content: 'Generate the report.' }]
   });
+
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again, or narrow the filters to fewer reps/evaluations.');
+  }
 
   // Find the actual text block — some models can emit a thinking block first,
   // which would otherwise silently parse as "{}" and look like an empty report.
@@ -150,7 +154,8 @@ Respond with ONLY valid JSON, no other text:
     const match = raw.match(/\{[\s\S]*\}/);
     parsed = JSON.parse(match ? match[0] : raw);
   } catch {
-    throw new Error('Could not parse the AI report response');
+    console.error('Call report JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
+    throw new Error('Could not parse the AI report response — please try again.');
   }
 
   return { stats, aiReport: parsed };

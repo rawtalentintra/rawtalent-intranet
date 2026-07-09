@@ -47,7 +47,7 @@ async function extractFaqsFromDocument(text, docTitle) {
 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 2500,
+    max_tokens: 4096,
     system: `You are reading an internal RawTalent document titled "${docTitle}" to extract genuinely reusable FAQ material for a staff knowledge base. RawTalent is an Australian childcare staffing agency.
 
 Read the whole document and extract every distinct, general, reusable question-and-answer pair you can find or reasonably construct from its content — e.g. policy points, process steps, compliance requirements, common scenarios and how to resolve them. Skip narrative or boilerplate text with no answerable question behind it.
@@ -73,6 +73,7 @@ If there is truly nothing extractable, return {"candidates": []}.`,
     const parsed = JSON.parse(match ? match[0] : raw);
     return { candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [] };
   } catch {
+    console.error('Document FAQ extraction JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
     return { candidates: [] };
   }
 }

@@ -176,12 +176,19 @@ async function gradeCall(transcriptText, rubricType, feedback = null) {
 
   const calibrationNotes = await getCalibrationNotes();
 
+  // 7 categories x 2-4 sentences of evidence-based notes, plus a summary, plus
+  // any calibration/feedback context, comfortably exceeds 2500 tokens — that
+  // was cutting the JSON off mid-response often enough to fail to parse.
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 2500,
+    max_tokens: 4096,
     system: buildSystemPrompt(rubric, calibrationNotes, feedback),
     messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
   });
+
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again.');
+  }
 
   // Sonnet 5 can emit a thinking block before the actual text block, so the
   // final answer isn't reliably content[0] — find the text block explicitly.
@@ -192,7 +199,10 @@ async function gradeCall(transcriptText, rubricType, feedback = null) {
   const match = raw.match(/\{[\s\S]*\}/);
   let parsed;
   try { parsed = JSON.parse(match ? match[0] : raw); }
-  catch { throw new Error('Could not parse the AI grading response'); }
+  catch {
+    console.error('Call grading JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
+    throw new Error('Could not parse the AI grading response — please try again.');
+  }
 
   return computeResult(rubric, parsed.scores, parsed.summary);
 }
