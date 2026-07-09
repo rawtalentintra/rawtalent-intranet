@@ -91,8 +91,12 @@ async function getTranscript(recordingId) {
   const info = await dubberCall(`/accounts/${getAccountId()}/recordings/${recordingId}/ai`);
   const sentences = info.sentences || [];
   if (!sentences.length) throw new Error('Dubber AI info response had no sentences — transcript may not be ready yet for this call.');
+  // Dubber's per-sentence content can carry inline markup (e.g. sentiment
+  // highlighting) — strip it here so nothing downstream (grading, display,
+  // search) ever has to deal with stray tags leaking into plain text.
+  const stripMarkup = text => (text || '').replace(/<[^>]+>/g, '').trim();
   return sentences
-    .map(s => s.speaker ? `${s.speaker}: ${s.content}` : s.content)
+    .map(s => s.speaker ? `${stripMarkup(s.speaker)}: ${stripMarkup(s.content)}` : stripMarkup(s.content))
     .join('\n');
 }
 

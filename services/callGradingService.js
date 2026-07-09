@@ -95,7 +95,7 @@ function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibrationNo
   // call here matches what the main KB AI would tell someone who asked —
   // the two are never working off different versions of the truth.
   const knowledgeBlock = knowledgeMatches.length
-    ? `\n\nRelevant entries from RawTalent's knowledge base (the same source used to answer staff questions) — treat these as the authoritative source of truth whenever this call touches on them, e.g. compliance timeframes, pay rates, or process steps:\n${knowledgeMatches.map(m => `- ${m.title}: ${(m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}`).join('\n')}`
+    ? `\n\nRelevant entries from RawTalent's knowledge base (the same source used to answer staff questions) — treat these as the authoritative source of truth whenever this call touches on them, e.g. compliance timeframes, pay rates, or process steps:\n${knowledgeMatches.map(m => `- "${m.title}": ${(m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}`).join('\n')}\nIf you rely on one of these entries to justify a score, name it explicitly in that category's notes (e.g. "per the knowledge base entry '${knowledgeMatches[0]?.title}'...") so the reviewer can verify the claim themselves — never assert something is documented policy without naming the specific entry.`
     : '';
 
   const calibrationBlock = calibrationNotes.length
@@ -128,16 +128,18 @@ A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/comp
 
 Base every score strictly on what is actually in the transcript. Do not invent behaviour that isn't there. If the transcript is too short or unclear to judge a category, score it 3 and say so in the notes.
 
-For EVERY category, without exception, write 3-5 sentences of expert, evidence-based reasoning covering all of the following:
+For EVERY one of these ${rubric.categories.length} categories, without exception — ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — write 3-5 sentences of expert, evidence-based reasoning covering all of the following:
 1. Quote or paraphrase the exact moment in the call that drove the score.
 2. Explain the operational, compliance, or relationship stake this represents — why it matters to the business, not just whether it "sounded good".
 3. State precisely why it earned this number rather than one point higher or lower.
 4. Give one concrete, practical coaching tip the rep could apply next time — or, for a 4 or 5, name exactly what they did that should be repeated.
 
-Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never skip or shortchange any of the ${rubric.categories.length} categories.${knowledgeBlock}${calibrationBlock}${feedbackBlock}
+Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
+
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently). Use single quotation marks ('like this') around quoted excerpts rather than double quotes, so nothing you write can ever break the JSON format below.${knowledgeBlock}${calibrationBlock}${feedbackBlock}
 
 Respond with ONLY valid JSON, no other text, in this exact shape:
-{"scores": [{"key": "opening", "score": 1-5, "notes": "3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone"}, ...one entry per category key, all ${rubric.categories.length} required...], "summary": "4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager's perspective, referencing specific moments and the overall risk/coaching priority"}`;
+{"scores": [{"key": "${rubric.categories[0]?.key || 'opening'}", "score": 1-5, "notes": "3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone"}, ...one entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')}...], "summary": "4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager's perspective, referencing specific moments and the overall risk/coaching priority"}`;
 }
 
 async function getCalibrationNotes() {
@@ -317,6 +319,13 @@ function computeResult(rubric, rawScores, summary) {
   return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: summary || '' };
 }
 
+// Notes/summaries are meant to be plain text — strips any stray markup
+// regardless of where it came from (source transcript, model quirk), as a
+// safety net on top of sanitizing the transcript itself before grading.
+function stripMarkup(text) {
+  return (text || '').replace(/<\/?[a-z][^>]*>/gi, '').trim();
+}
+
 async function gradeCall(transcriptText, rubricType, repName = null, feedback = null) {
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
@@ -327,6 +336,11 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   const client = getClient();
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
 
+  // Defends against markup already baked into a stored transcript (e.g. from
+  // before the Dubber sync stripped it at the source) leaking into the
+  // model's quoted excerpts and corrupting the JSON it has to produce.
+  const cleanTranscript = stripMarkup(transcriptText);
+
   const calibrationNotes = await getCalibrationNotes();
 
   // Grounds this evaluation in the same knowledge base the main KB AI
@@ -334,41 +348,62 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   // policy/compliance facts — a failure here is non-fatal to grading.
   let knowledgeMatches = [];
   try {
-    knowledgeMatches = await searchKnowledge(getDb(), transcriptText.slice(0, 800), 5);
+    knowledgeMatches = await searchKnowledge(getDb(), cleanTranscript.slice(0, 800), 5);
   } catch (err) {
     console.error('Knowledge base lookup failed during call grading (continuing without it):', err.message);
   }
 
-  // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
-  // operational stake + justification + coaching action), plus a richer
-  // summary, plus any calibration/feedback context, needs real headroom —
-  // too little was cutting the JSON off mid-response and failing to parse.
-  const response = await client.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: 6144,
-    system: buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback),
-    messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
-  });
+  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback);
 
-  if (response.stop_reason === 'max_tokens') {
-    throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again.');
+  async function runOnce() {
+    // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
+    // operational stake + justification + coaching action), plus a richer
+    // summary, plus any calibration/feedback context, needs real headroom —
+    // too little was cutting the JSON off mid-response and failing to parse.
+    const response = await client.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 6144,
+      system,
+      messages: [{ role: 'user', content: cleanTranscript.slice(0, 12000) }]
+    });
+
+    if (response.stop_reason === 'max_tokens') {
+      throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again.');
+    }
+
+    // Sonnet 5 can emit a thinking block before the actual text block, so the
+    // final answer isn't reliably content[0] — find the text block explicitly.
+    // (Grabbing content[0] blindly silently defaulted every score to 3 with
+    // empty notes whenever a thinking block came first.)
+    const textBlock = response.content.find(b => b.type === 'text');
+    const raw = textBlock?.text || '{}';
+    const match = raw.match(/\{[\s\S]*\}/);
+    let parsed;
+    try { parsed = JSON.parse(match ? match[0] : raw); }
+    catch {
+      console.error('Call grading JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
+      throw new Error('Could not parse the AI grading response — please try again.');
+    }
+
+    // Sanitize whatever the model returned regardless of cause, then check
+    // every category actually got a substantive note — an empty one with a
+    // score attached means something went wrong generating that entry.
+    const scores = (parsed.scores || []).map(s => ({ ...s, notes: stripMarkup(s.notes) }));
+    const summary = stripMarkup(parsed.summary);
+    const missing = rubric.categories.filter(c => !scores.find(s => s.key === c.key && s.notes && s.notes.length > 20));
+    return { scores, summary, missing };
   }
 
-  // Sonnet 5 can emit a thinking block before the actual text block, so the
-  // final answer isn't reliably content[0] — find the text block explicitly.
-  // (Grabbing content[0] blindly silently defaulted every score to 3 with
-  // empty notes whenever a thinking block came first.)
-  const textBlock = response.content.find(b => b.type === 'text');
-  const raw = textBlock?.text || '{}';
-  const match = raw.match(/\{[\s\S]*\}/);
-  let parsed;
-  try { parsed = JSON.parse(match ? match[0] : raw); }
-  catch {
-    console.error('Call grading JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
-    throw new Error('Could not parse the AI grading response — please try again.');
+  let result = await runOnce();
+  if (result.missing.length) {
+    console.error(`Call grading returned incomplete notes for: ${result.missing.map(c => c.key).join(', ')} — retrying once.`);
+    result = await runOnce();
+    if (result.missing.length) {
+      throw new Error(`The AI didn't provide grading notes for: ${result.missing.map(c => c.label).join(', ')} — please try again.`);
+    }
   }
 
-  return computeResult(rubric, parsed.scores, parsed.summary);
+  return computeResult(rubric, result.scores, result.summary);
 }
 
 // Human grading via the manual evaluation form — same weighting/zero-tolerance
