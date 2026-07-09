@@ -261,4 +261,25 @@ router.get('/evaluations', async (req, res) => {
   }
 });
 
+router.get('/evaluations/:id', async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: 'Evaluation not found' });
+    res.json({ ...row, category_scores: JSON.parse(row.category_scores) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/evaluations/:id', async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'DELETE FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Evaluation not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
