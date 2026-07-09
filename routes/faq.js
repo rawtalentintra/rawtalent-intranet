@@ -1,11 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { runSlackScan, isConfigured: isSlackConfigured } = require('../services/slackService');
 const { runFathomScan, isConfigured: isFathomConfigured } = require('../services/fathomService');
+const { extractFaqsFromDocument } = require('../services/faqClassifier');
+const { extractPlainText } = require('../services/documentTextExtractor');
 const { logActivity } = require('../services/activityLog');
+
+const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 async function upsertFaqFts(id, question, answer) {
   const db = getDb();
@@ -52,6 +57,36 @@ router.post('/scan/fathom', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Fathom scan error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Uploads a document, extracts its text, and asks Claude to pull out every
+// genuinely reusable FAQ it can find — each becomes a normal pending
+// candidate, reviewed/edited/approved exactly like a Slack or Fathom one.
+router.post('/scan/document', docUpload.single('document'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const text = await extractPlainText(req.file.buffer, req.file.originalname);
+    if (!text.trim()) return res.status(400).json({ error: 'No readable text found in this document' });
+
+    const { candidates } = await extractFaqsFromDocument(text, req.file.originalname);
+    const db = getDb();
+    let candidatesFound = 0;
+    for (const c of candidates) {
+      if (!c.question?.trim() || !c.answer?.trim()) continue;
+      const id = uuidv4();
+      await db.execute({
+        sql: `INSERT INTO faq_candidates
+              (id, source, source_ref, raw_excerpt, suggested_question, suggested_answer, classification_reason)
+              VALUES (?, 'document', ?, ?, ?, ?, ?)`,
+        args: [id, req.file.originalname, text.slice(0, 2000), c.question.trim(), c.answer.trim(), 'Extracted from uploaded document']
+      });
+      candidatesFound++;
+    }
+    res.json({ docTitle: req.file.originalname, candidatesFound });
+  } catch (err) {
+    console.error('Document scan error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -124,6 +159,26 @@ router.delete('/candidates/:id', async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM faq_candidates WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manually author an FAQ directly — no Slack/Fathom candidate needed, since
+// an admin writing it themselves needs no separate scrub/approval step.
+router.post('/', async (req, res) => {
+  const { question, answer } = req.body;
+  if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: 'Question and answer are required' });
+  try {
+    const db = getDb();
+    const id = uuidv4();
+    await db.execute({
+      sql: 'INSERT INTO faqs (id, question, answer, source, approved_by) VALUES (?, ?, ?, ?, ?)',
+      args: [id, question.trim(), answer.trim(), 'manual', req.user.email]
+    });
+    await upsertFaqFts(id, question.trim(), answer.trim());
+    await logActivity('faq', question.trim(), 'created', 'FAQ added manually', req.user.email);
+    res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

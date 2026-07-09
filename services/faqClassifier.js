@@ -38,4 +38,43 @@ async function classifyConversation(text) {
   }
 }
 
-module.exports = { classifyConversation };
+// Documents (policy docs, guides) tend to hold several distinct reusable
+// Q&As rather than the single conversation classifyConversation() handles,
+// so this extracts as many as it can find in one pass instead of one verdict.
+async function extractFaqsFromDocument(text, docTitle) {
+  const client = getClassifierClient();
+  if (!client) return { candidates: [] };
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 2500,
+    system: `You are reading an internal RawTalent document titled "${docTitle}" to extract genuinely reusable FAQ material for a staff knowledge base. RawTalent is an Australian childcare staffing agency.
+
+Read the whole document and extract every distinct, general, reusable question-and-answer pair you can find or reasonably construct from its content — e.g. policy points, process steps, compliance requirements, common scenarios and how to resolve them. Skip narrative or boilerplate text with no answerable question behind it.
+
+Do not include anything containing:
+- Names of specific staff, educators, centres, or families
+- Anything personal, sensitive, or identifying
+
+Each answer must be self-contained and clear without needing the rest of the document for context.
+
+Respond with ONLY valid JSON, no other text:
+{"candidates": [{"question": string, "answer": string}, ...]}
+If there is truly nothing extractable, return {"candidates": []}.`,
+    messages: [{ role: 'user', content: text.slice(0, 15000) }]
+  });
+
+  // Find the actual text block rather than assuming content[0] — some models
+  // can emit a thinking block first, which would otherwise silently parse as "{}".
+  const textBlock = response.content.find(b => b.type === 'text');
+  const raw = textBlock?.text || '{}';
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : raw);
+    return { candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [] };
+  } catch {
+    return { candidates: [] };
+  }
+}
+
+module.exports = { classifyConversation, extractFaqsFromDocument };

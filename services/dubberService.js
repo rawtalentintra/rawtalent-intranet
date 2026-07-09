@@ -83,16 +83,17 @@ async function getRecording(recordingId) {
   return dubberCall(`/recordings/${recordingId}`);
 }
 
-// BLOCKED: Dubber's official "Get Recordings Details" doc confirms no transcript
-// field exists on the recording resource, and error code 3014 ("Invalid
-// Transcription") appears alongside *recording-creation* errors — meaning
-// Dubber's transcription concept is for external systems submitting a
-// transcript INTO Dubber, not Dubber generating and returning one. Transcript
-// access likely requires a separate product/plan (e.g. a conversational-
-// intelligence add-on) that isn't confirmed enabled on this account. Ask
-// Dubber support directly rather than guessing further.
+// Confirmed via Dubber's official "Get AI Information" doc: transcript text
+// lives in this account's Unified Capture Plus One license, at
+// GET /accounts/{account_id}/recordings/{recording_id}/ai, one entry per
+// sentence under sentences[].content (optionally with a speaker label).
 async function getTranscript(recordingId) {
-  throw new Error('Transcript is not available via the standard recordings API on this account/plan — confirmed against Dubber\'s official docs. Ask Dubber support whether AI transcription is enabled and what endpoint exposes it.');
+  const info = await dubberCall(`/accounts/${getAccountId()}/recordings/${recordingId}/ai`);
+  const sentences = info.sentences || [];
+  if (!sentences.length) throw new Error('Dubber AI info response had no sentences — transcript may not be ready yet for this call.');
+  return sentences
+    .map(s => s.speaker ? `${s.speaker}: ${s.content}` : s.content)
+    .join('\n');
 }
 
 const LISTENER_EMAIL = process.env.DUBBER_LISTENER_EMAIL || 'joy@rawtalent.com.au';
@@ -165,12 +166,13 @@ async function syncRecordings() {
     offset += SYNC_PAGE_SIZE;
   }
 
-  // Content pass — download audio, then immediately transcribe it ourselves via
-  // Groq (Dubber's own transcript API is confirmed unavailable). Using the
-  // bytes already in memory from the download avoids a second fetch. Audio and
-  // transcription are still independent try/catches, so Groq being unconfigured
-  // (or a transient failure) never blocks audio from being saved. Gated on
-  // has_audio, so already-completed rows don't get re-fetched forever.
+  // Content pass — download audio, then get a transcript. Dubber's own AI
+  // endpoint is tried first (it's already scrubbed/paid for on this account's
+  // license and needs no extra API call spacing beyond the standard rate
+  // limit); Groq only runs as a fallback if Dubber's transcript isn't ready
+  // or errors for a given call. Audio and transcript are independent
+  // try/catches, so either one succeeding never depends on the other.
+  // Gated on has_audio, so already-completed rows don't get re-fetched forever.
   const pending = await db.execute({
     sql: 'SELECT id, transcript FROM call_recordings WHERE has_audio = 0 ORDER BY start_time_iso DESC LIMIT ?',
     args: [MAX_CONTENT_FETCH_PER_RUN]
@@ -179,7 +181,7 @@ async function syncRecordings() {
   let audioFetched = 0, transcriptFetched = 0;
   const contentErrors = [];
   for (const row of pending.rows) {
-    if (audioFetched + transcriptFetched > 0) await sleepMs(600); // paces the Dubber-side download only
+    if (audioFetched + transcriptFetched > 0) await sleepMs(600); // paces Dubber-side requests
     let audio = null;
     try {
       audio = await downloadRecordingAudio(row.id);
@@ -194,13 +196,21 @@ async function syncRecordings() {
       contentErrors.push({ recordingId: row.id, type: 'audio', reason: err.message });
     }
 
-    if (audio && !row.transcript) {
+    if (!row.transcript) {
+      let transcript = null;
       try {
-        const transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
+        transcript = await getTranscript(row.id);
+      } catch (err) {
+        if (audio) {
+          try { transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype); }
+          catch (groqErr) { contentErrors.push({ recordingId: row.id, type: 'transcript', reason: groqErr.message }); }
+        } else {
+          contentErrors.push({ recordingId: row.id, type: 'transcript', reason: err.message });
+        }
+      }
+      if (transcript) {
         await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, row.id] });
         transcriptFetched++;
-      } catch (err) {
-        contentErrors.push({ recordingId: row.id, type: 'transcript', reason: err.message });
       }
     }
   }

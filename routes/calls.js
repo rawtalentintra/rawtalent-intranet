@@ -167,21 +167,26 @@ router.post('/:recordingId/evaluate', async (req, res) => {
 
     let transcript = local?.transcript;
     if (!transcript) {
-      // Transcribe ourselves via Groq using whatever audio we have (or can get) —
-      // Dubber's own transcript API is confirmed unavailable on this account.
-      let audioRes = await db.execute({ sql: 'SELECT data, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
-      let audio = audioRes.rows[0];
-      if (!audio) {
-        const fetched = await dubberService.downloadRecordingAudio(req.params.recordingId);
-        audio = { data: fetched.data, mimetype: fetched.mimetype };
-        await db.execute({
-          sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
-                ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
-          args: [req.params.recordingId, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
-        });
-        if (local) await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [req.params.recordingId] });
+      // Prefer Dubber's own AI transcript (included in this account's Unified
+      // Capture Plus One license) — only fall back to transcribing the audio
+      // ourselves via Groq if Dubber's isn't available for this call yet.
+      try {
+        transcript = await dubberService.getTranscript(req.params.recordingId);
+      } catch {
+        let audioRes = await db.execute({ sql: 'SELECT data, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
+        let audio = audioRes.rows[0];
+        if (!audio) {
+          const fetched = await dubberService.downloadRecordingAudio(req.params.recordingId);
+          audio = { data: fetched.data, mimetype: fetched.mimetype };
+          await db.execute({
+            sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
+                  ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
+            args: [req.params.recordingId, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
+          });
+          if (local) await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [req.params.recordingId] });
+        }
+        transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
       }
-      transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
       if (local) {
         await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, req.params.recordingId] });
       }
