@@ -308,4 +308,4 @@ async function askQuestion(question, askedBy, history = []) {
   return { answer, sources, history: updatedHistory };
 }
 
-module.exports = { askQuestion, streamQuestion };
+module.exports = { askQuestion, streamQuestion, searchKnowledge };

@@ -246,7 +246,8 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       }
     }
 
-    const result = await gradeCall(transcript, rubricType, feedback || null);
+    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
+    const result = await gradeCall(transcript, rubricType, repName, feedback || null);
 
     // Feedback given on this call is also saved as a standing calibration
     // note, so every future AI grading run (any call, any rep) applies the
@@ -255,7 +256,6 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       await addCalibrationNote(feedback.trim(), req.user.email);
     }
 
-    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
       repName,

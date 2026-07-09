@@ -652,9 +652,9 @@
             <table class="data-table" id="callsTable">
               <thead>
                 <tr>
-                  <th>Rep</th>
+                  <th style="width:130px">Rep</th>
                   <th style="width:38px">Dir.</th>
-                  <th>Contact</th>
+                  <th style="width:130px">Contact</th>
                   <th style="width:42px">Dur.</th>
                   <th style="width:150px">Date</th>
                   <th style="width:110px">Status</th>
@@ -2337,7 +2337,7 @@
         }
         list.innerHTML = candidates.map(c => `
           <div style="padding:18px 20px;border-bottom:1px solid var(--gray-100)">
-            <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">${c.source === 'document' ? `From document: ${escHtml(c.source_ref || 'uploaded file')}` : `From ${escHtml(c.source)}${c.source_channel ? ` · ${escHtml(c.source_channel)}` : ''} · conversation on ${fmtDate(c.source_date) || 'unknown date'}`}</div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">${c.source === 'document' ? `From document: ${escHtml(c.source_ref || 'uploaded file')}` : c.source === 'call-evaluator' ? `📞 From Call Quality Evaluator: ${escHtml(c.source_ref || 'grading feedback')}` : `From ${escHtml(c.source)}${c.source_channel ? ` · ${escHtml(c.source_channel)}` : ''} · conversation on ${fmtDate(c.source_date) || 'unknown date'}`}</div>
             <div style="margin-bottom:8px">
               <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Question</label>
               <textarea id="faq-q-${c.id}" class="form-control" style="margin-top:4px;min-height:44px;resize:vertical">${escHtml(c.suggested_question)}</textarea>

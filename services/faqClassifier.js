@@ -78,4 +78,36 @@ If there is truly nothing extractable, return {"candidates": []}.`,
   }
 }
 
-module.exports = { classifyConversation, extractFaqsFromDocument };
+const OPERATIONAL_NOTE_PROMPT = `You review internal notes from RawTalent's call-quality grading system — corrections a reviewer has taught the AI, or new grading instructions for a rubric category — to decide if the underlying insight is general company or industry knowledge worth adding to the staff knowledge base, as distinct from something that only matters to how AI grades calls.
+
+Only accept it if it reflects a genuine, generalisable policy, process, or compliance fact that would help ANY staff member — e.g. "WWCC renewal takes 10 business days in VIC" is worth sharing; "score this category more leniently" or "this rep specifically struggled with X" is not.
+
+If accepted, rewrite it as a clear, standalone question and answer, in formal Australian English, with no reference to AI grading, calls, evaluations, or the review process — write it as if it's a fact any team member might ask about directly.
+
+Respond with ONLY valid JSON, no other text:
+{"isFaqCandidate": boolean, "question": string or null, "answer": string or null, "reason": string}`;
+
+// Lets institutional knowledge flow from the call grader into the shared
+// knowledge base — a calibration note or rubric instruction often encodes a
+// real policy fact, not just a grading preference. Kept behind the same
+// human-review queue as Slack/Fathom/document candidates, never auto-published.
+async function classifyOperationalNote(noteText) {
+  const client = getClassifierClient();
+  if (!client) return { isFaqCandidate: false, reason: 'AI is not configured' };
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    system: OPERATIONAL_NOTE_PROMPT,
+    messages: [{ role: 'user', content: noteText.slice(0, 2000) }]
+  });
+  const textBlock = response.content.find(b => b.type === 'text');
+  const raw = textBlock?.text || '{}';
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    return JSON.parse(match ? match[0] : raw);
+  } catch {
+    return { isFaqCandidate: false, reason: 'Could not parse classification response' };
+  }
+}
+
+module.exports = { classifyConversation, extractFaqsFromDocument, classifyOperationalNote };

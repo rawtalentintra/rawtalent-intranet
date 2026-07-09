@@ -1,6 +1,8 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
+const { searchKnowledge } = require('./aiService');
+const { classifyOperationalNote } = require('./faqClassifier');
 
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
@@ -80,13 +82,21 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, calibrationNotes = [], oneOffFeedback = null) {
+function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibrationNotes = [], oneOffFeedback = null) {
   const categoryList = rubric.categories.map(c => {
     const base = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     return c.instructions
       ? `${base}\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`
       : base;
   }).join('\n');
+
+  // Grounds grading in the exact same knowledge base staff get answers from
+  // (articles, approved FAQs, documents), so a compliance/process judgement
+  // call here matches what the main KB AI would tell someone who asked —
+  // the two are never working off different versions of the truth.
+  const knowledgeBlock = knowledgeMatches.length
+    ? `\n\nRelevant entries from RawTalent's knowledge base (the same source used to answer staff questions) — treat these as the authoritative source of truth whenever this call touches on them, e.g. compliance timeframes, pay rates, or process steps:\n${knowledgeMatches.map(m => `- ${m.title}: ${(m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}`).join('\n')}`
+    : '';
 
   const calibrationBlock = calibrationNotes.length
     ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibrationNotes.map(n => `- ${n}`).join('\n')}`
@@ -96,7 +106,11 @@ function buildSystemPrompt(rubric, calibrationNotes = [], oneOffFeedback = null)
     ? `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
     : '';
 
-  return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}
+  const repIdentityBlock = repName
+    ? `\n\nThe RawTalent consultant on this call is named "${repName}" — this is confirmed from the call record, not something to infer from the transcript. Always refer to the consultant being graded as "${repName}" in your notes and summary. The transcript may mention other people by name (the educator, a centre contact, a colleague) — never confuse one of them with the consultant, and never substitute a different name for the consultant even if the transcript's speaker labels are generic (e.g. "Rep:", "Agent:") or a different name is mentioned elsewhere in the call.`
+    : '';
+
+  return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}${repIdentityBlock}
 
 Your notes will be read by both the consultant being coached and their manager. Grade like the expert you are — weigh operational and compliance consequences, not just surface politeness — not like a generic transcript summariser.
 
@@ -120,7 +134,7 @@ For EVERY category, without exception, write 3-5 sentences of expert, evidence-b
 3. State precisely why it earned this number rather than one point higher or lower.
 4. Give one concrete, practical coaching tip the rep could apply next time — or, for a 4 or 5, name exactly what they did that should be repeated.
 
-Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never skip or shortchange any of the ${rubric.categories.length} categories.${calibrationBlock}${feedbackBlock}
+Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never skip or shortchange any of the ${rubric.categories.length} categories.${knowledgeBlock}${calibrationBlock}${feedbackBlock}
 
 Respond with ONLY valid JSON, no other text, in this exact shape:
 {"scores": [{"key": "opening", "score": 1-5, "notes": "3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone"}, ...one entry per category key, all ${rubric.categories.length} required...], "summary": "4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager's perspective, referencing specific moments and the overall risk/coaching priority"}`;
@@ -132,6 +146,27 @@ async function getCalibrationNotes() {
   return result.rows.map(r => r.note);
 }
 
+// If a correction taught to the call grader is actually general company
+// knowledge (not just a grading preference), surface it as a pending FAQ
+// candidate for human review — the same gate Slack/Fathom/document
+// candidates go through. Once approved, it's searchable by both this
+// grader (via searchKnowledge above) and the main KB AI, closing the loop.
+async function maybeCreateFaqCandidateFromNote(noteText, sourceRef) {
+  try {
+    const classification = await classifyOperationalNote(noteText);
+    if (!classification.isFaqCandidate || !classification.question || !classification.answer) return;
+    const db = getDb();
+    const id = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO faq_candidates (id, source, source_ref, raw_excerpt, suggested_question, suggested_answer, classification_reason)
+            VALUES (?, 'call-evaluator', ?, ?, ?, ?, ?)`,
+      args: [id, sourceRef, noteText.slice(0, 500), classification.question, classification.answer, classification.reason || 'Learned from call grading feedback']
+    });
+  } catch (err) {
+    console.error('Failed to create FAQ candidate from grading note (non-fatal):', err.message);
+  }
+}
+
 async function addCalibrationNote(note, createdBy) {
   const db = getDb();
   const id = uuidv4();
@@ -139,6 +174,7 @@ async function addCalibrationNote(note, createdBy) {
     sql: 'INSERT INTO call_grading_calibration (id, note, created_by) VALUES (?, ?, ?)',
     args: [id, note, createdBy || null]
   });
+  await maybeCreateFaqCandidateFromNote(note, 'Call grading calibration note');
   return id;
 }
 
@@ -248,6 +284,7 @@ async function saveRubricInstructions(rubricType, categoryKey, instructions, upd
           ON CONFLICT(rubric_type, category_key) DO UPDATE SET description = excluded.description, instructions = excluded.instructions, updated_by = excluded.updated_by, updated_at = datetime('now')`,
     args: [id, rubricType, categoryKey, JSON.stringify(bullets), trimmed, updatedBy || null]
   });
+  await maybeCreateFaqCandidateFromNote(trimmed, `Rubric instructions — ${category.label} (${rubric.label})`);
   return { description: bullets, instructions: trimmed };
 }
 
@@ -281,7 +318,7 @@ function computeResult(rubric, rawScores, summary) {
   return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: summary || '' };
 }
 
-async function gradeCall(transcriptText, rubricType, feedback = null) {
+async function gradeCall(transcriptText, rubricType, repName = null, feedback = null) {
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -292,6 +329,16 @@ async function gradeCall(transcriptText, rubricType, feedback = null) {
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
 
   const calibrationNotes = await getCalibrationNotes();
+
+  // Grounds this evaluation in the same knowledge base the main KB AI
+  // answers staff questions from, so the two are never out of sync on
+  // policy/compliance facts — a failure here is non-fatal to grading.
+  let knowledgeMatches = [];
+  try {
+    knowledgeMatches = await searchKnowledge(getDb(), transcriptText.slice(0, 800), 5);
+  } catch (err) {
+    console.error('Knowledge base lookup failed during call grading (continuing without it):', err.message);
+  }
 
   // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
   // operational stake + justification + coaching action), plus a richer
@@ -305,7 +352,7 @@ async function gradeCall(transcriptText, rubricType, feedback = null) {
     // rubric, criteria, and calibration notes are already fixed inputs on
     // every call; this keeps the model's judgement equally consistent.
     temperature: 0.3,
-    system: buildSystemPrompt(rubric, calibrationNotes, feedback),
+    system: buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback),
     messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
   });
 
