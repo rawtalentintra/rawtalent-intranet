@@ -81,9 +81,12 @@ const RUBRICS = {
 };
 
 function buildSystemPrompt(rubric, calibrationNotes = [], oneOffFeedback = null) {
-  const categoryList = rubric.categories.map(c =>
-    `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`
-  ).join('\n');
+  const categoryList = rubric.categories.map(c => {
+    const base = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
+    return c.instructions
+      ? `${base}\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`
+      : base;
+  }).join('\n');
 
   const calibrationBlock = calibrationNotes.length
     ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibrationNotes.map(n => `- ${n}`).join('\n')}`
@@ -149,6 +152,105 @@ async function deleteCalibrationNote(id) {
   await getDb().execute({ sql: 'DELETE FROM call_grading_calibration WHERE id = ?', args: [id] });
 }
 
+async function getRubricCustomizations(rubricType) {
+  const db = getDb();
+  const result = await db.execute({ sql: 'SELECT * FROM call_rubric_customizations WHERE rubric_type = ?', args: [rubricType] });
+  const map = {};
+  for (const row of result.rows) map[row.category_key] = row;
+  return map;
+}
+
+// Merges the static rubric definition with any admin-authored customizations
+// (an AI-maintained description + longer grading instructions) so both the
+// AI's grading prompt and the reference UI always reflect the latest
+// guidance a reviewer has taught it — not just the built-in defaults.
+async function getEffectiveRubric(rubricType) {
+  const base = RUBRICS[rubricType];
+  if (!base) return null;
+  const customizations = await getRubricCustomizations(rubricType);
+  return {
+    ...base,
+    categories: base.categories.map(c => {
+      const custom = customizations[c.key];
+      let criteria = c.criteria;
+      if (custom?.description) {
+        try { criteria = JSON.parse(custom.description); } catch { /* fall back to default criteria */ }
+      }
+      return { ...c, criteria, instructions: custom?.instructions || null };
+    })
+  };
+}
+
+async function getAllEffectiveRubrics() {
+  const [educator, centre] = await Promise.all([getEffectiveRubric('educator'), getEffectiveRubric('centre')]);
+  return { educator, centre };
+}
+
+// Keeps the short reference-table description in sync with whatever
+// in-depth grading instructions a reviewer adds, so the summary a reviewer
+// sees never drifts from what the AI is actually being told to check for.
+async function summarizeCategoryDescription(rubric, category, instructions) {
+  const client = getClient();
+  if (!client) return category.criteria; // AI not configured — leave the existing bullets as-is
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 600,
+    temperature: 0.3,
+    system: `You maintain the short reference description shown for one category of a RawTalent call-quality grading rubric. RawTalent is an Australian childcare staffing agency.
+
+Category: "${category.label}" (part of grading ${rubric.description})
+
+Current summary bullets:
+${category.criteria.map(x => `- ${x}`).join('\n')}
+
+The reviewer has just added or updated in-depth grading instructions for this category:
+"${instructions}"
+
+Rewrite the summary as 3-5 short, concrete bullet points, in formal Australian English, that combine the original intent above with anything new or changed by these instructions. Keep each bullet to one line — this is a quick-reference summary, not the full instructions.
+
+Respond with ONLY valid JSON, no other text: {"bullets": [string, ...]}`,
+    messages: [{ role: 'user', content: 'Update the summary.' }]
+  });
+
+  const textBlock = response.content.find(b => b.type === 'text');
+  const raw = textBlock?.text || '{}';
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : raw);
+    return Array.isArray(parsed.bullets) && parsed.bullets.length ? parsed.bullets : category.criteria;
+  } catch {
+    console.error('Rubric description summarisation parse failure. Raw response (first 500 chars):', raw.slice(0, 500));
+    return category.criteria;
+  }
+}
+
+async function saveRubricInstructions(rubricType, categoryKey, instructions, updatedBy) {
+  const rubric = RUBRICS[rubricType];
+  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
+  const category = rubric.categories.find(c => c.key === categoryKey);
+  if (!category) throw new Error(`Unknown category: ${categoryKey}`);
+
+  const trimmed = instructions?.trim() || '';
+  const db = getDb();
+
+  if (!trimmed) {
+    // Clearing instructions reverts the description to the built-in default.
+    await db.execute({ sql: 'DELETE FROM call_rubric_customizations WHERE rubric_type = ? AND category_key = ?', args: [rubricType, categoryKey] });
+    return { description: category.criteria, instructions: null };
+  }
+
+  const bullets = await summarizeCategoryDescription(rubric, category, trimmed);
+  const id = uuidv4();
+  await db.execute({
+    sql: `INSERT INTO call_rubric_customizations (id, rubric_type, category_key, description, instructions, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(rubric_type, category_key) DO UPDATE SET description = excluded.description, instructions = excluded.instructions, updated_by = excluded.updated_by, updated_at = datetime('now')`,
+    args: [id, rubricType, categoryKey, JSON.stringify(bullets), trimmed, updatedBy || null]
+  });
+  return { description: bullets, instructions: trimmed };
+}
+
 // Shared by AI grading and manual (human) grading so both produce comparable
 // weighted scores/outcomes for the future Call Quality Reporting rollup.
 function computeResult(rubric, rawScores, summary) {
@@ -180,8 +282,11 @@ function computeResult(rubric, rawScores, summary) {
 }
 
 async function gradeCall(transcriptText, rubricType, feedback = null) {
-  const rubric = RUBRICS[rubricType];
-  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
+  if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
+  // Effective rubric merges in any admin-authored per-category grading
+  // instructions, so a reviewer's added guidance is always applied — not
+  // just the built-in criteria.
+  const rubric = await getEffectiveRubric(rubricType);
 
   const client = getClient();
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
@@ -248,4 +353,8 @@ async function saveEvaluation({ recordingId, repName, callType, rubricType, call
   return id;
 }
 
-module.exports = { RUBRICS, gradeCall, gradeManual, saveEvaluation, addCalibrationNote, listCalibrationNotes, deleteCalibrationNote };
+module.exports = {
+  RUBRICS, gradeCall, gradeManual, saveEvaluation,
+  addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
+  getAllEffectiveRubrics, saveRubricInstructions
+};

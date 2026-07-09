@@ -4,7 +4,11 @@ const { getDb } = require('../db/database');
 const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
-const { RUBRICS, gradeCall, gradeManual, saveEvaluation, addCalibrationNote, listCalibrationNotes, deleteCalibrationNote } = require('../services/callGradingService');
+const {
+  RUBRICS, gradeCall, gradeManual, saveEvaluation,
+  addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
+  getAllEffectiveRubrics, saveRubricInstructions
+} = require('../services/callGradingService');
 const { generateReport } = require('../services/callReportService');
 
 // Call recordings are confidential — everything here is super_admin only,
@@ -148,8 +152,26 @@ router.get('/find-playback/:recordingId', async (req, res) => {
   }
 });
 
-router.get('/rubrics', (req, res) => {
-  res.json(RUBRICS);
+router.get('/rubrics', async (req, res) => {
+  try {
+    res.json(await getAllEffectiveRubrics());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin-authored, in-depth grading instructions per category — saving
+// re-summarises the short reference description via AI and applies the
+// instructions to every future AI evaluation for this rubric type.
+router.put('/rubrics/:rubricType/:categoryKey/instructions', async (req, res) => {
+  if (!RUBRICS[req.params.rubricType]) return res.status(400).json({ error: 'Unknown rubric type' });
+  try {
+    const result = await saveRubricInstructions(req.params.rubricType, req.params.categoryKey, req.body.instructions || '', req.user.email);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Save rubric instructions error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Standing grading calibration — a running list of corrections a reviewer

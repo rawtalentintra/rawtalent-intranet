@@ -255,6 +255,20 @@ async function initDatabase() {
       created_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // Per-category overrides on top of the built-in rubric: "description" is
+    // the short bullet-point summary shown in the reference table, kept in
+    // sync automatically by AI whenever "instructions" (longer, admin-authored
+    // grading guidance fed straight into the AI's system prompt) changes.
+    `CREATE TABLE IF NOT EXISTS call_rubric_customizations (
+      id TEXT PRIMARY KEY,
+      rubric_type TEXT NOT NULL,
+      category_key TEXT NOT NULL,
+      description TEXT,
+      instructions TEXT,
+      updated_by TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(rubric_type, category_key)
+    )`,
     // Local cache of Dubber recording metadata, fetched eagerly at sync time
     // along with the transcript — so browsing never has to hit Dubber's
     // rate-limited API, and a call is ready to evaluate the moment it's synced.

@@ -653,12 +653,12 @@
               <thead>
                 <tr>
                   <th>Rep</th>
-                  <th style="width:70px">Dir.</th>
+                  <th style="width:38px">Dir.</th>
                   <th>Contact</th>
-                  <th style="width:60px">Dur.</th>
+                  <th style="width:42px">Dur.</th>
                   <th style="width:150px">Date</th>
                   <th style="width:110px">Status</th>
-                  <th style="width:420px"></th>
+                  <th style="width:460px"></th>
                 </tr>
               </thead>
               <tbody id="callsListBody">
@@ -2531,30 +2531,90 @@
     async function loadRubricReference() {
       const container = document.getElementById('rubricReferenceBody');
       try {
-        if (Object.keys(callRubrics).length === 0) {
-          callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
-        }
+        callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
         container.innerHTML = Object.entries(callRubrics).map(([type, rubric]) => `
-          <div style="margin-bottom:18px">
+          <div style="margin-bottom:22px">
             <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:2px">${escHtml(rubric.label)}</div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(rubric.description)}</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
-              ${rubric.categories.map(c => `
-                <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 14px">
-                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px">
-                    <span style="font-weight:700;font-size:12.5px;color:var(--navy)">${escHtml(c.label)}</span>
-                    <span style="font-size:11px;font-weight:700;color:var(--orange);flex-shrink:0">${c.weight}%</span>
-                  </div>
-                  ${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;display:inline-block;margin-bottom:6px">⛔ Zero-tolerance</div>' : ''}
-                  <ul style="margin:0;padding-left:16px;font-size:11.5px;color:var(--text-muted);line-height:1.5">
-                    ${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}
-                  </ul>
-                </div>
-              `).join('')}
+            <div style="overflow-x:auto">
+              <table class="data-table" style="font-size:12.5px">
+                <thead>
+                  <tr>
+                    <th>Section</th>
+                    <th>Description</th>
+                    <th style="width:60px">Points</th>
+                    <th style="width:60px">Weight</th>
+                    <th style="width:150px"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rubric.categories.map(c => `
+                    <tr>
+                      <td style="font-weight:700;color:var(--navy);vertical-align:top">
+                        ${escHtml(c.label)}
+                        ${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;display:inline-block;margin-top:4px">⛔ Zero-tolerance</div>' : ''}
+                      </td>
+                      <td style="vertical-align:top">
+                        <ul style="margin:0;padding-left:16px;color:var(--text-muted);line-height:1.5">
+                          ${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}
+                        </ul>
+                      </td>
+                      <td style="text-align:center;color:var(--text-muted);vertical-align:top">1–5</td>
+                      <td style="text-align:center;font-weight:700;color:var(--orange);vertical-align:top">${c.weight}%</td>
+                      <td style="vertical-align:top">
+                        <button class="action-btn edit" onclick="toggleRubricInstructions('${type}','${c.key}')">${c.instructions ? '📝 Instructions' : '+ Instructions'}</button>
+                      </td>
+                    </tr>
+                    <tr id="rubric-instructions-${type}-${c.key}" style="display:none">
+                      <td colspan="5" style="background:var(--offwhite)">
+                        <label class="form-label-modal">In-depth grading instructions — ${escHtml(c.label)} (${escHtml(rubric.label)})</label>
+                        <textarea id="rubric-instructions-text-${type}-${c.key}" class="form-control textarea" style="min-height:80px;margin-top:6px">${escHtml(c.instructions || '')}</textarea>
+                        <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Saving re-summarises the Description column automatically via AI, and applies these instructions to every future AI evaluation for this category.</div>
+                        <div style="display:flex;gap:8px;margin-top:10px">
+                          <button class="btn-add" onclick="submitRubricInstructions('${type}','${c.key}')">Save Instructions</button>
+                          ${c.instructions ? `<button class="btn-secondary" onclick="clearRubricInstructions('${type}','${c.key}')">Clear</button>` : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
             </div>
           </div>
         `).join('');
       } catch { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Failed to load rubric definitions.</div>'; }
+    }
+
+    function toggleRubricInstructions(type, key) {
+      const row = document.getElementById(`rubric-instructions-${type}-${key}`);
+      row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+    }
+
+    async function submitRubricInstructions(type, key) {
+      const text = document.getElementById(`rubric-instructions-text-${type}-${key}`).value.trim();
+      try {
+        const res = await fetch(`/api/calls/rubrics/${type}/${key}/instructions`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instructions: text })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
+        toast('Instructions saved — description updated', 'success');
+        await loadRubricReference();
+      } catch { toast('Save failed', 'error'); }
+    }
+
+    async function clearRubricInstructions(type, key) {
+      if (!confirm('Clear these instructions and revert to the default description?')) return;
+      try {
+        const res = await fetch(`/api/calls/rubrics/${type}/${key}/instructions`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instructions: '' })
+        });
+        if (!res.ok) { toast('Failed to clear', 'error'); return; }
+        toast('Reverted to default description', 'success');
+        await loadRubricReference();
+      } catch { toast('Failed to clear', 'error'); }
     }
 
     async function loadCalibrationNotes() {
@@ -2846,9 +2906,9 @@
           return `
           <tr>
             <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || 'Unknown')}</td>
-            <td style="text-transform:capitalize;color:var(--text-muted)">${escHtml(r.call_type || '—')}</td>
+            <td style="color:var(--text-muted)" title="${escHtml(r.call_type || '—')}">${r.call_type === 'outbound' ? 'Out' : r.call_type === 'inbound' ? 'In' : '—'}</td>
             <td>${escHtml(contact || '—')}</td>
-            <td style="color:var(--text-muted)">${fmtDuration(r.duration_seconds)}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${fmtDuration(r.duration_seconds)}</td>
             <td style="color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
             <td><span class="badge ${badge.cls}">${badge.label}</span></td>
             <td>
