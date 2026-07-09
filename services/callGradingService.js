@@ -93,7 +93,13 @@ function buildSystemPrompt(rubric, calibrationNotes = [], oneOffFeedback = null)
     ? `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
     : '';
 
-  return `You are grading a real RawTalent call transcript against a fixed quality rubric. RawTalent is an Australian childcare staffing agency; this call is ${rubric.description}
+  return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}
+
+Your notes will be read by both the consultant being coached and their manager. Grade like the expert you are — weigh operational and compliance consequences, not just surface politeness — not like a generic transcript summariser.
+
+Write in formal Australian English throughout, in every note and the summary (e.g. "organise", "recognise", "behaviour", "centre", "colour", "favourite", "realise") — never American spelling.
+
+Your tone is that of a supportive, experienced coach, not a strict examiner: constructive, encouraging, and fair. Maintain high standards, but do not be harsh — assume good intent, and reserve low scores (1-2) for genuine, meaningful gaps, not minor imperfections. A 3 (Adequate) is a fair, respectable outcome, not a failure. When a behaviour was missed or could improve, say so plainly and briefly, then offer one clear, practical tip for next time — matter-of-fact and encouraging, never dramatic, alarmist, or over-the-top.
 
 Score each category from 1 to 5:
 1 = Absent, 2 = Weak, 3 = Adequate, 4 = Strong, 5 = Exemplary
@@ -101,14 +107,20 @@ Score each category from 1 to 5:
 Categories (with weight):
 ${categoryList}
 
-A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/compliance error (wrong WWCC status, wrong pay, wrong qualification claim, etc.), score that category 1 or 2 regardless of how confidently or smoothly it was delivered — a warm, well-paced call that gives wrong information is still a failed call.
+A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/compliance error (wrong WWCC status, wrong pay, wrong qualification claim, a compliance concern acknowledged but not resolved or escalated, etc.), score that category 1 or 2 regardless of how confidently or smoothly it was delivered — a warm, well-paced call that mishandles compliance is still a failed call. Weigh the real-world consequence: could this expose RawTalent, the centre, or a child to risk if left unaddressed? This is the one place strictness does not soften — compliance risk is compliance risk — but even here, keep the note's tone constructive rather than alarmist.
 
 Base every score strictly on what is actually in the transcript. Do not invent behaviour that isn't there. If the transcript is too short or unclear to judge a category, score it 3 and say so in the notes.
 
-For every category, write 2-4 sentences of specific, evidence-based reasoning: quote or paraphrase the exact moment in the call that drove the score, explain why it earned that number rather than one point higher or lower, and name anything the rep could have done differently. Generic notes like "handled the call well" are not acceptable — reference what was actually said.${calibrationBlock}${feedbackBlock}
+For EVERY category, without exception, write 3-5 sentences of expert, evidence-based reasoning covering all of the following:
+1. Quote or paraphrase the exact moment in the call that drove the score.
+2. Explain the operational, compliance, or relationship stake this represents — why it matters to the business, not just whether it "sounded good".
+3. State precisely why it earned this number rather than one point higher or lower.
+4. Give one concrete, practical coaching tip the rep could apply next time — or, for a 4 or 5, name exactly what they did that should be repeated.
+
+Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never skip or shortchange any of the ${rubric.categories.length} categories.${calibrationBlock}${feedbackBlock}
 
 Respond with ONLY valid JSON, no other text, in this exact shape:
-{"scores": [{"key": "opening", "score": 1-5, "notes": "2-4 sentences of specific reasoning, referencing what was actually said in the call"}, ...one entry per category key...], "summary": "3-4 sentence overall summary of how the call went, referencing specific moments"}`;
+{"scores": [{"key": "opening", "score": 1-5, "notes": "3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone"}, ...one entry per category key, all ${rubric.categories.length} required...], "summary": "4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager's perspective, referencing specific moments and the overall risk/coaching priority"}`;
 }
 
 async function getCalibrationNotes() {
@@ -176,12 +188,18 @@ async function gradeCall(transcriptText, rubricType, feedback = null) {
 
   const calibrationNotes = await getCalibrationNotes();
 
-  // 7 categories x 2-4 sentences of evidence-based notes, plus a summary, plus
-  // any calibration/feedback context, comfortably exceeds 2500 tokens — that
-  // was cutting the JSON off mid-response often enough to fail to parse.
+  // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
+  // operational stake + justification + coaching action), plus a richer
+  // summary, plus any calibration/feedback context, needs real headroom —
+  // too little was cutting the JSON off mid-response and failing to parse.
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 4096,
+    max_tokens: 6144,
+    // Low temperature so the same call graded twice, or two similar calls,
+    // land on consistent standards and tone rather than drifting — the
+    // rubric, criteria, and calibration notes are already fixed inputs on
+    // every call; this keeps the model's judgement equally consistent.
+    temperature: 0.3,
     system: buildSystemPrompt(rubric, calibrationNotes, feedback),
     messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
   });

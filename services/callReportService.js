@@ -104,6 +104,8 @@ async function generateReport(evaluations, filters) {
 
   const system = `You are a call quality analyst for RawTalent, an Australian childcare staffing agency, writing a period report for a super admin reviewing call evaluations from ${rubricLabel} calls.
 
+Write in formal Australian English throughout (e.g. "organise", "recognise", "behaviour", "centre", "realise") — never American spelling. Keep the tone constructive and fair, like an experienced coach: maintain high standards without being harsh, and when flagging a gap, be plain and brief rather than dramatic or alarmist.
+
 The quality rubric measures: Opening & Rapport, Active Listening, Compliance Accuracy (zero-tolerance for factual/compliance errors), Critical Thinking & Proactiveness, Australian Cultural Fit, Resolution & Ownership, and Closing — each scored 1-5 (1=Absent, 5=Exemplary), weighted into an overall percentage. A great call is warm and locally natural, listens without interrupting, is 100% accurate on compliance details, proactively solves problems, and fully resolves the reason for the call.
 
 This report's focus: ${focusLabel}.
@@ -137,6 +139,7 @@ Respond with ONLY valid JSON, no other text:
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 4096,
+    temperature: 0.3,
     system,
     messages: [{ role: 'user', content: 'Generate the report.' }]
   });

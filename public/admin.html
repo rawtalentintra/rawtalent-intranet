@@ -675,14 +675,6 @@
             <span id="callEvalOutcome"></span>
           </div>
           <div id="callEvalResultBody" style="padding:20px"></div>
-          <div style="padding:0 20px 20px">
-            <button class="btn-secondary" onclick="toggleFeedbackBox()">💬 Give Feedback &amp; Re-grade</button>
-            <div id="feedbackBox" style="display:none;margin-top:12px">
-              <textarea id="evalFeedbackText" class="form-control textarea" placeholder="e.g. You were too strict on Compliance Accuracy — confirming WWCC is already noted in the CRM is enough, it doesn't need to be said aloud on the call." style="min-height:70px"></textarea>
-              <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, and is also saved as a standing rule the AI applies to every future evaluation.</div>
-              <button class="btn-add" style="margin-top:10px" onclick="submitFeedbackRegrade()">Re-grade with This Feedback</button>
-            </div>
-          </div>
         </div>
 
         <div class="admin-table-card">
@@ -925,8 +917,18 @@
         <div class="modal-title" id="evalDetailModalTitle">Evaluation Detail</div>
         <button class="modal-close" onclick="closeEvalDetailModal()">×</button>
       </div>
-      <div class="modal-body" id="evalDetailBody" style="max-height:65vh;overflow-y:auto">
-        <div class="loading-spinner"><div class="spinner"></div></div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+        <div id="evalDetailBody">
+          <div class="loading-spinner"><div class="spinner"></div></div>
+        </div>
+        <div style="padding-top:16px;margin-top:16px;border-top:1px solid var(--gray-100)">
+          <button class="btn-secondary" onclick="toggleDetailFeedbackBox()">💬 Give Feedback &amp; Re-grade</button>
+          <div id="detailFeedbackBox" style="display:none;margin-top:12px">
+            <textarea id="detailFeedbackText" class="form-control textarea" placeholder="e.g. You were too strict on Compliance Accuracy — confirming WWCC is already noted in the CRM is enough, it doesn't need to be said aloud on the call." style="min-height:70px"></textarea>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, and is also saved as a standing rule the AI applies to every future evaluation.</div>
+            <button class="btn-add" style="margin-top:10px" id="detailFeedbackSubmitBtn" onclick="submitDetailFeedbackRegrade()">Re-grade with This Feedback</button>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="action-btn delete" style="padding:9px 18px;font-size:13px" onclick="deleteEvalDetailConfirm()">Delete Evaluation</button>
@@ -2583,38 +2585,6 @@
       } catch { toast('Remove failed', 'error'); }
     }
 
-    function toggleFeedbackBox() {
-      const box = document.getElementById('feedbackBox');
-      box.style.display = box.style.display === 'none' ? 'block' : 'none';
-    }
-
-    async function submitFeedbackRegrade() {
-      const feedback = document.getElementById('evalFeedbackText').value.trim();
-      if (!feedback) { toast('Enter feedback first', 'error'); return; }
-      if (!currentEvalRecordingId || !currentEvalRubricType) { toast('No call selected to re-grade', 'error'); return; }
-      const body = document.getElementById('callEvalResultBody');
-      const outcomeEl = document.getElementById('callEvalOutcome');
-      outcomeEl.innerHTML = '';
-      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Re-grading with your feedback…</div>';
-      try {
-        const res = await fetch(`/api/calls/${currentEvalRecordingId}/evaluate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rubricType: currentEvalRubricType, feedback })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          body.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Re-grade failed')}</div>`;
-          return;
-        }
-        renderEvalResult(data);
-        document.getElementById('evalFeedbackText').value = '';
-        document.getElementById('feedbackBox').style.display = 'none';
-        loadEvaluationHistory();
-        loadCalibrationNotes();
-        toast('Re-graded — feedback saved as a standing rule for future evaluations', 'success');
-      } catch { body.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Re-grade failed.</div>'; }
-    }
-
     // ── Call Quality Dashboard ───────────────────────────────────────
     let dashboardLoaded = false;
 
@@ -2931,13 +2901,8 @@
       escalate: { label: 'Escalate', badge: 'badge-draft' }
     };
 
-    let currentEvalRecordingId = null;
-    let currentEvalRubricType = null;
-
     async function evaluateCall(recordingId) {
       const rubricType = document.getElementById(`rubric-${recordingId}`).value;
-      currentEvalRecordingId = recordingId;
-      currentEvalRubricType = rubricType;
       if (Object.keys(callRubrics).length === 0) {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
       }
@@ -2946,8 +2911,6 @@
       const outcomeEl = document.getElementById('callEvalOutcome');
       card.style.display = 'block';
       outcomeEl.innerHTML = '';
-      document.getElementById('feedbackBox').style.display = 'none';
-      document.getElementById('evalFeedbackText').value = '';
       body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Grading call against the ' + (rubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing') + ' rubric…</div>';
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       try {
@@ -3061,8 +3024,6 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
         closeManualGradeModal();
-        currentEvalRecordingId = manualGradeRecordingId;
-        currentEvalRubricType = rubricType;
         const card = document.getElementById('callEvalResultCard');
         card.style.display = 'block';
         renderEvalResult(data);
@@ -3097,12 +3058,16 @@
       } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load evaluations.</div>'; }
     }
 
-    // ── Evaluation Detail (full breakdown + delete) ──────────────────
+    // ── Evaluation Detail (full breakdown + delete + feedback/re-grade) ──
     let evalDetailCurrentId = null;
+    let evalDetailRecordingId = null;
+    let evalDetailRubricType = null;
 
     async function openEvalDetail(evalId) {
       evalDetailCurrentId = evalId;
       document.getElementById('evalDetailModal').classList.add('open');
+      document.getElementById('detailFeedbackBox').style.display = 'none';
+      document.getElementById('detailFeedbackText').value = '';
       const body = document.getElementById('evalDetailBody');
       body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
@@ -3111,8 +3076,36 @@
         }
         const e = await fetch(`/api/calls/evaluations/${evalId}`).then(r => r.json());
         if (e.error) { body.innerHTML = `<div style="color:#c0392b">${escHtml(e.error)}</div>`; return; }
+        evalDetailRecordingId = e.recording_id;
+        evalDetailRubricType = e.rubric_type;
         renderEvalDetail(e);
       } catch { body.innerHTML = '<div style="color:#c0392b">Failed to load evaluation.</div>'; }
+    }
+
+    function toggleDetailFeedbackBox() {
+      const box = document.getElementById('detailFeedbackBox');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function submitDetailFeedbackRegrade() {
+      const feedback = document.getElementById('detailFeedbackText').value.trim();
+      if (!feedback) { toast('Enter feedback first', 'error'); return; }
+      if (!evalDetailRecordingId || !evalDetailRubricType) { toast('No call to re-grade', 'error'); return; }
+      const btn = document.getElementById('detailFeedbackSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Re-grading…';
+      try {
+        const res = await fetch(`/api/calls/${evalDetailRecordingId}/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rubricType: evalDetailRubricType, feedback })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Re-grade failed', 'error'); return; }
+        toast('Re-graded — feedback saved as a standing rule for future evaluations', 'success');
+        await openEvalDetail(data.id);
+        loadEvaluationHistory();
+        loadCalibrationNotes();
+      } catch { toast('Re-grade failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Re-grade with This Feedback'; }
     }
 
     function renderEvalDetail(e) {
