@@ -111,6 +111,9 @@
         <div class="admin-nav-item" onclick="showSection('calls', this)">
           <span class="admin-nav-icon">📞</span> Call Quality Evaluator
         </div>
+        <div class="admin-nav-item" onclick="showSection('calls-dashboard', this)">
+          <span class="admin-nav-icon">📊</span> Call Quality Dashboard
+        </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label">Insights</div>
@@ -622,6 +625,19 @@
         <div class="admin-table-card" style="margin-bottom:20px">
           <div class="admin-table-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">🎯 Grading Calibration Notes</span>
+              <span id="calibrationCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+          </div>
+          <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--gray-200)">Standing corrections taught to the AI from past reviewer feedback — applied automatically to every future evaluation. Remove any that no longer apply.</div>
+          <div id="calibrationList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
               <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
               <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
             </div>
@@ -659,6 +675,14 @@
             <span id="callEvalOutcome"></span>
           </div>
           <div id="callEvalResultBody" style="padding:20px"></div>
+          <div style="padding:0 20px 20px">
+            <button class="btn-secondary" onclick="toggleFeedbackBox()">💬 Give Feedback &amp; Re-grade</button>
+            <div id="feedbackBox" style="display:none;margin-top:12px">
+              <textarea id="evalFeedbackText" class="form-control textarea" placeholder="e.g. You were too strict on Compliance Accuracy — confirming WWCC is already noted in the CRM is enough, it doesn't need to be said aloud on the call." style="min-height:70px"></textarea>
+              <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, and is also saved as a standing rule the AI applies to every future evaluation.</div>
+              <button class="btn-add" style="margin-top:10px" onclick="submitFeedbackRegrade()">Re-grade with This Feedback</button>
+            </div>
+          </div>
         </div>
 
         <div class="admin-table-card">
@@ -672,6 +696,52 @@
             <div class="loading-spinner"><div class="spinner"></div></div>
           </div>
         </div>
+      </div>
+
+      <!-- Call Quality Dashboard -->
+      <div class="admin-section" id="section-calls-dashboard">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Call Quality Dashboard</div>
+            <div class="admin-page-sub">A period-level view of how calls are going — team and individual performance against the quality rubric, outliers worth addressing, and commendable behaviour worth recognising. Visible to you as super admin only.</div>
+          </div>
+        </div>
+
+        <div style="background:white;border-radius:var(--radius-lg);padding:20px 24px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;align-items:end">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">FROM</label>
+              <input type="date" id="reportFrom" class="form-control">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">TO</label>
+              <input type="date" id="reportTo" class="form-control">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">REP</label>
+              <select id="reportRep" class="form-control">
+                <option value="">All Reps</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">RUBRIC</label>
+              <select id="reportRubric" class="form-control">
+                <option value="">Both</option>
+                <option value="educator">Educator-Facing</option>
+                <option value="centre">Centre-Facing</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">FOCUS CRITERIA</label>
+              <select id="reportCategory" class="form-control">
+                <option value="">Overall Score</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn-primary" id="generateReportBtn" onclick="generateCallReport()" style="margin-top:14px;padding:10px 22px">Generate Report</button>
+        </div>
+
+        <div id="reportOutput"></div>
       </div>
 
     </main>
@@ -1059,7 +1129,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'calls'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'calls', 'calls-dashboard'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -1080,6 +1150,7 @@
       if (id === 'sources') loadSources();
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
+      if (id === 'calls-dashboard') loadCallsDashboard();
     }
 
     // ── Stats ─────────────────────────────────────────────────────
@@ -2452,6 +2523,7 @@
       loadCallsList();
       loadEvaluationHistory();
       loadRubricReference();
+      loadCalibrationNotes();
     }
 
     async function loadRubricReference() {
@@ -2481,6 +2553,237 @@
           </div>
         `).join('');
       } catch { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Failed to load rubric definitions.</div>'; }
+    }
+
+    async function loadCalibrationNotes() {
+      const list = document.getElementById('calibrationList');
+      try {
+        const notes = await fetch('/api/calls/calibration').then(r => r.json());
+        document.getElementById('calibrationCount').textContent = `${notes.length} active`;
+        if (notes.length === 0) {
+          list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No calibration notes yet — use "Give Feedback & Re-grade" on an evaluation to teach the AI a standing correction.</div>';
+          return;
+        }
+        list.innerHTML = notes.map(n => `
+          <div style="display:flex;align-items:flex-start;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="flex:1;min-width:0;font-size:13px;color:var(--text)">${escHtml(n.note)}</div>
+            <div style="font-size:11px;color:var(--text-muted);flex-shrink:0;white-space:nowrap">${escHtml(n.created_by || '—')} · ${fmtDate(n.created_at)}</div>
+            <button class="action-btn delete" style="flex-shrink:0" onclick="deleteCalibrationNote('${n.id}')">Remove</button>
+          </div>
+        `).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load calibration notes.</div>'; }
+    }
+
+    async function deleteCalibrationNote(id) {
+      if (!confirm('Remove this calibration note? Future evaluations will no longer apply this correction.')) return;
+      try {
+        await fetch(`/api/calls/calibration/${id}`, { method: 'DELETE' });
+        toast('Calibration note removed', 'success');
+        loadCalibrationNotes();
+      } catch { toast('Remove failed', 'error'); }
+    }
+
+    function toggleFeedbackBox() {
+      const box = document.getElementById('feedbackBox');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function submitFeedbackRegrade() {
+      const feedback = document.getElementById('evalFeedbackText').value.trim();
+      if (!feedback) { toast('Enter feedback first', 'error'); return; }
+      if (!currentEvalRecordingId || !currentEvalRubricType) { toast('No call selected to re-grade', 'error'); return; }
+      const body = document.getElementById('callEvalResultBody');
+      const outcomeEl = document.getElementById('callEvalOutcome');
+      outcomeEl.innerHTML = '';
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Re-grading with your feedback…</div>';
+      try {
+        const res = await fetch(`/api/calls/${currentEvalRecordingId}/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rubricType: currentEvalRubricType, feedback })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          body.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Re-grade failed')}</div>`;
+          return;
+        }
+        renderEvalResult(data);
+        document.getElementById('evalFeedbackText').value = '';
+        document.getElementById('feedbackBox').style.display = 'none';
+        loadEvaluationHistory();
+        loadCalibrationNotes();
+        toast('Re-graded — feedback saved as a standing rule for future evaluations', 'success');
+      } catch { body.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Re-grade failed.</div>'; }
+    }
+
+    // ── Call Quality Dashboard ───────────────────────────────────────
+    let dashboardLoaded = false;
+
+    async function loadCallsDashboard() {
+      if (dashboardLoaded) return;
+      dashboardLoaded = true;
+      try {
+        const reps = await fetch('/api/calls/rep-names').then(r => r.json());
+        const repSelect = document.getElementById('reportRep');
+        reps.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name;
+          repSelect.appendChild(opt);
+        });
+      } catch {}
+      try {
+        if (Object.keys(callRubrics).length === 0) {
+          callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+        }
+        const seen = new Set();
+        const catSelect = document.getElementById('reportCategory');
+        Object.values(callRubrics).forEach(rubric => {
+          rubric.categories.forEach(c => {
+            if (seen.has(c.key)) return;
+            seen.add(c.key);
+            const opt = document.createElement('option');
+            opt.value = c.key; opt.textContent = c.label;
+            catSelect.appendChild(opt);
+          });
+        });
+      } catch {}
+    }
+
+    async function generateCallReport() {
+      const btn = document.getElementById('generateReportBtn');
+      const output = document.getElementById('reportOutput');
+      const params = new URLSearchParams();
+      const from = document.getElementById('reportFrom').value;
+      const to = document.getElementById('reportTo').value;
+      const rep = document.getElementById('reportRep').value;
+      const rubricType = document.getElementById('reportRubric').value;
+      const category = document.getElementById('reportCategory').value;
+      if (from) params.set('dateFrom', from);
+      if (to) params.set('dateTo', to);
+      if (rep) params.set('repName', rep);
+      if (rubricType) params.set('rubricType', rubricType);
+      if (category) params.set('category', category);
+
+      btn.disabled = true; btn.textContent = 'Generating…';
+      output.innerHTML = '<div style="padding:40px;text-align:center"><div class="loading-spinner"><div class="spinner"></div></div><div style="color:var(--text-muted);font-size:13px;margin-top:10px">Analysing evaluations and writing the report…</div></div>';
+      try {
+        const data = await fetch(`/api/calls/report?${params}`).then(r => r.json());
+        if (data.error) { output.innerHTML = `<div style="padding:20px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error)}</div>`; return; }
+        renderCallReport(data, category);
+      } catch { output.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to generate report.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Generate Report'; }
+    }
+
+    function renderCallReport(data, categoryKey) {
+      const output = document.getElementById('reportOutput');
+      const { stats, aiReport, aiError } = data;
+
+      if (stats.total === 0) {
+        output.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200)">No evaluations match this period and filters.</div>';
+        return;
+      }
+
+      const focusLabel = categoryKey ? (stats.categoryAverages.find(c => c.key === categoryKey)?.label || categoryKey) : 'Overall Score';
+
+      const statCards = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+          <div style="background:white;border-radius:var(--radius-lg);padding:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-size:26px;font-weight:800;color:var(--navy)">${stats.total}</div>
+            <div style="font-size:12.5px;color:var(--text-muted)">Calls evaluated by AI</div>
+          </div>
+          <div style="background:white;border-radius:var(--radius-lg);padding:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-size:26px;font-weight:800;color:var(--orange)">${stats.avgOverallScore}%</div>
+            <div style="font-size:12.5px;color:var(--text-muted)">Average overall score</div>
+          </div>
+          <div style="background:white;border-radius:var(--radius-lg);padding:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="display:flex;gap:10px;font-size:13px">
+              <span style="color:#1a8a4a;font-weight:700">${stats.outcomeBreakdown.pass || 0} pass</span>
+              <span style="color:#b8860b;font-weight:700">${stats.outcomeBreakdown.coaching || 0} coaching</span>
+              <span style="color:#c0392b;font-weight:700">${stats.outcomeBreakdown.escalate || 0} escalate</span>
+            </div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">Outcome breakdown</div>
+          </div>
+          <div style="background:white;border-radius:var(--radius-lg);padding:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
+            <div style="font-size:26px;font-weight:800;color:var(--navy)">${stats.perRep.length}</div>
+            <div style="font-size:12.5px;color:var(--text-muted)">Reps represented</div>
+          </div>
+        </div>
+      `;
+
+      const categoryBars = `
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header"><span style="font-weight:600;font-size:14px;color:var(--navy)">Category Averages</span></div>
+          <div style="padding:18px 22px">
+            ${stats.categoryAverages.map(c => `
+              <div style="margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+                  <span style="font-weight:600;color:var(--navy)">${escHtml(c.label)}${categoryKey === c.key ? ' <span style="color:var(--orange)">★ focus</span>' : ''}</span>
+                  <span style="color:var(--text-muted)">${c.avgScore}/5</span>
+                </div>
+                <div style="background:var(--gray-100);border-radius:6px;height:8px;overflow:hidden">
+                  <div style="background:${c.avgScore >= 4 ? '#1a8a4a' : c.avgScore >= 3 ? 'var(--orange)' : '#c0392b'};width:${(c.avgScore / 5) * 100}%;height:100%"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      const aiNotice = aiError ? `<div style="padding:14px 18px;border-radius:var(--radius);background:#fef9f0;color:#92600a;font-size:13px;margin-bottom:20px">${escHtml(aiError)}</div>` : '';
+
+      const teamSummary = aiReport ? `
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header"><span style="font-weight:600;font-size:14px;color:var(--navy)">Team Performance — ${escHtml(focusLabel)}</span></div>
+          <div style="padding:18px 22px;font-size:13.5px;color:var(--text);line-height:1.7">${escHtml(aiReport.teamSummary)}</div>
+        </div>
+      ` : '';
+
+      const perRepAi = new Map((aiReport?.perRep || []).map(r => [r.repName, r.summary]));
+      const perRepCards = `
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header"><span style="font-weight:600;font-size:14px;color:var(--navy)">Individual Performance</span></div>
+          <div>
+            ${stats.perRep.map(r => `
+              <div style="padding:16px 22px;border-bottom:1px solid var(--gray-100)">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+                  <span style="font-weight:700;font-size:14px;color:var(--navy)">${escHtml(r.repName)}</span>
+                  <span style="font-size:13px;color:var(--text-muted)">${r.callsEvaluated} call${r.callsEvaluated !== 1 ? 's' : ''} · avg ${r.avgOverallScore}%${r.avgFocusScore != null ? ` · ${escHtml(focusLabel)} ${r.avgFocusScore}/5` : ''}</span>
+                </div>
+                ${perRepAi.has(r.repName) ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.6">${escHtml(perRepAi.get(r.repName))}</div>` : (r.callsEvaluated < 2 ? '<div style="font-size:12px;color:var(--gray-400);font-style:italic">Not enough calls yet for a pattern summary.</div>' : '')}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      const outliers = aiReport?.outliers?.length ? `
+        <div class="admin-table-card" style="margin-bottom:20px;border-color:#fecaca">
+          <div class="admin-table-header" style="background:#fef2f2"><span style="font-weight:600;font-size:14px;color:#c0392b">⚠ Outliers to Address</span></div>
+          <div>
+            ${aiReport.outliers.map(o => `
+              <div style="padding:14px 22px;border-bottom:1px solid var(--gray-100)">
+                <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:4px">${o.repName ? escHtml(o.repName) + ' — ' : ''}${escHtml(o.issue)}</div>
+                <div style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(o.evidence)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : (aiReport ? '<div class="admin-table-card" style="margin-bottom:20px"><div style="padding:16px 22px;font-size:13px;color:var(--text-muted)">✓ No concerning outliers found this period.</div></div>' : '');
+
+      const commendations = aiReport?.commendations?.length ? `
+        <div class="admin-table-card" style="margin-bottom:20px;border-color:#bbf7d0">
+          <div class="admin-table-header" style="background:#f0fdf4"><span style="font-weight:600;font-size:14px;color:#1a8a4a">★ Commendable Behaviour</span></div>
+          <div>
+            ${aiReport.commendations.map(c => `
+              <div style="padding:14px 22px;border-bottom:1px solid var(--gray-100)">
+                <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:4px">${c.repName ? escHtml(c.repName) + ' — ' : ''}${escHtml(c.behavior)}</div>
+                <div style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(c.evidence)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : (aiReport ? '<div class="admin-table-card" style="margin-bottom:20px"><div style="padding:16px 22px;font-size:13px;color:var(--text-muted)">No standout commendations flagged this period.</div></div>' : '');
+
+      output.innerHTML = statCards + categoryBars + aiNotice + teamSummary + perRepCards + outliers + commendations;
     }
 
     function fmtDuration(seconds) {
@@ -2628,8 +2931,13 @@
       escalate: { label: 'Escalate', badge: 'badge-draft' }
     };
 
+    let currentEvalRecordingId = null;
+    let currentEvalRubricType = null;
+
     async function evaluateCall(recordingId) {
       const rubricType = document.getElementById(`rubric-${recordingId}`).value;
+      currentEvalRecordingId = recordingId;
+      currentEvalRubricType = rubricType;
       if (Object.keys(callRubrics).length === 0) {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
       }
@@ -2638,6 +2946,8 @@
       const outcomeEl = document.getElementById('callEvalOutcome');
       card.style.display = 'block';
       outcomeEl.innerHTML = '';
+      document.getElementById('feedbackBox').style.display = 'none';
+      document.getElementById('evalFeedbackText').value = '';
       body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Grading call against the ' + (rubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing') + ' rubric…</div>';
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       try {
@@ -2751,6 +3061,8 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
         closeManualGradeModal();
+        currentEvalRecordingId = manualGradeRecordingId;
+        currentEvalRubricType = rubricType;
         const card = document.getElementById('callEvalResultCard');
         card.style.display = 'block';
         renderEvalResult(data);
@@ -2837,6 +3149,7 @@
           <div style="font-size:13px;color:var(--text-muted);max-width:600px">${escHtml(e.summary) || '<span style="font-style:italic">No summary provided.</span>'}</div>
           <div style="font-size:26px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:20px">${e.overall_score}%</div>
         </div>
+        ${e.reviewer_feedback ? `<div style="font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px"><strong>Re-graded with reviewer feedback:</strong> ${escHtml(e.reviewer_feedback)}</div>` : ''}
         <div style="overflow-x:auto">
           <table class="data-table" style="font-size:12.5px">
             <thead><tr><th>Wt.</th><th>Category</th><th>Notes</th><th>Score</th></tr></thead>

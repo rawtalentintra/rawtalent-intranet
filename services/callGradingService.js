@@ -80,10 +80,18 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric) {
+function buildSystemPrompt(rubric, calibrationNotes = [], oneOffFeedback = null) {
   const categoryList = rubric.categories.map(c =>
     `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`
   ).join('\n');
+
+  const calibrationBlock = calibrationNotes.length
+    ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibrationNotes.map(n => `- ${n}`).join('\n')}`
+    : '';
+
+  const feedbackBlock = oneOffFeedback
+    ? `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
+    : '';
 
   return `You are grading a real RawTalent call transcript against a fixed quality rubric. RawTalent is an Australian childcare staffing agency; this call is ${rubric.description}
 
@@ -97,10 +105,36 @@ A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/comp
 
 Base every score strictly on what is actually in the transcript. Do not invent behaviour that isn't there. If the transcript is too short or unclear to judge a category, score it 3 and say so in the notes.
 
-For every category, write 2-4 sentences of specific, evidence-based reasoning: quote or paraphrase the exact moment in the call that drove the score, explain why it earned that number rather than one point higher or lower, and name anything the rep could have done differently. Generic notes like "handled the call well" are not acceptable — reference what was actually said.
+For every category, write 2-4 sentences of specific, evidence-based reasoning: quote or paraphrase the exact moment in the call that drove the score, explain why it earned that number rather than one point higher or lower, and name anything the rep could have done differently. Generic notes like "handled the call well" are not acceptable — reference what was actually said.${calibrationBlock}${feedbackBlock}
 
 Respond with ONLY valid JSON, no other text, in this exact shape:
 {"scores": [{"key": "opening", "score": 1-5, "notes": "2-4 sentences of specific reasoning, referencing what was actually said in the call"}, ...one entry per category key...], "summary": "3-4 sentence overall summary of how the call went, referencing specific moments"}`;
+}
+
+async function getCalibrationNotes() {
+  const db = getDb();
+  const result = await db.execute('SELECT note FROM call_grading_calibration ORDER BY created_at ASC');
+  return result.rows.map(r => r.note);
+}
+
+async function addCalibrationNote(note, createdBy) {
+  const db = getDb();
+  const id = uuidv4();
+  await db.execute({
+    sql: 'INSERT INTO call_grading_calibration (id, note, created_by) VALUES (?, ?, ?)',
+    args: [id, note, createdBy || null]
+  });
+  return id;
+}
+
+async function listCalibrationNotes() {
+  const db = getDb();
+  const result = await db.execute('SELECT * FROM call_grading_calibration ORDER BY created_at DESC');
+  return result.rows;
+}
+
+async function deleteCalibrationNote(id) {
+  await getDb().execute({ sql: 'DELETE FROM call_grading_calibration WHERE id = ?', args: [id] });
 }
 
 // Shared by AI grading and manual (human) grading so both produce comparable
@@ -133,17 +167,19 @@ function computeResult(rubric, rawScores, summary) {
   return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: summary || '' };
 }
 
-async function gradeCall(transcriptText, rubricType) {
+async function gradeCall(transcriptText, rubricType, feedback = null) {
   const rubric = RUBRICS[rubricType];
   if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
 
   const client = getClient();
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
 
+  const calibrationNotes = await getCalibrationNotes();
+
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 2500,
-    system: buildSystemPrompt(rubric),
+    system: buildSystemPrompt(rubric, calibrationNotes, feedback),
     messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
   });
 
@@ -169,19 +205,19 @@ function gradeManual(rubricType, rawScores, summary) {
   return computeResult(rubric, rawScores, summary);
 }
 
-async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source }) {
+async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, reviewerFeedback }) {
   const db = getDb();
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO call_evaluations
-          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source, reviewer_feedback)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id, recordingId, repName || null, callType || null, rubricType, callDate || null, durationSeconds || null,
-      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai'
+      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai', reviewerFeedback || null
     ]
   });
   return id;
 }
 
-module.exports = { RUBRICS, gradeCall, gradeManual, saveEvaluation };
+module.exports = { RUBRICS, gradeCall, gradeManual, saveEvaluation, addCalibrationNote, listCalibrationNotes, deleteCalibrationNote };

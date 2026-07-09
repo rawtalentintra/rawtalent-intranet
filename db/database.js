@@ -243,6 +243,16 @@ async function initDatabase() {
       summary TEXT,
       evaluated_by TEXT,
       source TEXT DEFAULT 'ai',
+      reviewer_feedback TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    // Standing calibration notes from a reviewer, persisted so every future AI
+    // grading call applies the same corrections — not just the one call the
+    // feedback was given on.
+    `CREATE TABLE IF NOT EXISTS call_grading_calibration (
+      id TEXT PRIMARY KEY,
+      note TEXT NOT NULL,
+      created_by TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
     // Local cache of Dubber recording metadata, fetched eagerly at sync time
@@ -298,6 +308,7 @@ async function initDatabase() {
 
   // call_evaluations shipped before source (ai vs human grading) existed.
   try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN source TEXT DEFAULT 'ai'`); } catch {}
+  try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN reviewer_feedback TEXT`); } catch {}
 
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
   // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,

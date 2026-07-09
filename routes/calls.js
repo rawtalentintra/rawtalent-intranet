@@ -4,7 +4,8 @@ const { getDb } = require('../db/database');
 const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
-const { RUBRICS, gradeCall, gradeManual, saveEvaluation } = require('../services/callGradingService');
+const { RUBRICS, gradeCall, gradeManual, saveEvaluation, addCalibrationNote, listCalibrationNotes, deleteCalibrationNote } = require('../services/callGradingService');
+const { generateReport } = require('../services/callReportService');
 
 // Call recordings are confidential — everything here is super_admin only,
 // same as the FAQ Review / Slack+Fathom review queue.
@@ -151,8 +152,39 @@ router.get('/rubrics', (req, res) => {
   res.json(RUBRICS);
 });
 
+// Standing grading calibration — a running list of corrections a reviewer
+// has taught the AI, applied to every future evaluation regardless of call
+// or rep. Manageable directly here in case a note turns out to be wrong.
+router.get('/calibration', async (req, res) => {
+  try {
+    res.json(await listCalibrationNotes());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/calibration', async (req, res) => {
+  const { note } = req.body;
+  if (!note?.trim()) return res.status(400).json({ error: 'A note is required' });
+  try {
+    const id = await addCalibrationNote(note.trim(), req.user.email);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/calibration/:id', async (req, res) => {
+  try {
+    await deleteCalibrationNote(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:recordingId/evaluate', async (req, res) => {
-  const { rubricType } = req.body;
+  const { rubricType, feedback } = req.body;
   if (!rubricType || !RUBRICS[rubricType]) {
     return res.status(400).json({ error: 'A valid rubricType ("educator" or "centre") is required' });
   }
@@ -192,7 +224,14 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       }
     }
 
-    const result = await gradeCall(transcript, rubricType);
+    const result = await gradeCall(transcript, rubricType, feedback || null);
+
+    // Feedback given on this call is also saved as a standing calibration
+    // note, so every future AI grading run (any call, any rep) applies the
+    // same correction — not just this one re-grade.
+    if (feedback?.trim()) {
+      await addCalibrationNote(feedback.trim(), req.user.email);
+    }
 
     const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
     const id = await saveEvaluation({
@@ -204,10 +243,11 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       durationSeconds: recording.duration_seconds ?? recording.duration,
       result,
       evaluatedBy: req.user.email,
-      source: 'ai'
+      source: 'ai',
+      reviewerFeedback: feedback?.trim() || null
     });
 
-    res.json({ id, repName, rubricType, source: 'ai', ...result });
+    res.json({ id, repName, rubricType, source: 'ai', calibrationSaved: !!feedback?.trim(), ...result });
   } catch (err) {
     console.error('Call evaluation error:', err.message);
     res.status(500).json({ error: err.message });
@@ -262,6 +302,43 @@ router.get('/evaluations', async (req, res) => {
     const result = await getDb().execute('SELECT * FROM call_evaluations ORDER BY created_at DESC LIMIT 200');
     res.json(result.rows.map(r => ({ ...r, category_scores: JSON.parse(r.category_scores) })));
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/rep-names', async (req, res) => {
+  try {
+    const result = await getDb().execute("SELECT DISTINCT rep_name FROM call_evaluations WHERE rep_name IS NOT NULL ORDER BY rep_name");
+    res.json(result.rows.map(r => r.rep_name));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Call Quality Dashboard — aggregates evaluations within a period (joined to
+// call_recordings for a reliable ISO date to filter on) and, if configured,
+// asks Claude for a narrative report: team/individual performance against
+// the rubric, outliers worth addressing, and commendable behaviour.
+router.get('/report', async (req, res) => {
+  const { dateFrom, dateTo, repName, rubricType, category } = req.query;
+  try {
+    const conditions = [];
+    const args = [];
+    if (dateFrom) { conditions.push('r.start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
+    if (dateTo) { conditions.push('r.start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+    if (repName) { conditions.push('e.rep_name = ?'); args.push(repName); }
+    if (rubricType && RUBRICS[rubricType]) { conditions.push('e.rubric_type = ?'); args.push(rubricType); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await getDb().execute({
+      sql: `SELECT e.* FROM call_evaluations e LEFT JOIN call_recordings r ON r.id = e.recording_id ${where} ORDER BY e.created_at DESC LIMIT 500`,
+      args
+    });
+    const evaluations = result.rows.map(r => ({ ...r, category_scores: JSON.parse(r.category_scores) }));
+    const report = await generateReport(evaluations, { rubricType, category });
+    res.json(report);
+  } catch (err) {
+    console.error('Call report error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
