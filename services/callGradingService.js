@@ -232,7 +232,6 @@ async function summarizeCategoryDescription(rubric, category, instructions) {
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 600,
-    temperature: 0.3,
     system: `You maintain the short reference description shown for one category of a RawTalent call-quality grading rubric. RawTalent is an Australian childcare staffing agency.
 
 Category: "${category.label}" (part of grading ${rubric.description})
@@ -347,11 +346,6 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 6144,
-    // Low temperature so the same call graded twice, or two similar calls,
-    // land on consistent standards and tone rather than drifting — the
-    // rubric, criteria, and calibration notes are already fixed inputs on
-    // every call; this keeps the model's judgement equally consistent.
-    temperature: 0.3,
     system: buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback),
     messages: [{ role: 'user', content: transcriptText.slice(0, 12000) }]
   });

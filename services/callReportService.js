@@ -139,7 +139,6 @@ Respond with ONLY valid JSON, no other text:
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 4096,
-    temperature: 0.3,
     system,
     messages: [{ role: 'user', content: 'Generate the report.' }]
   });
