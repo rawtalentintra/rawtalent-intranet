@@ -6,6 +6,7 @@ const path = require('path');
 
 const { initDatabase } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
+const TursoSessionStore = require('./services/sessionStore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
+  store: new TursoSessionStore(),
   secret: process.env.SESSION_SECRET || 'rt-kb-change-this-secret',
   resave: false,
   saveUninitialized: false,

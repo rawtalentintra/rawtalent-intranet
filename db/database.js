@@ -307,6 +307,14 @@ async function initDatabase() {
       total_synced INTEGER DEFAULT 0,
       updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // Express session store, backed by the same persistent Turso DB as
+    // everything else — logins survive redeploys instead of resetting every
+    // time the container restarts (the default in-memory session store).
+    `CREATE TABLE IF NOT EXISTS sessions (
+      sid TEXT PRIMARY KEY,
+      sess TEXT NOT NULL,
+      expires INTEGER
+    )`,
   ];
 
   for (const sql of schema) {
