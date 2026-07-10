@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
 const {
@@ -11,9 +11,9 @@ const {
 } = require('../services/callGradingService');
 const { generateReport } = require('../services/callReportService');
 
-// Call recordings are confidential — everything here is super_admin only,
-// same as the FAQ Review / Slack+Fathom review queue.
-router.use(requireSuperAdmin);
+// Call recordings are confidential, but admins (not just super_admin) get
+// full access here — evaluate, delete, and manage rubric/calibration.
+router.use(requireAdmin);
 
 router.get('/status', (req, res) => {
   res.json({ dubberConfigured: dubberService.isConfigured(), groqConfigured: groqTranscription.isConfigured() });

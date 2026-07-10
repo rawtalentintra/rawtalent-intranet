@@ -106,7 +106,7 @@
           <span class="admin-nav-icon">❓</span> FAQ Review
         </div>
       </div>
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Call Quality</div>
         <div class="admin-nav-item" onclick="showSection('calls', this)">
           <span class="admin-nav-icon">📞</span> Call Quality Evaluator
@@ -577,7 +577,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Call Quality Evaluator</div>
-            <div class="admin-page-sub">Connects to Dubber call recordings for AI-assisted quality evaluation. Visible to you as super admin only.</div>
+            <div class="admin-page-sub">Connects to Dubber call recordings for AI-assisted quality evaluation. Visible to admins and super admins.</div>
           </div>
         </div>
 
@@ -695,7 +695,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Call Quality Dashboard</div>
-            <div class="admin-page-sub">A period-level view of how calls are going — team and individual performance against the quality rubric, outliers worth addressing, and commendable behaviour worth recognising. Visible to you as super admin only.</div>
+            <div class="admin-page-sub">A period-level view of how calls are going — team and individual performance against the quality rubric, outliers worth addressing, and commendable behaviour worth recognising. Visible to admins and super admins.</div>
           </div>
         </div>
 
@@ -1131,7 +1131,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'calls', 'calls-dashboard'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
