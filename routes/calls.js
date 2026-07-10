@@ -46,8 +46,9 @@ router.get('/recordings', async (req, res) => {
 // Pulls recent recordings from Dubber and stores metadata locally. Click again
 // later to keep extending how far back the local store goes.
 router.post('/sync', async (req, res) => {
+  const direction = req.body?.direction === 'older' ? 'older' : 'recent';
   try {
-    const result = await dubberService.syncRecordings();
+    const result = await dubberService.syncRecordings(direction);
     res.json(result);
   } catch (err) {
     console.error('Dubber sync error:', err.message);

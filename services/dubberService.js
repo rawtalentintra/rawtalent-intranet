@@ -120,54 +120,86 @@ async function downloadRecordingAudio(recordingId) {
 function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const SYNC_PAGE_SIZE = 100;
-const SYNC_MAX_PAGES = 5; // metadata-only pass: caps a click at ~500 recordings checked, cheap (1 API call/page)
+const SYNC_MAX_PAGES = 5; // 'recent' mode: caps a click at ~500 recordings checked, cheap (1 API call/page)
+const BACKFILL_MAX_PAGES = 15; // 'older' mode: pages much further back per click — safe since before_id is a real cursor, not the unconfirmed "offset" param
 const MAX_CONTENT_FETCH_PER_RUN = 25; // transcript+audio pass: bounds a click's runtime and rate-limit exposure
 
-// Two-phase sync:
-//  1. Metadata pass — pages through recent recordings (only "count" is a
-//     confirmed param; "offset" is best-effort and degrades safely if
-//     unsupported, since already-stored IDs are simply skipped) and stores
-//     anything new, marked content_synced=0.
+async function insertRecordingIfNew(db, r) {
+  const existing = await db.execute({ sql: 'SELECT id FROM call_recordings WHERE id = ?', args: [r.id] });
+  if (existing.rows[0]) return false;
+
+  let startIso = null;
+  try { startIso = r.start_time ? new Date(r.start_time).toISOString() : null; } catch {}
+
+  await db.execute({
+    sql: `INSERT INTO call_recordings
+          (id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds, start_time, start_time_iso, status, sentiment_score, meta_tags)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      r.id, r.to || null, r.from || null, r.to_label || null, r.from_label || null,
+      r.from_label || r.to_label || r.channel || null, r.call_type || null, r.duration ?? null,
+      r.start_time || null, startIso, r.status || null, r.document_sentiment?.score ?? null,
+      JSON.stringify(r.meta_tags || {})
+    ]
+  });
+  return true;
+}
+
+// Two-phase sync, in either of two directions:
+//  - 'recent' (default): pages forward from the top of Dubber's list to catch
+//    newly-happened calls. Uses "offset", which Dubber never confirmed as a
+//    real parameter — if it's ignored server-side, every page just re-returns
+//    the same top window, which is harmless here since new calls naturally
+//    stop appearing once caught up.
+//  - 'older': backfills history from the oldest call currently stored,
+//    using Dubber's confirmed before_id cursor. This is what actually reaches
+//    calls older than whatever the very first sync's 500-record window
+//    covered — offset-based paging could never get there since it always
+//    restarts from the top on every click.
+//  1. Metadata pass stores anything new, marked content_synced=0.
 //  2. Content pass — for up to MAX_CONTENT_FETCH_PER_RUN rows still missing
 //     transcript/audio (from this run or any earlier one), fetches both and
-//     marks content_synced=1 only once that succeeds. Until the real
-//     transcript/audio endpoints are confirmed, this pass will keep retrying
-//     the same rows on every sync click and finding nothing — that's expected;
-//     the moment they're confirmed, the very next click starts filling them in
-//     with no further changes needed here.
-async function syncRecordings() {
+//     marks content_synced=1 only once that succeeds.
+async function syncRecordings(direction = 'recent') {
   const db = getDb();
-  let totalSeen = 0, totalNew = 0, offset = 0;
+  let totalSeen = 0, totalNew = 0, reachedEnd = false;
 
-  for (let page = 0; page < SYNC_MAX_PAGES; page++) {
-    const data = await listRecordings({ count: SYNC_PAGE_SIZE, offset });
-    const recordings = data.recordings || data.items || [];
-    if (!recordings.length) break;
-    totalSeen += recordings.length;
+  if (direction === 'older') {
+    const oldestRow = await db.execute('SELECT id FROM call_recordings ORDER BY start_time_iso ASC LIMIT 1');
+    let beforeId = oldestRow.rows[0]?.id || null;
 
-    let newInPage = 0;
-    for (const r of recordings) {
-      const existing = await db.execute({ sql: 'SELECT id FROM call_recordings WHERE id = ?', args: [r.id] });
-      if (existing.rows[0]) continue;
-      newInPage++; totalNew++;
+    for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
+      const params = { count: SYNC_PAGE_SIZE };
+      if (beforeId) params.before_id = beforeId;
+      const data = await listRecordings(params);
+      const recordings = data.recordings || data.items || [];
+      if (!recordings.length) { reachedEnd = true; break; }
+      totalSeen += recordings.length;
 
-      let startIso = null;
-      try { startIso = r.start_time ? new Date(r.start_time).toISOString() : null; } catch {}
+      for (const r of recordings) {
+        if (await insertRecordingIfNew(db, r)) totalNew++;
+      }
 
-      await db.execute({
-        sql: `INSERT INTO call_recordings
-              (id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds, start_time, start_time_iso, status, sentiment_score, meta_tags)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          r.id, r.to || null, r.from || null, r.to_label || null, r.from_label || null,
-          r.from_label || r.to_label || r.channel || null, r.call_type || null, r.duration ?? null,
-          r.start_time || null, startIso, r.status || null, r.document_sentiment?.score ?? null,
-          JSON.stringify(r.meta_tags || {})
-        ]
-      });
+      // Move the cursor to the oldest ID actually returned this page — a
+      // short page means Dubber has nothing older left to give us.
+      beforeId = recordings[recordings.length - 1].id;
+      if (recordings.length < SYNC_PAGE_SIZE) { reachedEnd = true; break; }
     }
-    if (newInPage === 0) break; // caught up, or offset isn't real — either way, stop
-    offset += SYNC_PAGE_SIZE;
+  } else {
+    let offset = 0;
+    for (let page = 0; page < SYNC_MAX_PAGES; page++) {
+      const data = await listRecordings({ count: SYNC_PAGE_SIZE, offset });
+      const recordings = data.recordings || data.items || [];
+      if (!recordings.length) break;
+      totalSeen += recordings.length;
+
+      let newInPage = 0;
+      for (const r of recordings) {
+        if (await insertRecordingIfNew(db, r)) { newInPage++; totalNew++; }
+      }
+      if (newInPage === 0) break; // caught up, or offset isn't real — either way, stop
+      offset += SYNC_PAGE_SIZE;
+    }
   }
 
   // Content pass — download audio, then get a transcript. Dubber's own AI
@@ -226,7 +258,7 @@ async function syncRecordings() {
     args: [totalNew]
   });
 
-  return { totalSeen, totalNew, contentFetched, transcriptFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3) };
+  return { totalSeen, totalNew, contentFetched, transcriptFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3), reachedEnd };
 }
 
 // Diagnostic only — the recording detail endpoint hasn't shown a playback URL

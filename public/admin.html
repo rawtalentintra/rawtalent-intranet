@@ -609,7 +609,10 @@
         <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">⬇️ Sync Calls</div>
           <div id="callsSyncStatusLine" style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Checking local store…</div>
-          <button class="btn-add" id="callsSyncBtn" onclick="syncCalls()">Sync Calls Now</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn-add" id="callsSyncBtn" onclick="syncCalls('recent')">Sync Calls Now</button>
+            <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history">Sync Older Calls</button>
+          </div>
           <div id="callsSyncStatus" style="display:none;margin-top:12px"></div>
         </div>
 
@@ -2832,23 +2835,32 @@
       } catch { line.textContent = 'Failed to check sync status.'; }
     }
 
-    async function syncCalls() {
-      const btn = document.getElementById('callsSyncBtn');
+    async function syncCalls(direction = 'recent') {
+      const btn = document.getElementById(direction === 'older' ? 'callsSyncOlderBtn' : 'callsSyncBtn');
+      const otherBtn = document.getElementById(direction === 'older' ? 'callsSyncBtn' : 'callsSyncOlderBtn');
       const statusEl = document.getElementById('callsSyncStatus');
-      btn.disabled = true; btn.textContent = 'Syncing…';
+      const originalLabel = btn.textContent;
+      btn.disabled = true; otherBtn.disabled = true;
+      btn.textContent = direction === 'older' ? 'Syncing older calls…' : 'Syncing…';
       statusEl.style.display = 'block';
-      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Pulling recent calls from Dubber…';
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> ${direction === 'older' ? 'Backfilling older calls from Dubber…' : 'Pulling recent calls from Dubber…'}`;
       try {
-        const res = await fetch('/api/calls/sync', { method: 'POST' });
+        const res = await fetch('/api/calls/sync', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction })
+        });
         const data = await res.json();
         if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
+        const olderNote = direction === 'older'
+          ? (data.reachedEnd ? ' · reached the earliest call Dubber has' : ' · more calls remain further back — click Sync Older Calls again')
+          : '';
         statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">
-          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio, ${data.transcriptFetched} transcribed this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}
+          ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio, ${data.transcriptFetched} transcribed this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}${olderNote}
         </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.slice(0, 3).map(e => `${escHtml(e.type)}: ${escHtml(e.reason)}`).join(' · ')}</div>` : '');
         loadSyncStatus();
         loadCallsList();
       } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Sync failed.</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'Sync Calls Now'; }
+      finally { btn.disabled = false; otherBtn.disabled = false; btn.textContent = originalLabel; }
     }
 
     let callsFilterTimer, callsCurrentPage = 1;
