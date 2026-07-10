@@ -7,19 +7,19 @@ const photos = require('./teamPhotos.json');
 const members = [
   { key: 'liam', name: 'Liam Baxter', position: 'Founder', manager: null, sortOrder: 0 },
 
-  { key: 'sophia', name: 'Sophia', legal_name: 'Banthita Arwae', position: 'Operations Manager', manager: 'liam', sortOrder: 0,
+  { key: 'sophia', name: 'Sophia', legal_name: 'Banthita Arwae', position: 'Operations Manager', manager: 'liam', sortOrder: 1,
     employment_date: 'August 01, 2024', address: '80/12 ซอยน้ำตกกะทู้ · Soi Charoen, 83120 Phuket City, Thailand', birthdate: 'November 15, 2002',
     device_name: 'MacBook Air M3', headset: 'Jabra Evolve 20se', internet_connection: 'Wifi (AIS)', backup_available: 'Yes',
     backup_types: ["2 Power Banks - They can charge my Mac for 1 time.", "Phone Internet Data - It'll last as long as the government doesn't cut the connection."],
     photo: photos.sophia },
 
-  { key: 'joy', name: 'Joy Victoria', legal_name: 'Joy Victoria', position: 'Business Analyst', manager: 'liam', sortOrder: 1,
+  { key: 'joy', name: 'Joy Victoria', legal_name: 'Joy Victoria', position: 'Business Analyst', manager: 'liam', sortOrder: 2,
     employment_date: 'June 02, 2026', address: '23 Rimando Road, Baguio City, Philippines 2600', birthdate: 'September 13, 1985',
     device_name: 'MacBook Air M2', headset: 'Beats Studio Pro; Bose QuietComfort', internet_connection: 'PLDT', backup_available: 'YES',
     backup_types: ['Power Station', 'Smart Mobile Data'],
     photo: photos.joy },
 
-  { key: 'yuvraj', name: 'Yuvraj Rao', position: 'App Development Lead', manager: 'liam', sortOrder: 2 },
+  { key: 'yuvraj', name: 'Yuvraj Rao', position: 'App Development Lead', manager: 'liam', sortOrder: 0 },
   { key: 'prince', name: 'Prince Kumar', position: 'App Developer', manager: 'yuvraj', sortOrder: 0 },
   { key: 'gwen', name: 'Gwen Stocks', position: 'Workforce Partner (SA)', manager: 'liam', sortOrder: 3 },
   { key: 'jemina', name: 'Jemina Numos', position: 'Email Marketer', manager: 'liam', sortOrder: 4 },

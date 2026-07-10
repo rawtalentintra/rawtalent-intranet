@@ -333,6 +333,8 @@ async function initDatabase() {
       phone TEXT,
       whatsapp TEXT,
       email TEXT,
+      emergency_contact_name TEXT,
+      emergency_contact_number TEXT,
       device_name TEXT,
       headset TEXT,
       internet_connection TEXT,
@@ -387,6 +389,21 @@ async function initDatabase() {
   } catch (err) {
     console.error('Team seed error:', err.message);
   }
+
+  // team_members shipped before emergency contact fields existed.
+  try { await db.execute(`ALTER TABLE team_members ADD COLUMN emergency_contact_name TEXT`); } catch {}
+  try { await db.execute(`ALTER TABLE team_members ADD COLUMN emergency_contact_number TEXT`); } catch {}
+
+  // Keeps sort_order correct for Liam's direct reports even on a DB that was
+  // already seeded before this ordering existed — the org chart groups
+  // Sophia/Joy as team-leading branches and Yuvraj/Gwen/Jemina into one
+  // vertically-stacked column, and needs these values within each group.
+  try {
+    const centeredOrder = { 'Yuvraj Rao': 0, 'Sophia': 1, 'Joy Victoria': 2, 'Gwen Stocks': 3, 'Jemina Numos': 4 };
+    for (const [name, ord] of Object.entries(centeredOrder)) {
+      await db.execute({ sql: 'UPDATE team_members SET sort_order = ? WHERE name = ?', args: [ord, name] });
+    }
+  } catch {}
 
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
   // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,

@@ -50,17 +50,19 @@
     #callsTable select.form-control { padding: 2px 5px; font-size: 10.5px; }
 
     /* Org chart — classic pure-CSS tree (connector lines via pseudo-elements).
-       #orgChartContainer clips overflow and org-chart-fit.js scales .org-tree
-       down to fit its width, so there's never a scrollbar — just a smaller
-       (but always fully visible, centered) chart on narrower screens. */
-    #orgChartContainer, #teamChartContainer { overflow: hidden; }
+       The container scales .org-tree down (never below a legible minimum) if
+       it doesn't fit — text should never be clipped or shrunk to
+       illegibility. text-align:center is what actually centers the chart
+       (an inline-block) within the container; without it the chart is
+       left-anchored regardless of how wide the container is. */
+    #orgChartContainer, #teamChartContainer { overflow: hidden; text-align: center; }
     .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
-    .org-tree { display: inline-block; white-space: nowrap; }
-    .org-tree ul { display: flex; padding-top: 16px; position: relative; }
-    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 16px 5px 0 5px; position: relative; white-space: normal; }
+    .org-tree { display: inline-block; white-space: nowrap; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .org-tree ul { display: flex; padding-top: 20px; position: relative; }
+    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 20px 8px 0 8px; position: relative; white-space: normal; }
     .org-tree li::before, .org-tree li::after {
       content: ''; position: absolute; top: 0; right: 50%;
-      border-top: 2px solid var(--gray-300); width: 50%; height: 16px;
+      border-top: 2px solid var(--gray-300); width: 50%; height: 20px;
     }
     .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--gray-300); }
     .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
@@ -70,26 +72,39 @@
     .org-tree li:first-child::after { border-radius: 6px 0 0 0; }
     .org-tree ul::before {
       content: ''; position: absolute; top: 0; left: 50%;
-      border-left: 2px solid var(--gray-300); width: 0; height: 16px;
+      border-left: 2px solid var(--gray-300); width: 0; height: 20px;
     }
     .org-tree li > ul { margin-top: 0; }
     .org-node {
-      display: inline-block; min-width: 82px; padding: 6px 8px; border-radius: 8px;
-      background: var(--orange-glow); border: 1.5px solid rgba(61,111,255,.35); cursor: pointer;
+      display: inline-block; min-width: 100px; padding: 8px 12px; border-radius: 8px;
+      background: var(--gray-100); border: 1px solid var(--gray-200); cursor: pointer;
       transition: var(--transition);
     }
     .org-node:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: var(--orange); }
-    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); min-width: 110px; }
+    .org-node.org-node-manager { background: #e4e9fd; border: 1.5px solid #8b9cf0; }
+    .org-node.org-node-founder {
+      background: var(--navy); border-color: var(--navy); min-width: 120px;
+      align-self: stretch; box-sizing: border-box;
+    }
     .org-node.org-node-founder .org-node-name, .org-node.org-node-founder .org-node-position { color: white; }
     .org-node.org-node-tohire { background: var(--gray-100); border: 1.5px dashed var(--gray-300); cursor: default; opacity: .75; }
-    .org-node-name { font-weight: 700; font-size: 10.5px; color: var(--navy); line-height: 1.25; }
-    .org-node-position { font-size: 8.5px; color: var(--text-muted); margin-top: 1px; line-height: 1.2; }
-    .org-node-founder .org-node-name { font-size: 13px; }
-    .org-node-founder .org-node-position { font-size: 10px; }
+    .org-node-name { font-weight: 700; font-size: 12px; color: var(--navy); line-height: 1.3; white-space: nowrap; }
+    .org-node-position { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.25; white-space: nowrap; }
+    .org-node-founder .org-node-name { font-size: 14.5px; }
+    .org-node-founder .org-node-position { font-size: 11px; }
     .org-team-pill {
-      display: inline-block; background: var(--navy); color: white; font-size: 7.5px; font-weight: 700;
-      letter-spacing: .3px; padding: 2px 7px; border-radius: 20px; margin-bottom: 5px;
+      display: inline-block; background: var(--navy); color: white; font-size: 8.5px; font-weight: 700;
+      letter-spacing: .3px; padding: 3px 9px; border-radius: 20px; margin-bottom: 6px; white-space: nowrap;
     }
+    /* Misc column — people who report directly to the root but don't lead a
+       team of their own (e.g. Yuvraj/Gwen/Jemina). Stacked vertically with a
+       single shared trunk line, since the standard flex-row tree pattern
+       above only knows how to lay siblings out horizontally. */
+    .org-misc-column { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; position: relative; padding-left: 26px; padding-top: 4px; }
+    .org-misc-column::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; width: 2px; background: var(--gray-300); }
+    .org-misc-item { position: relative; display: flex; flex-direction: column; align-items: flex-start; }
+    .org-misc-item::before { content: ''; position: absolute; left: -26px; top: 20px; width: 26px; height: 2px; background: var(--gray-300); }
+    .org-misc-item > ul { padding-top: 20px; }
   </style>
 </head>
 <body>
@@ -200,7 +215,7 @@
           <div class="admin-table-header">
             <span style="font-weight:600;font-size:14px;color:var(--navy)">Org Chart</span>
           </div>
-          <div id="orgChartContainer" style="padding:32px;overflow-x:auto">
+          <div id="orgChartContainer" style="padding:32px;overflow-x:hidden">
             <div class="loading-spinner"><div class="spinner"></div></div>
           </div>
         </div>
@@ -214,16 +229,18 @@
             <table class="data-table" id="teamTable" style="font-size:12.5px">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Position</th>
-                  <th style="width:150px">Phone / WhatsApp</th>
-                  <th>Address</th>
-                  <th style="width:110px">Employment Date</th>
+                  <th>Full Name</th>
+                  <th>Nickname</th>
+                  <th>Title</th>
+                  <th style="width:140px">Phone / WhatsApp</th>
+                  <th style="width:105px">Employment Date</th>
+                  <th style="width:105px">DOB</th>
+                  <th style="width:140px">Emergency Contact</th>
                   <th style="width:70px"></th>
                 </tr>
               </thead>
               <tbody id="teamTableBody">
-                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -1014,6 +1031,7 @@
         <div id="teamProfileWfh" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
       </div>
       <div class="modal-footer">
+        <button class="action-btn delete super-admin-only" style="display:none" onclick="deleteTeamMemberFromProfile()">Delete</button>
         <button class="action-btn edit super-admin-only" style="display:none" onclick="editTeamMemberFromProfile()">Edit</button>
         <button class="btn-secondary" onclick="closeTeamProfileModal()">Close</button>
       </div>
@@ -1096,6 +1114,16 @@
         <div class="form-group-modal">
           <label class="form-label-modal">Email</label>
           <input type="email" id="teamMemberEmail" class="form-control" placeholder="name@rawtalent.com.au">
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Emergency Contact Name</label>
+            <input type="text" id="teamMemberEmergencyName" class="form-control" placeholder="e.g. Juan Dela Cruz">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Emergency Contact Number</label>
+            <input type="text" id="teamMemberEmergencyNumber" class="form-control" placeholder="Phone number">
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group-modal">
@@ -1305,6 +1333,9 @@
         chartEl.innerHTML = renderOrgChart(allTeamMembers);
         renderTeamTable(allTeamMembers);
         fitOrgChart(chartEl);
+        // Defensive second pass — catches the rare case where the section
+        // wasn't fully laid out yet on the first (synchronous) measurement.
+        setTimeout(() => fitOrgChart(chartEl), 60);
       } catch {
         chartEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">Failed to load team.</div>';
       }
@@ -1313,21 +1344,33 @@
     // Scales the tree down (uniformly, centered) so it always fits the
     // container's width with no horizontal scrollbar, regardless of how
     // many people are in it.
+    // Scales the tree down (uniformly, centered via transform-origin: top
+    // center, matching the container's text-align:center) if it's wider than
+    // the container — clamped so it never shrinks below a legible minimum.
+    const ORG_CHART_MIN_SCALE = 0.7;
     function fitOrgChart(container) {
       const tree = container.querySelector('.org-tree');
       if (!tree) return;
       tree.style.transform = 'none';
+      tree.style.marginLeft = '';
       container.style.height = '';
-      requestAnimationFrame(() => {
-        const naturalWidth = tree.scrollWidth;
-        const availableWidth = container.clientWidth - 8;
-        if (naturalWidth > availableWidth && naturalWidth > 0) {
-          const scale = Math.max(availableWidth / naturalWidth, 0.4);
-          tree.style.transform = `scale(${scale})`;
-          tree.style.transformOrigin = 'top center';
-          container.style.height = (tree.scrollHeight * scale + 16) + 'px';
-        }
-      });
+      const naturalWidth = tree.scrollWidth;
+      // clientWidth includes the container's own padding, which isn't
+      // available space for the tree itself — must be subtracted or the
+      // computed scale runs too large and the edges clip.
+      const cs = getComputedStyle(container);
+      const paddingX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const availableWidth = container.clientWidth - paddingX - 4;
+      if (naturalWidth > availableWidth && naturalWidth > 0) {
+        const scale = Math.max(availableWidth / naturalWidth, ORG_CHART_MIN_SCALE);
+        // transform doesn't affect the element's layout box, so text-align:
+        // center (computed on the pre-scale width) drifts once scaled down —
+        // recenter explicitly against the scaled width instead.
+        tree.style.transform = `scale(${scale})`;
+        tree.style.transformOrigin = 'top left';
+        tree.style.marginLeft = Math.max(0, (availableWidth - naturalWidth * scale) / 2) + 'px';
+        container.style.height = (tree.scrollHeight * scale + 16) + 'px';
+      }
     }
     window.addEventListener('resize', () => {
       const el = document.getElementById('orgChartContainer');
@@ -1344,44 +1387,83 @@
         (byManager[key] = byManager[key] || []).push(m);
       });
       Object.values(byManager).forEach(list => list.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
-      const roots = byManager['root'] || [];
-      return `<div class="org-tree"><ul>${roots.map(r => renderOrgNode(r, byManager)).join('')}</ul></div>`;
+      const root = (byManager['root'] || [])[0];
+      if (!root) return '<div style="text-align:center;padding:20px;color:var(--text-muted)">No founder set.</div>';
+
+      // Direct reports of the founder split into two groups: people who lead
+      // a team (have at least one report with a `team` set) render as their
+      // own branch, exactly like before. Everyone else (no team of their
+      // own) is grouped into one vertically-stacked "misc" column instead of
+      // a flat sibling — this is what makes the middle branch land directly
+      // under the founder rather than centered across every direct report.
+      const directReports = byManager[root.id] || [];
+      const branches = [], misc = [];
+      directReports.forEach(child => {
+        const grandchildren = byManager[child.id] || [];
+        (grandchildren.some(g => g.team) ? branches : misc).push(child);
+      });
+      const branchHtml = branches.map(b => renderOrgNode(b, byManager, root.id)).join('');
+      const miscHtml = misc.length ? renderMiscColumn(misc, byManager, root.id) : '';
+      const childrenHtml = branchHtml + miscHtml;
+      return `<div class="org-tree"><ul><li>${renderNodeBox(root, [], root.id)}${childrenHtml ? `<ul>${childrenHtml}</ul>` : ''}</li></ul></div>`;
     }
 
-    function renderOrgNode(member, byManager) {
-      const children = byManager[member.id] || [];
+    function renderNodeBox(member, children, rootId) {
       const isFounder = !member.manager_id;
       const isToHire = member.status === 'to_hire';
+      // Founder and to-hire placeholders keep their own look; everyone else
+      // is either "manager tier" (direct report of the founder, or has
+      // reports of their own) or plain "individual contributor" tier —
+      // matching the reference chart's two-tone styling.
+      const isManagerTier = member.manager_id === rootId || children.length > 0;
+      const tierClass = isFounder ? 'org-node-founder' : isToHire ? 'org-node-tohire' : isManagerTier ? 'org-node-manager' : '';
+      return `
+        <div class="org-node ${tierClass}" ${isToHire ? '' : `onclick="openTeamProfile('${member.id}')"`}>
+          <div class="org-node-name">${escHtml(member.name)}</div>
+          ${member.position ? `<div class="org-node-position">${escHtml(member.position)}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function renderOrgNode(member, byManager, rootId) {
+      const children = byManager[member.id] || [];
       // A team pill marks whoever leads that team — i.e. has a team value
       // AND direct reports (not every member of the team individually).
       const showTeamPill = member.team && children.some(c => c.team === member.team);
       return `
         <li>
           ${showTeamPill ? `<div class="org-team-pill">${escHtml(member.team.toUpperCase())}</div>` : ''}
-          <div class="org-node ${isFounder ? 'org-node-founder' : ''} ${isToHire ? 'org-node-tohire' : ''}"
-               ${isToHire ? '' : `onclick="openTeamProfile('${member.id}')"`}>
-            <div class="org-node-name">${escHtml(member.name)}</div>
-            ${member.position ? `<div class="org-node-position">${escHtml(member.position)}</div>` : ''}
-          </div>
-          ${children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager)).join('')}</ul>` : ''}
+          ${renderNodeBox(member, children, rootId)}
+          ${children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager, rootId)).join('')}</ul>` : ''}
         </li>
       `;
+    }
+
+    function renderMiscColumn(miscMembers, byManager, rootId) {
+      const items = miscMembers.map(m => {
+        const children = byManager[m.id] || [];
+        const childUl = children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager, rootId)).join('')}</ul>` : '';
+        return `<div class="org-misc-item">${renderNodeBox(m, children, rootId)}${childUl}</div>`;
+      }).join('');
+      return `<li><div class="org-misc-column">${items}</div></li>`;
     }
 
     function renderTeamTable(members) {
       const tbody = document.getElementById('teamTableBody');
       document.getElementById('teamTableCount').textContent = `${members.length} member${members.length !== 1 ? 's' : ''}`;
       if (members.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
         return;
       }
       tbody.innerHTML = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
         <tr>
-          <td style="font-weight:600;color:var(--navy)">${escHtml(m.name)}</td>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(m.legal_name || m.name)}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
-          <td style="color:var(--text-muted)">${escHtml(m.address || '—')}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
+          <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.birthdate || '—')}</td>
+          <td style="color:var(--text-muted);line-height:1.35">${m.emergency_contact_name ? `${escHtml(m.emergency_contact_name)}<br>${escHtml(m.emergency_contact_number || '—')}` : '—'}</td>
           <td><button class="action-btn edit" onclick="openTeamProfile('${m.id}')">View</button></td>
         </tr>
       `).join('');
@@ -1404,10 +1486,12 @@
         </div>
       `;
       document.getElementById('teamProfilePersonal').innerHTML = `
+        <strong>Full Name:</strong> ${escHtml(m.legal_name || m.name)}<br>
+        <strong>Nickname:</strong> ${escHtml(m.name)}<br>
         <strong>Employment Date:</strong> ${escHtml(m.employment_date || '—')}<br>
-        <strong>Name:</strong> ${escHtml(m.legal_name || m.name)}<br>
+        <strong>Birthdate:</strong> ${escHtml(m.birthdate || '—')}<br>
         <strong>Address:</strong> ${escHtml(m.address || '—')}<br>
-        <strong>Birthdate:</strong> ${escHtml(m.birthdate || '—')}
+        <strong>Emergency Contact:</strong> ${m.emergency_contact_name ? `${escHtml(m.emergency_contact_name)} — ${escHtml(m.emergency_contact_number || '—')}` : '—'}
       `;
       const backups = (m.backup_types || []).map(b => `<li>${escHtml(b)}</li>`).join('');
       document.getElementById('teamProfileWfh').innerHTML = `
@@ -1425,6 +1509,29 @@
     function editTeamMemberFromProfile() {
       closeTeamProfileModal();
       openTeamMemberModal(currentProfileId);
+    }
+
+    function deleteTeamMemberFromProfile() {
+      const m = allTeamMembers.find(x => x.id === currentProfileId);
+      if (!m) return;
+      document.getElementById('confirmTitle').textContent = 'Delete Team Member';
+      document.getElementById('confirmMsg').textContent = `Are you sure you want to delete "${m.name}"? This cannot be undone. Anyone reporting to them will move to the top level.`;
+      document.getElementById('confirmOkBtn').onclick = () => { doDeleteTeamMember(m.id); closeConfirm(); };
+      document.getElementById('confirmModal').classList.add('open');
+    }
+
+    async function doDeleteTeamMember(id) {
+      try {
+        const res = await fetch(`/api/team/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          toast('Team member deleted', 'success');
+          closeTeamProfileModal();
+          loadOurTeam();
+        } else {
+          const d = await res.json();
+          toast(d.error || 'Delete failed', 'error');
+        }
+      } catch { toast('Network error', 'error'); }
     }
 
     function openTeamMemberModal(id) {
@@ -1449,6 +1556,8 @@
       document.getElementById('teamMemberPhone').value = m?.phone || '';
       document.getElementById('teamMemberWhatsapp').value = m?.whatsapp || '';
       document.getElementById('teamMemberEmail').value = m?.email || '';
+      document.getElementById('teamMemberEmergencyName').value = m?.emergency_contact_name || '';
+      document.getElementById('teamMemberEmergencyNumber').value = m?.emergency_contact_number || '';
       document.getElementById('teamMemberDevice').value = m?.device_name || '';
       document.getElementById('teamMemberHeadset').value = m?.headset || '';
       document.getElementById('teamMemberInternet').value = m?.internet_connection || '';
@@ -1490,6 +1599,8 @@
         phone: document.getElementById('teamMemberPhone').value.trim(),
         whatsapp: document.getElementById('teamMemberWhatsapp').value.trim(),
         email: document.getElementById('teamMemberEmail').value.trim(),
+        emergency_contact_name: document.getElementById('teamMemberEmergencyName').value.trim(),
+        emergency_contact_number: document.getElementById('teamMemberEmergencyNumber').value.trim(),
         device_name: document.getElementById('teamMemberDevice').value.trim(),
         headset: document.getElementById('teamMemberHeadset').value.trim(),
         internet_connection: document.getElementById('teamMemberInternet').value.trim(),

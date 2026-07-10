@@ -23,19 +23,22 @@ router.get('/', async (req, res) => {
 
 router.post('/', requireSuperAdmin, async (req, res) => {
   const { name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
-    phone, whatsapp, email, device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
+    phone, whatsapp, email, emergency_contact_name, emergency_contact_number,
+    device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   try {
     const id = uuidv4();
     await getDb().execute({
       sql: `INSERT INTO team_members
             (id, name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
-             phone, whatsapp, email, device_name, headset, internet_connection, backup_available, backup_types, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             phone, whatsapp, email, emergency_contact_name, emergency_contact_number,
+             device_name, headset, internet_connection, backup_available, backup_types, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         id, name.trim(), legal_name || null, position || null, team || null, manager_id || null, sort_order || 0,
         photo || null, employment_date || null, address || null, birthdate || null, phone || null, whatsapp || null,
-        email || null, device_name || null, headset || null, internet_connection || null, backup_available || null,
+        email || null, emergency_contact_name || null, emergency_contact_number || null,
+        device_name || null, headset || null, internet_connection || null, backup_available || null,
         JSON.stringify(backup_types || []), status || 'active'
       ]
     });
@@ -48,19 +51,22 @@ router.post('/', requireSuperAdmin, async (req, res) => {
 
 router.put('/:id', requireSuperAdmin, async (req, res) => {
   const { name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
-    phone, whatsapp, email, device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
+    phone, whatsapp, email, emergency_contact_name, emergency_contact_number,
+    device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   try {
     await getDb().execute({
       sql: `UPDATE team_members SET
               name=?, legal_name=?, position=?, team=?, manager_id=?, sort_order=?, photo=?, employment_date=?,
-              address=?, birthdate=?, phone=?, whatsapp=?, email=?, device_name=?, headset=?, internet_connection=?,
+              address=?, birthdate=?, phone=?, whatsapp=?, email=?, emergency_contact_name=?, emergency_contact_number=?,
+              device_name=?, headset=?, internet_connection=?,
               backup_available=?, backup_types=?, status=?, updated_at=datetime('now')
             WHERE id=?`,
       args: [
         name.trim(), legal_name || null, position || null, team || null, manager_id || null, sort_order || 0,
         photo || null, employment_date || null, address || null, birthdate || null, phone || null, whatsapp || null,
-        email || null, device_name || null, headset || null, internet_connection || null, backup_available || null,
+        email || null, emergency_contact_name || null, emergency_contact_number || null,
+        device_name || null, headset || null, internet_connection || null, backup_available || null,
         JSON.stringify(backup_types || []), status || 'active', req.params.id
       ]
     });
