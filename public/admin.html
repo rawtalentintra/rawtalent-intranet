@@ -67,6 +67,11 @@
     </div>
   </nav>
 
+  <div id="impersonationBanner" style="display:none;background:#fef2f2;border-bottom:1px solid #fecaca;padding:9px 24px;text-align:center;font-size:13.5px;color:#991b1b;font-weight:600">
+    <span id="impersonationBannerText"></span>
+    <button onclick="stopImpersonating()" style="margin-left:12px;background:#991b1b;color:white;border:none;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Return to My Account</button>
+  </div>
+
   <div id="viewBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:9px 24px;text-align:center;font-size:13.5px;color:#9a3412;font-weight:600">
     <span id="viewBannerText"></span>
   </div>
@@ -311,6 +316,19 @@
           </div>
           <button class="btn-add" onclick="openUserModal()">+ Add User</button>
         </div>
+
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">🟢 Currently Logged In</span>
+              <span id="activeSessionsCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+          </div>
+          <div id="activeSessionsList" style="padding:8px 0">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
         <div class="admin-table-card">
           <div class="admin-table-header">
             <input type="text" class="admin-search-input" placeholder="Filter users…" oninput="filterUsers(this.value)">
@@ -1024,23 +1042,29 @@
 
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
+    let currentUserEmail = '';
 
     async function init() {
       try {
         const me = await fetch('/auth/me').then(r => r.json());
         if (me.error || (me.role !== 'admin' && me.role !== 'super_admin')) { location.href = '/'; return; }
         currentUserRole = me.role;
+        currentUserEmail = me.email;
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         document.getElementById('adminName').textContent = me.name || me.email.split('@')[0];
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
         document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on Admin View.`;
         document.getElementById('viewBanner').style.display = 'block';
+        if (me.impersonating) {
+          document.getElementById('impersonationBannerText').textContent = `${me.impersonatorName || 'A super admin'} is viewing as ${me.name || me.email} (${me.role})`;
+          document.getElementById('impersonationBanner').style.display = 'block';
+        }
         applyRoleVisibility();
       } catch { location.href = '/login.html'; return; }
 
       loadStats();
       loadArticles();
-      if (currentUserRole === 'super_admin') loadUsers();
+      if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
       loadCategoriesForDatalist();
       loadTagsForDatalist();
     }
@@ -1450,6 +1474,47 @@
       } catch {}
     }
 
+    // ── Active Sessions & Impersonation ──────────────────────────────
+    async function loadActiveSessions() {
+      const list = document.getElementById('activeSessionsList');
+      try {
+        const sessions = await fetch('/api/admin/active-sessions').then(r => r.json());
+        document.getElementById('activeSessionsCount').textContent = `${sessions.length} user${sessions.length !== 1 ? 's' : ''} online`;
+        if (sessions.length === 0) {
+          list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No one is currently logged in.</div>';
+          return;
+        }
+        list.innerHTML = sessions.map(s => `
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+            <span style="width:8px;height:8px;border-radius:50%;background:#1a8a4a;flex-shrink:0"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13.5px;color:var(--navy)">${escHtml(s.name || s.email)} <span style="font-weight:400;color:var(--text-muted)">· ${escHtml(s.email)}</span></div>
+            </div>
+            <span class="badge ${s.role === 'super_admin' ? 'badge-super' : s.role === 'admin' ? 'badge-admin' : 'badge-user'}" style="flex-shrink:0">${s.role === 'super_admin' ? 'Super Admin' : s.role === 'admin' ? 'Admin' : 'User'}</span>
+            <span style="font-size:11.5px;color:var(--text-muted);flex-shrink:0">${s.sessionCount} session${s.sessionCount !== 1 ? 's' : ''}</span>
+          </div>
+        `).join('');
+      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load active sessions.</div>'; }
+    }
+
+    async function logInAsUser(id, name) {
+      if (!confirm(`Log in as ${name}? You'll see exactly what they see until you return to your own account.`)) return;
+      try {
+        const res = await fetch(`/api/admin/impersonate/${id}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to log in as user', 'error'); return; }
+        window.location.href = '/';
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function stopImpersonating() {
+      try {
+        const res = await fetch('/auth/stop-impersonating', { method: 'POST' });
+        if (res.ok) { window.location.href = '/admin'; }
+        else { const data = await res.json(); toast(data.error || 'Failed to return to your account', 'error'); }
+      } catch { toast('Network error', 'error'); }
+    }
+
     // ── Users ─────────────────────────────────────────────────────
     async function loadUsers() {
       try {
@@ -1475,6 +1540,7 @@
           <td>
             <div style="display:flex;gap:6px">
               <button class="action-btn edit" onclick="openUserModal(${u.id})">Edit</button>
+              ${u.email !== currentUserEmail && u.active ? `<button class="action-btn edit" onclick="logInAsUser(${u.id},'${escHtml(u.name || u.email)}')">Log In as User</button>` : ''}
               <button class="action-btn delete" onclick="deleteUserConfirm(${u.id},'${escHtml(u.name || u.email)}')">Remove</button>
             </div>
           </td>

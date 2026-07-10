@@ -538,6 +538,11 @@
     </div>
   </nav>
 
+  <div id="impersonationBanner" style="display:none;background:#fef2f2;border-bottom:1px solid #fecaca;padding:9px 24px;text-align:center;font-size:13.5px;color:#991b1b;font-weight:600">
+    <span id="impersonationBannerText"></span>
+    <button onclick="stopImpersonating()" style="margin-left:12px;background:#991b1b;color:white;border:none;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Return to My Account</button>
+  </div>
+
   <div id="viewBanner" style="display:none;background:#eef2ff;border-bottom:1px solid #c7d2fe;padding:9px 24px;text-align:center;font-size:13.5px;color:#3730a3;font-weight:600">
     <div id="viewBannerText"></div>
     <div style="font-size:11px;font-weight:400;opacity:.75;margin-top:2px">Users will never see the Admin button.</div>
@@ -628,11 +633,23 @@
           document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on User View.`;
           document.getElementById('viewBanner').style.display = 'block';
         }
+        if (me.impersonating) {
+          document.getElementById('impersonationBannerText').textContent = `${me.impersonatorName || 'A super admin'} is viewing as ${me.name || me.email} (${me.role})`;
+          document.getElementById('impersonationBanner').style.display = 'block';
+        }
       } catch { location.href = '/login.html'; return; }
 
       loadStats();
       loadCategories();
       loadResults();
+    }
+
+    async function stopImpersonating() {
+      try {
+        const res = await fetch('/auth/stop-impersonating', { method: 'POST' });
+        if (res.ok) { window.location.href = '/admin'; }
+        else { const data = await res.json(); alert(data.error || 'Failed to return to your account'); }
+      } catch { alert('Network error — please try again.'); }
     }
 
     async function loadStats() {

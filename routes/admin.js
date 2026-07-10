@@ -119,6 +119,70 @@ router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// ── Active Sessions & Impersonation (super_admin only) ─────────────
+// Reads straight from the Turso-backed session store — a session counts as
+// "active" if it hasn't expired and carries a real logged-in (passport) user.
+router.get('/active-sessions', requireSuperAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const result = await db.execute('SELECT sess, expires FROM sessions');
+    const now = Date.now();
+    const sessionCounts = new Map(); // userId (string) -> count
+
+    for (const row of result.rows) {
+      if (row.expires && Number(row.expires) < now) continue;
+      let parsed;
+      try { parsed = JSON.parse(row.sess); } catch { continue; }
+      const uid = parsed?.passport?.user;
+      if (uid == null) continue;
+      const key = String(uid);
+      sessionCounts.set(key, (sessionCounts.get(key) || 0) + 1);
+    }
+
+    if (sessionCounts.size === 0) return res.json([]);
+
+    const ids = [...sessionCounts.keys()];
+    const placeholders = ids.map(() => '?').join(',');
+    const usersRes = await db.execute({
+      sql: `SELECT id, email, name, role FROM users WHERE id IN (${placeholders})`,
+      args: ids
+    });
+
+    res.json(usersRes.rows.map(u => ({ ...u, sessionCount: sessionCounts.get(String(u.id)) || 1 })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/impersonate/:id', requireSuperAdmin, async (req, res) => {
+  if (req.session.impersonatorId) {
+    return res.status(400).json({ error: 'Already logged in as another user — return to your account first.' });
+  }
+  try {
+    const db = getDb();
+    const targetRes = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [req.params.id] });
+    const target = targetRes.rows[0];
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (!target.active) return res.status(400).json({ error: 'Cannot log in as a disabled account' });
+    if (target.id === req.user.id) return res.status(400).json({ error: "That's your own account" });
+
+    const originalId = req.user.id;
+    const originalEmail = req.user.email;
+
+    req.login(target, (err) => {
+      if (err) return res.status(500).json({ error: 'Failed to switch account' });
+      req.session.impersonatorId = originalId;
+      req.session.save(async (saveErr) => {
+        if (saveErr) return res.status(500).json({ error: 'Failed to switch account' });
+        await logActivity('session', target.email, 'impersonation-start', `${originalEmail} logged in as ${target.email}`, originalEmail);
+        res.json({ success: true, user: { email: target.email, name: target.name, role: target.role } });
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Articles ──────────────────────────────────────────────────────
 router.get('/articles', async (req, res) => {
   try {
