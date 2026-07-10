@@ -196,6 +196,10 @@
       margin: 0 auto;
       padding: 32px 24px 60px;
     }
+    /* Our Team needs the full desktop width — the org chart and directory
+       table are both wide, dense content, not the narrow prose-style
+       results the other tabs show. */
+    .results-wrap.results-wrap--wide { max-width: 1440px; }
     .results-label {
       font-size: 13px;
       color: var(--text-muted);
@@ -521,7 +525,7 @@
     .spinner-wrap { display: flex; justify-content: center; padding: 60px; }
 
     /* Org chart — read-only mirror of the admin panel's version */
-    #teamChartContainer { overflow: hidden; text-align: center; background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--gray-200); }
+    #teamChartContainer { overflow: hidden; text-align: center; background: white; border-radius: var(--radius-lg); padding: 44px 24px; border: 1px solid var(--gray-200); }
     .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
     .org-tree { display: inline-block; white-space: nowrap; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .org-tree ul { display: flex; padding-top: 20px; position: relative; }
@@ -562,14 +566,15 @@
       display: inline-block; background: var(--navy); color: white; font-size: 8.5px; font-weight: 700;
       letter-spacing: .3px; padding: 3px 9px; border-radius: 20px; margin-bottom: 6px; white-space: nowrap;
     }
-    .org-misc-column { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; position: relative; padding-left: 26px; padding-top: 4px; }
+    .org-misc-column { display: flex; flex-direction: column; align-items: stretch; gap: 16px; position: relative; padding-left: 26px; padding-top: 4px; }
     .org-misc-column::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; width: 2px; background: var(--gray-300); }
-    .org-misc-item { position: relative; display: flex; flex-direction: column; align-items: flex-start; }
+    .org-misc-item { position: relative; display: flex; flex-direction: column; align-items: stretch; }
     .org-misc-item::before { content: ''; position: absolute; left: -26px; top: 20px; width: 26px; height: 2px; background: var(--gray-300); }
     .org-misc-item > ul { padding-top: 20px; }
+    .org-misc-item > .org-node { width: 100%; box-sizing: border-box; }
     .team-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    .team-table th { text-align: left; padding: 10px 14px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); background: var(--gray-100); border-bottom: 1px solid var(--gray-200); }
-    .team-table td { padding: 9px 14px; font-size: 12.5px; border-bottom: 1px solid var(--gray-100); color: var(--text); vertical-align: middle; }
+    .team-table th { text-align: left; padding: 7px 14px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); background: var(--gray-100); border-bottom: 1px solid var(--gray-200); }
+    .team-table td { padding: 5px 14px; font-size: 12.5px; line-height: 1.3; border-bottom: 1px solid var(--gray-100); color: var(--text); vertical-align: middle; }
     .team-table tr:hover td { background: var(--offwhite); }
     .team-profile-modal-overlay {
       display: none; position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000;
@@ -753,6 +758,7 @@
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
       document.getElementById('tabTeam').classList.toggle('active', isTeam);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1011,7 +1017,7 @@
         tree.style.transform = `scale(${scale})`;
         tree.style.transformOrigin = 'top left';
         tree.style.marginLeft = Math.max(0, (availableWidth - naturalWidth * scale) / 2) + 'px';
-        container.style.height = (tree.scrollHeight * scale + 16) + 'px';
+        container.style.height = (tree.scrollHeight * scale + 24) + 'px';
       }
     }
     window.addEventListener('resize', () => {
