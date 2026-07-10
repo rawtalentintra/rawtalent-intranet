@@ -48,6 +48,42 @@
     #callsTable td { padding: 4px 10px; font-size: 11.5px; line-height: 1.3; }
     #callsTable .action-btn { padding: 3px 8px; font-size: 10.5px; }
     #callsTable select.form-control { padding: 2px 5px; font-size: 10.5px; }
+
+    /* Org chart — classic pure-CSS tree (connector lines via pseudo-elements) */
+    .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
+    .org-tree { display: inline-block; white-space: nowrap; }
+    .org-tree ul { display: flex; padding-top: 24px; position: relative; }
+    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 24px 12px 0 12px; position: relative; white-space: normal; }
+    .org-tree li::before, .org-tree li::after {
+      content: ''; position: absolute; top: 0; right: 50%;
+      border-top: 2px solid var(--gray-300); width: 50%; height: 24px;
+    }
+    .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--gray-300); }
+    .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
+    .org-tree li:only-child { padding-top: 0; }
+    .org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
+    .org-tree li:last-child::before { border-right: 2px solid var(--gray-300); border-radius: 0 6px 0 0; }
+    .org-tree li:first-child::after { border-radius: 6px 0 0 0; }
+    .org-tree ul::before {
+      content: ''; position: absolute; top: 0; left: 50%;
+      border-left: 2px solid var(--gray-300); width: 0; height: 24px;
+    }
+    .org-tree li > ul { margin-top: 0; }
+    .org-node {
+      display: inline-block; min-width: 140px; padding: 10px 16px; border-radius: var(--radius);
+      background: var(--orange-glow); border: 1.5px solid rgba(61,111,255,.35); cursor: pointer;
+      transition: var(--transition);
+    }
+    .org-node:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: var(--orange); }
+    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); }
+    .org-node.org-node-founder .org-node-name, .org-node.org-node-founder .org-node-position { color: white; }
+    .org-node.org-node-tohire { background: var(--gray-100); border: 1.5px dashed var(--gray-300); cursor: default; opacity: .75; }
+    .org-node-name { font-weight: 700; font-size: 13px; color: var(--navy); }
+    .org-node-position { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .org-team-pill {
+      display: inline-block; background: var(--navy); color: white; font-size: 9.5px; font-weight: 700;
+      letter-spacing: .5px; padding: 3px 10px; border-radius: 20px; margin-bottom: 8px;
+    }
   </style>
 </head>
 <body>
@@ -79,6 +115,12 @@
   <div class="admin-layout">
     <!-- Sidebar -->
     <aside class="admin-sidebar">
+      <div class="admin-nav-section super-admin-only" style="display:none">
+        <div class="admin-nav-label">HR</div>
+        <div class="admin-nav-item" onclick="showSection('team', this)">
+          <span class="admin-nav-icon">🧑‍🤝‍🧑</span> Our Team
+        </div>
+      </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label">Overview</div>
         <div class="admin-nav-item active" onclick="showSection('dashboard', this)">
@@ -137,6 +179,50 @@
 
     <!-- Main Content -->
     <main class="admin-content">
+
+      <!-- Our Team -->
+      <div class="admin-section" id="section-team">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Our Team</div>
+            <div class="admin-page-sub">Team hierarchy and HR profiles. Click anyone in the chart to view their profile. Visible to you as super admin only.</div>
+          </div>
+          <button class="btn-add" onclick="openTeamMemberModal()">+ Add Team Member</button>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">Org Chart</span>
+          </div>
+          <div id="orgChartContainer" style="padding:32px;overflow-x:auto">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">Team Directory</span>
+            <span id="teamTableCount" style="font-size:13px;color:var(--text-muted)"></span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="teamTable" style="font-size:12.5px">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Position</th>
+                  <th style="width:150px">Phone / WhatsApp</th>
+                  <th>Address</th>
+                  <th style="width:110px">Employment Date</th>
+                  <th style="width:70px"></th>
+                </tr>
+              </thead>
+              <tbody id="teamTableBody">
+                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
       <!-- Dashboard -->
       <div class="admin-section active" id="section-dashboard">
@@ -911,6 +997,132 @@
     </div>
   </div>
 
+  <!-- Team Profile Modal -->
+  <div class="modal-overlay" id="teamProfileModal" onclick="if(event.target===this)closeTeamProfileModal()">
+    <div class="modal" style="max-width:520px;padding:0;overflow:hidden">
+      <div id="teamProfileHeader" style="background:var(--navy);padding:28px;display:flex;align-items:center;gap:20px;position:relative"></div>
+      <div style="padding:24px 28px;max-height:52vh;overflow-y:auto">
+        <div style="font-weight:700;font-size:14px;color:var(--navy);border-bottom:1px solid var(--gray-200);padding-bottom:6px;margin-bottom:10px">Personal Information</div>
+        <div id="teamProfilePersonal" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
+        <div style="font-weight:700;font-size:14px;color:var(--navy);border-bottom:1px solid var(--gray-200);padding-bottom:6px;margin:20px 0 10px">WFH Set Up</div>
+        <div id="teamProfileWfh" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn edit" onclick="editTeamMemberFromProfile()">Edit</button>
+        <button class="btn-secondary" onclick="closeTeamProfileModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Team Member Modal -->
+  <div class="modal-overlay" id="teamMemberModal" onclick="if(event.target===this)closeTeamMemberModal()">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header">
+        <div class="modal-title" id="teamMemberModalTitle">Add Team Member</div>
+        <button class="modal-close" onclick="closeTeamMemberModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+        <input type="hidden" id="editTeamMemberId">
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
+          <div id="teamMemberPhotoPreview" style="width:64px;height:64px;border-radius:50%;background:var(--gray-100);flex-shrink:0;background-size:cover;background-position:center;border:1px solid var(--gray-200)"></div>
+          <div>
+            <input type="file" id="teamMemberPhotoInput" accept="image/*" style="display:none" onchange="previewTeamMemberPhoto(this)">
+            <button class="btn-secondary" style="font-size:12px;padding:7px 14px" onclick="document.getElementById('teamMemberPhotoInput').click()">Upload Photo</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Display Name <span style="color:#ef4444">*</span></label>
+            <input type="text" id="teamMemberName" class="form-control" placeholder="e.g. Sophia">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Legal Name</label>
+            <input type="text" id="teamMemberLegalName" class="form-control" placeholder="Full legal name">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Position</label>
+            <input type="text" id="teamMemberPosition" class="form-control" placeholder="e.g. Talent Consultant">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Team</label>
+            <input type="text" id="teamMemberTeam" class="form-control" placeholder="e.g. AM Team">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Reports To</label>
+            <select id="teamMemberManager" class="form-control"><option value="">— None (top level) —</option></select>
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Status</label>
+            <select id="teamMemberStatus" class="form-control">
+              <option value="active">Active</option>
+              <option value="to_hire">To Hire (placeholder)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Employment Date</label>
+            <input type="text" id="teamMemberEmploymentDate" class="form-control" placeholder="e.g. June 02, 2026">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Birthdate</label>
+            <input type="text" id="teamMemberBirthdate" class="form-control" placeholder="e.g. September 13, 1985">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Address</label>
+          <input type="text" id="teamMemberAddress" class="form-control" placeholder="Home address">
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Phone</label>
+            <input type="text" id="teamMemberPhone" class="form-control" placeholder="Phone number">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">WhatsApp</label>
+            <input type="text" id="teamMemberWhatsapp" class="form-control" placeholder="WhatsApp number">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Email</label>
+          <input type="email" id="teamMemberEmail" class="form-control" placeholder="name@rawtalent.com.au">
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Device Name</label>
+            <input type="text" id="teamMemberDevice" class="form-control" placeholder="e.g. MacBook Air M2">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Headset</label>
+            <input type="text" id="teamMemberHeadset" class="form-control" placeholder="e.g. Bose QuietComfort">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Internet Connection</label>
+            <input type="text" id="teamMemberInternet" class="form-control" placeholder="e.g. PLDT">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Backup Available</label>
+            <input type="text" id="teamMemberBackupAvailable" class="form-control" placeholder="Yes / No">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Backup Types <span class="optional">(one per line)</span></label>
+          <textarea id="teamMemberBackupTypes" class="form-control textarea" placeholder="Power Station&#10;Smart Mobile Data" style="min-height:70px"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeTeamMemberModal()">Cancel</button>
+        <button class="btn-add" id="teamMemberSubmitBtn" onclick="submitTeamMember()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add FAQ Modal -->
   <div class="modal-overlay" id="addFaqModal" onclick="if(event.target===this)closeAddFaqModal()">
     <div class="modal" style="max-width:560px">
@@ -1075,6 +1287,202 @@
       }
     }
 
+    // ── Our Team ──────────────────────────────────────────────────
+    let allTeamMembers = [];
+    let currentProfileId = null;
+    let teamMemberPhotoDataUri = null;
+
+    async function loadOurTeam() {
+      const chartEl = document.getElementById('orgChartContainer');
+      try {
+        allTeamMembers = await fetch('/api/team').then(r => r.json());
+        chartEl.innerHTML = renderOrgChart(allTeamMembers);
+        renderTeamTable(allTeamMembers);
+      } catch {
+        chartEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">Failed to load team.</div>';
+      }
+    }
+
+    function renderOrgChart(members) {
+      if (members.length === 0) {
+        return '<div style="text-align:center;padding:20px;color:var(--text-muted)">No team members yet — click "+ Add Team Member" to start building the chart.</div>';
+      }
+      const byManager = {};
+      members.forEach(m => {
+        const key = m.manager_id || 'root';
+        (byManager[key] = byManager[key] || []).push(m);
+      });
+      Object.values(byManager).forEach(list => list.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
+      const roots = byManager['root'] || [];
+      return `<div class="org-tree"><ul>${roots.map(r => renderOrgNode(r, byManager)).join('')}</ul></div>`;
+    }
+
+    function renderOrgNode(member, byManager) {
+      const children = byManager[member.id] || [];
+      const isFounder = !member.manager_id;
+      const isToHire = member.status === 'to_hire';
+      const showTeamPill = member.team && /team manager/i.test(member.position || '');
+      return `
+        <li>
+          ${showTeamPill ? `<div class="org-team-pill">${escHtml(member.team.toUpperCase())}</div>` : ''}
+          <div class="org-node ${isFounder ? 'org-node-founder' : ''} ${isToHire ? 'org-node-tohire' : ''}"
+               ${isToHire ? '' : `onclick="openTeamProfile('${member.id}')"`}>
+            <div class="org-node-name">${escHtml(member.name)}</div>
+            ${member.position ? `<div class="org-node-position">${escHtml(member.position)}</div>` : ''}
+          </div>
+          ${children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager)).join('')}</ul>` : ''}
+        </li>
+      `;
+    }
+
+    function renderTeamTable(members) {
+      const tbody = document.getElementById('teamTableBody');
+      document.getElementById('teamTableCount').textContent = `${members.length} member${members.length !== 1 ? 's' : ''}`;
+      if (members.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
+        <tr>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(m.name)}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
+          <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.address || '—')}</td>
+          <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
+          <td><button class="action-btn edit" onclick="openTeamProfile('${m.id}')">View</button></td>
+        </tr>
+      `).join('');
+    }
+
+    function openTeamProfile(id) {
+      const m = allTeamMembers.find(x => x.id === id);
+      if (!m) return;
+      currentProfileId = id;
+      const initials = (m.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+      document.getElementById('teamProfileHeader').innerHTML = `
+        <button class="modal-close" onclick="closeTeamProfileModal()" style="position:absolute;top:14px;right:14px;color:white">×</button>
+        ${m.photo
+          ? `<img src="${m.photo}" style="width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,.3);flex-shrink:0">`
+          : `<div style="width:90px;height:90px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:white;border:3px solid rgba(255,255,255,.3);flex-shrink:0">${escHtml(initials)}</div>`
+        }
+        <div>
+          <div style="font-size:22px;font-weight:800;color:white">${escHtml(m.name)}</div>
+          <div style="font-size:15px;font-weight:600;color:rgba(255,255,255,.85)">${escHtml(m.position || '')}</div>
+        </div>
+      `;
+      document.getElementById('teamProfilePersonal').innerHTML = `
+        <strong>Employment Date:</strong> ${escHtml(m.employment_date || '—')}<br>
+        <strong>Name:</strong> ${escHtml(m.legal_name || m.name)}<br>
+        <strong>Address:</strong> ${escHtml(m.address || '—')}<br>
+        <strong>Birthdate:</strong> ${escHtml(m.birthdate || '—')}
+      `;
+      const backups = (m.backup_types || []).map(b => `<li>${escHtml(b)}</li>`).join('');
+      document.getElementById('teamProfileWfh').innerHTML = `
+        <strong>Device Name:</strong> ${escHtml(m.device_name || '—')}<br>
+        <strong>Headset:</strong> ${escHtml(m.headset || '—')}<br>
+        <strong>Internet Connection:</strong> ${escHtml(m.internet_connection || '—')}<br>
+        <strong>Backup Available:</strong> ${escHtml(m.backup_available || '—')}
+        ${backups ? `<ul style="margin:6px 0 0;padding-left:18px">${backups}</ul>` : ''}
+      `;
+      document.getElementById('teamProfileModal').classList.add('open');
+    }
+
+    function closeTeamProfileModal() { document.getElementById('teamProfileModal').classList.remove('open'); }
+
+    function editTeamMemberFromProfile() {
+      closeTeamProfileModal();
+      openTeamMemberModal(currentProfileId);
+    }
+
+    function openTeamMemberModal(id) {
+      document.getElementById('editTeamMemberId').value = id || '';
+      document.getElementById('teamMemberModalTitle').textContent = id ? 'Edit Team Member' : 'Add Team Member';
+      teamMemberPhotoDataUri = null;
+
+      const managerSelect = document.getElementById('teamMemberManager');
+      managerSelect.innerHTML = '<option value="">— None (top level) —</option>' +
+        allTeamMembers.filter(m => m.id !== id).map(m => `<option value="${m.id}">${escHtml(m.name)}</option>`).join('');
+
+      const m = id ? allTeamMembers.find(x => x.id === id) : null;
+      document.getElementById('teamMemberName').value = m?.name || '';
+      document.getElementById('teamMemberLegalName').value = m?.legal_name || '';
+      document.getElementById('teamMemberPosition').value = m?.position || '';
+      document.getElementById('teamMemberTeam').value = m?.team || '';
+      managerSelect.value = m?.manager_id || '';
+      document.getElementById('teamMemberStatus').value = m?.status || 'active';
+      document.getElementById('teamMemberEmploymentDate').value = m?.employment_date || '';
+      document.getElementById('teamMemberBirthdate').value = m?.birthdate || '';
+      document.getElementById('teamMemberAddress').value = m?.address || '';
+      document.getElementById('teamMemberPhone').value = m?.phone || '';
+      document.getElementById('teamMemberWhatsapp').value = m?.whatsapp || '';
+      document.getElementById('teamMemberEmail').value = m?.email || '';
+      document.getElementById('teamMemberDevice').value = m?.device_name || '';
+      document.getElementById('teamMemberHeadset').value = m?.headset || '';
+      document.getElementById('teamMemberInternet').value = m?.internet_connection || '';
+      document.getElementById('teamMemberBackupAvailable').value = m?.backup_available || '';
+      document.getElementById('teamMemberBackupTypes').value = (m?.backup_types || []).join('\n');
+      const preview = document.getElementById('teamMemberPhotoPreview');
+      preview.style.backgroundImage = m?.photo ? `url(${m.photo})` : 'none';
+
+      document.getElementById('teamMemberModal').classList.add('open');
+    }
+
+    function closeTeamMemberModal() { document.getElementById('teamMemberModal').classList.remove('open'); }
+
+    function previewTeamMemberPhoto(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        teamMemberPhotoDataUri = reader.result;
+        document.getElementById('teamMemberPhotoPreview').style.backgroundImage = `url(${reader.result})`;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function submitTeamMember() {
+      const name = document.getElementById('teamMemberName').value.trim();
+      if (!name) { toast('Display name is required', 'error'); return; }
+      const id = document.getElementById('editTeamMemberId').value;
+      const payload = {
+        name,
+        legal_name: document.getElementById('teamMemberLegalName').value.trim(),
+        position: document.getElementById('teamMemberPosition').value.trim(),
+        team: document.getElementById('teamMemberTeam').value.trim(),
+        manager_id: document.getElementById('teamMemberManager').value || null,
+        status: document.getElementById('teamMemberStatus').value,
+        employment_date: document.getElementById('teamMemberEmploymentDate').value.trim(),
+        birthdate: document.getElementById('teamMemberBirthdate').value.trim(),
+        address: document.getElementById('teamMemberAddress').value.trim(),
+        phone: document.getElementById('teamMemberPhone').value.trim(),
+        whatsapp: document.getElementById('teamMemberWhatsapp').value.trim(),
+        email: document.getElementById('teamMemberEmail').value.trim(),
+        device_name: document.getElementById('teamMemberDevice').value.trim(),
+        headset: document.getElementById('teamMemberHeadset').value.trim(),
+        internet_connection: document.getElementById('teamMemberInternet').value.trim(),
+        backup_available: document.getElementById('teamMemberBackupAvailable').value.trim(),
+        backup_types: document.getElementById('teamMemberBackupTypes').value.split('\n').map(s => s.trim()).filter(Boolean)
+      };
+      if (teamMemberPhotoDataUri) payload.photo = teamMemberPhotoDataUri;
+      else if (id) { const existing = allTeamMembers.find(m => m.id === id); if (existing?.photo) payload.photo = existing.photo; }
+
+      const btn = document.getElementById('teamMemberSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const res = await fetch(id ? `/api/team/${id}` : '/api/team', {
+          method: id ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
+        toast(id ? 'Team member updated' : 'Team member added', 'success');
+        closeTeamMemberModal();
+        loadOurTeam();
+      } catch { toast('Network error', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Save'; }
+    }
+
     // ── Document Upload ───────────────────────────────────────────
     function handleDocDrop(event) {
       event.preventDefault();
@@ -1165,7 +1573,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'team'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -1187,6 +1595,7 @@
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
       if (id === 'calls-dashboard') loadCallsDashboard();
+      if (id === 'team') loadOurTeam();
     }
 
     // ── Stats ─────────────────────────────────────────────────────

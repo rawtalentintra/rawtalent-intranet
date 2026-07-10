@@ -315,6 +315,33 @@ async function initDatabase() {
       sess TEXT NOT NULL,
       expires INTEGER
     )`,
+    // "Our Team" HR directory — org chart (via manager_id) plus a personal
+    // profile per person. Contains real PII (address, birthdate, home setup),
+    // so this whole feature is super_admin only, same gate as Users.
+    `CREATE TABLE IF NOT EXISTS team_members (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      legal_name TEXT,
+      position TEXT,
+      team TEXT,
+      manager_id TEXT,
+      sort_order INTEGER DEFAULT 0,
+      photo TEXT,
+      employment_date TEXT,
+      address TEXT,
+      birthdate TEXT,
+      phone TEXT,
+      whatsapp TEXT,
+      email TEXT,
+      device_name TEXT,
+      headset TEXT,
+      internet_connection TEXT,
+      backup_available TEXT,
+      backup_types TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of schema) {
