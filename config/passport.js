@@ -6,10 +6,29 @@ const { getDb } = require('../db/database');
 
 passport.serializeUser((user, done) => done(null, user.id));
 
+// Every authenticated request deserializes the user, which is otherwise a
+// remote DB round trip per request — a single page load easily fires 5-10
+// API calls in parallel, each paying that cost separately. A short TTL cache
+// removes the repeat cost within one page load / a few seconds of activity,
+// while still picking up role/active changes (e.g. impersonation, disabling
+// an account) within a few seconds rather than requiring a full re-login.
+const USER_CACHE_TTL_MS = 20 * 1000;
+const userCache = new Map(); // id -> { user, expiresAt }
+
+function invalidateUserCache(id) {
+  userCache.delete(id);
+}
+
 passport.deserializeUser(async (id, done) => {
   try {
+    const cached = userCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return done(null, cached.user);
+    }
     const result = await getDb().execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
-    done(null, result.rows[0] || false);
+    const user = result.rows[0] || false;
+    userCache.set(id, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+    done(null, user);
   } catch (err) {
     done(err);
   }
@@ -32,6 +51,8 @@ passport.use(new LocalStrategy({ usernameField: 'email' }, async (email, passwor
     return done(err);
   }
 }));
+
+module.exports.invalidateUserCache = invalidateUserCache;
 
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   passport.use(new GoogleStrategy({

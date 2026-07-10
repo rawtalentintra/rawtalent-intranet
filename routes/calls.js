@@ -82,8 +82,19 @@ router.get('/local', async (req, res) => {
 
     const offset = (Math.max(1, Number(page)) - 1) * Number(pageSize);
     const db = getDb();
+    // The list view only needs to know WHETHER a transcript exists (for the
+    // "Ready"/badge state) — it doesn't render the transcript text itself
+    // (that's fetched separately per-call in the transcript modal). Selecting
+    // the full transcript blob for every row on every page load was pure
+    // wasted bandwidth/DB read cost.
     const [rows, countRes] = await Promise.all([
-      db.execute({ sql: `SELECT * FROM call_recordings ${where} ORDER BY start_time_iso DESC LIMIT ? OFFSET ?`, args: [...args, Number(pageSize), offset] }),
+      db.execute({
+        sql: `SELECT id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds,
+                     start_time, start_time_iso, status, sentiment_score, has_audio, content_synced, synced_at,
+                     (transcript IS NOT NULL AND transcript != '') AS has_transcript
+              FROM call_recordings ${where} ORDER BY start_time_iso DESC LIMIT ? OFFSET ?`,
+        args: [...args, Number(pageSize), offset]
+      }),
       db.execute({ sql: `SELECT COUNT(*) as n FROM call_recordings ${where}`, args })
     ]);
     res.json({ recordings: rows.rows, total: Number(countRes.rows[0].n), page: Number(page), pageSize: Number(pageSize) });

@@ -350,6 +350,27 @@ async function initDatabase() {
     await db.execute(sql);
   }
 
+  // Every one of these backs a WHERE/ORDER BY that route handlers run on
+  // every request (call browsing/filtering, article listing, team lookups,
+  // session/login checks) — without an index each is a full table scan that
+  // gets slower as the table grows.
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_call_recordings_start_time ON call_recordings(start_time_iso)',
+    'CREATE INDEX IF NOT EXISTS idx_call_recordings_rep_name ON call_recordings(rep_name)',
+    'CREATE INDEX IF NOT EXISTS idx_call_evaluations_created_at ON call_evaluations(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_call_evaluations_recording_id ON call_evaluations(recording_id)',
+    'CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category)',
+    'CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at)',
+    'CREATE INDEX IF NOT EXISTS idx_team_members_manager_id ON team_members(manager_id)',
+    'CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)',
+    'CREATE INDEX IF NOT EXISTS idx_feedback_article_id ON feedback(article_id)',
+    'CREATE INDEX IF NOT EXISTS idx_article_logs_article_id ON article_logs(article_id)',
+    'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires)',
+  ];
+  for (const sql of indexes) {
+    await db.execute(sql);
+  }
+
   // call_recordings shipped before has_audio/content_synced existed — add them
   // to any table created by an earlier deploy. "Duplicate column" errors are
   // expected (and ignored) on a fresh table where CREATE TABLE already has them.
@@ -400,30 +421,42 @@ async function initDatabase() {
   // vertically-stacked column, and needs these values within each group.
   try {
     const centeredOrder = { 'Yuvraj Rao': 0, 'Sophia': 1, 'Joy Victoria': 2, 'Gwen Stocks': 3, 'Jemina Numos': 4 };
-    for (const [name, ord] of Object.entries(centeredOrder)) {
-      await db.execute({ sql: 'UPDATE team_members SET sort_order = ? WHERE name = ?', args: [ord, name] });
-    }
+    await db.batch(
+      Object.entries(centeredOrder).map(([name, ord]) => ({
+        sql: 'UPDATE team_members SET sort_order = ? WHERE name = ?',
+        args: [ord, name]
+      })),
+      'write'
+    );
   } catch {}
 
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
   // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,
-  // recreate it as a standalone table, and populate it directly on every startup.
-  await db.execute('DROP TRIGGER IF EXISTS ks_ai');
-  await db.execute('DROP TRIGGER IF EXISTS ks_au');
-  await db.execute('DROP TRIGGER IF EXISTS ks_ad');
-  await db.execute('DROP TABLE IF EXISTS knowledge_sources_fts');
-  await db.execute('CREATE VIRTUAL TABLE knowledge_sources_fts USING fts5(id UNINDEXED, title, content)');
-  const ksSources = await db.execute('SELECT id, title, content FROM knowledge_sources');
-  if (ksSources.rows.length > 0) {
-    await db.batch(
-      ksSources.rows.map(r => ({
-        sql: 'INSERT INTO knowledge_sources_fts(id, title, content) VALUES (?, ?, ?)',
-        args: [r.id, r.title, r.content]
-      })),
-      'write'
-    );
+  // recreate it as a standalone table, and populate it directly — but only when the
+  // counts actually disagree, so a normal restart with no new/changed sources doesn't
+  // pay for a full drop/rebuild every single boot.
+  const [ksCount, ksFtsCount] = await Promise.all([
+    db.execute('SELECT COUNT(*) as n FROM knowledge_sources'),
+    db.execute('SELECT COUNT(*) as n FROM knowledge_sources_fts').catch(() => ({ rows: [{ n: -1 }] }))
+  ]);
+  if (Number(ksCount.rows[0].n) !== Number(ksFtsCount.rows[0].n)) {
+    await db.execute('DROP TRIGGER IF EXISTS ks_ai');
+    await db.execute('DROP TRIGGER IF EXISTS ks_au');
+    await db.execute('DROP TRIGGER IF EXISTS ks_ad');
+    await db.execute('DROP TABLE IF EXISTS knowledge_sources_fts');
+    await db.execute('CREATE VIRTUAL TABLE knowledge_sources_fts USING fts5(id UNINDEXED, title, content)');
+    const ksSources = await db.execute('SELECT id, title, content FROM knowledge_sources');
+    if (ksSources.rows.length > 0) {
+      await db.batch(
+        ksSources.rows.map(r => ({
+          sql: 'INSERT INTO knowledge_sources_fts(id, title, content) VALUES (?, ?, ?)',
+          args: [r.id, r.title, r.content]
+        })),
+        'write'
+      );
+    }
+    console.log(`✓ knowledge_sources_fts rebuilt (${ksSources.rows.length} entries)`);
   }
-  console.log(`✓ knowledge_sources_fts rebuilt (${ksSources.rows.length} entries)`);
 
   const countRes = await db.execute('SELECT COUNT(*) as n FROM glossary');
   if (Number(countRes.rows[0].n) === 0) {
@@ -435,6 +468,16 @@ async function initDatabase() {
       'write'
     );
     console.log(`✓ Glossary seeded with ${ECEC_GLOSSARY.length} ECEC terms`);
+  }
+
+  // Expired sessions are only ever deleted lazily (when that exact sid is
+  // looked up again after expiring), so a session table can accumulate rows
+  // forever. The active-sessions admin panel does a full table scan, so this
+  // keeps that scan (and the table itself) from growing unbounded.
+  try {
+    await db.execute({ sql: 'DELETE FROM sessions WHERE expires IS NOT NULL AND expires < ?', args: [Date.now()] });
+  } catch (err) {
+    console.error('Session cleanup error:', err.message);
   }
 
   const adminEmail = process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au';

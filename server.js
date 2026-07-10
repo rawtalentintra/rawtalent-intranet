@@ -4,7 +4,7 @@ const session = require('express-session');
 const passport = require('passport');
 const path = require('path');
 
-const { initDatabase } = require('./db/database');
+const { initDatabase, getDb } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
 const TursoSessionStore = require('./services/sessionStore');
 
@@ -63,6 +63,12 @@ async function start() {
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
     syncFromDrive().catch(err => console.error('Drive sync error:', err.message));
   }
+  // initDatabase() only clears expired sessions on boot — keep sweeping
+  // periodically too, since a process can run for weeks between deploys.
+  setInterval(() => {
+    getDb().execute({ sql: 'DELETE FROM sessions WHERE expires IS NOT NULL AND expires < ?', args: [Date.now()] })
+      .catch(err => console.error('Session cleanup error:', err.message));
+  }, 6 * 60 * 60 * 1000);
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
     console.log(`   Admin: ${process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au'}\n`);

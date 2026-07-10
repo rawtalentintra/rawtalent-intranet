@@ -10,6 +10,7 @@ const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
 const { logActivity } = require('../services/activityLog');
+const { invalidateUserCache } = require('../config/passport');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -95,6 +96,7 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     if (role !== undefined && role !== target.role) { await db.execute({ sql: 'UPDATE users SET role = ? WHERE id = ?', args: [role, req.params.id] }); changes.push(`Role: "${target.role}" → "${role}"`); }
     if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [active ? 1 : 0, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
 
+    invalidateUserCache(Number(req.params.id));
     await logActivity('user', target.email, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email);
     res.json({ success: true });
   } catch (err) {
@@ -112,6 +114,7 @@ router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete the primary admin account' });
     }
     await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [req.params.id] });
+    invalidateUserCache(Number(req.params.id));
     await logActivity('user', target.email, 'deleted', `User "${target.email}" removed`, req.user.email);
     res.json({ success: true });
   } catch (err) {

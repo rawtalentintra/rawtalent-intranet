@@ -3539,7 +3539,7 @@
         }
         list.innerHTML = recordings.map(r => {
           const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
-          const gradeReady = !!r.transcript;
+          const gradeReady = !!r.has_transcript;
           const badge = gradeReady
             ? { cls: 'badge-published', label: '✓ Ready' }
             : r.has_audio
@@ -3557,13 +3557,13 @@
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
                 <button class="action-btn edit" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
                 ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
-                ${r.transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
+                ${r.has_transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
                 <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:11px;padding:4px 6px;width:100px">
                   <option value="educator">Educator</option>
                   <option value="centre">Centre</option>
                 </select>
                 <button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate (AI)</button>
-                ${r.transcript ? `<button class="action-btn edit" onclick="openManualGradeModal('${r.id}')">Grade Manually</button>` : ''}
+                ${r.has_transcript ? `<button class="action-btn edit" onclick="openManualGradeModal('${r.id}')">Grade Manually</button>` : ''}
               </div>
             </td>
           </tr>`;
