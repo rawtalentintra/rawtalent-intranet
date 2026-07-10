@@ -67,6 +67,10 @@
     </div>
   </nav>
 
+  <div id="viewBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:9px 24px;text-align:center;font-size:13.5px;color:#9a3412;font-weight:600">
+    <span id="viewBannerText"></span>
+  </div>
+
   <div class="admin-layout">
     <!-- Sidebar -->
     <aside class="admin-sidebar">
@@ -1028,6 +1032,9 @@
         currentUserRole = me.role;
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         document.getElementById('adminName').textContent = me.name || me.email.split('@')[0];
+        const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
+        document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on Admin View.`;
+        document.getElementById('viewBanner').style.display = 'block';
         applyRoleVisibility();
       } catch { location.href = '/login.html'; return; }
 

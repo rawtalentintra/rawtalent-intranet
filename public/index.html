@@ -538,6 +538,11 @@
     </div>
   </nav>
 
+  <div id="viewBanner" style="display:none;background:#eef2ff;border-bottom:1px solid #c7d2fe;padding:9px 24px;text-align:center;font-size:13.5px;color:#3730a3;font-weight:600">
+    <div id="viewBannerText"></div>
+    <div style="font-size:11px;font-weight:400;opacity:.75;margin-top:2px">Users will never see the Admin button.</div>
+  </div>
+
   <!-- Hero -->
   <div class="hero-wrap" id="heroWrap">
     <div class="hero-content">
@@ -618,6 +623,10 @@
           const btn = document.getElementById('adminNavBtn');
           btn.style.display = 'inline-flex';
           btn.textContent = me.role === 'super_admin' ? '⚙ Super Admin' : '⚙ Admin';
+
+          const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
+          document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on User View.`;
+          document.getElementById('viewBanner').style.display = 'block';
         }
       } catch { location.href = '/login.html'; return; }
 
