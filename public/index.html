@@ -519,6 +519,55 @@
     .empty-icon { font-size: 40px; margin-bottom: 14px; }
     .empty-title { font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
     .spinner-wrap { display: flex; justify-content: center; padding: 60px; }
+
+    /* Org chart — read-only mirror of the admin panel's version */
+    #teamChartContainer { overflow: hidden; background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--gray-200); }
+    .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
+    .org-tree { display: inline-block; white-space: nowrap; }
+    .org-tree ul { display: flex; padding-top: 16px; position: relative; }
+    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 16px 5px 0 5px; position: relative; white-space: normal; }
+    .org-tree li::before, .org-tree li::after {
+      content: ''; position: absolute; top: 0; right: 50%;
+      border-top: 2px solid var(--gray-200); width: 50%; height: 16px;
+    }
+    .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--gray-200); }
+    .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
+    .org-tree li:only-child { padding-top: 0; }
+    .org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
+    .org-tree li:last-child::before { border-right: 2px solid var(--gray-200); border-radius: 0 6px 0 0; }
+    .org-tree li:first-child::after { border-radius: 6px 0 0 0; }
+    .org-tree ul::before {
+      content: ''; position: absolute; top: 0; left: 50%;
+      border-left: 2px solid var(--gray-200); width: 0; height: 16px;
+    }
+    .org-tree li > ul { margin-top: 0; }
+    .org-node {
+      display: inline-block; min-width: 82px; padding: 6px 8px; border-radius: 8px;
+      background: var(--orange-glow); border: 1.5px solid rgba(61,111,255,.35); cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .org-node:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.08); border-color: var(--orange); }
+    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); min-width: 110px; }
+    .org-node.org-node-founder .org-node-name, .org-node.org-node-founder .org-node-position { color: white; }
+    .org-node.org-node-tohire { background: var(--gray-100); border: 1.5px dashed var(--gray-300); cursor: default; opacity: .75; }
+    .org-node-name { font-weight: 700; font-size: 10.5px; color: var(--navy); line-height: 1.25; }
+    .org-node-position { font-size: 8.5px; color: var(--text-muted); margin-top: 1px; line-height: 1.2; }
+    .org-node-founder .org-node-name { font-size: 13px; }
+    .org-node-founder .org-node-position { font-size: 10px; }
+    .org-team-pill {
+      display: inline-block; background: var(--navy); color: white; font-size: 7.5px; font-weight: 700;
+      letter-spacing: .3px; padding: 2px 7px; border-radius: 20px; margin-bottom: 5px;
+    }
+    .team-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .team-table th { text-align: left; padding: 10px 14px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); background: var(--gray-100); border-bottom: 1px solid var(--gray-200); }
+    .team-table td { padding: 9px 14px; font-size: 12.5px; border-bottom: 1px solid var(--gray-100); color: var(--text); vertical-align: middle; }
+    .team-table tr:hover td { background: var(--offwhite); }
+    .team-profile-modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .team-profile-modal-overlay.open { display: flex; }
+    .team-profile-modal { background: white; border-radius: var(--radius-lg); max-width: 480px; width: 92%; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
   </style>
 </head>
 <body>
@@ -559,6 +608,7 @@
         <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
         <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
         <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
+        <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -605,6 +655,22 @@
   </div>
 
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Team Profile Modal (read-only) -->
+  <div class="team-profile-modal-overlay" id="teamProfileModal" onclick="if(event.target===this)closeTeamProfileModal()">
+    <div class="team-profile-modal">
+      <div id="teamProfileHeader" style="background:var(--navy);padding:28px;display:flex;align-items:center;gap:20px;position:relative"></div>
+      <div style="padding:24px 28px;overflow-y:auto">
+        <div style="font-weight:700;font-size:14px;color:var(--navy);border-bottom:1px solid var(--gray-200);padding-bottom:6px;margin-bottom:10px">Personal Information</div>
+        <div id="teamProfilePersonal" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
+        <div style="font-weight:700;font-size:14px;color:var(--navy);border-bottom:1px solid var(--gray-200);padding-bottom:6px;margin:20px 0 10px">WFH Set Up</div>
+        <div id="teamProfileWfh" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
+      </div>
+      <div style="padding:16px 28px;border-top:1px solid var(--gray-200);text-align:right">
+        <button onclick="closeTeamProfileModal()" style="background:var(--gray-100);border:none;padding:9px 18px;border-radius:var(--radius);font-size:13px;font-weight:600;cursor:pointer;color:var(--text)">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     let currentMode = 'search';
@@ -672,10 +738,12 @@
       const isAI = mode === 'ai';
       const isGlossary = mode === 'glossary';
       const isFaq = mode === 'faq';
+      const isTeam = mode === 'team';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
+      document.getElementById('tabTeam').classList.toggle('active', isTeam);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -684,11 +752,13 @@
         ? 'Ask the AI anything' + String.fromCharCode(8203)
         : isGlossary ? 'Glossary of terms'
         : isFaq ? 'Frequently asked questions'
+        : isTeam ? 'Our Team'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Powered by Claude AI — searches across all articles, documents, and reference sites'
         : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
         : isFaq ? 'Real questions from the team, reviewed and approved'
+        : isTeam ? 'Team hierarchy and HR profiles'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -703,6 +773,8 @@
         loadGlossaryView();
       } else if (isFaq) {
         loadFaqView();
+      } else if (isTeam) {
+        loadTeamView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
@@ -826,6 +898,130 @@
       if (listEl) listEl.innerHTML = items;
       else list.insertAdjacentHTML('beforeend', `<div class="glossary-list">${items}</div>`);
     }
+
+    // ── Our Team (read-only mirror of the admin panel's org chart) ──
+    let allTeamMembers = [];
+
+    async function loadTeamView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        allTeamMembers = await fetch('/api/team').then(r => r.json());
+        list.innerHTML = `
+          <div id="teamChartContainer">${renderOrgChart(allTeamMembers)}</div>
+          <div style="overflow-x:auto">${renderTeamTable(allTeamMembers)}</div>
+        `;
+        const chartEl = document.getElementById('teamChartContainer');
+        if (chartEl) fitOrgChart(chartEl);
+      } catch {
+        list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load team.</div></div>';
+      }
+    }
+
+    function renderOrgChart(members) {
+      if (members.length === 0) {
+        return '<div style="text-align:center;padding:20px;color:var(--text-muted)">No team members yet.</div>';
+      }
+      const byManager = {};
+      members.forEach(m => {
+        const key = m.manager_id || 'root';
+        (byManager[key] = byManager[key] || []).push(m);
+      });
+      Object.values(byManager).forEach(l => l.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
+      const roots = byManager['root'] || [];
+      return `<div class="org-tree"><ul>${roots.map(r => renderOrgNode(r, byManager)).join('')}</ul></div>`;
+    }
+
+    function renderOrgNode(member, byManager) {
+      const children = byManager[member.id] || [];
+      const isFounder = !member.manager_id;
+      const isToHire = member.status === 'to_hire';
+      const showTeamPill = member.team && children.some(c => c.team === member.team);
+      return `
+        <li>
+          ${showTeamPill ? `<div class="org-team-pill">${escHtml(member.team.toUpperCase())}</div>` : ''}
+          <div class="org-node ${isFounder ? 'org-node-founder' : ''} ${isToHire ? 'org-node-tohire' : ''}"
+               ${isToHire ? '' : `onclick="openTeamProfile('${member.id}')"`}>
+            <div class="org-node-name">${escHtml(member.name)}</div>
+            ${member.position ? `<div class="org-node-position">${escHtml(member.position)}</div>` : ''}
+          </div>
+          ${children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager)).join('')}</ul>` : ''}
+        </li>
+      `;
+    }
+
+    function fitOrgChart(container) {
+      const tree = container.querySelector('.org-tree');
+      if (!tree) return;
+      tree.style.transform = 'none';
+      container.style.height = '';
+      requestAnimationFrame(() => {
+        const naturalWidth = tree.scrollWidth;
+        const availableWidth = container.clientWidth - 8;
+        if (naturalWidth > availableWidth && naturalWidth > 0) {
+          const scale = Math.max(availableWidth / naturalWidth, 0.4);
+          tree.style.transform = `scale(${scale})`;
+          tree.style.transformOrigin = 'top center';
+          container.style.height = (tree.scrollHeight * scale + 16) + 'px';
+        }
+      });
+    }
+    window.addEventListener('resize', () => {
+      const el = document.getElementById('teamChartContainer');
+      if (el && currentMode === 'team') fitOrgChart(el);
+    });
+
+    function renderTeamTable(members) {
+      if (members.length === 0) return '';
+      const rows = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
+        <tr>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(m.name)}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
+          <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.address || '—')}</td>
+          <td><button onclick="openTeamProfile('${m.id}')" style="background:none;border:1px solid var(--gray-200);padding:4px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--orange)">View</button></td>
+        </tr>
+      `).join('');
+      return `
+        <table class="team-table">
+          <thead><tr><th>Name</th><th>Position</th><th>Phone / WhatsApp</th><th>Address</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function openTeamProfile(id) {
+      const m = allTeamMembers.find(x => x.id === id);
+      if (!m) return;
+      const initials = (m.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+      document.getElementById('teamProfileHeader').innerHTML = `
+        ${m.photo
+          ? `<img src="${m.photo}" style="width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,.3);flex-shrink:0">`
+          : `<div style="width:90px;height:90px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:white;border:3px solid rgba(255,255,255,.3);flex-shrink:0">${escHtml(initials)}</div>`
+        }
+        <div>
+          <div style="font-size:22px;font-weight:800;color:white">${escHtml(m.name)}</div>
+          <div style="font-size:15px;font-weight:600;color:rgba(255,255,255,.85)">${escHtml(m.position || '')}</div>
+        </div>
+      `;
+      document.getElementById('teamProfilePersonal').innerHTML = `
+        <strong>Employment Date:</strong> ${escHtml(m.employment_date || '—')}<br>
+        <strong>Name:</strong> ${escHtml(m.legal_name || m.name)}<br>
+        <strong>Address:</strong> ${escHtml(m.address || '—')}<br>
+        <strong>Birthdate:</strong> ${escHtml(m.birthdate || '—')}
+      `;
+      const backups = (m.backup_types || []).map(b => `<li>${escHtml(b)}</li>`).join('');
+      document.getElementById('teamProfileWfh').innerHTML = `
+        <strong>Device Name:</strong> ${escHtml(m.device_name || '—')}<br>
+        <strong>Headset:</strong> ${escHtml(m.headset || '—')}<br>
+        <strong>Internet Connection:</strong> ${escHtml(m.internet_connection || '—')}<br>
+        <strong>Backup Available:</strong> ${escHtml(m.backup_available || '—')}
+        ${backups ? `<ul style="margin:6px 0 0;padding-left:18px">${backups}</ul>` : ''}
+      `;
+      document.getElementById('teamProfileModal').classList.add('open');
+    }
+
+    function closeTeamProfileModal() { document.getElementById('teamProfileModal').classList.remove('open'); }
 
     // ── Ask AI ────────────────────────────────────────────────────
     let conversationTurns = [];

@@ -359,6 +359,35 @@ async function initDatabase() {
   try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN source TEXT DEFAULT 'ai'`); } catch {}
   try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN reviewer_feedback TEXT`); } catch {}
 
+  // One-time seed for "Our Team" — only runs while the table is still empty,
+  // so it never overwrites real edits made later through the UI.
+  try {
+    const teamCount = await db.execute('SELECT COUNT(*) as n FROM team_members');
+    if (Number(teamCount.rows[0].n) === 0) {
+      const { v4: uuidv4 } = require('uuid');
+      const seedMembers = require('./seedTeamData');
+      const idByKey = {};
+      seedMembers.forEach(m => { idByKey[m.key] = uuidv4(); });
+      for (const m of seedMembers) {
+        await db.execute({
+          sql: `INSERT INTO team_members
+                (id, name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
+                 device_name, headset, internet_connection, backup_available, backup_types, status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          args: [
+            idByKey[m.key], m.name, m.legal_name || null, m.position || null, m.team || null,
+            m.manager ? idByKey[m.manager] : null, m.sortOrder || 0, m.photo || null, m.employment_date || null,
+            m.address || null, m.birthdate || null, m.device_name || null, m.headset || null,
+            m.internet_connection || null, m.backup_available || null, JSON.stringify(m.backup_types || []), m.status || 'active'
+          ]
+        });
+      }
+      console.log(`✓ Seeded ${seedMembers.length} team members`);
+    }
+  } catch (err) {
+    console.error('Team seed error:', err.message);
+  }
+
   // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
   // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,
   // recreate it as a standalone table, and populate it directly on every startup.

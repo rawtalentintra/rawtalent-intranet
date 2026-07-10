@@ -49,14 +49,18 @@
     #callsTable .action-btn { padding: 3px 8px; font-size: 10.5px; }
     #callsTable select.form-control { padding: 2px 5px; font-size: 10.5px; }
 
-    /* Org chart — classic pure-CSS tree (connector lines via pseudo-elements) */
+    /* Org chart — classic pure-CSS tree (connector lines via pseudo-elements).
+       #orgChartContainer clips overflow and org-chart-fit.js scales .org-tree
+       down to fit its width, so there's never a scrollbar — just a smaller
+       (but always fully visible, centered) chart on narrower screens. */
+    #orgChartContainer, #teamChartContainer { overflow: hidden; }
     .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
     .org-tree { display: inline-block; white-space: nowrap; }
-    .org-tree ul { display: flex; padding-top: 24px; position: relative; }
-    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 24px 12px 0 12px; position: relative; white-space: normal; }
+    .org-tree ul { display: flex; padding-top: 16px; position: relative; }
+    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 16px 5px 0 5px; position: relative; white-space: normal; }
     .org-tree li::before, .org-tree li::after {
       content: ''; position: absolute; top: 0; right: 50%;
-      border-top: 2px solid var(--gray-300); width: 50%; height: 24px;
+      border-top: 2px solid var(--gray-300); width: 50%; height: 16px;
     }
     .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--gray-300); }
     .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
@@ -66,23 +70,25 @@
     .org-tree li:first-child::after { border-radius: 6px 0 0 0; }
     .org-tree ul::before {
       content: ''; position: absolute; top: 0; left: 50%;
-      border-left: 2px solid var(--gray-300); width: 0; height: 24px;
+      border-left: 2px solid var(--gray-300); width: 0; height: 16px;
     }
     .org-tree li > ul { margin-top: 0; }
     .org-node {
-      display: inline-block; min-width: 140px; padding: 10px 16px; border-radius: var(--radius);
+      display: inline-block; min-width: 82px; padding: 6px 8px; border-radius: 8px;
       background: var(--orange-glow); border: 1.5px solid rgba(61,111,255,.35); cursor: pointer;
       transition: var(--transition);
     }
     .org-node:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: var(--orange); }
-    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); }
+    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); min-width: 110px; }
     .org-node.org-node-founder .org-node-name, .org-node.org-node-founder .org-node-position { color: white; }
     .org-node.org-node-tohire { background: var(--gray-100); border: 1.5px dashed var(--gray-300); cursor: default; opacity: .75; }
-    .org-node-name { font-weight: 700; font-size: 13px; color: var(--navy); }
-    .org-node-position { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .org-node-name { font-weight: 700; font-size: 10.5px; color: var(--navy); line-height: 1.25; }
+    .org-node-position { font-size: 8.5px; color: var(--text-muted); margin-top: 1px; line-height: 1.2; }
+    .org-node-founder .org-node-name { font-size: 13px; }
+    .org-node-founder .org-node-position { font-size: 10px; }
     .org-team-pill {
-      display: inline-block; background: var(--navy); color: white; font-size: 9.5px; font-weight: 700;
-      letter-spacing: .5px; padding: 3px 10px; border-radius: 20px; margin-bottom: 8px;
+      display: inline-block; background: var(--navy); color: white; font-size: 7.5px; font-weight: 700;
+      letter-spacing: .3px; padding: 2px 7px; border-radius: 20px; margin-bottom: 5px;
     }
   </style>
 </head>
@@ -115,7 +121,7 @@
   <div class="admin-layout">
     <!-- Sidebar -->
     <aside class="admin-sidebar">
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">HR</div>
         <div class="admin-nav-item" onclick="showSection('team', this)">
           <span class="admin-nav-icon">🧑‍🤝‍🧑</span> Our Team
@@ -185,9 +191,9 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Our Team</div>
-            <div class="admin-page-sub">Team hierarchy and HR profiles. Click anyone in the chart to view their profile. Visible to you as super admin only.</div>
+            <div class="admin-page-sub">Team hierarchy and HR profiles. Click anyone in the chart to view their profile.</div>
           </div>
-          <button class="btn-add" onclick="openTeamMemberModal()">+ Add Team Member</button>
+          <button class="btn-add super-admin-only" id="addTeamMemberBtn" style="display:none" onclick="openTeamMemberModal()">+ Add Team Member</button>
         </div>
 
         <div class="admin-table-card" style="margin-bottom:20px">
@@ -1008,7 +1014,7 @@
         <div id="teamProfileWfh" style="font-size:13.5px;line-height:1.9;color:var(--text)"></div>
       </div>
       <div class="modal-footer">
-        <button class="action-btn edit" onclick="editTeamMemberFromProfile()">Edit</button>
+        <button class="action-btn edit super-admin-only" style="display:none" onclick="editTeamMemberFromProfile()">Edit</button>
         <button class="btn-secondary" onclick="closeTeamProfileModal()">Close</button>
       </div>
     </div>
@@ -1298,10 +1304,35 @@
         allTeamMembers = await fetch('/api/team').then(r => r.json());
         chartEl.innerHTML = renderOrgChart(allTeamMembers);
         renderTeamTable(allTeamMembers);
+        fitOrgChart(chartEl);
       } catch {
         chartEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">Failed to load team.</div>';
       }
     }
+
+    // Scales the tree down (uniformly, centered) so it always fits the
+    // container's width with no horizontal scrollbar, regardless of how
+    // many people are in it.
+    function fitOrgChart(container) {
+      const tree = container.querySelector('.org-tree');
+      if (!tree) return;
+      tree.style.transform = 'none';
+      container.style.height = '';
+      requestAnimationFrame(() => {
+        const naturalWidth = tree.scrollWidth;
+        const availableWidth = container.clientWidth - 8;
+        if (naturalWidth > availableWidth && naturalWidth > 0) {
+          const scale = Math.max(availableWidth / naturalWidth, 0.4);
+          tree.style.transform = `scale(${scale})`;
+          tree.style.transformOrigin = 'top center';
+          container.style.height = (tree.scrollHeight * scale + 16) + 'px';
+        }
+      });
+    }
+    window.addEventListener('resize', () => {
+      const el = document.getElementById('orgChartContainer');
+      if (el && document.getElementById('section-team')?.classList.contains('active')) fitOrgChart(el);
+    });
 
     function renderOrgChart(members) {
       if (members.length === 0) {
@@ -1321,7 +1352,9 @@
       const children = byManager[member.id] || [];
       const isFounder = !member.manager_id;
       const isToHire = member.status === 'to_hire';
-      const showTeamPill = member.team && /team manager/i.test(member.position || '');
+      // A team pill marks whoever leads that team — i.e. has a team value
+      // AND direct reports (not every member of the team individually).
+      const showTeamPill = member.team && children.some(c => c.team === member.team);
       return `
         <li>
           ${showTeamPill ? `<div class="org-team-pill">${escHtml(member.team.toUpperCase())}</div>` : ''}
@@ -1573,7 +1606,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq', 'team'];
+    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {

@@ -3,14 +3,14 @@ const router = express.Router();
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
-const { requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { logActivity } = require('../services/activityLog');
 
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// Real PII (home address, birthdate, personal device/backup details) —
-// same confidentiality gate as Users management.
-router.use(requireSuperAdmin);
+// Viewable by any signed-in user (regardless of role) — editing (add/update/
+// delete/photo) is super_admin only.
+router.use(requireAuth);
 
 router.get('/', async (req, res) => {
   try {
@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireSuperAdmin, async (req, res) => {
   const { name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
     phone, whatsapp, email, device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSuperAdmin, async (req, res) => {
   const { name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
     phone, whatsapp, email, device_name, headset, internet_connection, backup_available, backup_types, status } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
@@ -71,7 +71,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT name FROM team_members WHERE id = ?', args: [req.params.id] });
@@ -85,7 +85,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-router.post('/:id/photo', photoUpload.single('photo'), async (req, res) => {
+router.post('/:id/photo', requireSuperAdmin, photoUpload.single('photo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const dataUri = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
