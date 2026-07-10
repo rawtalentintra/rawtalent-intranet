@@ -11,6 +11,7 @@ const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddlewar
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
 const { logActivity } = require('../services/activityLog');
 const { invalidateUserCache } = require('../config/passport');
+const { BUCKETS, uploadBuffer, extForMimetype, remove: removeFile } = require('../services/storageService');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -21,10 +22,10 @@ router.get('/stats', async (req, res) => {
   try {
     const db = getDb();
     const [total, draft, users, cats] = await Promise.all([
-      db.execute('SELECT COUNT(*) as n FROM articles WHERE published=1'),
-      db.execute('SELECT COUNT(*) as n FROM articles WHERE published=0'),
-      db.execute('SELECT COUNT(*) as n FROM users WHERE active=1'),
-      db.execute("SELECT COUNT(DISTINCT category) as n FROM articles WHERE published=1 AND category!=''"),
+      db.execute('SELECT COUNT(*) as n FROM articles WHERE published=true'),
+      db.execute('SELECT COUNT(*) as n FROM articles WHERE published=false'),
+      db.execute('SELECT COUNT(*) as n FROM users WHERE active=true'),
+      db.execute("SELECT COUNT(DISTINCT category) as n FROM articles WHERE published=true AND category!=''"),
     ]);
     res.json({
       totalArticles: Number(total.rows[0].n),
@@ -94,7 +95,7 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     }
     if (name !== undefined && name !== target.name) { await db.execute({ sql: 'UPDATE users SET name = ? WHERE id = ?', args: [name, req.params.id] }); changes.push(`Name: "${target.name}" → "${name}"`); }
     if (role !== undefined && role !== target.role) { await db.execute({ sql: 'UPDATE users SET role = ? WHERE id = ?', args: [role, req.params.id] }); changes.push(`Role: "${target.role}" → "${role}"`); }
-    if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [active ? 1 : 0, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
+    if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [!!active, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
 
     invalidateUserCache(Number(req.params.id));
     await logActivity('user', target.email, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email);
@@ -192,7 +193,7 @@ router.get('/articles', async (req, res) => {
     const result = await getDb().execute(
       'SELECT id, title, summary, category, tags, published, created_at, updated_at, author_email FROM articles ORDER BY updated_at DESC'
     );
-    res.json(result.rows.map(a => ({ ...a, tags: JSON.parse(a.tags || '[]') })));
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -203,7 +204,7 @@ router.get('/articles/:id', async (req, res) => {
     const result = await getDb().execute({ sql: 'SELECT * FROM articles WHERE id = ?', args: [req.params.id] });
     const article = result.rows[0];
     if (!article) return res.status(404).json({ error: 'Not found' });
-    res.json({ ...article, tags: JSON.parse(article.tags || '[]'), related_ids: JSON.parse(article.related_ids || '[]') });
+    res.json(article);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -229,7 +230,7 @@ router.post('/articles', async (req, res) => {
       sql: `INSERT INTO articles (id, title, summary, content, category, tags, related_ids, author_email, published, drive_file_id, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [id, title, summary || '', content, category || '', JSON.stringify(tags || []),
-        JSON.stringify(relatedIds || []), req.user.email, published ? 1 : 0, driveFileId, now, now]
+        JSON.stringify(relatedIds || []), req.user.email, !!published, driveFileId, now, now]
     });
 
     await db.execute({
@@ -257,14 +258,14 @@ router.put('/articles/:id', async (req, res) => {
     if ((summary || '') !== (existing.summary || '')) changes.push('Summary updated');
     if (content !== existing.content) changes.push('Content updated');
     if ((category || '') !== (existing.category || '')) changes.push(`Category: "${existing.category || 'none'}" → "${category || 'none'}"`);
-    if (JSON.stringify(tags || []) !== existing.tags) changes.push('Tags updated');
+    if (JSON.stringify(tags || []) !== JSON.stringify(existing.tags || [])) changes.push('Tags updated');
     if (Boolean(published) !== Boolean(existing.published)) changes.push(`Status: ${existing.published ? 'Published' : 'Draft'} → ${published ? 'Published' : 'Draft'}`);
 
     const now = new Date().toISOString();
     await db.execute({
       sql: `UPDATE articles SET title=?, summary=?, content=?, category=?, tags=?, related_ids=?, published=?, updated_at=? WHERE id=?`,
       args: [title, summary || '', content, category || '', JSON.stringify(tags || []),
-        JSON.stringify(relatedIds || []), published ? 1 : 0, now, req.params.id]
+        JSON.stringify(relatedIds || []), !!published, now, req.params.id]
     });
 
     await db.execute({
@@ -364,7 +365,7 @@ router.put('/glossary/:id', async (req, res) => {
     const existing = await db.execute({ sql: 'SELECT id, term FROM glossary WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Term not found' });
     await db.execute({
-      sql: "UPDATE glossary SET term=?, definition=?, updated_at=datetime('now') WHERE id=?",
+      sql: "UPDATE glossary SET term=?, definition=?, updated_at=now() WHERE id=?",
       args: [term.trim(), definition.trim(), req.params.id]
     });
     await logActivity('glossary', term.trim(), 'updated', `Term "${existing.rows[0].term}" updated`, req.user.email);
@@ -400,7 +401,7 @@ router.put('/feedback/:id', requireSuperAdmin, async (req, res) => {
   const { status, adminComments } = req.body;
   try {
     await getDb().execute({
-      sql: "UPDATE feedback SET status=?, admin_comments=?, updated_at=datetime('now') WHERE id=?",
+      sql: "UPDATE feedback SET status=?, admin_comments=?, updated_at=now() WHERE id=?",
       args: [status || 'pending', adminComments ?? '', req.params.id]
     });
     res.json({ success: true });
@@ -571,13 +572,16 @@ router.post('/articles/:id/files', fileUpload.single('file'), async (req, res) =
     const artRes = await db.execute({ sql: 'SELECT id FROM articles WHERE id = ?', args: [req.params.id] });
     if (!artRes.rows[0]) return res.status(404).json({ error: 'Article not found' });
 
-    const base64 = req.file.buffer.toString('base64');
     const result = await db.execute({
-      sql: 'INSERT INTO article_files (article_id, filename, mimetype, filesize, data, display_mode) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, base64, displayMode]
+      sql: 'INSERT INTO article_files (article_id, filename, mimetype, filesize, display_mode) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, displayMode]
     });
+    const fileId = result.rows[0].id;
+    const storagePath = `${fileId}.${extForMimetype(req.file.mimetype)}`;
+    await uploadBuffer(BUCKETS.articleFiles, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE article_files SET storage_path = ? WHERE id = ?', args: [storagePath, fileId] });
 
-    res.json({ success: true, id: Number(result.lastInsertRowid), filename: req.file.originalname, displayMode });
+    res.json({ success: true, id: fileId, filename: req.file.originalname, displayMode });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -597,7 +601,12 @@ router.get('/articles/:id/files', async (req, res) => {
 
 router.delete('/files/:id', async (req, res) => {
   try {
-    await getDb().execute({ sql: 'DELETE FROM article_files WHERE id = ?', args: [req.params.id] });
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT storage_path FROM article_files WHERE id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM article_files WHERE id = ?', args: [req.params.id] });
+    if (existing.rows[0]?.storage_path) {
+      try { await removeFile(BUCKETS.articleFiles, existing.rows[0].storage_path); } catch { /* orphaned storage object, non-fatal */ }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

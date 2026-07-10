@@ -91,8 +91,8 @@ async function runFathomScan(triggeredBy) {
   }
 
   await db.execute({
-    sql: `INSERT INTO fathom_scan_state (id, last_synced_at, updated_at) VALUES (1, ?, datetime('now'))
-          ON CONFLICT(id) DO UPDATE SET last_synced_at = excluded.last_synced_at, updated_at = datetime('now')`,
+    sql: `INSERT INTO fathom_scan_state (id, last_synced_at, updated_at) VALUES (1, ?, now())
+          ON CONFLICT(id) DO UPDATE SET last_synced_at = excluded.last_synced_at, updated_at = now()`,
     args: [newestCreatedAt]
   });
 

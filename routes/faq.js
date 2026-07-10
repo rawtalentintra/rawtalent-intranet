@@ -12,17 +12,6 @@ const { logActivity } = require('../services/activityLog');
 
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-async function upsertFaqFts(id, question, answer) {
-  const db = getDb();
-  try {
-    await db.execute({ sql: 'DELETE FROM faqs_fts WHERE id = ?', args: [id] });
-    await db.execute({ sql: 'INSERT INTO faqs_fts(id, question, answer) VALUES (?, ?, ?)', args: [id, question, answer] });
-  } catch {}
-}
-async function deleteFaqFts(id) {
-  try { await getDb().execute({ sql: 'DELETE FROM faqs_fts WHERE id = ?', args: [id] }); } catch {}
-}
-
 // ── Public — any authenticated user can view approved FAQs ────────
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -129,10 +118,9 @@ router.put('/candidates/:id/approve', async (req, res) => {
       sql: 'INSERT INTO faqs (id, question, answer, source, source_date, approved_by) VALUES (?, ?, ?, ?, ?, ?)',
       args: [id, finalQuestion, finalAnswer, candidate.source, candidate.source_date, req.user.email]
     });
-    await upsertFaqFts(id, finalQuestion, finalAnswer);
 
     await db.execute({
-      sql: "UPDATE faq_candidates SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?",
+      sql: "UPDATE faq_candidates SET status = 'approved', reviewed_by = ?, reviewed_at = now() WHERE id = ?",
       args: [req.user.email, req.params.id]
     });
 
@@ -146,7 +134,7 @@ router.put('/candidates/:id/approve', async (req, res) => {
 router.put('/candidates/:id/reject', async (req, res) => {
   try {
     await getDb().execute({
-      sql: "UPDATE faq_candidates SET status = 'rejected', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?",
+      sql: "UPDATE faq_candidates SET status = 'rejected', reviewed_by = ?, reviewed_at = now() WHERE id = ?",
       args: [req.user.email, req.params.id]
     });
     res.json({ success: true });
@@ -176,7 +164,6 @@ router.post('/', async (req, res) => {
       sql: 'INSERT INTO faqs (id, question, answer, source, approved_by) VALUES (?, ?, ?, ?, ?)',
       args: [id, question.trim(), answer.trim(), 'manual', req.user.email]
     });
-    await upsertFaqFts(id, question.trim(), answer.trim());
     await logActivity('faq', question.trim(), 'created', 'FAQ added manually', req.user.email);
     res.json({ success: true, id });
   } catch (err) {
@@ -199,10 +186,9 @@ router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
     await db.execute({
-      sql: "UPDATE faqs SET question=?, answer=?, updated_at=datetime('now') WHERE id=?",
+      sql: "UPDATE faqs SET question=?, answer=?, updated_at=now() WHERE id=?",
       args: [question.trim(), answer.trim(), req.params.id]
     });
-    await upsertFaqFts(req.params.id, question.trim(), answer.trim());
     await logActivity('faq', question.trim(), 'updated', 'FAQ edited', req.user.email);
     res.json({ success: true });
   } catch (err) {
@@ -215,7 +201,6 @@ router.delete('/:id', async (req, res) => {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT question FROM faqs WHERE id = ?', args: [req.params.id] });
     await db.execute({ sql: 'DELETE FROM faqs WHERE id = ?', args: [req.params.id] });
-    await deleteFaqFts(req.params.id);
     if (existing.rows[0]) await logActivity('faq', existing.rows[0].question, 'deleted', 'FAQ removed', req.user.email);
     res.json({ success: true });
   } catch (err) {

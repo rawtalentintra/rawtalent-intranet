@@ -6,18 +6,9 @@ function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
-function buildFtsTerm(text) {
-  return text
-    .replace(/[^\w\s\-]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2)
-    .map(t => `"${t}"*`)
-    .join(' OR ');
-}
-
 async function searchKnowledge(db, question, limit = 6) {
-  const term = buildFtsTerm(question);
-
+  // websearch_to_tsquery tolerates arbitrary free-text input directly — no
+  // need to hand-build FTS5-style quoted/prefix terms the way SQLite needed.
   async function query(sql, args) {
     try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
@@ -27,31 +18,35 @@ async function searchKnowledge(db, question, limit = 6) {
   const [artRows, faqRows, docRows, webRows] = await Promise.all([
     // Lane 1 — Internal: published KB articles / SOPs
     query(
-      `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
-       FROM articles a JOIN articles_fts fts ON a.id = fts.id
-       WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 2`,
-      [term]
+      `SELECT id, title, content, category, 'article' as source_type, NULL as origin
+       FROM articles
+       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND published = true
+       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
+      [question, question]
     ),
     // Lane 2 — Internal: super_admin-approved FAQs (e.g. from Slack, scrubbed of PII)
     query(
-      `SELECT f.id, f.question as title, f.answer as content, NULL as category, 'faq' as source_type, NULL as origin, f.source as faq_source, f.source_date
-       FROM faqs f JOIN faqs_fts fts ON f.id = fts.id
-       WHERE faqs_fts MATCH ? ORDER BY rank LIMIT 2`,
-      [term]
+      `SELECT id, question as title, answer as content, NULL as category, 'faq' as source_type, NULL as origin, source as faq_source, source_date
+       FROM faqs
+       WHERE search_vector @@ websearch_to_tsquery('english', ?)
+       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
+      [question, question]
     ),
     // Lane 3 — Internal: uploaded documents (PDF, DOCX, TXT)
     query(
-      `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
-       FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-       WHERE knowledge_sources_fts MATCH ? AND s.type = 'document' ORDER BY rank LIMIT 2`,
-      [term]
+      `SELECT id, title, content, NULL as category, type as source_type, origin
+       FROM knowledge_sources
+       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'document'
+       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
+      [question, question]
     ),
     // Lane 4 — External: crawled websites (regulatory / industry)
     query(
-      `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
-       FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-       WHERE knowledge_sources_fts MATCH ? AND s.type = 'website' ORDER BY rank LIMIT 2`,
-      [term]
+      `SELECT id, title, content, NULL as category, type as source_type, origin
+       FROM knowledge_sources
+       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'website'
+       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
+      [question, question]
     )
   ]);
 
@@ -64,31 +59,34 @@ async function searchKnowledge(db, question, limit = 6) {
     const words = question.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
     for (const word of words.slice(0, 4)) {
       if (results.length >= limit) break;
-      const wt = `"${word}"*`;
       const [wa, wf, wd, ww] = await Promise.all([
         query(
-          `SELECT a.id, a.title, a.content, a.category, 'article' as source_type, NULL as origin
-           FROM articles a JOIN articles_fts fts ON a.id = fts.id
-           WHERE articles_fts MATCH ? AND a.published = 1 ORDER BY rank LIMIT 1`,
-          [wt]
+          `SELECT id, title, content, category, 'article' as source_type, NULL as origin
+           FROM articles
+           WHERE search_vector @@ websearch_to_tsquery('english', ?) AND published = true
+           ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 1`,
+          [word, word]
         ),
         query(
-          `SELECT f.id, f.question as title, f.answer as content, NULL as category, 'faq' as source_type, NULL as origin, f.source as faq_source, f.source_date
-           FROM faqs f JOIN faqs_fts fts ON f.id = fts.id
-           WHERE faqs_fts MATCH ? ORDER BY rank LIMIT 1`,
-          [wt]
+          `SELECT id, question as title, answer as content, NULL as category, 'faq' as source_type, NULL as origin, source as faq_source, source_date
+           FROM faqs
+           WHERE search_vector @@ websearch_to_tsquery('english', ?)
+           ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 1`,
+          [word, word]
         ),
         query(
-          `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
-           FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-           WHERE knowledge_sources_fts MATCH ? AND s.type = 'document' ORDER BY rank LIMIT 1`,
-          [wt]
+          `SELECT id, title, content, NULL as category, type as source_type, origin
+           FROM knowledge_sources
+           WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'document'
+           ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 1`,
+          [word, word]
         ),
         query(
-          `SELECT s.id, s.title, s.content, NULL as category, s.type as source_type, s.origin
-           FROM knowledge_sources s JOIN knowledge_sources_fts fts ON s.id = fts.id
-           WHERE knowledge_sources_fts MATCH ? AND s.type = 'website' ORDER BY rank LIMIT 1`,
-          [wt]
+          `SELECT id, title, content, NULL as category, type as source_type, origin
+           FROM knowledge_sources
+           WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'website'
+           ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 1`,
+          [word, word]
         )
       ]);
       for (const r of [...wa, ...wf, ...wd, ...ww]) {

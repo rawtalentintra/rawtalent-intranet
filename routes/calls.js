@@ -10,6 +10,7 @@ const {
   getAllEffectiveRubrics, saveRubricInstructions
 } = require('../services/callGradingService');
 const { generateReport } = require('../services/callReportService');
+const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../services/storageService');
 
 // Call recordings are confidential, but admins (not just super_admin) get
 // full access here — evaluate, delete, and manage rubric/calibration.
@@ -118,8 +119,8 @@ router.get('/local/:id/audio', async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM call_recording_audio WHERE recording_id = ?', args: [req.params.id] });
     const row = result.rows[0];
-    if (!row) return res.status(404).json({ error: 'Audio not synced for this call yet' });
-    const buffer = Buffer.from(row.data, 'base64');
+    if (!row || !row.storage_path) return res.status(404).json({ error: 'Audio not synced for this call yet' });
+    const buffer = await downloadAsBuffer(BUCKETS.callRecordings, row.storage_path);
     res.setHeader('Content-Type', row.mimetype || 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);
     res.send(buffer);
@@ -239,19 +240,26 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       try {
         transcript = await dubberService.getTranscript(req.params.recordingId);
       } catch {
-        let audioRes = await db.execute({ sql: 'SELECT data, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
-        let audio = audioRes.rows[0];
-        if (!audio) {
+        const audioRes = await db.execute({ sql: 'SELECT storage_path, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
+        const existingAudio = audioRes.rows[0];
+        let audioBase64, audioMimetype;
+        if (existingAudio?.storage_path) {
+          audioMimetype = existingAudio.mimetype || 'audio/mpeg';
+          audioBase64 = (await downloadAsBuffer(BUCKETS.callRecordings, existingAudio.storage_path)).toString('base64');
+        } else {
           const fetched = await dubberService.downloadRecordingAudio(req.params.recordingId);
-          audio = { data: fetched.data, mimetype: fetched.mimetype };
+          audioMimetype = fetched.mimetype || 'audio/mpeg';
+          audioBase64 = fetched.data;
+          const path = `${req.params.recordingId}.${extForMimetype(audioMimetype)}`;
+          await uploadBase64(BUCKETS.callRecordings, path, audioBase64, audioMimetype);
           await db.execute({
-            sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
-                  ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
-            args: [req.params.recordingId, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
+            sql: `INSERT INTO call_recording_audio (recording_id, storage_path, mimetype, filesize) VALUES (?, ?, ?, ?)
+                  ON CONFLICT(recording_id) DO UPDATE SET storage_path = excluded.storage_path, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = now()`,
+            args: [req.params.recordingId, path, audioMimetype, audioBase64?.length || null]
           });
-          if (local) await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [req.params.recordingId] });
+          if (local) await db.execute({ sql: 'UPDATE call_recordings SET has_audio = true WHERE id = ?', args: [req.params.recordingId] });
         }
-        transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype);
+        transcript = await groqTranscription.transcribeAudio(audioBase64, audioMimetype);
       }
       if (local) {
         await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, req.params.recordingId] });
@@ -334,7 +342,7 @@ router.post('/:recordingId/evaluate-manual', async (req, res) => {
 router.get('/evaluations', async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM call_evaluations ORDER BY created_at DESC LIMIT 200');
-    res.json(result.rows.map(r => ({ ...r, category_scores: JSON.parse(r.category_scores) })));
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -368,7 +376,7 @@ router.get('/report', async (req, res) => {
       sql: `SELECT e.* FROM call_evaluations e LEFT JOIN call_recordings r ON r.id = e.recording_id ${where} ORDER BY e.created_at DESC LIMIT 500`,
       args
     });
-    const evaluations = result.rows.map(r => ({ ...r, category_scores: JSON.parse(r.category_scores) }));
+    const evaluations = result.rows;
     const report = await generateReport(evaluations, { rubricType, category });
     res.json(report);
   } catch (err) {
@@ -382,7 +390,7 @@ router.get('/evaluations/:id', async (req, res) => {
     const result = await getDb().execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Evaluation not found' });
-    res.json({ ...row, category_scores: JSON.parse(row.category_scores) });
+    res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

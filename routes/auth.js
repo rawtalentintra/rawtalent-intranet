@@ -11,7 +11,7 @@ router.post('/login', (req, res, next) => {
     if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
     req.logIn(user, async (err) => {
       if (err) return res.status(500).json({ error: 'Login failed' });
-      await getDb().execute({ sql: "UPDATE users SET last_login = datetime('now') WHERE id = ?", args: [user.id] });
+      await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [user.id] });
       res.json({ success: true, user: { email: user.email, name: user.name, role: user.role } });
     });
   })(req, res, next);
@@ -22,7 +22,7 @@ if (process.env.GOOGLE_CLIENT_ID) {
   router.get('/google/callback',
     passport.authenticate('google', { failureRedirect: '/login.html?error=1' }),
     async (req, res) => {
-      await getDb().execute({ sql: "UPDATE users SET last_login = datetime('now') WHERE id = ?", args: [req.user.id] });
+      await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [req.user.id] });
       res.redirect('/');
     }
   );

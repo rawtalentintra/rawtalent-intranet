@@ -1,18 +1,19 @@
 const session = require('express-session');
 const { getDb } = require('../db/database');
 
-// Persists express-session data in the same Turso DB as everything else,
-// so logins survive a redeploy instead of being wiped every time the
-// container restarts (the default MemoryStore only lives in process RAM).
-// express-session calls store.touch() on essentially every authenticated
-// request (any time the session is read but not otherwise modified), just to
-// push the cookie expiry forward. Persisting that to a remote DB every time
-// would mean 1 extra network round trip per request for no practical benefit
-// — the 7-day maxAge doesn't need per-request precision. Throttle actual
-// writes to once per SID per THROTTLE_MS; anything more frequent is a no-op.
+// Persists express-session data in the same Supabase Postgres DB as
+// everything else, so logins survive a redeploy instead of being wiped every
+// time the container restarts (the default MemoryStore only lives in process
+// RAM). express-session calls store.touch() on essentially every
+// authenticated request (any time the session is read but not otherwise
+// modified), just to push the cookie expiry forward. Persisting that to a
+// remote DB every time would mean 1 extra network round trip per request for
+// no practical benefit — the 7-day maxAge doesn't need per-request precision.
+// Throttle actual writes to once per SID per THROTTLE_MS; anything more
+// frequent is a no-op.
 const TOUCH_THROTTLE_MS = 15 * 60 * 1000;
 
-class TursoSessionStore extends session.Store {
+class PgSessionStore extends session.Store {
   constructor() {
     super();
     this._lastTouch = new Map(); // sid -> ms timestamp of last persisted touch
@@ -71,4 +72,4 @@ class TursoSessionStore extends session.Store {
   }
 }
 
-module.exports = TursoSessionStore;
+module.exports = PgSessionStore;

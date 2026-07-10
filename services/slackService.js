@@ -130,8 +130,8 @@ async function runSlackScan(triggeredBy) {
       }
 
       await db.execute({
-        sql: `INSERT INTO slack_scan_state (channel_id, channel_name, last_ts, updated_at) VALUES (?, ?, ?, datetime('now'))
-              ON CONFLICT(channel_id) DO UPDATE SET last_ts = excluded.last_ts, channel_name = excluded.channel_name, updated_at = datetime('now')`,
+        sql: `INSERT INTO slack_scan_state (channel_id, channel_name, last_ts, updated_at) VALUES (?, ?, ?, now())
+              ON CONFLICT(channel_id) DO UPDATE SET last_ts = excluded.last_ts, channel_name = excluded.channel_name, updated_at = now()`,
         args: [channel.id, channel.name, newestTs]
       });
     } catch (err) {

@@ -212,7 +212,7 @@ async function getEffectiveRubric(rubricType) {
       const custom = customizations[c.key];
       let criteria = c.criteria;
       if (custom?.description) {
-        try { criteria = JSON.parse(custom.description); } catch { /* fall back to default criteria */ }
+        criteria = custom.description;
       }
       return { ...c, criteria, instructions: custom?.instructions || null };
     })
@@ -282,7 +282,7 @@ async function saveRubricInstructions(rubricType, categoryKey, instructions, upd
   await db.execute({
     sql: `INSERT INTO call_rubric_customizations (id, rubric_type, category_key, description, instructions, updated_by)
           VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(rubric_type, category_key) DO UPDATE SET description = excluded.description, instructions = excluded.instructions, updated_by = excluded.updated_by, updated_at = datetime('now')`,
+          ON CONFLICT(rubric_type, category_key) DO UPDATE SET description = excluded.description, instructions = excluded.instructions, updated_by = excluded.updated_by, updated_at = now()`,
     args: [id, rubricType, categoryKey, JSON.stringify(bullets), trimmed, updatedBy || null]
   });
   await maybeCreateFaqCandidateFromNote(trimmed, `Rubric instructions — ${category.label} (${rubric.label})`);

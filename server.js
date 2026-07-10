@@ -6,22 +6,17 @@ const path = require('path');
 
 const { initDatabase, getDb } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
-const TursoSessionStore = require('./services/sessionStore');
+const PgSessionStore = require('./services/sessionStore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Serialize BigInt values that @libsql/client may return (e.g. lastInsertRowid)
-app.set('json replacer', (key, value) =>
-  typeof value === 'bigint' ? Number(value) : value
-);
 
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
-  store: new TursoSessionStore(),
+  store: new PgSessionStore(),
   secret: process.env.SESSION_SECRET || 'rt-kb-change-this-secret',
   resave: false,
   saveUninitialized: false,

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
+const { BUCKETS, downloadAsBuffer } = require('../services/storageService');
 
 // Search articles
 router.get('/search', requireAuth, async (req, res) => {
@@ -10,44 +11,26 @@ router.get('/search', requireAuth, async (req, res) => {
   let rows;
 
   if (q && q.trim().length > 0) {
-    const term = q.trim()
-      .replace(/[^\w\s\-]/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(t => `"${t}"*`)
-      .join(' OR ');
-
-    try {
-      const result = await db.execute({
-        sql: `SELECT a.id, a.title, a.summary, a.category, a.tags, a.created_at, a.updated_at
-              FROM articles a
-              JOIN articles_fts fts ON a.id = fts.id
-              WHERE articles_fts MATCH ?
-                AND a.published = 1
-                ${category ? 'AND a.category = ?' : ''}
-              ORDER BY rank
-              LIMIT ?`,
-        args: [term, ...(category ? [category] : []), parseInt(limit)]
-      });
-      rows = result.rows;
-    } catch {
-      const result = await db.execute({
-        sql: `SELECT id, title, summary, category, tags, created_at, updated_at
-              FROM articles
-              WHERE published = 1
-                AND (title LIKE ? OR summary LIKE ? OR content LIKE ?)
-                ${category ? 'AND category = ?' : ''}
-              ORDER BY updated_at DESC
-              LIMIT ?`,
-        args: [`%${q}%`, `%${q}%`, `%${q}%`, ...(category ? [category] : []), parseInt(limit)]
-      });
-      rows = result.rows;
-    }
+    // websearch_to_tsquery tolerates arbitrary free-text user input (unlike
+    // plainto_tsquery/to_tsquery, which can throw on certain syntax), so
+    // there's no need for the LIKE-based fallback the old FTS5 MATCH query
+    // used to need for malformed search terms.
+    const result = await db.execute({
+      sql: `SELECT id, title, summary, category, tags, created_at, updated_at
+            FROM articles
+            WHERE published = true
+              AND search_vector @@ websearch_to_tsquery('english', ?)
+              ${category ? 'AND category = ?' : ''}
+            ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC
+            LIMIT ?`,
+      args: [q.trim(), ...(category ? [category] : []), q.trim(), parseInt(limit)]
+    });
+    rows = result.rows;
   } else {
     const result = await db.execute({
       sql: `SELECT id, title, summary, category, tags, created_at, updated_at
             FROM articles
-            WHERE published = 1
+            WHERE published = true
               ${category ? 'AND category = ?' : ''}
             ORDER BY updated_at DESC
             LIMIT ?`,
@@ -56,14 +39,14 @@ router.get('/search', requireAuth, async (req, res) => {
     rows = result.rows;
   }
 
-  res.json(rows.map(a => ({ ...a, tags: JSON.parse(a.tags || '[]') })));
+  res.json(rows);
 });
 
 // Get categories
 router.get('/categories', requireAuth, async (req, res) => {
   try {
     const result = await getDb().execute(
-      `SELECT category, COUNT(*) as count FROM articles WHERE published = 1 AND category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`
+      `SELECT category, COUNT(*) as count FROM articles WHERE published = true AND category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -87,7 +70,8 @@ router.get('/file/:fileId', requireAuth, async (req, res) => {
     const result = await getDb().execute({ sql: 'SELECT * FROM article_files WHERE id = ?', args: [req.params.fileId] });
     const file = result.rows[0];
     if (!file) return res.status(404).json({ error: 'File not found' });
-    const buffer = Buffer.from(file.data, 'base64');
+    if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
+    const buffer = await downloadAsBuffer(BUCKETS.articleFiles, file.storage_path);
     res.setHeader('Content-Type', file.mimetype);
     res.setHeader('Content-Length', buffer.length);
     if (file.display_mode === 'download') {
@@ -109,13 +93,13 @@ router.get('/:id', requireAuth, async (req, res) => {
       sql: `SELECT a.*, u.name as author_name
             FROM articles a
             LEFT JOIN users u ON a.author_email = u.email
-            WHERE a.id = ? AND a.published = 1`,
+            WHERE a.id = ? AND a.published = true`,
       args: [req.params.id]
     });
     const article = result.rows[0];
     if (!article) return res.status(404).json({ error: 'Article not found' });
 
-    const articleObj = { ...article, tags: JSON.parse(article.tags || '[]') };
+    const articleObj = { ...article, tags: article.tags || [] };
     articleObj.relatedArticles = await findRelatedArticles(db, articleObj);
 
     res.json(articleObj);
@@ -126,7 +110,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 async function findRelatedArticles(db, article) {
   const result = await db.execute({
-    sql: 'SELECT id, title, summary, category, tags FROM articles WHERE published = 1 AND id != ?',
+    sql: 'SELECT id, title, summary, category, tags FROM articles WHERE published = true AND id != ?',
     args: [article.id]
   });
 
@@ -137,7 +121,7 @@ async function findRelatedArticles(db, article) {
   const currentWords = extractKeywords(article.title + ' ' + (article.summary || ''));
 
   const scored = result.rows.map(a => {
-    const aTags = JSON.parse(a.tags || '[]');
+    const aTags = a.tags || [];
     const aCategory = (a.category || '').toLowerCase();
     const aWords = extractKeywords(a.title + ' ' + (a.summary || ''));
 
@@ -182,7 +166,7 @@ router.post('/:id/feedback', requireAuth, async (req, res) => {
 
   try {
     const db = getDb();
-    const artRes = await db.execute({ sql: 'SELECT title FROM articles WHERE id = ? AND published = 1', args: [req.params.id] });
+    const artRes = await db.execute({ sql: 'SELECT title FROM articles WHERE id = ? AND published = true', args: [req.params.id] });
     const article = artRes.rows[0];
     if (!article) return res.status(404).json({ error: 'Article not found' });
 

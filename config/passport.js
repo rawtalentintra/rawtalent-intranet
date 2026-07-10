@@ -37,7 +37,7 @@ passport.deserializeUser(async (id, done) => {
 passport.use(new LocalStrategy({ usernameField: 'email' }, async (email, password, done) => {
   try {
     const result = await getDb().execute({
-      sql: 'SELECT * FROM users WHERE email = ? AND active = 1',
+      sql: 'SELECT * FROM users WHERE email = ? AND active = true',
       args: [email.toLowerCase().trim()]
     });
     const user = result.rows[0];

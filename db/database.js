@@ -1,16 +1,44 @@
-const { createClient } = require('@libsql/client');
+const fs = require('fs');
+const path = require('path');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-let client;
+let pool;
+
+// Temporary migration-scaffolding shim (Turso -> Supabase): preserves the
+// getDb().execute({ sql, args }) interface used by ~150 call sites across
+// routes/*.js and services/*.js, converting SQLite-style `?` placeholders to
+// Postgres `$1,$2,...` and returning the same `{ rows }` shape those call
+// sites already destructure. This is NOT meant to be a permanent
+// abstraction — as files get touched for the CRM buildout, prefer writing
+// native pg queries directly instead of leaning on this further.
+function toPgQuery(sql, args) {
+  let i = 0;
+  const text = sql.replace(/\?/g, () => `$${++i}`);
+  return { text, values: args || [] };
+}
 
 function getDb() {
-  if (!client) {
-    client = createClient({
-      url: process.env.TURSO_DATABASE_URL || 'file:./knowledgebase.db',
-      authToken: process.env.TURSO_AUTH_TOKEN
+  if (!pool) {
+    pool = new Pool({
+      host: process.env.SUPABASE_DB_HOST,
+      port: process.env.SUPABASE_DB_PORT,
+      database: process.env.SUPABASE_DB_NAME,
+      user: process.env.SUPABASE_DB_USER,
+      password: process.env.SUPABASE_DB_PASSWORD,
+      ssl: { rejectUnauthorized: false },
+      max: 10
     });
   }
-  return client;
+  return {
+    async execute(arg) {
+      const sql = typeof arg === 'string' ? arg : arg.sql;
+      const args = typeof arg === 'string' ? undefined : arg.args;
+      const { text, values } = toPgQuery(sql, args);
+      const result = await pool.query(text, values);
+      return { rows: result.rows };
+    }
+  };
 }
 
 const ECEC_GLOSSARY = [
@@ -53,337 +81,16 @@ const ECEC_GLOSSARY = [
 async function initDatabase() {
   const db = getDb();
 
-  const schema = [
-    `CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL COLLATE NOCASE,
-      password_hash TEXT,
-      name TEXT,
-      role TEXT DEFAULT 'user',
-      google_id TEXT,
-      active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      last_login TEXT
-    )`,
-    `CREATE TABLE IF NOT EXISTS articles (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      summary TEXT,
-      content TEXT,
-      category TEXT,
-      tags TEXT DEFAULT '[]',
-      related_ids TEXT DEFAULT '[]',
-      author_email TEXT,
-      published INTEGER DEFAULT 1,
-      drive_file_id TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS glossary (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      term TEXT UNIQUE NOT NULL,
-      definition TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
-      id UNINDEXED,
-      title,
-      summary,
-      content,
-      category,
-      tags,
-      content=articles,
-      content_rowid=rowid
-    )`,
-    `CREATE TRIGGER IF NOT EXISTS articles_ai AFTER INSERT ON articles BEGIN
-      INSERT INTO articles_fts(rowid, id, title, summary, content, category, tags)
-      VALUES (new.rowid, new.id, new.title, new.summary, new.content, new.category, new.tags);
-    END`,
-    `CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
-      INSERT INTO articles_fts(articles_fts, rowid, id, title, summary, content, category, tags)
-      VALUES('delete', old.rowid, old.id, old.title, old.summary, old.content, old.category, old.tags);
-      INSERT INTO articles_fts(rowid, id, title, summary, content, category, tags)
-      VALUES (new.rowid, new.id, new.title, new.summary, new.content, new.category, new.tags);
-    END`,
-    `CREATE TRIGGER IF NOT EXISTS articles_ad AFTER DELETE ON articles BEGIN
-      INSERT INTO articles_fts(articles_fts, rowid, id, title, summary, content, category, tags)
-      VALUES('delete', old.rowid, old.id, old.title, old.summary, old.content, old.category, old.tags);
-    END`,
-    `CREATE TABLE IF NOT EXISTS feedback (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      article_id TEXT NOT NULL,
-      article_title TEXT NOT NULL,
-      suggested_changes TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      admin_comments TEXT DEFAULT '',
-      submitted_by TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS article_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      article_id TEXT NOT NULL,
-      article_title TEXT NOT NULL,
-      action TEXT NOT NULL,
-      changes_summary TEXT DEFAULT '',
-      changed_by TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS article_files (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      article_id TEXT NOT NULL,
-      filename TEXT NOT NULL,
-      mimetype TEXT NOT NULL,
-      filesize INTEGER,
-      data TEXT NOT NULL,
-      display_mode TEXT DEFAULT 'download',
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS knowledge_sources (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      origin TEXT,
-      content TEXT NOT NULL,
-      added_by TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_sources_fts USING fts5(
-      id UNINDEXED, title, content,
-      content=knowledge_sources, content_rowid=rowid
-    )`,
-    `CREATE TRIGGER IF NOT EXISTS ks_ai AFTER INSERT ON knowledge_sources BEGIN
-      INSERT INTO knowledge_sources_fts(rowid, id, title, content)
-      VALUES (new.rowid, new.id, new.title, new.content);
-    END`,
-    `CREATE TRIGGER IF NOT EXISTS ks_au AFTER UPDATE ON knowledge_sources BEGIN
-      INSERT INTO knowledge_sources_fts(knowledge_sources_fts, rowid, id, title, content)
-      VALUES('delete', old.rowid, old.id, old.title, old.content);
-      INSERT INTO knowledge_sources_fts(rowid, id, title, content)
-      VALUES (new.rowid, new.id, new.title, new.content);
-    END`,
-    `CREATE TRIGGER IF NOT EXISTS ks_ad AFTER DELETE ON knowledge_sources BEGIN
-      INSERT INTO knowledge_sources_fts(knowledge_sources_fts, rowid, id, title, content)
-      VALUES('delete', old.rowid, old.id, old.title, old.content);
-    END`,
-    `CREATE TABLE IF NOT EXISTS ai_query_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      question TEXT NOT NULL,
-      answer TEXT,
-      sources_used TEXT DEFAULT '[]',
-      asked_by TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS system_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      entity_type TEXT NOT NULL,
-      entity_label TEXT NOT NULL,
-      action TEXT NOT NULL,
-      changes_summary TEXT DEFAULT '',
-      changed_by TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    // Slack and Fathom conversations are never used as AI sources directly. Every
-    // scanned conversation lands here — including ones Claude auto-rejected — so a
-    // super_admin has full visibility into what was looked at. Only a 'pending' row
-    // that a super_admin explicitly approves becomes a real, visible FAQ.
-    // suggested_question/suggested_answer are null when Claude auto-rejects.
-    `CREATE TABLE IF NOT EXISTS faq_candidates (
-      id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      source_channel TEXT,
-      source_ref TEXT,
-      source_date TEXT,
-      raw_excerpt TEXT,
-      suggested_question TEXT,
-      suggested_answer TEXT,
-      classification_reason TEXT,
-      status TEXT DEFAULT 'pending',
-      reviewed_by TEXT,
-      reviewed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS faqs (
-      id TEXT PRIMARY KEY,
-      question TEXT NOT NULL,
-      answer TEXT NOT NULL,
-      source TEXT,
-      source_date TEXT,
-      approved_by TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE VIRTUAL TABLE IF NOT EXISTS faqs_fts USING fts5(id UNINDEXED, question, answer)`,
-    `CREATE TABLE IF NOT EXISTS slack_scan_state (
-      channel_id TEXT PRIMARY KEY,
-      channel_name TEXT,
-      last_ts TEXT,
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS fathom_scan_state (
-      id INTEGER PRIMARY KEY,
-      last_synced_at TEXT,
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    // One row per AI-graded call, feeding the future Call Quality Reporting dashboard.
-    // category_scores is a JSON array of {category, weight, score, notes}.
-    `CREATE TABLE IF NOT EXISTS call_evaluations (
-      id TEXT PRIMARY KEY,
-      recording_id TEXT NOT NULL,
-      rep_name TEXT,
-      call_type TEXT,
-      rubric_type TEXT NOT NULL,
-      call_date TEXT,
-      duration_seconds INTEGER,
-      category_scores TEXT NOT NULL,
-      overall_score REAL NOT NULL,
-      outcome TEXT NOT NULL,
-      summary TEXT,
-      evaluated_by TEXT,
-      source TEXT DEFAULT 'ai',
-      reviewer_feedback TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    // Standing calibration notes from a reviewer, persisted so every future AI
-    // grading call applies the same corrections — not just the one call the
-    // feedback was given on.
-    `CREATE TABLE IF NOT EXISTS call_grading_calibration (
-      id TEXT PRIMARY KEY,
-      note TEXT NOT NULL,
-      created_by TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`,
-    // Per-category overrides on top of the built-in rubric: "description" is
-    // the short bullet-point summary shown in the reference table, kept in
-    // sync automatically by AI whenever "instructions" (longer, admin-authored
-    // grading guidance fed straight into the AI's system prompt) changes.
-    `CREATE TABLE IF NOT EXISTS call_rubric_customizations (
-      id TEXT PRIMARY KEY,
-      rubric_type TEXT NOT NULL,
-      category_key TEXT NOT NULL,
-      description TEXT,
-      instructions TEXT,
-      updated_by TEXT,
-      updated_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(rubric_type, category_key)
-    )`,
-    // Local cache of Dubber recording metadata, fetched eagerly at sync time
-    // along with the transcript — so browsing never has to hit Dubber's
-    // rate-limited API, and a call is ready to evaluate the moment it's synced.
-    // has_audio is a fast flag for list display; the audio bytes themselves live
-    // in call_recording_audio (kept separate so listing/filtering never has to
-    // scan large blobs), mirroring how article attachments are stored.
-    `CREATE TABLE IF NOT EXISTS call_recordings (
-      id TEXT PRIMARY KEY,
-      to_number TEXT,
-      from_number TEXT,
-      to_label TEXT,
-      from_label TEXT,
-      rep_name TEXT,
-      call_type TEXT,
-      duration_seconds INTEGER,
-      start_time TEXT,
-      start_time_iso TEXT,
-      status TEXT,
-      sentiment_score REAL,
-      transcript TEXT,
-      has_audio INTEGER DEFAULT 0,
-      content_synced INTEGER DEFAULT 0,
-      meta_tags TEXT,
-      synced_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS call_recording_audio (
-      recording_id TEXT PRIMARY KEY,
-      data TEXT NOT NULL,
-      mimetype TEXT DEFAULT 'audio/mpeg',
-      filesize INTEGER,
-      fetched_at TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS dubber_sync_state (
-      id INTEGER PRIMARY KEY,
-      last_synced_at TEXT,
-      total_synced INTEGER DEFAULT 0,
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-    // Express session store, backed by the same persistent Turso DB as
-    // everything else — logins survive redeploys instead of resetting every
-    // time the container restarts (the default in-memory session store).
-    `CREATE TABLE IF NOT EXISTS sessions (
-      sid TEXT PRIMARY KEY,
-      sess TEXT NOT NULL,
-      expires INTEGER
-    )`,
-    // "Our Team" HR directory — org chart (via manager_id) plus a personal
-    // profile per person. Contains real PII (address, birthdate, home setup),
-    // so this whole feature is super_admin only, same gate as Users.
-    `CREATE TABLE IF NOT EXISTS team_members (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      legal_name TEXT,
-      position TEXT,
-      team TEXT,
-      manager_id TEXT,
-      sort_order INTEGER DEFAULT 0,
-      photo TEXT,
-      employment_date TEXT,
-      address TEXT,
-      birthdate TEXT,
-      phone TEXT,
-      whatsapp TEXT,
-      email TEXT,
-      emergency_contact_name TEXT,
-      emergency_contact_number TEXT,
-      device_name TEXT,
-      headset TEXT,
-      internet_connection TEXT,
-      backup_available TEXT,
-      backup_types TEXT,
-      status TEXT DEFAULT 'active',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`,
-  ];
-
-  for (const sql of schema) {
-    await db.execute(sql);
-  }
-
-  // Every one of these backs a WHERE/ORDER BY that route handlers run on
-  // every request (call browsing/filtering, article listing, team lookups,
-  // session/login checks) — without an index each is a full table scan that
-  // gets slower as the table grows.
-  const indexes = [
-    'CREATE INDEX IF NOT EXISTS idx_call_recordings_start_time ON call_recordings(start_time_iso)',
-    'CREATE INDEX IF NOT EXISTS idx_call_recordings_rep_name ON call_recordings(rep_name)',
-    'CREATE INDEX IF NOT EXISTS idx_call_evaluations_created_at ON call_evaluations(created_at)',
-    'CREATE INDEX IF NOT EXISTS idx_call_evaluations_recording_id ON call_evaluations(recording_id)',
-    'CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category)',
-    'CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at)',
-    'CREATE INDEX IF NOT EXISTS idx_team_members_manager_id ON team_members(manager_id)',
-    'CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)',
-    'CREATE INDEX IF NOT EXISTS idx_feedback_article_id ON feedback(article_id)',
-    'CREATE INDEX IF NOT EXISTS idx_article_logs_article_id ON article_logs(article_id)',
-    'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires)',
-  ];
-  for (const sql of indexes) {
-    await db.execute(sql);
-  }
-
-  // call_recordings shipped before has_audio/content_synced existed — add them
-  // to any table created by an earlier deploy. "Duplicate column" errors are
-  // expected (and ignored) on a fresh table where CREATE TABLE already has them.
-  for (const col of ['has_audio INTEGER DEFAULT 0', 'content_synced INTEGER DEFAULT 0']) {
-    try { await db.execute(`ALTER TABLE call_recordings ADD COLUMN ${col}`); } catch {}
-  }
-
-  // call_evaluations shipped before source (ai vs human grading) existed.
-  try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN source TEXT DEFAULT 'ai'`); } catch {}
-  try { await db.execute(`ALTER TABLE call_evaluations ADD COLUMN reviewer_feedback TEXT`); } catch {}
+  // Schema lives in db/schema.sql (Postgres DDL) — every statement in it is
+  // idempotent (IF NOT EXISTS), so re-running it on every boot is safe and
+  // keeps a freshly-provisioned Supabase project in sync automatically.
+  const schemaSql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  await runSchemaSql(schemaSql);
 
   // One-time seed for "Our Team" — only runs while the table is still empty,
-  // so it never overwrites real edits made later through the UI.
+  // so it never overwrites real edits made later through the UI. Real data
+  // already lives in Supabase after the Turso migration; this is purely a
+  // disaster-recovery fallback if the table is ever wiped.
   try {
     const teamCount = await db.execute('SELECT COUNT(*) as n FROM team_members');
     if (Number(teamCount.rows[0].n) === 0) {
@@ -394,12 +101,12 @@ async function initDatabase() {
       for (const m of seedMembers) {
         await db.execute({
           sql: `INSERT INTO team_members
-                (id, name, legal_name, position, team, manager_id, sort_order, photo, employment_date, address, birthdate,
+                (id, name, legal_name, position, team, manager_id, sort_order, employment_date, address, birthdate,
                  device_name, headset, internet_connection, backup_available, backup_types, status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           args: [
             idByKey[m.key], m.name, m.legal_name || null, m.position || null, m.team || null,
-            m.manager ? idByKey[m.manager] : null, m.sortOrder || 0, m.photo || null, m.employment_date || null,
+            m.manager ? idByKey[m.manager] : null, m.sortOrder || 0, m.employment_date || null,
             m.address || null, m.birthdate || null, m.device_name || null, m.headset || null,
             m.internet_connection || null, m.backup_available || null, JSON.stringify(m.backup_types || []), m.status || 'active'
           ]
@@ -411,62 +118,22 @@ async function initDatabase() {
     console.error('Team seed error:', err.message);
   }
 
-  // team_members shipped before emergency contact fields existed.
-  try { await db.execute(`ALTER TABLE team_members ADD COLUMN emergency_contact_name TEXT`); } catch {}
-  try { await db.execute(`ALTER TABLE team_members ADD COLUMN emergency_contact_number TEXT`); } catch {}
-
   // Keeps sort_order correct for Liam's direct reports even on a DB that was
   // already seeded before this ordering existed — the org chart groups
   // Sophia/Joy as team-leading branches and Yuvraj/Gwen/Jemina into one
   // vertically-stacked column, and needs these values within each group.
   try {
     const centeredOrder = { 'Yuvraj Rao': 0, 'Sophia': 1, 'Joy Victoria': 2, 'Gwen Stocks': 3, 'Jemina Numos': 4 };
-    await db.batch(
-      Object.entries(centeredOrder).map(([name, ord]) => ({
-        sql: 'UPDATE team_members SET sort_order = ? WHERE name = ?',
-        args: [ord, name]
-      })),
-      'write'
-    );
-  } catch {}
-
-  // Turso cloud does not fire SQLite triggers, so the FTS index for knowledge_sources
-  // never gets populated via the trigger-based approach. Fix: drop the content-table FTS,
-  // recreate it as a standalone table, and populate it directly — but only when the
-  // counts actually disagree, so a normal restart with no new/changed sources doesn't
-  // pay for a full drop/rebuild every single boot.
-  const [ksCount, ksFtsCount] = await Promise.all([
-    db.execute('SELECT COUNT(*) as n FROM knowledge_sources'),
-    db.execute('SELECT COUNT(*) as n FROM knowledge_sources_fts').catch(() => ({ rows: [{ n: -1 }] }))
-  ]);
-  if (Number(ksCount.rows[0].n) !== Number(ksFtsCount.rows[0].n)) {
-    await db.execute('DROP TRIGGER IF EXISTS ks_ai');
-    await db.execute('DROP TRIGGER IF EXISTS ks_au');
-    await db.execute('DROP TRIGGER IF EXISTS ks_ad');
-    await db.execute('DROP TABLE IF EXISTS knowledge_sources_fts');
-    await db.execute('CREATE VIRTUAL TABLE knowledge_sources_fts USING fts5(id UNINDEXED, title, content)');
-    const ksSources = await db.execute('SELECT id, title, content FROM knowledge_sources');
-    if (ksSources.rows.length > 0) {
-      await db.batch(
-        ksSources.rows.map(r => ({
-          sql: 'INSERT INTO knowledge_sources_fts(id, title, content) VALUES (?, ?, ?)',
-          args: [r.id, r.title, r.content]
-        })),
-        'write'
-      );
+    for (const [name, ord] of Object.entries(centeredOrder)) {
+      await db.execute({ sql: 'UPDATE team_members SET sort_order = ? WHERE name = ?', args: [ord, name] });
     }
-    console.log(`✓ knowledge_sources_fts rebuilt (${ksSources.rows.length} entries)`);
-  }
+  } catch {}
 
   const countRes = await db.execute('SELECT COUNT(*) as n FROM glossary');
   if (Number(countRes.rows[0].n) === 0) {
-    await db.batch(
-      ECEC_GLOSSARY.map(({ term, definition }) => ({
-        sql: 'INSERT OR IGNORE INTO glossary (term, definition) VALUES (?, ?)',
-        args: [term, definition]
-      })),
-      'write'
-    );
+    for (const { term, definition } of ECEC_GLOSSARY) {
+      await db.execute({ sql: 'INSERT INTO glossary (term, definition) VALUES (?, ?) ON CONFLICT (term) DO NOTHING', args: [term, definition] });
+    }
     console.log(`✓ Glossary seeded with ${ECEC_GLOSSARY.length} ECEC terms`);
   }
 
@@ -494,6 +161,13 @@ async function initDatabase() {
   }
 
   console.log('✓ Database ready');
+}
+
+// schema.sql has no bound parameters, so the simple query protocol (a plain
+// string with no values) can run it as one multi-statement batch.
+async function runSchemaSql(sql) {
+  getDb(); // ensures pool is initialized
+  await pool.query(sql);
 }
 
 module.exports = { getDb, initDatabase };

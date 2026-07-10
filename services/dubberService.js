@@ -1,5 +1,6 @@
 const { getDb } = require('../db/database');
 const groqTranscription = require('./groqTranscriptionService');
+const { BUCKETS, uploadBase64, extForMimetype } = require('./storageService');
 
 const REGION = process.env.DUBBER_REGION || 'au';
 const BASE_URL = `https://api.dubber.net/${REGION}/v1`;
@@ -210,7 +211,7 @@ async function syncRecordings(direction = 'recent') {
   // try/catches, so either one succeeding never depends on the other.
   // Gated on has_audio, so already-completed rows don't get re-fetched forever.
   const pending = await db.execute({
-    sql: 'SELECT id, transcript FROM call_recordings WHERE has_audio = 0 ORDER BY start_time_iso DESC LIMIT ?',
+    sql: 'SELECT id, transcript FROM call_recordings WHERE has_audio = false ORDER BY start_time_iso DESC LIMIT ?',
     args: [MAX_CONTENT_FETCH_PER_RUN]
   });
 
@@ -221,11 +222,14 @@ async function syncRecordings(direction = 'recent') {
     let audio = null;
     try {
       audio = await downloadRecordingAudio(row.id);
-      await db.execute({ sql: 'UPDATE call_recordings SET has_audio = 1 WHERE id = ?', args: [row.id] });
+      await db.execute({ sql: 'UPDATE call_recordings SET has_audio = true WHERE id = ?', args: [row.id] });
+      const mimetype = audio.mimetype || 'audio/mpeg';
+      const path = `${row.id}.${extForMimetype(mimetype)}`;
+      await uploadBase64(BUCKETS.callRecordings, path, audio.data, mimetype);
       await db.execute({
-        sql: `INSERT INTO call_recording_audio (recording_id, data, mimetype, filesize) VALUES (?, ?, ?, ?)
-              ON CONFLICT(recording_id) DO UPDATE SET data = excluded.data, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = datetime('now')`,
-        args: [row.id, audio.data, audio.mimetype || 'audio/mpeg', audio.data?.length || null]
+        sql: `INSERT INTO call_recording_audio (recording_id, storage_path, mimetype, filesize) VALUES (?, ?, ?, ?)
+              ON CONFLICT(recording_id) DO UPDATE SET storage_path = excluded.storage_path, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = now()`,
+        args: [row.id, path, mimetype, audio.data?.length || null]
       });
       audioFetched++;
     } catch (err) {
@@ -253,8 +257,8 @@ async function syncRecordings(direction = 'recent') {
   const contentFetched = audioFetched; // audio is the currently-achievable metric
 
   await db.execute({
-    sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, datetime('now'), ?, datetime('now'))
-          ON CONFLICT(id) DO UPDATE SET last_synced_at = datetime('now'), total_synced = total_synced + excluded.total_synced, updated_at = datetime('now')`,
+    sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, now(), ?, now())
+          ON CONFLICT(id) DO UPDATE SET last_synced_at = now(), total_synced = total_synced + excluded.total_synced, updated_at = now()`,
     args: [totalNew]
   });
 
