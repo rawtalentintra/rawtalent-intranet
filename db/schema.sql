@@ -319,6 +319,25 @@ CREATE TABLE IF NOT EXISTS team_members (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Fun team-culture feature: birthday/work-anniversary greetings between
+-- logged-in users. Upcoming-date reminders themselves are computed live from
+-- team_members.birthdate/employment_date (not stored) — this table only
+-- holds the greetings people actually send each other, so the recipient's
+-- notification bell has something to show ("Shienna sent you a Birthday
+-- Greeting!"). team_member_id is matched to a logged-in user by email at
+-- read time, not a hard foreign key (not every team member has a login).
+CREATE TABLE IF NOT EXISTS team_greetings (
+  id TEXT PRIMARY KEY,
+  team_member_id TEXT NOT NULL,
+  greeting_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  sent_by_email TEXT,
+  sent_by_name TEXT,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_team_greetings_team_member_id ON team_greetings(team_member_id);
+
 -- Every one of these backs a WHERE/ORDER BY that route handlers run on every
 -- request (call browsing/filtering, article listing, team lookups, session/
 -- login checks) — without an index each is a full table scan that gets

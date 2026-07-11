@@ -565,6 +565,16 @@
     }
     .team-profile-modal-overlay.open { display: flex; }
     .team-profile-modal { background: white; border-radius: var(--radius-lg); max-width: 480px; width: 92%; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* Notification bell + celebratory confetti burst for greetings */
+    .celebration-modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1100;
+      align-items: center; justify-content: center;
+    }
+    .celebration-modal-overlay.open { display: flex; }
+    .celebration-modal { background: white; border-radius: var(--radius-lg); max-width: 420px; width: 92%; text-align: center; padding: 36px 28px; overflow: hidden; position: relative; }
+    .confetti-piece { position: absolute; top: -20px; width: 8px; height: 14px; opacity: .9; animation: confetti-fall linear forwards; }
+    @keyframes confetti-fall { to { transform: translateY(420px) rotate(540deg); opacity: 0; } }
   </style>
 </head>
 <body>
@@ -575,6 +585,19 @@
       <span class="nav-tag">Knowledge Base</span>
     </a>
     <div class="nav-actions">
+      <div class="notif-bell-wrap" style="position:relative">
+        <button class="nav-btn ghost" onclick="toggleNotifPanel(event)" id="notifBellBtn" style="position:relative;font-size:15px;padding:8px 11px">
+          🔔
+          <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
+        </button>
+        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
+            <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
+            <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+          </div>
+          <div id="notifPanelBody" style="padding:8px"></div>
+        </div>
+      </div>
       <div class="nav-user">
         <div class="nav-avatar" id="navAvatar">?</div>
         <span id="navName" style="font-size:13px;color:rgba(255,255,255,.5);display:none"></span>
@@ -663,6 +686,17 @@
     </div>
   </div>
 
+  <!-- Greeting Celebration Modal -->
+  <div class="celebration-modal-overlay" id="celebrationModal" onclick="if(event.target===this)closeCelebrationModal()">
+    <div class="celebration-modal">
+      <div id="confettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
+      <div id="celebrationEmoji" style="font-size:56px;margin-bottom:10px;position:relative">🎉</div>
+      <div id="celebrationTitle" style="font-weight:800;font-size:16.5px;color:var(--navy);margin-bottom:10px;position:relative"></div>
+      <div id="celebrationMessage" style="font-size:14px;color:var(--text);line-height:1.6;margin-bottom:22px;position:relative"></div>
+      <button onclick="closeCelebrationModal()" style="position:relative;background:var(--orange);color:white;border:none;padding:10px 22px;border-radius:var(--radius);font-size:13.5px;font-weight:700;cursor:pointer">Thanks! 🎉</button>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -698,7 +732,120 @@
 
       loadCategories();
       loadResults();
+      loadNotifications();
+      setInterval(loadNotifications, 5 * 60 * 1000);
     }
+
+    // ── Notifications (birthday / work-anniversary reminders + greetings) ──
+    let notifData = { upcomingEvents: [], receivedGreetings: [], unreadCount: 0 };
+
+    async function loadNotifications() {
+      try {
+        notifData = await fetch('/api/notifications').then(r => r.json());
+        const badge = document.getElementById('notifBadge');
+        if (notifData.unreadCount > 0) {
+          badge.textContent = notifData.unreadCount > 9 ? '9+' : notifData.unreadCount;
+          badge.style.display = 'flex';
+        } else {
+          badge.style.display = 'none';
+        }
+        renderNotifPanel();
+      } catch {}
+    }
+
+    function renderNotifPanel() {
+      const body = document.getElementById('notifPanelBody');
+      const sections = [];
+      if (notifData.upcomingEvents?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Upcoming</div>
+          ${notifData.upcomingEvents.map(ev => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${escHtml(ev.headline)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(ev.action)}</div>
+              <button onclick="sendGreeting('${ev.teamMemberId}','${ev.type}','${escHtml(ev.name)}')" style="background:var(--orange);color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${ev.type === 'birthday' ? '🎂 Send Birthday Greeting' : '🎉 Send Anniversary Greeting'}</button>
+            </div>
+          `).join('')}
+        `);
+      }
+      if (notifData.receivedGreetings?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your Greetings</div>
+          ${notifData.receivedGreetings.map(g => `
+            <div style="background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${fmtDate(g.created_at)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
+    }
+
+    function toggleNotifPanel(event) {
+      event?.stopPropagation();
+      const panel = document.getElementById('notifPanel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    document.addEventListener('click', (e) => {
+      const wrap = document.querySelector('.notif-bell-wrap');
+      const panel = document.getElementById('notifPanel');
+      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target)) {
+        panel.style.display = 'none';
+      }
+    });
+
+    async function sendGreeting(teamMemberId, type, name) {
+      try {
+        const res = await fetch('/api/notifications/greet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamMemberId, type })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
+        toast(`Greeting sent to ${name}! 🎉`, 'success');
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function openGreetingCelebration(id) {
+      const g = notifData.receivedGreetings.find(x => x.id === id);
+      if (!g) return;
+      if (!g.is_read) {
+        fetch(`/api/notifications/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
+      }
+      showCelebrationModal(g);
+    }
+
+    function markAllGreetingsRead() {
+      fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    function spawnConfetti(container) {
+      container.innerHTML = '';
+      const colors = ['#3d6fff', '#f59e0b', '#ef4444', '#10b981', '#a855f7', '#ec4899'];
+      for (let i = 0; i < 40; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = Math.random() * 100 + '%';
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDuration = (1.2 + Math.random() * 1.2) + 's';
+        piece.style.animationDelay = (Math.random() * 0.4) + 's';
+        piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+        container.appendChild(piece);
+      }
+    }
+
+    function showCelebrationModal(g) {
+      document.getElementById('celebrationEmoji').textContent = g.greeting_type === 'birthday' ? '🎂' : '🏆';
+      document.getElementById('celebrationTitle').textContent = `${g.sent_by_name || 'A teammate'} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting!`;
+      document.getElementById('celebrationMessage').textContent = g.message;
+      document.getElementById('celebrationModal').classList.add('open');
+      spawnConfetti(document.getElementById('confettiLayer'));
+    }
+
+    function closeCelebrationModal() { document.getElementById('celebrationModal').classList.remove('open'); }
 
     async function stopImpersonating() {
       try {
@@ -991,19 +1138,18 @@
       if (members.length === 0) return '';
       const rows = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
         <tr>
-          <td style="font-weight:600;color:var(--navy)">${escHtml(m.legal_name || m.name)}</td>
-          <td style="color:var(--text-muted)">${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)">${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.email || '—')}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.birthdate || '—')}</td>
-          <td style="color:var(--text-muted);line-height:1.35">${m.emergency_contact_name ? `${escHtml(m.emergency_contact_name)}<br>${escHtml(m.emergency_contact_number || '—')}` : '—'}</td>
           <td><button onclick="openTeamProfile('${m.id}')" style="background:none;border:1px solid var(--gray-200);padding:4px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--orange)">View</button></td>
         </tr>
       `).join('');
       return `
         <table class="team-table">
-          <thead><tr><th>Full Name</th><th>Nickname</th><th>Title</th><th>Phone / WhatsApp</th><th>Employment Date</th><th>DOB</th><th>Emergency Contact</th><th></th></tr></thead>
+          <thead><tr><th>Nickname</th><th>Title</th><th>Phone / WhatsApp</th><th>Employment Date</th><th>Email</th><th>DOB</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       `;
@@ -1380,6 +1526,14 @@
     }
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function toast(msg, type = '') {
+      const tc = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.textContent = msg;
+      tc.appendChild(t);
+      setTimeout(() => t.remove(), 3500);
     }
     function fmtDate(iso) {
       if (!iso) return '';

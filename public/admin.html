@@ -109,6 +109,10 @@
     .org-misc-item::before { content: ''; position: absolute; left: -26px; top: 20px; width: 26px; height: 2px; background: var(--gray-300); }
     .org-misc-item > ul { padding-top: 20px; }
     .org-misc-item > .org-node { width: 100%; box-sizing: border-box; }
+
+    /* Notification bell + celebratory confetti burst for greetings */
+    .confetti-piece { position: absolute; top: -20px; width: 8px; height: 14px; opacity: .9; animation: confetti-fall linear forwards; }
+    @keyframes confetti-fall { to { transform: translateY(420px) rotate(540deg); opacity: 0; } }
   </style>
 </head>
 <body>
@@ -120,6 +124,19 @@
     </a>
     <div class="nav-actions">
       <button class="nav-btn ghost" onclick="location.href='/'">← Knowledge Base</button>
+      <div class="notif-bell-wrap" style="position:relative">
+        <button class="nav-btn ghost" onclick="toggleNotifPanel(event)" id="notifBellBtn" style="position:relative;font-size:15px;padding:8px 11px">
+          🔔
+          <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
+        </button>
+        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
+            <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
+            <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+          </div>
+          <div id="notifPanelBody" style="padding:8px"></div>
+        </div>
+      </div>
       <div class="nav-user" style="cursor:pointer" onclick="openPasswordModal()" title="Change your password">
         <div class="nav-avatar" id="navAvatar">J</div>
       </div>
@@ -233,18 +250,17 @@
             <table class="data-table" id="teamTable" style="font-size:12.5px">
               <thead>
                 <tr>
-                  <th>Full Name</th>
                   <th>Nickname</th>
                   <th>Title</th>
                   <th style="width:140px">Phone / WhatsApp</th>
                   <th style="width:105px">Employment Date</th>
+                  <th style="width:180px">Email</th>
                   <th style="width:105px">DOB</th>
-                  <th style="width:140px">Emergency Contact</th>
                   <th style="width:70px"></th>
                 </tr>
               </thead>
               <tbody id="teamTableBody">
-                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -1002,6 +1018,17 @@
     </div>
   </div>
 
+  <!-- Greeting Celebration Modal -->
+  <div class="modal-overlay" id="celebrationModal" onclick="if(event.target===this)closeCelebrationModal()">
+    <div class="modal" style="max-width:420px;text-align:center;padding:36px 28px;overflow:hidden;position:relative">
+      <div id="confettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
+      <div id="celebrationEmoji" style="font-size:56px;margin-bottom:10px;position:relative">🎉</div>
+      <div id="celebrationTitle" style="font-weight:800;font-size:16.5px;color:var(--navy);margin-bottom:10px;position:relative"></div>
+      <div id="celebrationMessage" style="font-size:14px;color:var(--text);line-height:1.6;margin-bottom:22px;position:relative"></div>
+      <button class="btn-add" style="position:relative" onclick="closeCelebrationModal()">Thanks! 🎉</button>
+    </div>
+  </div>
+
   <!-- Calibration Note Modal -->
   <div class="modal-overlay" id="calibrationNoteModal" onclick="if(event.target===this)closeCalibrationNoteModal()">
     <div class="modal" style="max-width:560px">
@@ -1333,6 +1360,8 @@
       if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
       loadCategoriesForDatalist();
       loadTagsForDatalist();
+      loadNotifications();
+      setInterval(loadNotifications, 5 * 60 * 1000);
     }
 
     function applyRoleVisibility() {
@@ -1340,6 +1369,117 @@
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
       }
     }
+
+    // ── Notifications (birthday / work-anniversary reminders + greetings) ──
+    let notifData = { upcomingEvents: [], receivedGreetings: [], unreadCount: 0 };
+
+    async function loadNotifications() {
+      try {
+        notifData = await fetch('/api/notifications').then(r => r.json());
+        const badge = document.getElementById('notifBadge');
+        if (notifData.unreadCount > 0) {
+          badge.textContent = notifData.unreadCount > 9 ? '9+' : notifData.unreadCount;
+          badge.style.display = 'flex';
+        } else {
+          badge.style.display = 'none';
+        }
+        renderNotifPanel();
+      } catch {}
+    }
+
+    function renderNotifPanel() {
+      const body = document.getElementById('notifPanelBody');
+      const sections = [];
+      if (notifData.upcomingEvents?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Upcoming</div>
+          ${notifData.upcomingEvents.map(ev => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${escHtml(ev.headline)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(ev.action)}</div>
+              <button class="btn-add" style="font-size:11px;padding:6px 12px" onclick="sendGreeting('${ev.teamMemberId}','${ev.type}','${escHtml(ev.name)}')">${ev.type === 'birthday' ? '🎂 Send Birthday Greeting' : '🎉 Send Anniversary Greeting'}</button>
+            </div>
+          `).join('')}
+        `);
+      }
+      if (notifData.receivedGreetings?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your Greetings</div>
+          ${notifData.receivedGreetings.map(g => `
+            <div style="background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${fmtDate(g.created_at)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
+    }
+
+    function toggleNotifPanel(event) {
+      event?.stopPropagation();
+      const panel = document.getElementById('notifPanel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    document.addEventListener('click', (e) => {
+      const wrap = document.querySelector('.notif-bell-wrap');
+      const panel = document.getElementById('notifPanel');
+      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target)) {
+        panel.style.display = 'none';
+      }
+    });
+
+    async function sendGreeting(teamMemberId, type, name) {
+      try {
+        const res = await fetch('/api/notifications/greet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamMemberId, type })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
+        toast(`Greeting sent to ${name}! 🎉`, 'success');
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function openGreetingCelebration(id) {
+      const g = notifData.receivedGreetings.find(x => x.id === id);
+      if (!g) return;
+      if (!g.is_read) {
+        fetch(`/api/notifications/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
+      }
+      showCelebrationModal(g);
+    }
+
+    function markAllGreetingsRead() {
+      fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    function spawnConfetti(container) {
+      container.innerHTML = '';
+      const colors = ['#3d6fff', '#f59e0b', '#ef4444', '#10b981', '#a855f7', '#ec4899'];
+      for (let i = 0; i < 40; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = Math.random() * 100 + '%';
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDuration = (1.2 + Math.random() * 1.2) + 's';
+        piece.style.animationDelay = (Math.random() * 0.4) + 's';
+        piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+        container.appendChild(piece);
+      }
+    }
+
+    function showCelebrationModal(g) {
+      document.getElementById('celebrationEmoji').textContent = g.greeting_type === 'birthday' ? '🎂' : '🏆';
+      document.getElementById('celebrationTitle').textContent = `${g.sent_by_name || 'A teammate'} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting!`;
+      document.getElementById('celebrationMessage').textContent = g.message;
+      document.getElementById('celebrationModal').classList.add('open');
+      spawnConfetti(document.getElementById('confettiLayer'));
+    }
+
+    function closeCelebrationModal() { document.getElementById('celebrationModal').classList.remove('open'); }
 
     // ── Our Team ──────────────────────────────────────────────────
     let allTeamMembers = [];
@@ -1472,18 +1612,17 @@
       const tbody = document.getElementById('teamTableBody');
       document.getElementById('teamTableCount').textContent = `${members.length} member${members.length !== 1 ? 's' : ''}`;
       if (members.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
         return;
       }
       tbody.innerHTML = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
         <tr>
-          <td style="font-weight:600;color:var(--navy)">${escHtml(m.legal_name || m.name)}</td>
-          <td style="color:var(--text-muted)">${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)">${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
+          <td style="color:var(--text-muted)">${escHtml(m.email || '—')}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.birthdate || '—')}</td>
-          <td style="color:var(--text-muted);line-height:1.35">${m.emergency_contact_name ? `${escHtml(m.emergency_contact_name)}<br>${escHtml(m.emergency_contact_number || '—')}` : '—'}</td>
           <td><button class="action-btn edit" onclick="openTeamProfile('${m.id}')">View</button></td>
         </tr>
       `).join('');
