@@ -133,7 +133,7 @@
     <button onclick="stopImpersonating()" style="margin-left:12px;background:#991b1b;color:white;border:none;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Return to My Account</button>
   </div>
 
-  <div id="viewBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:9px 24px;text-align:center;font-size:13.5px;color:#9a3412;font-weight:600">
+  <div id="viewBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:3px 24px;text-align:center;font-size:11px;color:#9a3412;font-weight:600;line-height:1.3">
     <span id="viewBannerText"></span>
   </div>
 
@@ -766,9 +766,9 @@
               <span style="font-weight:600;font-size:14px;color:var(--navy)">🎯 Grading Calibration Notes</span>
               <span id="calibrationCount" style="font-size:13px;color:var(--text-muted)"></span>
             </div>
+            <button class="btn-secondary" style="font-size:12px;padding:6px 14px" onclick="toggleCalibrationList()" id="calibrationToggleBtn">View Calibration Notes</button>
           </div>
-          <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--gray-200)">Standing corrections taught to the AI from past reviewer feedback — applied automatically to every future evaluation. Remove any that no longer apply.</div>
-          <div id="calibrationList" style="padding:8px 0">
+          <div id="calibrationList" style="padding:8px 0;display:none">
             <div class="loading-spinner"><div class="spinner"></div></div>
           </div>
         </div>
@@ -1002,6 +1002,21 @@
     </div>
   </div>
 
+  <!-- Calibration Note Modal -->
+  <div class="modal-overlay" id="calibrationNoteModal" onclick="if(event.target===this)closeCalibrationNoteModal()">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header">
+        <div class="modal-title">Calibration Note</div>
+        <button class="modal-close" onclick="closeCalibrationNoteModal()">×</button>
+      </div>
+      <div class="modal-body" id="calibrationNoteModalBody" style="max-height:60vh;overflow-y:auto"></div>
+      <div class="modal-footer">
+        <button class="action-btn delete" id="calibrationNoteModalRemoveBtn">Remove</button>
+        <button class="btn-secondary" onclick="closeCalibrationNoteModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Manual Grade Modal -->
   <div class="modal-overlay" id="manualGradeModal" onclick="if(event.target===this)closeManualGradeModal()">
     <div class="modal" style="max-width:760px">
@@ -1207,6 +1222,7 @@
       </div>
       <div class="modal-footer">
         <button class="action-btn delete" style="padding:9px 18px;font-size:13px" onclick="deleteEvalDetailConfirm()">Delete Evaluation</button>
+        <button class="btn-secondary" onclick="exportEvalPdf()">🖨️ Print / Save as PDF</button>
         <button class="btn-secondary" onclick="closeEvalDetailModal()">Close</button>
       </div>
     </div>
@@ -3250,24 +3266,55 @@
       } catch { toast('Failed to clear', 'error'); }
     }
 
+    let allCalibrationNotes = [];
+    let calibrationListLoaded = false;
+
+    function toggleCalibrationList() {
+      const list = document.getElementById('calibrationList');
+      const btn = document.getElementById('calibrationToggleBtn');
+      const showing = list.style.display !== 'none';
+      if (showing) {
+        list.style.display = 'none';
+        btn.textContent = 'View Calibration Notes';
+      } else {
+        list.style.display = 'block';
+        btn.textContent = 'Hide Calibration Notes';
+        if (!calibrationListLoaded) loadCalibrationNotes();
+      }
+    }
+
     async function loadCalibrationNotes() {
       const list = document.getElementById('calibrationList');
       try {
-        const notes = await fetch('/api/calls/calibration').then(r => r.json());
-        document.getElementById('calibrationCount').textContent = `${notes.length} active`;
-        if (notes.length === 0) {
+        allCalibrationNotes = await fetch('/api/calls/calibration').then(r => r.json());
+        calibrationListLoaded = true;
+        document.getElementById('calibrationCount').textContent = `${allCalibrationNotes.length} active`;
+        if (allCalibrationNotes.length === 0) {
           list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No calibration notes yet — use "Give Feedback & Re-grade" on an evaluation to teach the AI a standing correction.</div>';
           return;
         }
-        list.innerHTML = notes.map(n => `
-          <div style="display:flex;align-items:flex-start;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
-            <div style="flex:1;min-width:0;font-size:13px;color:var(--text)">${escHtml(n.note)}</div>
-            <div style="font-size:11px;color:var(--text-muted);flex-shrink:0;white-space:nowrap">${escHtml(n.created_by || '—')} · ${fmtDate(n.created_at)}</div>
+        list.innerHTML = allCalibrationNotes.map(n => `
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+            <div style="flex:1;min-width:0;font-size:13px;color:var(--text)">${fmtDate(n.created_at)}</div>
+            <button class="action-btn edit" style="flex-shrink:0" onclick="viewCalibrationNote('${n.id}')">View</button>
             <button class="action-btn delete" style="flex-shrink:0" onclick="deleteCalibrationNote('${n.id}')">Remove</button>
           </div>
         `).join('');
       } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load calibration notes.</div>'; }
     }
+
+    function viewCalibrationNote(id) {
+      const n = allCalibrationNotes.find(x => x.id === id);
+      if (!n) return;
+      document.getElementById('calibrationNoteModalBody').innerHTML = `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">${escHtml(n.created_by || '—')} · ${fmtDate(n.created_at)}</div>
+        <div style="font-size:13.5px;color:var(--text);line-height:1.6;white-space:pre-wrap">${escHtml(n.note)}</div>
+      `;
+      document.getElementById('calibrationNoteModalRemoveBtn').onclick = () => { closeCalibrationNoteModal(); deleteCalibrationNote(id); };
+      document.getElementById('calibrationNoteModal').classList.add('open');
+    }
+
+    function closeCalibrationNoteModal() { document.getElementById('calibrationNoteModal').classList.remove('open'); }
 
     async function deleteCalibrationNote(id) {
       if (!confirm('Remove this calibration note? Future evaluations will no longer apply this correction.')) return;
@@ -3764,6 +3811,7 @@
     let evalDetailCurrentId = null;
     let evalDetailRecordingId = null;
     let evalDetailRubricType = null;
+    let evalDetailCurrentData = null;
 
     async function openEvalDetail(evalId) {
       evalDetailCurrentId = evalId;
@@ -3811,6 +3859,7 @@
     }
 
     function renderEvalDetail(e) {
+      evalDetailCurrentData = e;
       const meta = outcomeMeta[e.outcome] || { label: e.outcome, badge: 'badge-user' };
       const sourceLabel = e.source === 'human' ? '🧑 Your evaluation' : '🤖 AI-graded';
       document.getElementById('evalDetailModalTitle').textContent = `${e.rep_name || 'Unknown rep'} — ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}`;
@@ -3855,6 +3904,78 @@
     }
 
     function closeEvalDetailModal() { document.getElementById('evalDetailModal').classList.remove('open'); }
+
+    // Opens a self-contained, print-styled document in a new tab and
+    // triggers the browser's print dialog — "Save as PDF" there produces a
+    // branded, presentable PDF without needing a server-side PDF library.
+    function exportEvalPdf() {
+      const e = evalDetailCurrentData;
+      if (!e) { toast('No evaluation loaded', 'error'); return; }
+      const meta = outcomeMeta[e.outcome] || { label: e.outcome };
+      const rubric = callRubrics[e.rubric_type];
+      const rows = e.category_scores.map(c => {
+        const def = rubric?.categories.find(x => x.key === c.key);
+        return `
+          <tr>
+            <td style="padding:9px 10px;border:1px solid #dde3f0;text-align:center;font-weight:700;color:#3d6fff">${c.weight}%</td>
+            <td style="padding:9px 10px;border:1px solid #dde3f0">
+              <strong style="color:#0b1d3e">${escHtml(c.category)}</strong>
+              ${c.critical ? '<div style="font-size:9px;font-weight:700;color:#c0392b;margin-top:2px">⛔ ZERO-TOLERANCE</div>' : ''}
+            </td>
+            <td style="padding:9px 10px;border:1px solid #dde3f0;font-size:12px;color:#333;line-height:1.5">${escHtml(c.notes) || '—'}</td>
+            <td style="padding:9px 10px;border:1px solid #dde3f0;text-align:center;font-weight:800;color:#0b1d3e">${c.score}/5</td>
+          </tr>`;
+      }).join('');
+      const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Call Evaluation — ${escHtml(e.rep_name || 'Unknown')}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Inter, sans-serif; color: #0b1d3e; padding: 36px; max-width: 900px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #3d6fff; padding-bottom: 14px; margin-bottom: 22px; }
+  .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
+  .brand span { color: #3d6fff; }
+  .doc-label { text-align: right; font-size: 11px; color: #666; line-height: 1.5; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subline { color: #666; font-size: 12.5px; margin-bottom: 16px; }
+  .score-big { font-size: 15px; font-weight: 800; color: #3d6fff; }
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 20px; font-size: 12px; margin-bottom: 18px; background: #f7f8fc; padding: 14px 16px; border-radius: 8px; }
+  .meta-grid strong { color: #0b1d3e; display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .3px; color: #667; margin-bottom: 2px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th { background: #0b1d3e; color: white; padding: 8px 10px; text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .3px; }
+  .summary { font-size: 13px; line-height: 1.6; color: #333; margin-bottom: 14px; }
+  .feedback-note { font-size: 12px; background: #fef9f0; border-left: 3px solid #e0a030; padding: 10px 14px; margin-bottom: 16px; color: #664d03; }
+  .footer { margin-top: 34px; font-size: 9.5px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 10px; }
+  @media print { body { padding: 16px; } }
+</style></head>
+<body>
+  <div class="header">
+    <div class="brand">Raw<span>Talent</span></div>
+    <div class="doc-label">Call Quality Evaluation<br>Generated ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+  </div>
+  <h1>${escHtml(e.rep_name || 'Unknown rep')}</h1>
+  <div class="subline">${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'} Call &nbsp;·&nbsp; ${escHtml(meta.label)} &nbsp;·&nbsp; <span class="score-big">${e.overall_score}%</span></div>
+  <div class="meta-grid">
+    <div><strong>Call Type</strong>${escHtml(e.call_type || '—')}</div>
+    <div><strong>Call Date</strong>${escHtml(e.call_date || '—')}</div>
+    <div><strong>Duration</strong>${fmtDuration(e.duration_seconds)}</div>
+    <div><strong>Evaluated By</strong>${escHtml(e.evaluated_by || '—')}</div>
+    <div><strong>Date Graded</strong>${fmtDate(e.created_at)}</div>
+    <div><strong>Recording ID</strong>${escHtml(e.recording_id)}</div>
+  </div>
+  <div class="summary">${escHtml(e.summary) || 'No summary provided.'}</div>
+  ${e.reviewer_feedback ? `<div class="feedback-note"><strong>Re-graded with reviewer feedback:</strong> ${escHtml(e.reviewer_feedback)}</div>` : ''}
+  <table>
+    <thead><tr><th style="width:60px">Weight</th><th style="width:170px">Category</th><th>Feedback Notes</th><th style="width:60px">Score</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="footer">RawTalent Knowledge Base — Call Quality Evaluation Report</div>
+  <script>window.onload = () => window.print();<\/script>
+</body></html>`;
+      const win = window.open('', '_blank');
+      if (!win) { toast('Please allow pop-ups to export this evaluation', 'error'); return; }
+      win.document.write(html);
+      win.document.close();
+    }
 
     function deleteEvalDetailConfirm() {
       document.getElementById('confirmTitle').textContent = 'Delete Evaluation';

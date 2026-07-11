@@ -144,23 +144,6 @@
     }
     .ai-mode-banner.show { display: block; }
 
-    /* Stats strip */
-    .stats-strip {
-      background: var(--navy);
-      border-top: 1px solid rgba(255,255,255,.06);
-      padding: 16px 32px;
-      display: flex;
-      justify-content: center;
-      gap: 40px;
-    }
-    .stat-pill {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      color: rgba(255,255,255,.45);
-    }
-    .stat-pill strong { color: rgba(255,255,255,.8); font-weight: 700; }
 
     /* Category bar */
     .cat-bar {
@@ -606,9 +589,9 @@
     <button onclick="stopImpersonating()" style="margin-left:12px;background:#991b1b;color:white;border:none;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Return to My Account</button>
   </div>
 
-  <div id="viewBanner" style="display:none;background:#eef2ff;border-bottom:1px solid #c7d2fe;padding:9px 24px;text-align:center;font-size:13.5px;color:#3730a3;font-weight:600">
-    <div id="viewBannerText"></div>
-    <div style="font-size:11px;font-weight:400;opacity:.75;margin-top:2px">Users will never see the Admin button.</div>
+  <div id="viewBanner" style="display:none;background:#eef2ff;border-bottom:1px solid #c7d2fe;padding:3px 24px;text-align:center;font-size:11px;color:#3730a3;font-weight:600;line-height:1.3">
+    <span id="viewBannerText"></span>
+    <span style="font-size:9.5px;font-weight:400;opacity:.75;margin-left:6px">— Users will never see the Admin button.</span>
   </div>
 
   <!-- Hero -->
@@ -647,12 +630,6 @@
       ✨ AI answers are generated from your knowledge base — documents, articles, and reference websites
     </div>
 
-    <!-- Stats strip inside hero -->
-    <div class="stats-strip" id="statsStrip">
-      <div class="stat-pill"><strong id="statArticles">—</strong> Articles</div>
-      <div class="stat-pill"><strong id="statCats">—</strong> Categories</div>
-      <div class="stat-pill"><strong id="statSources">—</strong> AI Sources</div>
-    </div>
   </div>
 
   <!-- Category bar -->
@@ -719,7 +696,6 @@
         }
       } catch { location.href = '/login.html'; return; }
 
-      loadStats();
       loadCategories();
       loadResults();
     }
@@ -730,20 +706,6 @@
         if (res.ok) { window.location.href = '/admin'; }
         else { const data = await res.json(); alert(data.error || 'Failed to return to your account'); }
       } catch { alert('Network error — please try again.'); }
-    }
-
-    async function loadStats() {
-      try {
-        const [cats, sources] = await Promise.all([
-          fetch('/api/articles/categories').then(r => r.json()),
-          fetch('/api/sources').then(r => r.json()).catch(() => [])
-        ]);
-        const totalCats = cats.length;
-        const totalArticles = cats.reduce((s, c) => s + Number(c.count), 0);
-        document.getElementById('statArticles').textContent = totalArticles;
-        document.getElementById('statCats').textContent = totalCats;
-        document.getElementById('statSources').textContent = Array.isArray(sources) ? sources.length : '—';
-      } catch {}
     }
 
     // ── Mode ──────────────────────────────────────────────────────

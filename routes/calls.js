@@ -16,6 +16,14 @@ const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../
 // full access here — evaluate, delete, and manage rubric/calibration.
 router.use(requireAdmin);
 
+// Grading notes should read naturally ("Gelliane handled this well") rather
+// than using a rep's full name or a Dubber extension number tacked on
+// (rep_name often looks like "Gelliane 299").
+function firstNameOnly(name) {
+  if (!name) return name;
+  return name.trim().split(/\s+/)[0] || name;
+}
+
 router.get('/status', (req, res) => {
   res.json({ dubberConfigured: dubberService.isConfigured(), groqConfigured: groqTranscription.isConfigured() });
 });
@@ -266,7 +274,7 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       }
     }
 
-    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
+    const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
     const result = await gradeCall(transcript, rubricType, repName, feedback || null);
 
     // Feedback given on this call is also saved as a standing calibration
@@ -319,7 +327,7 @@ router.post('/:recordingId/evaluate-manual', async (req, res) => {
     const recording = local || await dubberService.getRecording(req.params.recordingId);
 
     const result = gradeManual(rubricType, scores, summary);
-    const repName = recording.rep_name || recording.from_label || recording.to_label || recording.channel || null;
+    const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
       repName,
