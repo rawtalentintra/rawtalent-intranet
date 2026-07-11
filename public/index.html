@@ -697,6 +697,21 @@
     </div>
   </div>
 
+  <!-- Greeting Preview Modal — shows exactly what the recipient will see, before it's actually sent -->
+  <div class="celebration-modal-overlay" id="greetingPreviewModal" onclick="if(event.target===this)closeGreetingPreviewModal()">
+    <div class="celebration-modal">
+      <div id="previewConfettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
+      <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;position:relative">Preview — this is what they'll see</div>
+      <div id="previewEmoji" style="font-size:56px;margin-bottom:10px;position:relative">🎉</div>
+      <div id="previewTitle" style="font-weight:800;font-size:15px;color:var(--navy);margin-bottom:10px;position:relative"></div>
+      <div id="previewMessage" style="font-size:14px;color:var(--text);line-height:1.6;margin-bottom:22px;position:relative"></div>
+      <div style="display:flex;gap:10px;justify-content:center;position:relative">
+        <button onclick="closeGreetingPreviewModal()" style="background:var(--gray-100);color:var(--text);border:none;padding:10px 20px;border-radius:var(--radius);font-size:13.5px;font-weight:700;cursor:pointer">Cancel</button>
+        <button onclick="confirmSendGreeting()" style="background:var(--orange);color:white;border:none;padding:10px 20px;border-radius:var(--radius);font-size:13.5px;font-weight:700;cursor:pointer">Send This Greeting 🎉</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -753,6 +768,14 @@
       } catch {}
     }
 
+    function greetingButtonLabel(ev) {
+      if (!ev.alreadySent) return ev.type === 'birthday' ? '🎂 Send Birthday Greeting' : '🎉 Send Anniversary Greeting';
+      const repeatLabels = ev.type === 'birthday'
+        ? ['🎂 Send Another Birthday Greeting!', '🎂 Send a Birthday Greeting Again!']
+        : ['🎉 Send Another Anniversary Greeting!', '🎉 Send an Anniversary Greeting Again!'];
+      return repeatLabels[Math.floor(Math.random() * repeatLabels.length)];
+    }
+
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
@@ -763,7 +786,7 @@
             <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px">
               <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${escHtml(ev.headline)}</div>
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(ev.action)}</div>
-              <button onclick="sendGreeting('${ev.teamMemberId}','${ev.type}','${escHtml(ev.name)}')" style="background:var(--orange);color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${ev.type === 'birthday' ? '🎂 Send Birthday Greeting' : '🎉 Send Anniversary Greeting'}</button>
+              <button onclick="previewGreeting('${ev.teamMemberId}','${ev.type}','${escHtml(ev.name)}')" style="background:var(--orange);color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${greetingButtonLabel(ev)}</button>
             </div>
           `).join('')}
         `);
@@ -796,15 +819,42 @@
       }
     });
 
-    async function sendGreeting(teamMemberId, type, name) {
+    let pendingGreeting = null;
+
+    async function previewGreeting(teamMemberId, type, name) {
       try {
-        const res = await fetch('/api/notifications/greet', {
+        const res = await fetch('/api/notifications/preview', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ teamMemberId, type })
         });
         const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to generate preview', 'error'); return; }
+        pendingGreeting = { teamMemberId, type, name, message: data.message };
+        document.getElementById('previewEmoji').textContent = type === 'birthday' ? '🎂' : '🏆';
+        document.getElementById('previewTitle').textContent = `${type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting for ${name}`;
+        document.getElementById('previewMessage').textContent = data.message;
+        document.getElementById('greetingPreviewModal').classList.add('open');
+        spawnConfetti(document.getElementById('previewConfettiLayer'));
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function closeGreetingPreviewModal() {
+      document.getElementById('greetingPreviewModal').classList.remove('open');
+      pendingGreeting = null;
+    }
+
+    async function confirmSendGreeting() {
+      if (!pendingGreeting) return;
+      const { teamMemberId, type, name, message } = pendingGreeting;
+      try {
+        const res = await fetch('/api/notifications/greet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamMemberId, type, message })
+        });
+        const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
         toast(`Greeting sent to ${name}! 🎉`, 'success');
+        closeGreetingPreviewModal();
         loadNotifications();
       } catch { toast('Network error', 'error'); }
     }

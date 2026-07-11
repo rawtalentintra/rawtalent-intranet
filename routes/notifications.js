@@ -112,13 +112,25 @@ router.get('/', async (req, res) => {
     // "Upcoming" reminders — admin/super_admin only.
     let upcomingEvents = [];
     if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      // A reminder counts as "already handled" (and stops being unread) once
+      // *this* admin has personally sent that person a greeting of that type
+      // recently — recently, not ever, so it naturally resets for next
+      // year's occurrence instead of being permanently silenced.
+      const recentRes = await db.execute({
+        sql: `SELECT team_member_id, greeting_type FROM team_greetings
+              WHERE sent_by_email = ? AND created_at > now() - interval '5 days'`,
+        args: [req.user.email]
+      });
+      const recentlySent = new Set(recentRes.rows.map(r => `${r.team_member_id}:${r.greeting_type}`));
+
       for (const m of teamRes.rows) {
         const bday = nextOccurrence(m.birthdate);
         if (bday && REMINDER_DAYS_BEFORE.includes(bday.daysUntil)) {
           upcomingEvents.push({
             teamMemberId: m.id, name: m.name, type: 'birthday', daysUntil: bday.daysUntil,
             headline: bday.daysUntil === 0 ? `It's ${m.name}'s Birthday today! 🎂` : `It's almost ${m.name}'s Birthday! 🎂`,
-            action: pick(BIRTHDAY_ACTIONS)
+            action: pick(BIRTHDAY_ACTIONS),
+            alreadySent: recentlySent.has(`${m.id}:birthday`)
           });
         }
         const anniv = nextOccurrence(m.employment_date);
@@ -126,22 +138,41 @@ router.get('/', async (req, res) => {
           upcomingEvents.push({
             teamMemberId: m.id, name: m.name, type: 'anniversary', daysUntil: anniv.daysUntil,
             headline: anniv.daysUntil === 0 ? `It's ${m.name}'s Employment Date Anniversary today! 🎉` : `It's almost ${m.name}'s Employment Date Anniversary! 🎉`,
-            action: pick(ANNIVERSARY_ACTIONS)
+            action: pick(ANNIVERSARY_ACTIONS),
+            alreadySent: recentlySent.has(`${m.id}:anniversary`)
           });
         }
       }
       upcomingEvents.sort((a, b) => a.daysUntil - b.daysUntil);
     }
 
-    const unreadCount = receivedGreetings.filter(g => !g.is_read).length + upcomingEvents.length;
+    const unreadCount = receivedGreetings.filter(g => !g.is_read).length + upcomingEvents.filter(e => !e.alreadySent).length;
     res.json({ upcomingEvents, receivedGreetings, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/greet', async (req, res) => {
+// Generates a message without saving anything — lets the sender see exactly
+// what the recipient will see before committing to send it.
+router.post('/preview', async (req, res) => {
   const { teamMemberId, type } = req.body;
+  if (!teamMemberId || !['birthday', 'anniversary'].includes(type)) {
+    return res.status(400).json({ error: 'teamMemberId and a valid type ("birthday" or "anniversary") are required' });
+  }
+  try {
+    const targetRes = await getDb().execute({ sql: 'SELECT id, name FROM team_members WHERE id = ?', args: [teamMemberId] });
+    const target = targetRes.rows[0];
+    if (!target) return res.status(404).json({ error: 'Team member not found' });
+    const message = await generateGreetingMessage(type, target.name);
+    res.json({ message, recipientName: target.name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/greet', async (req, res) => {
+  const { teamMemberId, type, message: previewedMessage } = req.body;
   if (!teamMemberId || !['birthday', 'anniversary'].includes(type)) {
     return res.status(400).json({ error: 'teamMemberId and a valid type ("birthday" or "anniversary") are required' });
   }
@@ -153,7 +184,9 @@ router.post('/greet', async (req, res) => {
 
     // No limit on how many greetings someone can send/receive — a fresh
     // AI-written message each time keeps repeats from feeling copy-pasted.
-    const message = await generateGreetingMessage(type, target.name);
+    // If the caller already previewed a message, send exactly that (rather
+    // than silently generating a different one at send time).
+    const message = previewedMessage?.trim() || await generateGreetingMessage(type, target.name);
     const id = uuidv4();
     await db.execute({
       sql: `INSERT INTO team_greetings (id, team_member_id, greeting_type, message, sent_by_email, sent_by_name)
