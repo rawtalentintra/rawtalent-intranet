@@ -812,7 +812,7 @@
               </tbody>
             </table>
           </div>
-          <div id="callsPagination" style="display:flex;justify-content:center;gap:14px;padding:14px;align-items:center"></div>
+          <div id="callsPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
         </div>
 
         <div id="callEvalResultCard" class="admin-table-card" style="display:none;margin-bottom:20px">
@@ -3769,6 +3769,30 @@
 
     function filterCalls() { callsCurrentPage = 1; loadCallsList(); }
     function changeCallsPage(delta) { callsCurrentPage += delta; loadCallsList(); }
+    function goToCallsPage(page) { callsCurrentPage = page; loadCallsList(); }
+
+    // Numbered page buttons, current page centered in a window of ~10, with
+    // "…" jumps to the very first/last page when there are more pages than
+    // fit in the window — plain Prev/Next alone doesn't scale to 80+ pages.
+    function renderPageNumbers(current, total, windowSize = 10) {
+      if (total <= 1) return '';
+      let start = Math.max(1, current - Math.floor(windowSize / 2));
+      let end = Math.min(total, start + windowSize - 1);
+      start = Math.max(1, end - windowSize + 1);
+
+      const pageBtn = p => `<button class="btn-secondary" style="padding:5px 11px;font-size:12px;${p === current ? 'background:var(--navy);color:white;border-color:var(--navy)' : ''}" onclick="goToCallsPage(${p})" ${p === current ? 'disabled' : ''}>${p}</button>`;
+      let html = '';
+      if (start > 1) {
+        html += pageBtn(1);
+        if (start > 2) html += `<span style="padding:0 2px;color:var(--text-muted)">…</span>`;
+      }
+      for (let p = start; p <= end; p++) html += pageBtn(p);
+      if (end < total) {
+        if (end < total - 1) html += `<span style="padding:0 2px;color:var(--text-muted)">…</span>`;
+        html += pageBtn(total);
+      }
+      return html;
+    }
 
     function copyRecordingId(id) {
       navigator.clipboard.writeText(id).then(() => toast('Recording ID copied', 'success')).catch(() => toast('Copy failed', 'error'));
@@ -3797,7 +3821,7 @@
         const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
         pager.innerHTML = totalPages > 1 ? `
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(-1)" ${callsCurrentPage === 1 ? 'disabled' : ''}>← Prev</button>
-          <span style="font-size:13px;color:var(--text-muted)">Page ${callsCurrentPage} of ${totalPages}</span>
+          ${renderPageNumbers(callsCurrentPage, totalPages)}
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(1)" ${callsCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
 
         if (recordings.length === 0) {
