@@ -1184,6 +1184,13 @@
       if (el && currentMode === 'team') fitOrgChart(el);
     });
 
+    // Table view intentionally hides the birth year (month/day only) — the
+    // full profile popup still shows the complete date.
+    function birthdateNoYear(dateStr) {
+      if (!dateStr) return '—';
+      return dateStr.replace(/,?\s*\d{4}\s*$/, '').trim() || dateStr;
+    }
+
     function renderTeamTable(members) {
       if (members.length === 0) return '';
       const rows = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
@@ -1193,7 +1200,7 @@
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
           <td style="color:var(--text-muted)">${escHtml(m.email || '—')}</td>
-          <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.birthdate || '—')}</td>
+          <td style="color:var(--text-muted);white-space:nowrap">${escHtml(birthdateNoYear(m.birthdate))}</td>
           <td><button onclick="openTeamProfile('${m.id}')" style="background:none;border:1px solid var(--gray-200);padding:4px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--orange)">View</button></td>
         </tr>
       `).join('');
