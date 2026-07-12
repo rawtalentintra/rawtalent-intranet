@@ -134,7 +134,7 @@ Write a report with:
 4. Commendations — specific, genuinely excellent behaviours worth recognising, referencing specific evidence from the notes above. If there genuinely are none, return an empty array.
 
 Respond with ONLY valid JSON, no other text:
-{"teamSummary": string, "perRep": [{"repName": string, "summary": string}], "outliers": [{"repName": string or null, "issue": string, "evidence": string}], "commendations": [{"repName": string or null, "behavior": string, "evidence": string}]}`;
+{"teamSummary": string, "perRep": [{"repName": string, "summary": string}], "outliers": [{"repName": string or null, "issue": string, "evidence": string}], "commendations": [{"repName": string or null, "behaviour": string, "evidence": string}]}`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
@@ -163,4 +163,55 @@ Respond with ONLY valid JSON, no other text:
   return { stats, aiReport: parsed };
 }
 
-module.exports = { generateReport };
+// Free-form Q&A over a period's evaluations — plain text back, since the
+// answer is just displayed to the reviewer rather than parsed, which sidesteps
+// the JSON-escaping fragility altogether for this feature.
+async function answerQuestion(evaluations, filters, question) {
+  const client = getClient();
+  if (!client) throw new Error('AI is not configured. Set ANTHROPIC_API_KEY to use this.');
+  if (evaluations.length === 0) return "There aren't any evaluated calls in the selected period to answer that from.";
+
+  const categoryKey = filters.category || null;
+  const stats = computeStats(evaluations, categoryKey);
+  const rubricLabel = filters.rubricType ? (RUBRICS[filters.rubricType]?.label || filters.rubricType) : 'both Educator-Facing and Centre-Facing';
+
+  const categoryAvgLines = stats.categoryAverages.map(c => `- ${c.label}: ${c.avgScore}/5`).join('\n') || '(none)';
+  const perRepLines = stats.perRep.map(r => `- ${r.repName}: ${r.callsEvaluated} calls, avg overall ${r.avgOverallScore}%`).join('\n') || '(none)';
+  // Bounded evidence set so the prompt stays a sane size regardless of how
+  // many evaluations are in the period — same approach as the period report.
+  const evidenceLines = evaluations.slice(0, 80).map(e =>
+    `- ${e.rep_name || 'Unknown'} (${e.call_date || 'date unknown'}), ${e.rubric_type}, ${e.overall_score}%, outcome: ${e.outcome}: ${(e.summary || '').slice(0, 220)}`
+  ).join('\n') || '(none)';
+
+  const system = `You are a call quality analyst for RawTalent, an Australian childcare staffing agency. A super admin is asking you a question about call evaluations from ${rubricLabel} calls in the currently selected period on their dashboard.
+
+Write in formal Australian English throughout (e.g. "organise", "recognise", "behaviour", "centre", "realise") — never American spelling.
+
+Aggregate data for the period:
+- Calls evaluated: ${stats.total}
+- Average overall score: ${stats.avgOverallScore}%
+- Outcomes: ${stats.outcomeBreakdown.pass || 0} pass, ${stats.outcomeBreakdown.coaching || 0} coaching recommended, ${stats.outcomeBreakdown.escalate || 0} escalate
+
+Category averages (out of 5):
+${categoryAvgLines}
+
+Per-rep summary:
+${perRepLines}
+
+Individual evaluations this period (up to 80 shown):
+${evidenceLines}
+
+Answer the reviewer's question directly and concisely, grounded strictly in the data above — never invent a number, rep, or call that isn't shown. If the data above can't answer the question, say so plainly rather than guessing. Keep the answer to a few sentences unless the question genuinely calls for a list or breakdown.`;
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 1024,
+    system,
+    messages: [{ role: 'user', content: question }]
+  });
+
+  const textBlock = response.content.find(b => b.type === 'text');
+  return textBlock?.text?.trim() || "I wasn't able to generate an answer — please try rephrasing the question.";
+}
+
+module.exports = { generateReport, answerQuestion };

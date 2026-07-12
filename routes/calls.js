@@ -9,7 +9,7 @@ const {
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 } = require('../services/callGradingService');
-const { generateReport } = require('../services/callReportService');
+const { generateReport, answerQuestion } = require('../services/callReportService');
 const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../services/storageService');
 
 // Call recordings are confidential, but admins (not just super_admin) get
@@ -215,10 +215,11 @@ router.get('/calibration', async (req, res) => {
 });
 
 router.post('/calibration', async (req, res) => {
-  const { note } = req.body;
+  const { note, rubricType, categoryKey } = req.body;
   if (!note?.trim()) return res.status(400).json({ error: 'A note is required' });
+  if (rubricType && !RUBRICS[rubricType]) return res.status(400).json({ error: 'Unknown rubric type' });
   try {
-    const id = await addCalibrationNote(note.trim(), req.user.email);
+    const id = await addCalibrationNote(note.trim(), req.user.email, rubricType || null, categoryKey || null);
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -235,7 +236,7 @@ router.delete('/calibration/:id', async (req, res) => {
 });
 
 router.post('/:recordingId/evaluate', async (req, res) => {
-  const { rubricType, feedback } = req.body;
+  const { rubricType, feedback, feedbackCategoryKey } = req.body;
   if (!rubricType || !RUBRICS[rubricType]) {
     return res.status(400).json({ error: 'A valid rubricType ("educator" or "centre") is required' });
   }
@@ -283,13 +284,15 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     }
 
     const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
-    const result = await gradeCall(transcript, rubricType, repName, feedback || null);
+    const result = await gradeCall(transcript, rubricType, repName, feedback || null, feedbackCategoryKey || null);
 
     // Feedback given on this call is also saved as a standing calibration
-    // note, so every future AI grading run (any call, any rep) applies the
-    // same correction — not just this one re-grade.
+    // note, so every future AI grading run applies the same correction — not
+    // just this one re-grade. Tagged to the rubric (and category, if the
+    // reviewer picked one) so it only ever affects grading it's relevant to,
+    // and can be given as many times as needed, on any category, every time.
     if (feedback?.trim()) {
-      await addCalibrationNote(feedback.trim(), req.user.email);
+      await addCalibrationNote(feedback.trim(), req.user.email, rubricType, feedbackCategoryKey || null);
     }
 
     const id = await saveEvaluation({
@@ -302,7 +305,8 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       result,
       evaluatedBy: req.user.email,
       source: 'ai',
-      reviewerFeedback: feedback?.trim() || null
+      reviewerFeedback: feedback?.trim() || null,
+      reviewerFeedbackCategory: feedbackCategoryKey || null
     });
 
     res.json({ id, repName, rubricType, source: 'ai', calibrationSaved: !!feedback?.trim(), ...result });
@@ -373,30 +377,110 @@ router.get('/rep-names', async (req, res) => {
   }
 });
 
-// Call Quality Dashboard — aggregates evaluations within a period (joined to
-// call_recordings for a reliable ISO date to filter on) and, if configured,
-// asks Claude for a narrative report: team/individual performance against
-// the rubric, outliers worth addressing, and commendable behaviour.
+// Shared by /report and /ask — both need the same filtered, period-bounded
+// set of evaluations (joined to call_recordings for a reliable ISO date to
+// filter on) as their evidence base.
+async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType }) {
+  const conditions = [];
+  const args = [];
+  if (dateFrom) { conditions.push('r.start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
+  if (dateTo) { conditions.push('r.start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+  if (repName) { conditions.push('e.rep_name = ?'); args.push(repName); }
+  if (rubricType && RUBRICS[rubricType]) { conditions.push('e.rubric_type = ?'); args.push(rubricType); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const result = await getDb().execute({
+    sql: `SELECT e.* FROM call_evaluations e LEFT JOIN call_recordings r ON r.id = e.recording_id ${where} ORDER BY e.created_at DESC LIMIT 500`,
+    args
+  });
+  return result.rows;
+}
+
+// Call Quality Dashboard — aggregates evaluations within a period and, if
+// configured, asks Claude for a narrative report: team/individual
+// performance against the rubric, outliers worth addressing, and
+// commendable behaviour.
 router.get('/report', async (req, res) => {
   const { dateFrom, dateTo, repName, rubricType, category } = req.query;
   try {
-    const conditions = [];
-    const args = [];
-    if (dateFrom) { conditions.push('r.start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
-    if (dateTo) { conditions.push('r.start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
-    if (repName) { conditions.push('e.rep_name = ?'); args.push(repName); }
-    if (rubricType && RUBRICS[rubricType]) { conditions.push('e.rubric_type = ?'); args.push(rubricType); }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const result = await getDb().execute({
-      sql: `SELECT e.* FROM call_evaluations e LEFT JOIN call_recordings r ON r.id = e.recording_id ${where} ORDER BY e.created_at DESC LIMIT 500`,
-      args
-    });
-    const evaluations = result.rows;
+    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType });
     const report = await generateReport(evaluations, { rubricType, category });
     res.json(report);
   } catch (err) {
     console.error('Call report error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Free-form Q&A against the same period the dashboard is currently showing —
+// "how did Vicky do this month", "any compliance concerns in July", etc.
+router.post('/ask', async (req, res) => {
+  const { dateFrom, dateTo, repName, rubricType, category, question } = req.body;
+  if (!question?.trim()) return res.status(400).json({ error: 'A question is required' });
+  try {
+    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType });
+    const answer = await answerQuestion(evaluations, { rubricType, category }, question.trim());
+    res.json({ answer });
+  } catch (err) {
+    console.error('Call quality Q&A error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Raw call volume (from Dubber's synced metadata, not evaluations) —
+// inbound/outbound counts and a per-period trend, filterable by rep and
+// date range, with the grouping granularity chosen by the caller.
+router.get('/volume-stats', async (req, res) => {
+  const { repName, callType, dateFrom, dateTo } = req.query;
+  const groupBy = ['day', 'week', 'month'].includes(req.query.groupBy) ? req.query.groupBy : 'month';
+  try {
+    const conditions = ['start_time_iso IS NOT NULL'];
+    const args = [];
+    if (repName) { conditions.push('rep_name ILIKE ?'); args.push(`%${repName}%`); }
+    if (callType === 'inbound' || callType === 'outbound') { conditions.push('call_type = ?'); args.push(callType); }
+    if (dateFrom) { conditions.push('start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
+    if (dateTo) { conditions.push('start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+    const where = `WHERE ${conditions.join(' AND ')}`;
+
+    const db = getDb();
+    const [totalsRes, byRepRes, byPeriodRes] = await Promise.all([
+      db.execute({
+        sql: `SELECT COUNT(*) AS total,
+                     COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
+                     COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound
+              FROM call_recordings ${where}`,
+        args
+      }),
+      db.execute({
+        sql: `SELECT rep_name,
+                     COUNT(*) AS total,
+                     COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
+                     COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound
+              FROM call_recordings ${where}
+              GROUP BY rep_name ORDER BY total DESC LIMIT 50`,
+        args
+      }),
+      db.execute({
+        sql: `SELECT to_char(date_trunc('${groupBy}', start_time_iso::timestamptz), 'YYYY-MM-DD') AS period,
+                     COUNT(*) AS total,
+                     COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
+                     COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound
+              FROM call_recordings ${where}
+              GROUP BY period ORDER BY period ASC`,
+        args
+      })
+    ]);
+
+    res.json({
+      total: Number(totalsRes.rows[0]?.total || 0),
+      inbound: Number(totalsRes.rows[0]?.inbound || 0),
+      outbound: Number(totalsRes.rows[0]?.outbound || 0),
+      byRep: byRepRes.rows.map(r => ({ repName: r.rep_name || 'Unknown', total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
+      byPeriod: byPeriodRes.rows.map(r => ({ period: r.period, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
+      groupBy
+    });
+  } catch (err) {
+    console.error('Call volume stats error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

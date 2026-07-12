@@ -204,11 +204,14 @@
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label">Call Quality</div>
-        <div class="admin-nav-item" onclick="showSection('calls', this)">
-          <span class="admin-nav-icon">📞</span> Call Quality Evaluator
-        </div>
         <div class="admin-nav-item" onclick="showSection('calls-dashboard', this)">
           <span class="admin-nav-icon">📊</span> Call Quality Dashboard
+        </div>
+        <div class="admin-nav-item" onclick="showSection('call-rubrics', this)">
+          <span class="admin-nav-icon">📖</span> Call Grading Rubrics
+        </div>
+        <div class="admin-nav-item" onclick="showSection('calls', this)">
+          <span class="admin-nav-icon">📞</span> Call Quality Evaluator
         </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
@@ -726,6 +729,38 @@
         </div>
       </div>
 
+      <!-- Call Grading Rubrics -->
+      <div class="admin-section" id="section-call-rubrics">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Call Grading Rubrics</div>
+            <div class="admin-page-sub">Manage the grading criteria and standing calibration corrections the AI evaluator applies. Visible to admins and super admins.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">📖 Grading Rubric Reference</span>
+          </div>
+          <div id="rubricReferenceBody" style="padding:20px">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card">
+          <div class="admin-table-header">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">🎯 Grading Calibration Notes</span>
+              <span id="calibrationCount" style="font-size:13px;color:var(--text-muted)"></span>
+            </div>
+            <button class="btn-secondary" style="font-size:12px;padding:6px 14px" onclick="toggleCalibrationList()" id="calibrationToggleBtn">View Calibration Notes</button>
+          </div>
+          <div id="calibrationList" style="padding:8px 0;display:none">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Call Quality Evaluator -->
       <div class="admin-section" id="section-calls">
         <div class="admin-header">
@@ -757,28 +792,6 @@
             <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history">Sync Older Calls</button>
           </div>
           <div id="callsSyncStatus" style="display:none;margin-top:12px"></div>
-        </div>
-
-        <div class="admin-table-card" style="margin-bottom:20px">
-          <div class="admin-table-header">
-            <span style="font-weight:600;font-size:14px;color:var(--navy)">📖 Grading Rubric Reference</span>
-          </div>
-          <div id="rubricReferenceBody" style="padding:20px">
-            <div class="loading-spinner"><div class="spinner"></div></div>
-          </div>
-        </div>
-
-        <div class="admin-table-card" style="margin-bottom:20px">
-          <div class="admin-table-header">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-              <span style="font-weight:600;font-size:14px;color:var(--navy)">🎯 Grading Calibration Notes</span>
-              <span id="calibrationCount" style="font-size:13px;color:var(--text-muted)"></span>
-            </div>
-            <button class="btn-secondary" style="font-size:12px;padding:6px 14px" onclick="toggleCalibrationList()" id="calibrationToggleBtn">View Calibration Notes</button>
-          </div>
-          <div id="calibrationList" style="padding:8px 0;display:none">
-            <div class="loading-spinner"><div class="spinner"></div></div>
-          </div>
         </div>
 
         <div class="admin-table-card" style="margin-bottom:20px">
@@ -845,6 +858,46 @@
           </div>
         </div>
 
+        <div class="admin-table-card" style="margin-bottom:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">📞 Call Volume</span>
+          </div>
+          <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:grid;grid-template-columns:repeat(5,1fr);gap:10px;align-items:end">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">FROM</label>
+              <input type="date" id="volumeFrom" class="form-control">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">TO</label>
+              <input type="date" id="volumeTo" class="form-control">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">AGENT</label>
+              <input type="text" id="volumeRep" class="form-control" placeholder="Any agent…">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">DIRECTION</label>
+              <select id="volumeDirection" class="form-control">
+                <option value="">Inbound + Outbound</option>
+                <option value="inbound">Inbound only</option>
+                <option value="outbound">Outbound only</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">GROUP BY</label>
+              <select id="volumeGroupBy" class="form-control">
+                <option value="week">Week</option>
+                <option value="month" selected>Month</option>
+                <option value="day">Day</option>
+              </select>
+            </div>
+          </div>
+          <div style="padding:14px 20px">
+            <button class="btn-primary" onclick="loadCallVolumeStats()" style="padding:8px 20px">Load Volume</button>
+          </div>
+          <div id="volumeStatsOutput" style="padding:0 20px 20px"></div>
+        </div>
+
         <div style="background:white;border-radius:var(--radius-lg);padding:20px 24px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
           <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;align-items:end">
             <div>
@@ -880,6 +933,20 @@
         </div>
 
         <div id="reportOutput"></div>
+
+        <div class="admin-table-card" style="margin-top:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">🤖 Ask About This Data</span>
+          </div>
+          <div style="padding:16px 20px">
+            <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">Ask anything about evaluated calls — uses the FROM/TO/REP/RUBRIC filters above, e.g. "How did Vicky do this month?" or "Any compliance concerns this period?"</div>
+            <div style="display:flex;gap:10px">
+              <input type="text" id="callAskInput" class="form-control" placeholder="Ask a question about this period's calls…" onkeydown="if(event.key==='Enter')askCallQuality()" style="flex:1">
+              <button class="btn-primary" onclick="askCallQuality()" id="callAskBtn" style="padding:9px 22px;flex-shrink:0">Ask</button>
+            </div>
+            <div id="callAskOutput" style="margin-top:16px"></div>
+          </div>
+        </div>
       </div>
 
     </main>
@@ -1248,8 +1315,12 @@
         <div style="padding-top:16px;margin-top:16px;border-top:1px solid var(--gray-100)">
           <button class="btn-secondary" onclick="toggleDetailFeedbackBox()">💬 Give Feedback &amp; Re-grade</button>
           <div id="detailFeedbackBox" style="display:none;margin-top:12px">
+            <label class="form-label-modal">Which category is this about?</label>
+            <select id="detailFeedbackCategory" class="form-control" style="margin-bottom:10px">
+              <option value="">General — applies to every category</option>
+            </select>
             <textarea id="detailFeedbackText" class="form-control textarea" placeholder="e.g. You were too strict on Compliance Accuracy — confirming WWCC is already noted in the CRM is enough, it doesn't need to be said aloud on the call." style="min-height:70px"></textarea>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, and is also saved as a standing rule the AI applies to every future evaluation.</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, and is also saved as a standing rule the AI applies to every future evaluation of this rubric — you can give feedback as many times, on as many categories, as you like.</div>
             <button class="btn-add" style="margin-top:10px" id="detailFeedbackSubmitBtn" onclick="submitDetailFeedbackRegrade()">Re-grade with This Feedback</button>
           </div>
         </div>
@@ -1940,6 +2011,7 @@
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
       if (id === 'calls-dashboard') loadCallsDashboard();
+      if (id === 'call-rubrics') loadRubricReference();
       if (id === 'team') loadOurTeam();
       closeMobileSidebar();
     }
@@ -3364,8 +3436,12 @@
       loadSyncStatus();
       loadCallsList();
       loadEvaluationHistory();
-      loadRubricReference();
-      loadCalibrationNotes();
+      // callRubrics is needed here too (rubric labels/criteria shown in eval
+      // results and the manual grading modal) even though the reference
+      // table itself now lives on its own Call Grading Rubrics section.
+      if (Object.keys(callRubrics).length === 0) {
+        fetch('/api/calls/rubrics').then(r => r.json()).then(data => { callRubrics = data; }).catch(() => {});
+      }
     }
 
     async function loadRubricReference() {
@@ -3394,7 +3470,7 @@
                         ${escHtml(c.label)}
                         ${c.critical ? '<div style="font-size:9px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 5px;border-radius:4px;display:inline-block;margin-top:3px">⛔ Zero-tol.</div>' : ''}
                       </td>
-                      <td style="vertical-align:top;padding:8px 12px;color:var(--text-muted);line-height:1.45" id="rubric-desc-${type}-${c.key}">${escHtml(c.criteria.join(' · '))}</td>
+                      <td style="vertical-align:top;padding:8px 12px;color:var(--text-muted)" id="rubric-desc-${type}-${c.key}"><ul style="margin:0;padding-left:16px;line-height:1.6">${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}</ul></td>
                       <td style="text-align:center;font-weight:700;color:var(--orange);vertical-align:top;padding:8px 12px">${c.weight}%</td>
                       <td style="vertical-align:top;padding:8px 12px;white-space:nowrap">
                         <button class="action-btn edit" onclick="toggleRubricInstructions('${type}','${c.key}')">${c.instructions ? '📝 Instructions' : '+ Instructions'}</button>
@@ -3503,9 +3579,33 @@
       }
     }
 
+    // Groups notes the same way the AI applies them: fully general first,
+    // then per rubric, then per category within that rubric — so a reviewer
+    // can see at a glance exactly what's shaping "Opening & Rapport" vs the
+    // whole Educator-Facing rubric vs every call regardless of type.
+    function groupCalibrationNotes(notes) {
+      const groups = [];
+      const general = notes.filter(n => !n.rubric_type);
+      if (general.length) groups.push({ heading: 'General — applies to every call', notes: general });
+      ['educator', 'centre'].forEach(type => {
+        const rubric = callRubrics[type];
+        const rubricLabel = rubric?.label || (type === 'educator' ? 'Educator-Facing' : 'Centre-Facing');
+        const rubricWide = notes.filter(n => n.rubric_type === type && !n.category_key);
+        if (rubricWide.length) groups.push({ heading: `${rubricLabel} — all categories`, notes: rubricWide });
+        (rubric?.categories || []).forEach(c => {
+          const catNotes = notes.filter(n => n.rubric_type === type && n.category_key === c.key);
+          if (catNotes.length) groups.push({ heading: `${rubricLabel} — ${c.label}`, notes: catNotes });
+        });
+      });
+      return groups;
+    }
+
     async function loadCalibrationNotes() {
       const list = document.getElementById('calibrationList');
       try {
+        if (Object.keys(callRubrics).length === 0) {
+          callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+        }
         allCalibrationNotes = await fetch('/api/calls/calibration').then(r => r.json());
         calibrationListLoaded = true;
         document.getElementById('calibrationCount').textContent = `${allCalibrationNotes.length} active`;
@@ -3513,12 +3613,16 @@
           list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No calibration notes yet — use "Give Feedback & Re-grade" on an evaluation to teach the AI a standing correction.</div>';
           return;
         }
-        list.innerHTML = allCalibrationNotes.map(n => `
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
-            <div style="flex:1;min-width:0;font-size:13px;color:var(--text)">${fmtDate(n.created_at)}</div>
-            <button class="action-btn edit" style="flex-shrink:0" onclick="viewCalibrationNote('${n.id}')">View</button>
-            <button class="action-btn delete" style="flex-shrink:0" onclick="deleteCalibrationNote('${n.id}')">Remove</button>
-          </div>
+        const groups = groupCalibrationNotes(allCalibrationNotes);
+        list.innerHTML = groups.map(g => `
+          <div style="padding:10px 20px 4px;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-muted);background:var(--offwhite)">${escHtml(g.heading)}</div>
+          ${g.notes.map(n => `
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
+              <div style="flex:1;min-width:0;font-size:13px;color:var(--text)">${fmtDate(n.created_at)}</div>
+              <button class="action-btn edit" style="flex-shrink:0" onclick="viewCalibrationNote('${n.id}')">View</button>
+              <button class="action-btn delete" style="flex-shrink:0" onclick="deleteCalibrationNote('${n.id}')">Remove</button>
+            </div>
+          `).join('')}
         `).join('');
       } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load calibration notes.</div>'; }
     }
@@ -3576,6 +3680,107 @@
           });
         });
       } catch {}
+    }
+
+    function fmtVolumePeriod(period, groupBy) {
+      const d = new Date(period + 'T00:00:00');
+      if (isNaN(d.getTime())) return period;
+      if (groupBy === 'month') return d.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
+      if (groupBy === 'week') return `Week of ${d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    async function loadCallVolumeStats() {
+      const output = document.getElementById('volumeStatsOutput');
+      const params = new URLSearchParams();
+      const from = document.getElementById('volumeFrom').value;
+      const to = document.getElementById('volumeTo').value;
+      const rep = document.getElementById('volumeRep').value.trim();
+      const direction = document.getElementById('volumeDirection').value;
+      const groupBy = document.getElementById('volumeGroupBy').value;
+      if (from) params.set('dateFrom', from);
+      if (to) params.set('dateTo', to);
+      if (rep) params.set('repName', rep);
+      if (direction) params.set('callType', direction);
+      params.set('groupBy', groupBy);
+
+      output.innerHTML = '<div style="padding:24px;text-align:center"><div class="loading-spinner"><div class="spinner"></div></div></div>';
+      try {
+        const data = await fetch(`/api/calls/volume-stats?${params}`).then(r => r.json());
+        if (data.error) { output.innerHTML = `<div style="padding:16px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error)}</div>`; return; }
+
+        const periodRows = data.byPeriod.map(p => `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(fmtVolumePeriod(p.period, data.groupBy))}</td>
+            <td style="text-align:center;font-weight:700">${p.total}</td>
+            <td style="text-align:center;color:var(--text-muted)">${p.inbound}</td>
+            <td style="text-align:center;color:var(--text-muted)">${p.outbound}</td>
+          </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
+
+        const repRows = data.byRep.slice(0, 15).map(r => `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(r.repName)}</td>
+            <td style="text-align:center;font-weight:700">${r.total}</td>
+            <td style="text-align:center;color:var(--text-muted)">${r.inbound}</td>
+            <td style="text-align:center;color:var(--text-muted)">${r.outbound}</td>
+          </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
+
+        output.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:16px 0">
+            <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.total}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Total Calls</div>
+            </div>
+            <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.inbound}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Inbound</div>
+            </div>
+            <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.outbound}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Outbound</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By ${data.groupBy}</div>
+              <table class="data-table" style="font-size:12.5px"><thead><tr><th>Period</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th></tr></thead><tbody>${periodRows}</tbody></table>
+            </div>
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By Agent</div>
+              <table class="data-table" style="font-size:12.5px"><thead><tr><th>Agent</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th></tr></thead><tbody>${repRows}</tbody></table>
+            </div>
+          </div>
+        `;
+      } catch { output.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Failed to load call volume.</div>'; }
+    }
+
+    async function askCallQuality() {
+      const input = document.getElementById('callAskInput');
+      const question = input.value.trim();
+      if (!question) return;
+      const btn = document.getElementById('callAskBtn');
+      const output = document.getElementById('callAskOutput');
+      btn.disabled = true; btn.textContent = 'Thinking…';
+      output.innerHTML = '<div style="padding:16px;text-align:center"><div class="loading-spinner"><div class="spinner"></div></div></div>';
+      try {
+        const body = {
+          question,
+          dateFrom: document.getElementById('reportFrom').value || undefined,
+          dateTo: document.getElementById('reportTo').value || undefined,
+          repName: document.getElementById('reportRep').value || undefined,
+          rubricType: document.getElementById('reportRubric').value || undefined,
+          category: document.getElementById('reportCategory').value || undefined
+        };
+        const res = await fetch('/api/calls/ask', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) { output.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Failed to answer')}</div>`; return; }
+        output.innerHTML = `<div style="padding:14px 16px;border-radius:var(--radius);background:var(--offwhite);font-size:13.5px;line-height:1.6;color:var(--text);white-space:pre-wrap">${escHtml(data.answer)}</div>`;
+        input.value = '';
+      } catch { output.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-muted)">Failed to answer — please try again.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Ask'; }
     }
 
     async function generateCallReport() {
@@ -3705,7 +3910,7 @@
           <div>
             ${aiReport.commendations.map(c => `
               <div style="padding:14px 22px;border-bottom:1px solid var(--gray-100)">
-                <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:4px">${c.repName ? escHtml(c.repName) + ' — ' : ''}${escHtml(c.behavior)}</div>
+                <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:4px">${c.repName ? escHtml(c.repName) + ' — ' : ''}${escHtml(c.behaviour)}</div>
                 <div style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(c.evidence)}</div>
               </div>
             `).join('')}
@@ -3794,10 +3999,6 @@
       return html;
     }
 
-    function copyRecordingId(id) {
-      navigator.clipboard.writeText(id).then(() => toast('Recording ID copied', 'success')).catch(() => toast('Copy failed', 'error'));
-    }
-
     async function loadCallsList() {
       const list = document.getElementById('callsListBody');
       list.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
@@ -3846,7 +4047,6 @@
             <td><span class="badge ${badge.cls}">${badge.label}</span></td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
-                <button class="action-btn edit" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
                 ${!gradeReady ? `<button class="action-btn edit" onclick="fetchCallContent('${r.id}', this)">⬇️ Fetch Transcription &amp; Audio</button>` : ''}
                 ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
                 ${r.has_transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
@@ -4073,6 +4273,9 @@
         if (e.error) { body.innerHTML = `<div style="color:#c0392b">${escHtml(e.error)}</div>`; return; }
         evalDetailRecordingId = e.recording_id;
         evalDetailRubricType = e.rubric_type;
+        const catSelect = document.getElementById('detailFeedbackCategory');
+        catSelect.innerHTML = '<option value="">General — applies to every category</option>' +
+          (callRubrics[e.rubric_type]?.categories || []).map(c => `<option value="${c.key}">${escHtml(c.label)}</option>`).join('');
         renderEvalDetail(e);
       } catch { body.innerHTML = '<div style="color:#c0392b">Failed to load evaluation.</div>'; }
     }
@@ -4084,6 +4287,7 @@
 
     async function submitDetailFeedbackRegrade() {
       const feedback = document.getElementById('detailFeedbackText').value.trim();
+      const feedbackCategoryKey = document.getElementById('detailFeedbackCategory').value || null;
       if (!feedback) { toast('Enter feedback first', 'error'); return; }
       if (!evalDetailRecordingId || !evalDetailRubricType) { toast('No call to re-grade', 'error'); return; }
       const btn = document.getElementById('detailFeedbackSubmitBtn');
@@ -4091,7 +4295,7 @@
       try {
         const res = await fetch(`/api/calls/${evalDetailRecordingId}/evaluate`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rubricType: evalDetailRubricType, feedback })
+          body: JSON.stringify({ rubricType: evalDetailRubricType, feedback, feedbackCategoryKey })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Re-grade failed', 'error'); return; }
@@ -4141,7 +4345,7 @@
         ${e.reviewer_feedback ? `
           <div style="margin-bottom:16px">
             <button class="btn-secondary" style="font-size:11.5px;padding:5px 12px" onclick="toggleEvalFeedbackNote()">📝 View Calibration Note</button>
-            <div id="evalFeedbackNoteBox" style="display:none;margin-top:8px;font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px;white-space:pre-wrap">${escHtml(e.reviewer_feedback)}</div>
+            <div id="evalFeedbackNoteBox" style="display:none;margin-top:8px;font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px;white-space:pre-wrap"><strong>${escHtml(e.reviewer_feedback_category ? (rubric?.categories.find(c => c.key === e.reviewer_feedback_category)?.label || e.reviewer_feedback_category) : 'General — all categories')}:</strong> ${escHtml(e.reviewer_feedback)}</div>
           </div>
         ` : ''}
         <div style="overflow-x:auto">

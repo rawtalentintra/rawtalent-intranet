@@ -62,7 +62,7 @@ async function generateGreetingMessage(type, recipientName) {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 100,
-      system: `You write short, warm, genuinely fun workplace greeting messages for RawTalent, a friendly Australian childcare staffing agency. One or two sentences, upbeat and casual (never corporate or generic), with 2-3 well-placed emoji. Respond with ONLY the message text, nothing else.`,
+      system: `You write short, warm, genuinely fun workplace greeting messages for RawTalent, a friendly Australian childcare staffing agency. One or two sentences, upbeat and casual (never corporate or generic), with 2-3 well-placed emoji. Write in Australian English (e.g. "celebrate", "favourite", "organise") — never American spelling. Respond with ONLY the message text, nothing else.`,
       messages: [{ role: 'user', content: `Write a ${occasion} greeting for a teammate named ${recipientName}.` }]
     });
     const textBlock = response.content.find(b => b.type === 'text');

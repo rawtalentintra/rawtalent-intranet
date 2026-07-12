@@ -82,12 +82,13 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibrationNotes = [], oneOffFeedback = null) {
+function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null) {
   const categoryList = rubric.categories.map(c => {
-    const base = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
-    return c.instructions
-      ? `${base}\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`
-      : base;
+    let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
+    if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
+    const categoryNotes = calibration.byCategory?.[c.key] || [];
+    if (categoryNotes.length) block += `\n  Standing calibration corrections for this category specifically — always apply:\n${categoryNotes.map(n => `    - ${n}`).join('\n')}`;
+    return block;
   }).join('\n');
 
   // Grounds grading in the exact same knowledge base staff get answers from
@@ -98,12 +99,15 @@ function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibrationNo
     ? `\n\nRelevant entries from RawTalent's knowledge base (the same source used to answer staff questions) — treat these as the authoritative source of truth whenever this call touches on them, e.g. compliance timeframes, pay rates, or process steps:\n${knowledgeMatches.map(m => `- "${m.title}": ${(m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)}`).join('\n')}\nIf you rely on one of these entries to justify a score, name it explicitly in that category's notes (e.g. "per the knowledge base entry '${knowledgeMatches[0]?.title}'...") so the reviewer can verify the claim themselves — never assert something is documented policy without naming the specific entry.`
     : '';
 
-  const calibrationBlock = calibrationNotes.length
-    ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibrationNotes.map(n => `- ${n}`).join('\n')}`
+  const calibrationBlock = calibration.general?.length
+    ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibration.general.map(n => `- ${n}`).join('\n')}`
     : '';
 
+  const feedbackCategory = feedbackCategoryKey ? rubric.categories.find(c => c.key === feedbackCategoryKey) : null;
   const feedbackBlock = oneOffFeedback
-    ? `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
+    ? feedbackCategory
+      ? `\n\nYour reviewer has given specific feedback on THIS call, about the "${feedbackCategory.label}" category, that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust that category's score and explain in its notes how the feedback changed your assessment. Other categories should only change if this feedback genuinely bears on them too.`
+      : `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
     : '';
 
   const repIdentityBlock = repName
@@ -175,10 +179,30 @@ function buildGradingTool(rubric) {
   };
 }
 
-async function getCalibrationNotes() {
+// Splits standing calibration notes into what applies everywhere (no
+// rubric_type) vs what applies only within one rubric (rubric_type set,
+// no category_key) vs what applies to one specific category — the general
+// and rubric-wide notes get folded together since both mean "always apply",
+// while per-category notes are injected directly under that category so
+// they can't bleed into scoring a different one.
+async function getCalibrationNotes(rubricType) {
   const db = getDb();
-  const result = await db.execute('SELECT note FROM call_grading_calibration ORDER BY created_at ASC');
-  return result.rows.map(r => r.note);
+  const result = await db.execute({
+    sql: `SELECT note, rubric_type, category_key FROM call_grading_calibration
+          WHERE rubric_type IS NULL OR rubric_type = ?
+          ORDER BY created_at ASC`,
+    args: [rubricType]
+  });
+  const general = [];
+  const byCategory = {};
+  for (const row of result.rows) {
+    if (row.category_key) {
+      (byCategory[row.category_key] ||= []).push(row.note);
+    } else {
+      general.push(row.note);
+    }
+  }
+  return { general, byCategory };
 }
 
 // If a correction taught to the call grader is actually general company
@@ -202,12 +226,12 @@ async function maybeCreateFaqCandidateFromNote(noteText, sourceRef) {
   }
 }
 
-async function addCalibrationNote(note, createdBy) {
+async function addCalibrationNote(note, createdBy, rubricType = null, categoryKey = null) {
   const db = getDb();
   const id = uuidv4();
   await db.execute({
-    sql: 'INSERT INTO call_grading_calibration (id, note, created_by) VALUES (?, ?, ?)',
-    args: [id, note, createdBy || null]
+    sql: 'INSERT INTO call_grading_calibration (id, note, rubric_type, category_key, created_by) VALUES (?, ?, ?, ?, ?)',
+    args: [id, note, rubricType || null, categoryKey || null, createdBy || null]
   });
   await maybeCreateFaqCandidateFromNote(note, 'Call grading calibration note');
   return id;
@@ -384,7 +408,7 @@ function stripMarkup(text) {
   return (text || '').replace(/<\/?[a-z][^>]*>/gi, '').trim();
 }
 
-async function gradeCall(transcriptText, rubricType, repName = null, feedback = null) {
+async function gradeCall(transcriptText, rubricType, repName = null, feedback = null, feedbackCategoryKey = null) {
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -399,7 +423,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   // model's quoted excerpts and corrupting the JSON it has to produce.
   const cleanTranscript = stripMarkup(transcriptText);
 
-  const calibrationNotes = await getCalibrationNotes();
+  const calibration = await getCalibrationNotes(rubricType);
 
   // Grounds this evaluation in the same knowledge base the main KB AI
   // answers staff questions from, so the two are never out of sync on
@@ -411,7 +435,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
     console.error('Knowledge base lookup failed during call grading (continuing without it):', err.message);
   }
 
-  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback);
+  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey);
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {
@@ -472,16 +496,16 @@ function gradeManual(rubricType, rawScores, summary) {
   return computeResult(rubric, rawScores, summary);
 }
 
-async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, reviewerFeedback }) {
+async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, reviewerFeedback, reviewerFeedbackCategory }) {
   const db = getDb();
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO call_evaluations
-          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source, reviewer_feedback)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source, reviewer_feedback, reviewer_feedback_category)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id, recordingId, repName || null, callType || null, rubricType, callDate || null, durationSeconds || null,
-      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai', reviewerFeedback || null
+      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai', reviewerFeedback || null, reviewerFeedbackCategory || null
     ]
   });
   return id;

@@ -15,7 +15,7 @@ Most conversations are NOT suitable — reject anything containing:
 
 ONLY accept a conversation if it represents a genuine, reusable, general question with a clear answer that would help OTHER staff facing the same question later — e.g. how to handle a category of situation, a process or policy clarification, a general industry/compliance question.
 
-If accepted, rewrite the question and answer in a fully generalised, anonymised form — remove ALL names, dates, and identifying specifics. The question and answer must stand alone with no context from the original conversation.
+If accepted, rewrite the question and answer in a fully generalised, anonymised form — remove ALL names, dates, and identifying specifics. The question and answer must stand alone with no context from the original conversation. Write in formal Australian English throughout (e.g. "organise", "recognise", "behaviour", "centre", "realise") — never American spelling.
 
 Respond with ONLY valid JSON, no other text:
 {"isFaqCandidate": boolean, "question": string or null, "answer": string or null, "reason": string}`;
@@ -56,7 +56,7 @@ Do not include anything containing:
 - Names of specific staff, educators, centres, or families
 - Anything personal, sensitive, or identifying
 
-Each answer must be self-contained and clear without needing the rest of the document for context.
+Each answer must be self-contained and clear without needing the rest of the document for context. Write in formal Australian English throughout (e.g. "organise", "recognise", "behaviour", "centre", "realise") — never American spelling.
 
 Respond with ONLY valid JSON, no other text:
 {"candidates": [{"question": string, "answer": string}, ...]}

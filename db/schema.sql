@@ -199,18 +199,29 @@ CREATE TABLE IF NOT EXISTS call_evaluations (
   evaluated_by TEXT,
   source TEXT DEFAULT 'ai',
   reviewer_feedback TEXT,
+  reviewer_feedback_category TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS reviewer_feedback_category TEXT;
 
 -- Standing calibration notes from a reviewer, persisted so every future AI
 -- grading call applies the same corrections — not just the one call the
--- feedback was given on.
+-- feedback was given on. rubric_type/category_key are nullable: a note tied
+-- to a specific category (e.g. "opening" on the educator rubric) is only
+-- injected into that category's grading instructions; a note with a
+-- rubric_type but no category applies to every category of that rubric;
+-- a note with neither is a fully general standing rule (the original
+-- behaviour, kept for backwards compatibility with existing notes).
 CREATE TABLE IF NOT EXISTS call_grading_calibration (
   id TEXT PRIMARY KEY,
   note TEXT NOT NULL,
+  rubric_type TEXT,
+  category_key TEXT,
   created_by TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE call_grading_calibration ADD COLUMN IF NOT EXISTS rubric_type TEXT;
+ALTER TABLE call_grading_calibration ADD COLUMN IF NOT EXISTS category_key TEXT;
 
 -- Per-category overrides on top of the built-in rubric: "description" is the
 -- short bullet-point summary shown in the reference table (a JSON array of

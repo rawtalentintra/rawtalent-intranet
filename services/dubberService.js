@@ -279,7 +279,7 @@ async function syncRecordings(direction = 'recent') {
 
   await db.execute({
     sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, now(), ?, now())
-          ON CONFLICT(id) DO UPDATE SET last_synced_at = now(), total_synced = total_synced + excluded.total_synced, updated_at = now()`,
+          ON CONFLICT(id) DO UPDATE SET last_synced_at = now(), total_synced = dubber_sync_state.total_synced + excluded.total_synced, updated_at = now()`,
     args: [totalNew]
   });
 
