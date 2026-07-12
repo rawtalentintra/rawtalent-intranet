@@ -4504,6 +4504,11 @@
           <div><strong style="color:var(--navy)">Recording ID:</strong> ${escHtml(e.recording_id)}</div>
           <div><strong style="color:var(--navy)">Phone:</strong> ${escHtml((e.call_type === 'outbound' ? e.to_number : e.from_number) || '—')}</div>
         </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          ${e.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playRecording('${e.recording_id}')">▶ Play Recording</button>` : ''}
+          ${e.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${e.recording_id}')">📄 View Transcript</button>` : ''}
+          ${!e.has_audio && !e.has_transcript ? '<span style="font-size:12px;color:var(--text-muted);font-style:italic">No recording or transcript available for this call.</span>' : ''}
+        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <div style="font-size:13px;color:var(--text-muted);max-width:600px">${escHtml(e.summary) || '<span style="font-style:italic">No summary provided.</span>'}</div>
           <div style="font-size:26px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:20px">${e.overall_score}%</div>

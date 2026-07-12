@@ -586,11 +586,14 @@ router.get('/volume-stats', async (req, res) => {
 
 router.get('/evaluations/:id', async (req, res) => {
   try {
-    // Joined to call_recordings for the contact number — the evaluation
-    // itself never stored it, so this is the only way to show it alongside
-    // the recording ID in the detail view.
+    // Joined to call_recordings for the contact number and whether audio/
+    // transcript are actually available — the evaluation itself never
+    // stored any of this, so this is the only way to show it (and offer
+    // Play/View Transcript) in the detail view.
     const result = await getDb().execute({
-      sql: `SELECT e.*, r.to_number, r.from_number FROM call_evaluations e
+      sql: `SELECT e.*, r.to_number, r.from_number, r.has_audio,
+                   (r.transcript IS NOT NULL AND r.transcript != '') AS has_transcript
+            FROM call_evaluations e
             LEFT JOIN call_recordings r ON r.id = e.recording_id WHERE e.id = ?`,
       args: [req.params.id]
     });
