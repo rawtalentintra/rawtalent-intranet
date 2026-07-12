@@ -572,8 +572,51 @@ async function saveEvaluation({ recordingId, repName, callType, rubricType, call
   return id;
 }
 
+// Re-grading updates the SAME evaluation row rather than inserting a new
+// one — "Give Feedback & Re-grade" is a conversation about one call, not a
+// new call. The new scores/notes become the current state; the feedback
+// itself is preserved separately (see logEvaluationFeedback) so nothing is
+// lost across any number of re-grades.
+async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, reviewerFeedbackCategory }) {
+  const db = getDb();
+  await db.execute({
+    sql: `UPDATE call_evaluations
+          SET category_scores = ?, overall_score = ?, outcome = ?, summary = ?,
+              reviewer_feedback = ?, reviewer_feedback_category = ?, updated_at = now()
+          WHERE id = ?`,
+    args: [
+      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary,
+      reviewerFeedback || null, reviewerFeedbackCategory || null, evaluationId
+    ]
+  });
+}
+
+// One entry in the append-only feedback conversation thread for an
+// evaluation — every round of "Give Feedback & Re-grade" adds one of these,
+// no matter how many times a reviewer comes back to the same call.
+async function logEvaluationFeedback(evaluationId, feedbackText, categoryKey, createdBy) {
+  const db = getDb();
+  const id = uuidv4();
+  await db.execute({
+    sql: `INSERT INTO call_evaluation_feedback (id, evaluation_id, category_key, feedback_text, created_by)
+          VALUES (?, ?, ?, ?, ?)`,
+    args: [id, evaluationId, categoryKey || null, feedbackText, createdBy || null]
+  });
+  return id;
+}
+
+async function listEvaluationFeedback(evaluationId) {
+  const db = getDb();
+  const result = await db.execute({
+    sql: 'SELECT * FROM call_evaluation_feedback WHERE evaluation_id = ? ORDER BY created_at ASC',
+    args: [evaluationId]
+  });
+  return result.rows;
+}
+
 module.exports = {
-  RUBRICS, gradeCall, gradeManual, saveEvaluation, detectRubricType,
+  RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
+  logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 };

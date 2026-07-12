@@ -5,7 +5,8 @@ const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddlewar
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
 const {
-  RUBRICS, gradeCall, gradeManual, saveEvaluation, detectRubricType,
+  RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
+  logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 } = require('../services/callGradingService');
@@ -269,8 +270,11 @@ router.delete('/calibration/:id', async (req, res) => {
   }
 });
 
+// Always creates a fresh evaluation — used for grading a call for the first
+// time (or deliberately re-running a clean grade). Feedback-driven re-grades
+// go through PUT /evaluations/:id/regrade instead, which updates the
+// existing evaluation in place rather than adding another one.
 router.post('/:recordingId/evaluate', async (req, res) => {
-  const { feedback, feedbackCategoryKey } = req.body;
   let { rubricType } = req.body;
   if (!rubricType || (rubricType !== 'auto' && !RUBRICS[rubricType])) {
     return res.status(400).json({ error: 'A valid rubricType ("educator", "centre", or "auto") is required' });
@@ -344,16 +348,7 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     }
 
     const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
-    const result = await gradeCall(transcript, rubricType, repName, feedback || null, feedbackCategoryKey || null, recording.sentiment_score ?? null);
-
-    // Feedback given on this call is also saved as a standing calibration
-    // note, so every future AI grading run applies the same correction — not
-    // just this one re-grade. Tagged to the rubric (and category, if the
-    // reviewer picked one) so it only ever affects grading it's relevant to,
-    // and can be given as many times as needed, on any category, every time.
-    if (feedback?.trim()) {
-      await addCalibrationNote(feedback.trim(), req.user.email, rubricType, feedbackCategoryKey || null);
-    }
+    const result = await gradeCall(transcript, rubricType, repName, null, null, recording.sentiment_score ?? null);
 
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
@@ -364,14 +359,50 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       durationSeconds: recording.duration_seconds ?? recording.duration,
       result,
       evaluatedBy: req.user.email,
-      source: 'ai',
-      reviewerFeedback: feedback?.trim() || null,
-      reviewerFeedbackCategory: feedbackCategoryKey || null
+      source: 'ai'
     });
 
-    res.json({ id, repName, rubricType, source: 'ai', calibrationSaved: !!feedback?.trim(), detectedRubricType, detectedRubricReasoning, ...result });
+    res.json({ id, repName, rubricType, source: 'ai', detectedRubricType, detectedRubricReasoning, ...result });
   } catch (err) {
     console.error('Call evaluation error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Re-grades an EXISTING evaluation in place — the reviewer is having a
+// conversation with the AI about one specific call, not creating a new
+// call each time they give feedback. Updates that evaluation's scores/
+// notes/outcome, logs this round of feedback to the append-only history
+// (so nothing is lost across any number of re-grades), and — same as
+// before — saves the feedback as a standing calibration rule so it also
+// shapes every future grading run for this rubric/category.
+router.put('/evaluations/:id/regrade', async (req, res) => {
+  const { feedback, feedbackCategoryKey } = req.body;
+  if (!feedback?.trim()) return res.status(400).json({ error: 'Feedback is required to re-grade' });
+  try {
+    const db = getDb();
+    const evalRes = await db.execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    const evaluation = evalRes.rows[0];
+    if (!evaluation) return res.status(404).json({ error: 'Evaluation not found' });
+
+    const localRes = await db.execute({ sql: 'SELECT transcript, sentiment_score FROM call_recordings WHERE id = ?', args: [evaluation.recording_id] });
+    const local = localRes.rows[0];
+    if (!local?.transcript) return res.status(400).json({ error: 'No transcript available for this call' });
+
+    const trimmedFeedback = feedback.trim();
+    const result = await gradeCall(local.transcript, evaluation.rubric_type, evaluation.rep_name, trimmedFeedback, feedbackCategoryKey || null, local.sentiment_score ?? null);
+
+    await updateEvaluationResult(evaluation.id, {
+      result,
+      reviewerFeedback: trimmedFeedback,
+      reviewerFeedbackCategory: feedbackCategoryKey || null
+    });
+    await logEvaluationFeedback(evaluation.id, trimmedFeedback, feedbackCategoryKey || null, req.user.email);
+    await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, feedbackCategoryKey || null);
+
+    res.json({ id: evaluation.id, repName: evaluation.rep_name, rubricType: evaluation.rubric_type, source: 'ai', ...result });
+  } catch (err) {
+    console.error('Call re-grade error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -599,7 +630,11 @@ router.get('/evaluations/:id', async (req, res) => {
     });
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Evaluation not found' });
-    res.json(row);
+    // Full re-grade conversation thread — every round of feedback ever given
+    // on this evaluation, oldest first, regardless of how many times it's
+    // been re-graded.
+    const feedbackHistory = await listEvaluationFeedback(row.id);
+    res.json({ ...row, feedbackHistory });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

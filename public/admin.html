@@ -4411,8 +4411,6 @@
 
     // ── Evaluation Detail (full breakdown + delete + feedback/re-grade) ──
     let evalDetailCurrentId = null;
-    let evalDetailRecordingId = null;
-    let evalDetailRubricType = null;
     let evalDetailCurrentData = null;
 
     async function openEvalDetail(evalId) {
@@ -4428,8 +4426,6 @@
         }
         const e = await fetch(`/api/calls/evaluations/${evalId}`).then(r => r.json());
         if (e.error) { body.innerHTML = `<div style="color:#c0392b">${escHtml(e.error)}</div>`; return; }
-        evalDetailRecordingId = e.recording_id;
-        evalDetailRubricType = e.rubric_type;
         const catSelect = document.getElementById('detailFeedbackCategory');
         catSelect.innerHTML = '<option value="">General — applies to every category</option>' +
           (callRubrics[e.rubric_type]?.categories || []).map(c => `<option value="${c.key}">${escHtml(c.label)}</option>`).join('');
@@ -4446,18 +4442,21 @@
       const feedback = document.getElementById('detailFeedbackText').value.trim();
       const feedbackCategoryKey = document.getElementById('detailFeedbackCategory').value || null;
       if (!feedback) { toast('Enter feedback first', 'error'); return; }
-      if (!evalDetailRecordingId || !evalDetailRubricType) { toast('No call to re-grade', 'error'); return; }
+      if (!evalDetailCurrentId) { toast('No call to re-grade', 'error'); return; }
       const btn = document.getElementById('detailFeedbackSubmitBtn');
       btn.disabled = true; btn.textContent = 'Re-grading…';
       try {
-        const res = await fetch(`/api/calls/${evalDetailRecordingId}/evaluate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rubricType: evalDetailRubricType, feedback, feedbackCategoryKey })
+        // Updates the SAME evaluation in place — this is a conversation about
+        // one call, not a new call each time feedback is given.
+        const res = await fetch(`/api/calls/evaluations/${evalDetailCurrentId}/regrade`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedback, feedbackCategoryKey })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Re-grade failed', 'error'); return; }
         toast('Re-graded — feedback saved as a standing rule for future evaluations', 'success');
-        await openEvalDetail(data.id);
+        document.getElementById('detailFeedbackText').value = '';
+        await openEvalDetail(evalDetailCurrentId);
         loadEvaluationHistory();
         loadCalibrationNotes();
       } catch { toast('Re-grade failed', 'error'); }
@@ -4513,10 +4512,17 @@
           <div style="font-size:13px;color:var(--text-muted);max-width:600px">${escHtml(e.summary) || '<span style="font-style:italic">No summary provided.</span>'}</div>
           <div style="font-size:26px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:20px">${e.overall_score}%</div>
         </div>
-        ${e.reviewer_feedback ? `
+        ${e.feedbackHistory?.length ? `
           <div style="margin-bottom:16px">
-            <button class="btn-secondary" style="font-size:11.5px;padding:5px 12px" onclick="toggleEvalFeedbackNote()">📝 View Calibration Note</button>
-            <div id="evalFeedbackNoteBox" style="display:none;margin-top:8px;font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px;white-space:pre-wrap"><strong>${escHtml(e.reviewer_feedback_category ? (rubric?.categories.find(c => c.key === e.reviewer_feedback_category)?.label || e.reviewer_feedback_category) : 'General — all categories')}:</strong> ${escHtml(e.reviewer_feedback)}</div>
+            <button class="btn-secondary" style="font-size:11.5px;padding:5px 12px" onclick="toggleEvalFeedbackNote()">📝 Re-grade History (${e.feedbackHistory.length})</button>
+            <div id="evalFeedbackNoteBox" style="display:none;margin-top:8px">
+              ${e.feedbackHistory.map(f => `
+                <div style="font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px;white-space:pre-wrap;margin-bottom:6px">
+                  <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">${escHtml(f.category_key ? (rubric?.categories.find(c => c.key === f.category_key)?.label || f.category_key) : 'General — all categories')} · ${fmtDate(f.created_at)}${f.created_by ? ` · ${escHtml(f.created_by)}` : ''}</div>
+                  ${escHtml(f.feedback_text)}
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
         <div style="overflow-x:auto">
