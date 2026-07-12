@@ -515,10 +515,23 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
     }
     const parsed = toolUse.input || {};
 
+    // Defends against the model (rarely, but it happens) returning `scores`
+    // as an object keyed by category instead of an array, despite the tool
+    // schema declaring an array — coerce rather than let a bad shape crash
+    // the whole evaluation with a raw TypeError.
+    let scoresRaw = parsed.scores;
+    if (scoresRaw && !Array.isArray(scoresRaw) && typeof scoresRaw === 'object') {
+      scoresRaw = Object.values(scoresRaw);
+    }
+    if (!Array.isArray(scoresRaw)) {
+      console.error('Call grading tool call returned non-array scores. Raw input:', JSON.stringify(parsed).slice(0, 1000));
+      scoresRaw = [];
+    }
+
     // Sanitize whatever the model returned regardless of cause, then check
     // every category actually got a substantive note — an empty one with a
     // score attached means something went wrong generating that entry.
-    const scores = (parsed.scores || []).map(s => ({ ...s, notes: stripMarkup(s.notes) }));
+    const scores = scoresRaw.map(s => ({ ...s, notes: stripMarkup(s.notes) }));
     const summary = stripMarkup(parsed.summary);
     const missing = rubric.categories.filter(c => !scores.find(s => s.key === c.key && s.notes && s.notes.length > 20));
     return { scores, summary, missing };
