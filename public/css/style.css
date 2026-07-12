@@ -766,7 +766,7 @@ button { cursor: pointer; font-family: inherit; }
 
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th {
-  padding: 12px 20px;
+  padding: 8px 20px;
   text-align: left;
   font-size: 11px;
   font-weight: 700;
@@ -777,7 +777,7 @@ button { cursor: pointer; font-family: inherit; }
   border-bottom: 1px solid var(--gray-200);
 }
 .data-table td {
-  padding: 14px 20px;
+  padding: 7px 20px;
   font-size: 14px;
   border-bottom: 1px solid var(--gray-100);
   color: var(--text);
