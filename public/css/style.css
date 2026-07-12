@@ -678,7 +678,7 @@ button { cursor: pointer; font-family: inherit; }
   gap: 10px;
   padding: 5px 12px;
   border-radius: var(--radius);
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 500;
   color: rgba(255,255,255,.6);
   cursor: pointer;

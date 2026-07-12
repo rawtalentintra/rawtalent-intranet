@@ -770,28 +770,29 @@
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
-            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">📞 Dubber Connection</div>
-            <div id="callsConfigStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checking configuration…</div>
-            <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()">Test Connection</button>
-            <div id="callsTestStatus" style="display:none;margin-top:14px"></div>
+        <div class="super-admin-only" style="display:none">
+          <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px;padding:16px 20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start">
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">📞 Dubber Connection</div>
+              <div id="callsConfigStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Checking configuration…</div>
+              <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()" style="padding:5px 12px;font-size:12px">Test Connection</button>
+              <div id="callsTestStatus" style="display:none;margin-top:10px"></div>
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">🗣️ Groq Transcription</div>
+              <div id="groqConfigStatus" style="font-size:12px;color:var(--text-muted)">Checking configuration…</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Runs automatically after audio syncs.</div>
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">⬇️ Sync Calls</div>
+              <div id="callsSyncStatusLine" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Checking local store…</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn-add" id="callsSyncBtn" onclick="syncCalls('recent')" style="padding:5px 12px;font-size:12px">Sync Calls Now</button>
+                <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history" style="padding:5px 12px;font-size:12px">Sync Older Calls</button>
+              </div>
+              <div id="callsSyncStatus" style="display:none;margin-top:10px"></div>
+            </div>
           </div>
-          <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
-            <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🗣️ Groq Transcription</div>
-            <div id="groqConfigStatus" style="font-size:13px;color:var(--text-muted)">Checking configuration…</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:10px">Runs automatically right after each call's audio is synced — no manual step needed.</div>
-          </div>
-        </div>
-
-        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">⬇️ Sync Calls</div>
-          <div id="callsSyncStatusLine" style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Checking local store…</div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn-add" id="callsSyncBtn" onclick="syncCalls('recent')">Sync Calls Now</button>
-            <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history">Sync Older Calls</button>
-          </div>
-          <div id="callsSyncStatus" style="display:none;margin-top:12px"></div>
         </div>
 
         <div class="admin-table-card" style="margin-bottom:20px">
@@ -886,9 +887,9 @@
             <div>
               <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px">GROUP BY</label>
               <select id="volumeGroupBy" class="form-control">
+                <option value="day" selected>Day</option>
                 <option value="week">Week</option>
-                <option value="month" selected>Month</option>
-                <option value="day">Day</option>
+                <option value="month">Month</option>
               </select>
             </div>
           </div>
@@ -3422,18 +3423,24 @@
     let callRubrics = {}; // { educator: {label, description, categories:[{key,label,weight,critical,criteria}]}, centre: {...} }
 
     async function loadCallsSection() {
-      const statusEl = document.getElementById('callsConfigStatus');
-      const groqStatusEl = document.getElementById('groqConfigStatus');
-      try {
-        const { dubberConfigured, groqConfigured } = await fetch('/api/calls/status').then(r => r.json());
-        statusEl.innerHTML = dubberConfigured
-          ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
-          : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
-        groqStatusEl.innerHTML = groqConfigured
-          ? '<span style="color:#1a8a4a">✓ Groq API key configured</span>'
-          : '<span style="color:#c0392b">✗ Groq is not configured — add GROQ_API_KEY as an environment variable</span>';
-      } catch { statusEl.textContent = 'Failed to check status.'; }
-      loadSyncStatus();
+      // Dubber Connection / Groq Transcription / Sync Calls are super_admin-
+      // only (both the UI card and the backend routes it calls) — skip the
+      // status/sync fetches entirely for a plain admin rather than firing
+      // requests that would just come back 403.
+      if (currentUserRole === 'super_admin') {
+        const statusEl = document.getElementById('callsConfigStatus');
+        const groqStatusEl = document.getElementById('groqConfigStatus');
+        try {
+          const { dubberConfigured, groqConfigured } = await fetch('/api/calls/status').then(r => r.json());
+          statusEl.innerHTML = dubberConfigured
+            ? '<span style="color:#1a8a4a">✓ Dubber credentials configured</span>'
+            : '<span style="color:#c0392b">✗ Dubber is not configured — add DUBBER_CLIENT_ID, DUBBER_CLIENT_SECRET, DUBBER_AUTH_ID, and DUBBER_AUTH_TOKEN as environment variables</span>';
+          groqStatusEl.innerHTML = groqConfigured
+            ? '<span style="color:#1a8a4a">✓ Groq API key configured</span>'
+            : '<span style="color:#c0392b">✗ Groq is not configured — add GROQ_API_KEY as an environment variable</span>';
+        } catch { statusEl.textContent = 'Failed to check status.'; }
+        loadSyncStatus();
+      }
       loadCallsList();
       loadEvaluationHistory();
       // callRubrics is needed here too (rubric labels/criteria shown in eval
@@ -3680,6 +3687,22 @@
           });
         });
       } catch {}
+
+      // Default Call Volume to: current month, all agents, both directions,
+      // grouped by day — then load it straight away so the dashboard opens
+      // with real data already visible, not an empty filter form.
+      // toISOString() converts to UTC first, which silently rolls the date
+      // back a day in any timezone ahead of UTC (e.g. Australia) — build the
+      // YYYY-MM-DD string from local date parts instead.
+      const localDateStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const today = new Date();
+      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      document.getElementById('volumeFrom').value = localDateStr(firstOfMonth);
+      document.getElementById('volumeTo').value = localDateStr(today);
+      document.getElementById('volumeRep').value = '';
+      document.getElementById('volumeDirection').value = '';
+      document.getElementById('volumeGroupBy').value = 'day';
+      loadCallVolumeStats();
     }
 
     function fmtVolumePeriod(period, groupBy) {
@@ -3688,6 +3711,86 @@
       if (groupBy === 'month') return d.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
       if (groupBy === 'week') return `Week of ${d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
       return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    const VOLUME_COLORS = { inbound: '#3d6fff', outbound: '#f59e0b' };
+    function volumePct(n, total) { return total ? Math.round((n / total) * 1000) / 10 : 0; }
+
+    // Stacked bar trend — one bar per period, inbound (blue) below outbound
+    // (amber), same fixed colour-per-entity as everywhere else in this chart.
+    // A native <title> per segment gives a hover tooltip without any extra
+    // JS wiring. Left intentionally as "total calls" only for now — once
+    // voicemail/no-answer/hang-up outcomes exist, they'll stack in as
+    // further segments on the same bars rather than needing a new chart.
+    function renderVolumeTrendChart(byPeriod, groupBy) {
+      if (!byPeriod.length) return '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">No calls match these filters.</div>';
+      const w = 900, h = 220, padL = 34, padB = 28, padT = 10, padR = 10;
+      const innerW = w - padL - padR, innerH = h - padT - padB;
+      const maxTotal = Math.max(1, ...byPeriod.map(p => p.total));
+      const n = byPeriod.length;
+      const gap = n > 40 ? 1 : n > 20 ? 3 : 6;
+      const barW = Math.max(2, (innerW - gap * (n - 1)) / n);
+      const yScale = v => (v / maxTotal) * innerH;
+      const labelEvery = Math.max(1, Math.ceil(n / 10));
+
+      const bars = byPeriod.map((p, i) => {
+        const x = padL + i * (barW + gap);
+        const inH = yScale(p.inbound), outH = yScale(p.outbound);
+        const label = escHtml(fmtVolumePeriod(p.period, groupBy));
+        const pct = volumePct(p.total, byPeriod.reduce((s, x) => s + x.total, 0));
+        const tip = `${label}: ${p.total} calls (${pct}% of period total) — ${p.inbound} in / ${p.outbound} out`;
+        const showLabel = i % labelEvery === 0 || i === n - 1;
+        return `
+          <g>
+            <rect x="${x}" y="${padT + innerH - inH - outH}" width="${barW}" height="${outH}" fill="${VOLUME_COLORS.outbound}" rx="1.5"><title>${tip}</title></rect>
+            <rect x="${x}" y="${padT + innerH - inH}" width="${barW}" height="${inH}" fill="${VOLUME_COLORS.inbound}" rx="1.5"><title>${tip}</title></rect>
+            ${showLabel ? `<text x="${x + barW / 2}" y="${h - 8}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle">${label}</text>` : ''}
+          </g>`;
+      }).join('');
+
+      return `
+        <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="Calls by ${groupBy}">
+          <line x1="${padL}" y1="${padT + innerH}" x2="${w - padR}" y2="${padT + innerH}" stroke="var(--gray-200)" stroke-width="1"/>
+          <text x="4" y="${padT + 8}" font-size="9.5" fill="var(--text-muted)">${maxTotal}</text>
+          <text x="4" y="${padT + innerH}" font-size="9.5" fill="var(--text-muted)">0</text>
+          ${bars}
+        </svg>`;
+    }
+
+    // Horizontal bars, one per agent, inbound/outbound stacked, sorted by
+    // volume — bar length is magnitude (sequential use of the same two
+    // fixed colours), with % of the grand total as the direct label so the
+    // reviewer doesn't have to do the maths themselves.
+    function renderVolumeAgentChart(byRep, grandTotal) {
+      if (!byRep.length) return '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">No calls match these filters.</div>';
+      const top = byRep.slice(0, 10);
+      const maxTotal = Math.max(1, ...top.map(r => r.total));
+      return `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${top.map(r => {
+            const inPct = (r.inbound / maxTotal) * 100, outPct = (r.outbound / maxTotal) * 100;
+            const shareOfTotal = volumePct(r.total, grandTotal);
+            return `
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:2px">
+                <span style="font-weight:600;color:var(--navy)">${escHtml(r.repName)}</span>
+                <span style="color:var(--text-muted)">${r.total} · ${shareOfTotal}%</span>
+              </div>
+              <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--gray-100)" title="${escHtml(r.repName)}: ${r.total} calls (${shareOfTotal}% of total) — ${r.inbound} in / ${r.outbound} out">
+                <div style="width:${inPct}%;background:${VOLUME_COLORS.inbound}"></div>
+                <div style="width:${outPct}%;background:${VOLUME_COLORS.outbound}"></div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    function volumeLegend() {
+      return `
+        <div style="display:flex;gap:16px;font-size:11.5px;color:var(--text-muted);margin-bottom:8px">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${VOLUME_COLORS.inbound};display:inline-block"></span>Inbound</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${VOLUME_COLORS.outbound};display:inline-block"></span>Outbound</span>
+        </div>`;
     }
 
     async function loadCallVolumeStats() {
@@ -3709,13 +3812,16 @@
         const data = await fetch(`/api/calls/volume-stats?${params}`).then(r => r.json());
         if (data.error) { output.innerHTML = `<div style="padding:16px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error)}</div>`; return; }
 
+        const inPct = volumePct(data.inbound, data.total), outPct = volumePct(data.outbound, data.total);
+
         const periodRows = data.byPeriod.map(p => `
           <tr>
             <td style="font-weight:600;color:var(--navy)">${escHtml(fmtVolumePeriod(p.period, data.groupBy))}</td>
             <td style="text-align:center;font-weight:700">${p.total}</td>
             <td style="text-align:center;color:var(--text-muted)">${p.inbound}</td>
             <td style="text-align:center;color:var(--text-muted)">${p.outbound}</td>
-          </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
+            <td style="text-align:center;color:var(--text-muted)">${volumePct(p.total, data.total)}%</td>
+          </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
 
         const repRows = data.byRep.slice(0, 15).map(r => `
           <tr>
@@ -3723,7 +3829,8 @@
             <td style="text-align:center;font-weight:700">${r.total}</td>
             <td style="text-align:center;color:var(--text-muted)">${r.inbound}</td>
             <td style="text-align:center;color:var(--text-muted)">${r.outbound}</td>
-          </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
+            <td style="text-align:center;color:var(--text-muted)">${volumePct(r.total, data.total)}%</td>
+          </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
 
         output.innerHTML = `
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:16px 0">
@@ -3732,24 +3839,39 @@
               <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Total Calls</div>
             </div>
             <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
-              <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.inbound}</div>
-              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Inbound</div>
+              <div style="font-size:26px;font-weight:800;color:${VOLUME_COLORS.inbound}">${data.inbound}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Inbound · ${inPct}%</div>
             </div>
             <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
-              <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.outbound}</div>
-              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Outbound</div>
+              <div style="font-size:26px;font-weight:800;color:${VOLUME_COLORS.outbound}">${data.outbound}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Outbound · ${outPct}%</div>
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div>
-              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By ${data.groupBy}</div>
-              <table class="data-table" style="font-size:12.5px"><thead><tr><th>Period</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th></tr></thead><tbody>${periodRows}</tbody></table>
-            </div>
+
+          <div style="margin-bottom:20px">
+            <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Calls by ${data.groupBy}</div>
+            ${volumeLegend()}
+            ${renderVolumeTrendChart(data.byPeriod, data.groupBy)}
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:16px">
             <div>
               <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By Agent</div>
-              <table class="data-table" style="font-size:12.5px"><thead><tr><th>Agent</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th></tr></thead><tbody>${repRows}</tbody></table>
+              ${volumeLegend()}
+              ${renderVolumeAgentChart(data.byRep, data.total)}
+            </div>
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By Agent — detail</div>
+              <div style="max-height:290px;overflow-y:auto">
+                <table class="data-table" style="font-size:12px"><thead><tr><th>Agent</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th><th style="text-align:center">% of Total</th></tr></thead><tbody>${repRows}</tbody></table>
+              </div>
             </div>
           </div>
+
+          <details>
+            <summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">By ${data.groupBy} — table view</summary>
+            <table class="data-table" style="font-size:12.5px"><thead><tr><th>Period</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th><th style="text-align:center">% of Total</th></tr></thead><tbody>${periodRows}</tbody></table>
+          </details>
         `;
       } catch { output.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Failed to load call volume.</div>'; }
     }
@@ -4026,7 +4148,7 @@
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeCallsPage(1)" ${callsCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
 
         if (recordings.length === 0) {
-          list.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — try Sync Calls Now above, or adjust filters.</td></tr>';
+          list.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — ${currentUserRole === 'super_admin' ? 'try Sync Calls Now above, or adjust filters.' : 'adjust filters, or ask a super admin to sync calls.'}</td></tr>`;
           return;
         }
         list.innerHTML = recordings.map(r => {
@@ -4050,11 +4172,12 @@
                 ${!gradeReady ? `<button class="action-btn edit" onclick="fetchCallContent('${r.id}', this)">⬇️ Fetch Transcription &amp; Audio</button>` : ''}
                 ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
                 ${r.has_transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
-                <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:11px;padding:4px 6px;width:100px">
-                  <option value="educator">Educator</option>
-                  <option value="centre">Centre</option>
+                <select id="rubric-${escHtml(r.id)}" class="form-control" title="${r.detected_rubric_reasoning ? escHtml(r.detected_rubric_reasoning) : 'Auto-detect reads the transcript to pick Educator vs Centre'}" style="font-size:11px;padding:4px 6px;width:120px">
+                  <option value="auto" ${!r.detected_rubric_type ? 'selected' : ''}>🔍 Auto-detect</option>
+                  <option value="educator" ${r.detected_rubric_type === 'educator' ? 'selected' : ''}>Educator${r.detected_rubric_type === 'educator' ? ' ✓' : ''}</option>
+                  <option value="centre" ${r.detected_rubric_type === 'centre' ? 'selected' : ''}>Centre${r.detected_rubric_type === 'centre' ? ' ✓' : ''}</option>
                 </select>
-                <button class="action-btn edit" onclick="evaluateCall('${r.id}')">Evaluate (AI)</button>
+                <button class="action-btn edit" onclick="evaluateCall('${r.id}', this)">Evaluate (AI)</button>
                 ${r.has_transcript ? `<button class="action-btn edit" onclick="openManualGradeModal('${r.id}')">Grade Manually</button>` : ''}
               </div>
             </td>
@@ -4095,7 +4218,7 @@
       escalate: { label: 'Escalate', badge: 'badge-draft' }
     };
 
-    async function evaluateCall(recordingId) {
+    async function evaluateCall(recordingId, btn) {
       const rubricType = document.getElementById(`rubric-${recordingId}`).value;
       if (Object.keys(callRubrics).length === 0) {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
@@ -4105,8 +4228,10 @@
       const outcomeEl = document.getElementById('callEvalOutcome');
       card.style.display = 'block';
       outcomeEl.innerHTML = '';
-      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Grading call against the ' + (rubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing') + ' rubric…</div>';
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">' +
+        (rubricType === 'auto' ? 'Reading the transcript to work out Educator vs Centre, then grading…' : 'Grading call against the ' + (rubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing') + ' rubric…') + '</div>';
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (btn) btn.disabled = true;
       try {
         const res = await fetch(`/api/calls/${recordingId}/evaluate`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4117,9 +4242,17 @@
           body.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Evaluation failed')}</div>`;
           return;
         }
+        // Reflect a fresh auto-detection back into the row's dropdown so the
+        // reviewer can see (and override) what the AI picked, without having
+        // to re-detect next time this call is evaluated.
+        if (data.detectedRubricType) {
+          const select = document.getElementById(`rubric-${recordingId}`);
+          if (select) { select.value = data.detectedRubricType; select.title = data.detectedRubricReasoning || ''; }
+        }
         renderEvalResult(data);
         loadEvaluationHistory();
       } catch { body.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Evaluation failed.</div>'; }
+      finally { if (btn) btn.disabled = false; }
     }
 
     function renderEvalResult(data) {
@@ -4129,7 +4262,10 @@
       const sourceBadge = data.source === 'human'
         ? '<span class="badge badge-user" style="margin-left:6px">🧑 Your evaluation</span>'
         : '<span class="badge badge-published" style="margin-left:6px">🤖 AI-graded</span>';
-      outcomeEl.innerHTML = `<span class="badge ${meta.badge}">${meta.label}</span>${sourceBadge}`;
+      const detectedBadge = data.detectedRubricType
+        ? `<span class="badge badge-user" style="margin-left:6px" title="${escHtml(data.detectedRubricReasoning || '')}">🔍 Auto-detected: ${data.detectedRubricType === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}</span>`
+        : '';
+      outcomeEl.innerHTML = `<span class="badge ${meta.badge}">${meta.label}</span>${sourceBadge}${detectedBadge}`;
       const rubric = callRubrics[data.rubricType];
       const rows = data.categoryScores.map(c => {
         const def = rubric?.categories.find(x => x.key === c.key);

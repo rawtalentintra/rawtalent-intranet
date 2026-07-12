@@ -265,8 +265,12 @@ CREATE TABLE IF NOT EXISTS call_recordings (
   has_audio BOOLEAN DEFAULT false,
   content_synced BOOLEAN DEFAULT false,
   meta_tags JSONB,
-  synced_at TIMESTAMPTZ DEFAULT now()
+  synced_at TIMESTAMPTZ DEFAULT now(),
+  detected_rubric_type TEXT,
+  detected_rubric_reasoning TEXT
 );
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS detected_rubric_type TEXT;
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS detected_rubric_reasoning TEXT;
 
 -- `data` (base64 audio blob) is replaced by `storage_path` — populated in
 -- Phase 4 when existing call audio is uploaded to the `call-recordings` bucket.

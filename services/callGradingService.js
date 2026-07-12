@@ -82,7 +82,7 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null) {
+function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null, sentimentScore = null) {
   const categoryList = rubric.categories.map(c => {
     let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
@@ -114,6 +114,16 @@ function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration =
     ? `\n\nThe RawTalent consultant on this call is named "${repName}" — this is confirmed from the call record, not something to infer from the transcript. Always refer to the consultant being graded as "${repName}" in your notes and summary. The transcript may mention other people by name (the educator, a centre contact, a colleague) — never confuse one of them with the consultant, and never substitute a different name for the consultant even if the transcript's speaker labels are generic (e.g. "Rep:", "Agent:") or a different name is mentioned elsewhere in the call.`
     : '';
 
+  // You (the model) only ever receive the text transcript — there is no audio
+  // fed to you, so you cannot hear pace, pitch, or vocal warmth directly.
+  // Dubber's own sentiment score is the one genuine tone-adjacent signal
+  // available: it comes from Dubber's own analysis of the actual call, not
+  // from the words alone, so it can pick up on delivery the transcript text
+  // doesn't fully capture. Treat it as a supporting cue only.
+  const sentimentBlock = (sentimentScore !== null && sentimentScore !== undefined && !Number.isNaN(Number(sentimentScore)))
+    ? `\n\nDubber's own automated analysis of this call's audio rated its overall sentiment/tone at ${sentimentScore} (Dubber's proprietary relative score — treat a higher number as a warmer, more positive tone). This is the only signal you have about how the call actually sounded, since you're working from the transcript text alone. Use it as a supporting cue where it's relevant (e.g. Opening & Rapport, Australian Cultural Fit) — if it disagrees with clear evidence in the transcript, the transcript wins, but if the transcript is ambiguous on tone, let this score inform your judgement and say so in the note.`
+    : '';
+
   return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}${repIdentityBlock}
 
 Your notes will be read by both the consultant being coached and their manager. Grade like the expert you are — weigh operational and compliance consequences, not just surface politeness — not like a generic transcript summariser.
@@ -140,7 +150,7 @@ For EVERY one of these ${rubric.categories.length} categories, without exception
 
 Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
 
-When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}${sentimentBlock}
 
 Call the submit_grading tool exactly once, with one scores entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — no more, no fewer.`;
 }
@@ -177,6 +187,44 @@ function buildGradingTool(rubric) {
       required: ['scores', 'summary']
     }
   };
+}
+
+// Classifies which rubric a call belongs to straight from its transcript —
+// "educator" if the other party is an individual educator (own shifts/
+// availability/quals/pay), "centre" if they're a centre representative
+// calling on the service's behalf (staffing needs, bookings, issues) — so
+// a reviewer doesn't have to read the whole call before picking a rubric.
+async function detectRubricType(transcriptText) {
+  const client = getClient();
+  if (!client) throw new Error('AI is not configured. Please contact your administrator.');
+  const cleanTranscript = stripMarkup(transcriptText).slice(0, 6000);
+
+  const tool = {
+    name: 'classify_call',
+    description: 'Classify which rubric this call should be graded against.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        rubricType: { type: 'string', enum: ['educator', 'centre'], description: '"educator" if the other party is an individual educator discussing their own shifts, availability, qualifications, WWCC, or pay. "centre" if the other party is a childcare centre representative/coordinator calling on behalf of the service about staffing needs, booking a shift for someone else, or a service issue.' },
+        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        reasoning: { type: 'string', description: 'One sentence citing what in the transcript indicates this.' }
+      },
+      required: ['rubricType', 'confidence', 'reasoning']
+    }
+  };
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    system: `You classify calls for RawTalent, an Australian childcare staffing agency, so the right quality rubric can be applied. A RawTalent consultant is on every call; work out who the OTHER party is from the transcript, then call the classify_call tool exactly once with your answer. Write the reasoning in Australian English.`,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: 'classify_call' },
+    messages: [{ role: 'user', content: cleanTranscript || '(empty transcript)' }]
+  });
+
+  const toolUse = response.content.find(b => b.type === 'tool_use' && b.name === 'classify_call');
+  if (!toolUse) throw new Error('Could not classify this call — please try again.');
+  return toolUse.input;
 }
 
 // Splits standing calibration notes into what applies everywhere (no
@@ -408,7 +456,7 @@ function stripMarkup(text) {
   return (text || '').replace(/<\/?[a-z][^>]*>/gi, '').trim();
 }
 
-async function gradeCall(transcriptText, rubricType, repName = null, feedback = null, feedbackCategoryKey = null) {
+async function gradeCall(transcriptText, rubricType, repName = null, feedback = null, feedbackCategoryKey = null, sentimentScore = null) {
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -435,7 +483,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
     console.error('Knowledge base lookup failed during call grading (continuing without it):', err.message);
   }
 
-  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey);
+  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey, sentimentScore);
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {
@@ -512,7 +560,7 @@ async function saveEvaluation({ recordingId, repName, callType, rubricType, call
 }
 
 module.exports = {
-  RUBRICS, gradeCall, gradeManual, saveEvaluation,
+  RUBRICS, gradeCall, gradeManual, saveEvaluation, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 };

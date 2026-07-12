@@ -5,7 +5,7 @@ const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddlewar
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
 const {
-  RUBRICS, gradeCall, gradeManual, saveEvaluation,
+  RUBRICS, gradeCall, gradeManual, saveEvaluation, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 } = require('../services/callGradingService');
@@ -24,14 +24,17 @@ function firstNameOnly(name) {
   return name.trim().split(/\s+/)[0] || name;
 }
 
-router.get('/status', (req, res) => {
+// Connection status, test connection, and sync are infrastructure-level
+// actions (credentials, pulling from Dubber) — restricted to super_admin
+// only, unlike the rest of this router which any admin can use.
+router.get('/status', requireSuperAdmin, (req, res) => {
   res.json({ dubberConfigured: dubberService.isConfigured(), groqConfigured: groqTranscription.isConfigured() });
 });
 
 // Diagnostic step: confirms the connection works and shows the real API
 // response shape (including where transcript data actually lives) so the
 // grading logic can be built against confirmed data, not a guess.
-router.get('/test-connection', async (req, res) => {
+router.get('/test-connection', requireSuperAdmin, async (req, res) => {
   try {
     const result = await dubberService.testConnection();
     res.json(result);
@@ -54,7 +57,7 @@ router.get('/recordings', async (req, res) => {
 
 // Pulls recent recordings from Dubber and stores metadata locally. Click again
 // later to keep extending how far back the local store goes.
-router.post('/sync', async (req, res) => {
+router.post('/sync', requireSuperAdmin, async (req, res) => {
   const direction = req.body?.direction === 'older' ? 'older' : 'recent';
   try {
     const result = await dubberService.syncRecordings(direction);
@@ -65,7 +68,7 @@ router.post('/sync', async (req, res) => {
   }
 });
 
-router.get('/sync-status', async (req, res) => {
+router.get('/sync-status', requireSuperAdmin, async (req, res) => {
   try {
     const [state, count] = await Promise.all([
       getDb().execute('SELECT * FROM dubber_sync_state WHERE id = 1'),
@@ -100,6 +103,7 @@ router.get('/local', async (req, res) => {
       db.execute({
         sql: `SELECT id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds,
                      start_time, start_time_iso, status, sentiment_score, has_audio, content_synced, synced_at,
+                     detected_rubric_type, detected_rubric_reasoning,
                      (transcript IS NOT NULL AND transcript != '') AS has_transcript
               FROM call_recordings ${where} ORDER BY start_time_iso DESC LIMIT ? OFFSET ?`,
         args: [...args, Number(pageSize), offset]
@@ -159,6 +163,33 @@ router.post('/:recordingId/fetch-content', async (req, res) => {
     res.json({ ...result, ...updated.rows[0] });
   } catch (err) {
     console.error('Fetch call content error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Classifies a call as Educator-Facing vs Centre-Facing straight from its
+// transcript, without grading it — used by the "🔍 Auto-detect" option in
+// Browse Calls, and cached on the recording so it's not re-spent later.
+router.post('/:recordingId/detect-type', async (req, res) => {
+  try {
+    const db = getDb();
+    const localRes = await db.execute({ sql: 'SELECT id, transcript, detected_rubric_type, detected_rubric_reasoning FROM call_recordings WHERE id = ?', args: [req.params.recordingId] });
+    const local = localRes.rows[0];
+    if (!local) return res.status(404).json({ error: 'Call not found in local store' });
+    if (!local.transcript) return res.status(400).json({ error: 'No transcript available yet — fetch the transcript first' });
+
+    if (local.detected_rubric_type) {
+      return res.json({ rubricType: local.detected_rubric_type, reasoning: local.detected_rubric_reasoning, cached: true });
+    }
+
+    const detection = await detectRubricType(local.transcript);
+    await db.execute({
+      sql: 'UPDATE call_recordings SET detected_rubric_type = ?, detected_rubric_reasoning = ? WHERE id = ?',
+      args: [detection.rubricType, detection.reasoning, req.params.recordingId]
+    });
+    res.json({ ...detection, cached: false });
+  } catch (err) {
+    console.error('Detect call type error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -236,9 +267,10 @@ router.delete('/calibration/:id', async (req, res) => {
 });
 
 router.post('/:recordingId/evaluate', async (req, res) => {
-  const { rubricType, feedback, feedbackCategoryKey } = req.body;
-  if (!rubricType || !RUBRICS[rubricType]) {
-    return res.status(400).json({ error: 'A valid rubricType ("educator" or "centre") is required' });
+  const { feedback, feedbackCategoryKey } = req.body;
+  let { rubricType } = req.body;
+  if (!rubricType || (rubricType !== 'auto' && !RUBRICS[rubricType])) {
+    return res.status(400).json({ error: 'A valid rubricType ("educator", "centre", or "auto") is required' });
   }
   try {
     const db = getDb();
@@ -283,8 +315,33 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       }
     }
 
+    // "auto" defers to the AI to work out which rubric applies from the
+    // transcript, rather than requiring the reviewer to pick one up front.
+    // Reuses a cached detection from a prior evaluate/detect call on this
+    // recording where possible, so re-evaluating doesn't re-spend an AI call
+    // on a question that's already been answered.
+    let detectedRubricType = null, detectedRubricReasoning = null;
+    if (rubricType === 'auto') {
+      if (local?.detected_rubric_type) {
+        rubricType = local.detected_rubric_type;
+        detectedRubricType = local.detected_rubric_type;
+        detectedRubricReasoning = local.detected_rubric_reasoning;
+      } else {
+        const detection = await detectRubricType(transcript);
+        rubricType = detection.rubricType;
+        detectedRubricType = detection.rubricType;
+        detectedRubricReasoning = detection.reasoning;
+        if (local) {
+          await db.execute({
+            sql: 'UPDATE call_recordings SET detected_rubric_type = ?, detected_rubric_reasoning = ? WHERE id = ?',
+            args: [detection.rubricType, detection.reasoning, req.params.recordingId]
+          });
+        }
+      }
+    }
+
     const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
-    const result = await gradeCall(transcript, rubricType, repName, feedback || null, feedbackCategoryKey || null);
+    const result = await gradeCall(transcript, rubricType, repName, feedback || null, feedbackCategoryKey || null, recording.sentiment_score ?? null);
 
     // Feedback given on this call is also saved as a standing calibration
     // note, so every future AI grading run applies the same correction — not
@@ -309,7 +366,7 @@ router.post('/:recordingId/evaluate', async (req, res) => {
       reviewerFeedbackCategory: feedbackCategoryKey || null
     });
 
-    res.json({ id, repName, rubricType, source: 'ai', calibrationSaved: !!feedback?.trim(), ...result });
+    res.json({ id, repName, rubricType, source: 'ai', calibrationSaved: !!feedback?.trim(), detectedRubricType, detectedRubricReasoning, ...result });
   } catch (err) {
     console.error('Call evaluation error:', err.message);
     res.status(500).json({ error: err.message });
