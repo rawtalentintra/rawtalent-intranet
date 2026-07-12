@@ -82,7 +82,7 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKeys = [], sentimentScore = null, glossaryBlock = '', currentResult = null } = {}) {
+function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration = { general: [], byCategory: {} }, feedbackItems = [], sentimentScore = null, glossaryBlock = '', currentResult = null } = {}) {
   const categoryList = rubric.categories.map(c => {
     let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
@@ -111,11 +111,15 @@ function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration
     ? `\n\nCurrent results for this call, from the last grading/re-grade — this is your starting point, not the transcript alone:\n${currentResult.categoryScores.map(c => `- "${c.key}": ${c.score}/5 — ${c.notes}`).join('\n')}\nCurrent summary: ${currentResult.summary}\n\nFor every category NOT covered by the new feedback below, copy its score and notes forward EXACTLY as shown above — do not re-derive them from the transcript again. Only the categories the new feedback actually concerns should change.`
     : '';
 
-  const feedbackCategories = (feedbackCategoryKeys || []).map(k => rubric.categories.find(c => c.key === k)).filter(Boolean);
-  const feedbackBlock = oneOffFeedback
-    ? feedbackCategories.length
-      ? `\n\nYour reviewer has given specific feedback on THIS call, about ${feedbackCategories.length === 1 ? 'the' : 'these'} "${feedbackCategories.map(c => c.label).join('", "')}" categor${feedbackCategories.length === 1 ? 'y' : 'ies'}, that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust ${feedbackCategories.length === 1 ? 'that category\'s' : 'those categories\''} score and explain in ${feedbackCategories.length === 1 ? 'its' : 'their'} notes how the feedback changed your assessment. Every other category must stay exactly as given in the current results above, unless this feedback genuinely bears on it too.`
-      : `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment. Every other category must stay exactly as given in the current results above.`
+  // Each item is one reviewer comment tied to exactly one category (or to
+  // "General" if categoryKey is null) — listed distinctly rather than
+  // merged into one blob, so the model applies each correction to the
+  // right place instead of guessing which text belongs to which category.
+  const feedbackBlock = feedbackItems.length
+    ? `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n${feedbackItems.map(item => {
+        const cat = item.categoryKey ? rubric.categories.find(c => c.key === item.categoryKey) : null;
+        return `- ${cat ? `"${cat.label}"` : 'General (every category)'}: "${item.feedbackText}"`;
+      }).join('\n')}\nFor each category named above, adjust its score and explain in its notes how the feedback changed your assessment. A "General" item may bear on any category — apply it wherever it's actually relevant. Every category NOT named above (directly or via General) must stay exactly as given in the current results above.`
     : '';
 
   const repIdentityBlock = repName
@@ -465,7 +469,7 @@ function stripMarkup(text) {
 }
 
 async function gradeCall(transcriptText, rubricType, repName = null, options = {}) {
-  const { feedback = null, feedbackCategoryKeys = [], sentimentScore = null, currentResult = null } = options;
+  const { feedbackItems = [], sentimentScore = null, currentResult = null } = options;
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -493,7 +497,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
   }
   const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, oneOffFeedback: feedback, feedbackCategoryKeys, sentimentScore, glossaryBlock, currentResult });
+  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, glossaryBlock, currentResult });
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {

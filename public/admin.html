@@ -1317,9 +1317,8 @@
         <div style="padding-top:16px;margin-top:16px;border-top:1px solid var(--gray-100)">
           <button class="btn-secondary" onclick="toggleDetailFeedbackBox()">💬 Give Feedback &amp; Re-grade</button>
           <div id="detailFeedbackBox" style="display:none;margin-top:12px">
-            <label class="form-label-modal">Which categories is this about? (select any number — leave all unchecked for general feedback)</label>
-            <div id="detailFeedbackCategories" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px"></div>
-            <textarea id="detailFeedbackText" class="form-control textarea" placeholder="e.g. You were too strict on Compliance Accuracy — confirming WWCC is already noted in the CRM is enough, it doesn't need to be said aloud on the call." style="min-height:70px"></textarea>
+            <label class="form-label-modal">Pick a category and add your comment below it. A new dropdown appears for the next category once you've made a selection.</label>
+            <div id="detailFeedbackRows" style="margin-top:8px"></div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, updating the categories you've selected while keeping every other category's result exactly as it is — and is also saved as a standing rule the AI applies to every future evaluation of this rubric. You can give feedback as many times, on as many categories, as you like — each round builds on the last, it never starts over.</div>
             <button class="btn-add" style="margin-top:10px" id="detailFeedbackSubmitBtn" onclick="submitDetailFeedbackRegrade()">Re-grade with This Feedback</button>
           </div>
@@ -4410,12 +4409,17 @@
     // ── Evaluation Detail (full breakdown + delete + feedback/re-grade) ──
     let evalDetailCurrentId = null;
     let evalDetailCurrentData = null;
+    // One row per category the reviewer is giving feedback on this round —
+    // { categoryKey: 'general'|<key>|null, feedbackText }. A fresh empty row
+    // is appended each time the last row gets a category picked, so the
+    // dropdown chain grows one at a time until every category is used.
+    let detailFeedbackRows = [{ categoryKey: null, feedbackText: '' }];
 
     async function openEvalDetail(evalId) {
       evalDetailCurrentId = evalId;
       document.getElementById('evalDetailModal').classList.add('open');
       document.getElementById('detailFeedbackBox').style.display = 'none';
-      document.getElementById('detailFeedbackText').value = '';
+      detailFeedbackRows = [{ categoryKey: null, feedbackText: '' }];
       const body = document.getElementById('evalDetailBody');
       body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
@@ -4424,13 +4428,8 @@
         }
         const e = await fetch(`/api/calls/evaluations/${evalId}`).then(r => r.json());
         if (e.error) { body.innerHTML = `<div style="color:#c0392b">${escHtml(e.error)}</div>`; return; }
-        const catContainer = document.getElementById('detailFeedbackCategories');
-        catContainer.innerHTML = (callRubrics[e.rubric_type]?.categories || []).map(c => `
-          <label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--gray-200);border-radius:20px;font-size:12px;cursor:pointer;user-select:none">
-            <input type="checkbox" class="detail-feedback-cat-checkbox" value="${c.key}" style="margin:0">${escHtml(c.label)}
-          </label>
-        `).join('');
         renderEvalDetail(e);
+        renderDetailFeedbackRows();
       } catch { body.innerHTML = '<div style="color:#c0392b">Failed to load evaluation.</div>'; }
     }
 
@@ -4439,10 +4438,48 @@
       box.style.display = box.style.display === 'none' ? 'block' : 'none';
     }
 
+    function renderDetailFeedbackRows() {
+      const container = document.getElementById('detailFeedbackRows');
+      if (!container) return;
+      const rubric = callRubrics[evalDetailCurrentData?.rubric_type];
+      const allOptions = [
+        { key: 'general', label: 'General — applies to every category' },
+        ...(rubric?.categories || []).map(c => ({ key: c.key, label: c.label }))
+      ];
+      container.innerHTML = detailFeedbackRows.map((row, i) => {
+        const usedElsewhere = detailFeedbackRows.filter((r, j) => j !== i).map(r => r.categoryKey).filter(Boolean);
+        const opts = allOptions.filter(o => o.key === row.categoryKey || !usedElsewhere.includes(o.key));
+        return `
+        <div style="margin-bottom:10px;padding:10px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">
+          <select class="form-control" style="margin-bottom:8px" onchange="updateDetailFeedbackRowCategory(${i}, this.value)">
+            <option value="">— Select a category —</option>
+            ${opts.map(o => `<option value="${o.key}" ${o.key === row.categoryKey ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
+          </select>
+          <textarea class="form-control textarea" style="min-height:60px" placeholder="Your feedback for this category…" oninput="updateDetailFeedbackRowText(${i}, this.value)">${escHtml(row.feedbackText || '')}</textarea>
+        </div>`;
+      }).join('');
+    }
+
+    function updateDetailFeedbackRowCategory(i, value) {
+      detailFeedbackRows[i].categoryKey = value || null;
+      const rubric = callRubrics[evalDetailCurrentData?.rubric_type];
+      const totalOptions = (rubric?.categories?.length || 0) + 1; // + General
+      const usedCount = detailFeedbackRows.filter(r => r.categoryKey).length;
+      if (i === detailFeedbackRows.length - 1 && value && usedCount < totalOptions) {
+        detailFeedbackRows.push({ categoryKey: null, feedbackText: '' });
+      }
+      renderDetailFeedbackRows();
+    }
+
+    function updateDetailFeedbackRowText(i, value) {
+      detailFeedbackRows[i].feedbackText = value;
+    }
+
     async function submitDetailFeedbackRegrade() {
-      const feedback = document.getElementById('detailFeedbackText').value.trim();
-      const feedbackCategoryKeys = [...document.querySelectorAll('.detail-feedback-cat-checkbox:checked')].map(el => el.value);
-      if (!feedback) { toast('Enter feedback first', 'error'); return; }
+      const items = detailFeedbackRows
+        .filter(r => r.categoryKey && r.feedbackText.trim())
+        .map(r => ({ categoryKey: r.categoryKey === 'general' ? null : r.categoryKey, feedbackText: r.feedbackText.trim() }));
+      if (!items.length) { toast('Select a category and enter feedback for at least one row', 'error'); return; }
       if (!evalDetailCurrentId) { toast('No call to re-grade', 'error'); return; }
       const btn = document.getElementById('detailFeedbackSubmitBtn');
       btn.disabled = true; btn.textContent = 'Re-grading…';
@@ -4451,13 +4488,13 @@
         // one call, not a new call each time feedback is given.
         const res = await fetch(`/api/calls/evaluations/${evalDetailCurrentId}/regrade`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ feedback, feedbackCategoryKeys })
+          body: JSON.stringify({ items })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Re-grade failed', 'error'); return; }
         toast('Re-graded — feedback saved as a standing rule for future evaluations', 'success');
-        document.getElementById('detailFeedbackText').value = '';
         await openEvalDetail(evalDetailCurrentId);
+        document.getElementById('detailFeedbackBox').style.display = 'block';
         loadEvaluationHistory();
         loadCalibrationNotes();
       } catch { toast('Re-grade failed', 'error'); }

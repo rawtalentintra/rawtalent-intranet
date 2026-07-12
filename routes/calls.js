@@ -377,13 +377,15 @@ router.post('/:recordingId/evaluate', async (req, res) => {
 // before — saves the feedback as a standing calibration rule so it also
 // shapes every future grading run for this rubric/category.
 router.put('/evaluations/:id/regrade', async (req, res) => {
-  const { feedback } = req.body;
-  // Accept either the new multi-category array or the old singular field,
-  // so nothing breaks if a stale client is still sending the old shape.
-  const feedbackCategoryKeys = Array.isArray(req.body.feedbackCategoryKeys)
-    ? req.body.feedbackCategoryKeys.filter(Boolean)
-    : (req.body.feedbackCategoryKey ? [req.body.feedbackCategoryKey] : []);
-  if (!feedback?.trim()) return res.status(400).json({ error: 'Feedback is required to re-grade' });
+  // Each item is one reviewer comment tied to exactly one category (or to
+  // "General" if categoryKey is null/omitted) — the progressive-dropdown UI
+  // on the client submits one item per row it built up.
+  const items = Array.isArray(req.body.items)
+    ? req.body.items
+        .map(it => ({ categoryKey: it?.categoryKey || null, feedbackText: (it?.feedbackText || '').trim() }))
+        .filter(it => it.feedbackText)
+    : [];
+  if (!items.length) return res.status(400).json({ error: 'Feedback is required to re-grade' });
   try {
     const db = getDb();
     const evalRes = await db.execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
@@ -394,7 +396,6 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     const local = localRes.rows[0];
     if (!local?.transcript) return res.status(400).json({ error: 'No transcript available for this call' });
 
-    const trimmedFeedback = feedback.trim();
     // Passing the CURRENT result lets the model build on top of every prior
     // re-grade instead of re-deriving the whole call from the transcript
     // again — categories this round's feedback doesn't touch are carried
@@ -402,27 +403,30 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     // silently undone by a later, unrelated one.
     const currentResult = { categoryScores: evaluation.category_scores, summary: evaluation.summary };
     const result = await gradeCall(local.transcript, evaluation.rubric_type, evaluation.rep_name, {
-      feedback: trimmedFeedback,
-      feedbackCategoryKeys,
+      feedbackItems: items,
       sentimentScore: local.sentiment_score ?? null,
       currentResult
     });
 
+    const rubric = RUBRICS[evaluation.rubric_type];
+    const combinedFeedback = items.map(item => {
+      const cat = item.categoryKey ? rubric?.categories.find(c => c.key === item.categoryKey) : null;
+      return `${cat ? cat.label : 'General'}: ${item.feedbackText}`;
+    }).join('\n');
+    const combinedCategoryKeys = items.map(item => item.categoryKey).filter(Boolean);
+
     await updateEvaluationResult(evaluation.id, {
       result,
-      reviewerFeedback: trimmedFeedback,
-      reviewerFeedbackCategories: feedbackCategoryKeys
+      reviewerFeedback: combinedFeedback,
+      reviewerFeedbackCategories: combinedCategoryKeys
     });
-    await logEvaluationFeedback(evaluation.id, trimmedFeedback, feedbackCategoryKeys, req.user.email);
-    // One standing calibration note per selected category, so each tagged
-    // category gets this correction applied going forward; a fully general
-    // round of feedback (no categories picked) is saved once, untagged.
-    if (feedbackCategoryKeys.length) {
-      for (const key of feedbackCategoryKeys) {
-        await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, key);
-      }
-    } else {
-      await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, null);
+
+    // One history row and one standing calibration note per item, so each
+    // category-specific correction is logged and applied to future grading
+    // separately rather than merged into a single ambiguous blob.
+    for (const item of items) {
+      await logEvaluationFeedback(evaluation.id, item.feedbackText, item.categoryKey ? [item.categoryKey] : [], req.user.email);
+      await addCalibrationNote(item.feedbackText, req.user.email, evaluation.rubric_type, item.categoryKey || null);
     }
 
     res.json({ id: evaluation.id, repName: evaluation.rep_name, rubricType: evaluation.rubric_type, source: 'ai', ...result });
