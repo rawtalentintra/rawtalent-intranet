@@ -4213,9 +4213,10 @@
     function closeTranscriptModal() { document.getElementById('transcriptModal').classList.remove('open'); }
 
     const outcomeMeta = {
-      pass: { label: 'Pass', badge: 'badge-published' },
-      coaching: { label: 'Coaching recommended', badge: 'badge-user' },
-      escalate: { label: 'Escalate', badge: 'badge-draft' }
+      pass: { label: '✅ Pass', badge: 'badge-published' },
+      coaching: { label: '🎓 Coaching Recommended', badge: 'badge-user' },
+      escalate: { label: '🚩 Escalate', badge: 'badge-draft' },
+      calibration_only: { label: '🔬 Calibration Only', badge: 'badge-user' }
     };
 
     async function evaluateCall(recordingId, btn) {
@@ -4445,7 +4446,6 @@
 
     function renderEvalDetail(e) {
       evalDetailCurrentData = e;
-      const meta = outcomeMeta[e.outcome] || { label: e.outcome, badge: 'badge-user' };
       const sourceLabel = e.source === 'human' ? '🧑 Your evaluation' : '🤖 AI-graded';
       document.getElementById('evalDetailModalTitle').textContent = `${e.rep_name || 'Unknown rep'} — ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}`;
       const rubric = callRubrics[e.rubric_type];
@@ -4463,11 +4463,20 @@
         </tr>`;
       }).join('');
       document.getElementById('evalDetailBody').innerHTML = `
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">
-          <span class="badge ${meta.badge}">${meta.label}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
           <span class="badge badge-user">${sourceLabel}</span>
           <span style="font-size:12px;color:var(--text-muted)">${fmtDate(e.created_at)} · evaluated by ${escHtml(e.evaluated_by || '—')}</span>
         </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <label style="font-size:11.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Recommendation</label>
+          <select id="evalOutcomeSelect" class="form-control" style="width:auto;font-size:12.5px;padding:5px 10px" onchange="document.getElementById('evalOutcomeSaveBtn').style.display='inline-block'">
+            ${Object.entries(outcomeMeta).map(([key, m]) => `<option value="${key}" ${e.outcome === key ? 'selected' : ''}>${m.label}</option>`).join('')}
+          </select>
+          <button class="btn-add" id="evalOutcomeSaveBtn" style="display:none;padding:5px 12px;font-size:12px" onclick="saveEvalOutcome('${e.id}')">Save</button>
+        </div>
+        ${e.outcome === 'calibration_only' ? `
+          <div style="margin-bottom:14px;font-size:12px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px">🔬 <strong>Calibration Only</strong> — excluded from this rep's quality scores and the Call Quality Dashboard. Kept purely to review calls and train the AI grader; never shown to the rep.</div>
+        ` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:var(--text-muted);margin-bottom:16px;padding:12px 14px;background:var(--offwhite);border-radius:var(--radius)">
           <div><strong style="color:var(--navy)">Call type:</strong> ${escHtml(e.call_type || '—')}</div>
           <div><strong style="color:var(--navy)">Call date:</strong> ${escHtml(e.call_date || '—')}</div>
@@ -4494,6 +4503,25 @@
     }
 
     function closeEvalDetailModal() { document.getElementById('evalDetailModal').classList.remove('open'); }
+
+    async function saveEvalOutcome(evalId) {
+      const select = document.getElementById('evalOutcomeSelect');
+      const btn = document.getElementById('evalOutcomeSaveBtn');
+      const outcome = select.value;
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const res = await fetch(`/api/calls/evaluations/${evalId}/outcome`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcome })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        toast(outcome === 'calibration_only' ? 'Marked as Calibration Only — excluded from quality scores' : 'Recommendation updated', 'success');
+        openEvalDetail(evalId);
+        loadEvaluationHistory();
+      } catch { toast('Failed to save', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Save'; }
+    }
 
     function toggleEvalFeedbackNote() {
       const box = document.getElementById('evalFeedbackNoteBox');

@@ -438,13 +438,17 @@ router.get('/rep-names', async (req, res) => {
 // set of evaluations (joined to call_recordings for a reliable ISO date to
 // filter on) as their evidence base.
 async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType }) {
-  const conditions = [];
+  // "calibration_only" evaluations are deliberately excluded from every
+  // quality-score/aggregate view (Dashboard report, Q&A, and any future
+  // rep-facing dashboard that reuses this) — they exist purely to review
+  // calls and train the AI grader, and must never count against a rep.
+  const conditions = ["e.outcome != 'calibration_only'"];
   const args = [];
   if (dateFrom) { conditions.push('r.start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
   if (dateTo) { conditions.push('r.start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
   if (repName) { conditions.push('e.rep_name = ?'); args.push(repName); }
   if (rubricType && RUBRICS[rubricType]) { conditions.push('e.rubric_type = ?'); args.push(rubricType); }
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where = `WHERE ${conditions.join(' AND ')}`;
 
   const result = await getDb().execute({
     sql: `SELECT e.* FROM call_evaluations e LEFT JOIN call_recordings r ON r.id = e.recording_id ${where} ORDER BY e.created_at DESC LIMIT 500`,
@@ -548,6 +552,26 @@ router.get('/evaluations/:id', async (req, res) => {
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Evaluation not found' });
     res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lets a reviewer override the recommendation an evaluation landed on —
+// including flagging it "calibration_only", which excludes it from every
+// rep-facing/aggregate quality view (see fetchFilteredEvaluations) without
+// deleting the evaluation itself, since it's still useful for training the
+// AI grader.
+const RECOMMENDATION_OUTCOMES = ['pass', 'coaching', 'escalate', 'calibration_only'];
+router.put('/evaluations/:id/outcome', async (req, res) => {
+  const { outcome } = req.body;
+  if (!RECOMMENDATION_OUTCOMES.includes(outcome)) {
+    return res.status(400).json({ error: `outcome must be one of: ${RECOMMENDATION_OUTCOMES.join(', ')}` });
+  }
+  try {
+    const result = await getDb().execute({ sql: 'UPDATE call_evaluations SET outcome = ? WHERE id = ?', args: [outcome, req.params.id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Evaluation not found' });
+    res.json({ success: true, outcome });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
