@@ -348,7 +348,7 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     }
 
     const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
-    const result = await gradeCall(transcript, rubricType, repName, null, null, recording.sentiment_score ?? null);
+    const result = await gradeCall(transcript, rubricType, repName, { sentimentScore: recording.sentiment_score ?? null });
 
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
@@ -377,7 +377,12 @@ router.post('/:recordingId/evaluate', async (req, res) => {
 // before — saves the feedback as a standing calibration rule so it also
 // shapes every future grading run for this rubric/category.
 router.put('/evaluations/:id/regrade', async (req, res) => {
-  const { feedback, feedbackCategoryKey } = req.body;
+  const { feedback } = req.body;
+  // Accept either the new multi-category array or the old singular field,
+  // so nothing breaks if a stale client is still sending the old shape.
+  const feedbackCategoryKeys = Array.isArray(req.body.feedbackCategoryKeys)
+    ? req.body.feedbackCategoryKeys.filter(Boolean)
+    : (req.body.feedbackCategoryKey ? [req.body.feedbackCategoryKey] : []);
   if (!feedback?.trim()) return res.status(400).json({ error: 'Feedback is required to re-grade' });
   try {
     const db = getDb();
@@ -390,15 +395,35 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     if (!local?.transcript) return res.status(400).json({ error: 'No transcript available for this call' });
 
     const trimmedFeedback = feedback.trim();
-    const result = await gradeCall(local.transcript, evaluation.rubric_type, evaluation.rep_name, trimmedFeedback, feedbackCategoryKey || null, local.sentiment_score ?? null);
+    // Passing the CURRENT result lets the model build on top of every prior
+    // re-grade instead of re-deriving the whole call from the transcript
+    // again — categories this round's feedback doesn't touch are carried
+    // forward unchanged, so an earlier round's correction never gets
+    // silently undone by a later, unrelated one.
+    const currentResult = { categoryScores: evaluation.category_scores, summary: evaluation.summary };
+    const result = await gradeCall(local.transcript, evaluation.rubric_type, evaluation.rep_name, {
+      feedback: trimmedFeedback,
+      feedbackCategoryKeys,
+      sentimentScore: local.sentiment_score ?? null,
+      currentResult
+    });
 
     await updateEvaluationResult(evaluation.id, {
       result,
       reviewerFeedback: trimmedFeedback,
-      reviewerFeedbackCategory: feedbackCategoryKey || null
+      reviewerFeedbackCategories: feedbackCategoryKeys
     });
-    await logEvaluationFeedback(evaluation.id, trimmedFeedback, feedbackCategoryKey || null, req.user.email);
-    await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, feedbackCategoryKey || null);
+    await logEvaluationFeedback(evaluation.id, trimmedFeedback, feedbackCategoryKeys, req.user.email);
+    // One standing calibration note per selected category, so each tagged
+    // category gets this correction applied going forward; a fully general
+    // round of feedback (no categories picked) is saved once, untagged.
+    if (feedbackCategoryKeys.length) {
+      for (const key of feedbackCategoryKeys) {
+        await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, key);
+      }
+    } else {
+      await addCalibrationNote(trimmedFeedback, req.user.email, evaluation.rubric_type, null);
+    }
 
     res.json({ id: evaluation.id, repName: evaluation.rep_name, rubricType: evaluation.rubric_type, source: 'ai', ...result });
   } catch (err) {

@@ -200,24 +200,30 @@ CREATE TABLE IF NOT EXISTS call_evaluations (
   source TEXT DEFAULT 'ai',
   reviewer_feedback TEXT,
   reviewer_feedback_category TEXT,
+  reviewer_feedback_categories JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ
 );
 ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS reviewer_feedback_categories JSONB;
 
 -- Every piece of feedback ever given on an evaluation via "Give Feedback &
 -- Re-grade" — an append-only conversation thread. Re-grading updates the
 -- evaluation's scores/notes in place (never inserts a new call_evaluations
 -- row), but every round of feedback is preserved here so a reviewer can see
 -- the full back-and-forth, no matter how many times a call was re-graded.
+-- category_keys holds every category a single round of feedback targeted
+-- (a reviewer can tag more than one at once); empty/null means general.
 CREATE TABLE IF NOT EXISTS call_evaluation_feedback (
   id TEXT PRIMARY KEY,
   evaluation_id TEXT NOT NULL,
   category_key TEXT,
+  category_keys JSONB,
   feedback_text TEXT NOT NULL,
   created_by TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE call_evaluation_feedback ADD COLUMN IF NOT EXISTS category_keys JSONB;
 CREATE INDEX IF NOT EXISTS idx_call_evaluation_feedback_eval_id ON call_evaluation_feedback(evaluation_id);
 ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS reviewer_feedback_category TEXT;
 

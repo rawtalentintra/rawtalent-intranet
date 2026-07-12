@@ -82,7 +82,7 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null, sentimentScore = null, glossaryBlock = '') {
+function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKeys = [], sentimentScore = null, glossaryBlock = '', currentResult = null } = {}) {
   const categoryList = rubric.categories.map(c => {
     let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
@@ -103,11 +103,19 @@ function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration =
     ? `\n\nStanding calibration notes from your reviewer — these refine how strictly/leniently to apply the rubric above, based on real past corrections. Always apply them:\n${calibration.general.map(n => `- ${n}`).join('\n')}`
     : '';
 
-  const feedbackCategory = feedbackCategoryKey ? rubric.categories.find(c => c.key === feedbackCategoryKey) : null;
+  // Re-grades build on the PREVIOUS result rather than starting over — every
+  // category not touched by the new feedback must come out identical to
+  // what's shown here, so a reviewer's earlier corrections never silently
+  // get undone by a later, unrelated round of feedback.
+  const currentResultBlock = currentResult
+    ? `\n\nCurrent results for this call, from the last grading/re-grade — this is your starting point, not the transcript alone:\n${currentResult.categoryScores.map(c => `- "${c.key}": ${c.score}/5 — ${c.notes}`).join('\n')}\nCurrent summary: ${currentResult.summary}\n\nFor every category NOT covered by the new feedback below, copy its score and notes forward EXACTLY as shown above — do not re-derive them from the transcript again. Only the categories the new feedback actually concerns should change.`
+    : '';
+
+  const feedbackCategories = (feedbackCategoryKeys || []).map(k => rubric.categories.find(c => c.key === k)).filter(Boolean);
   const feedbackBlock = oneOffFeedback
-    ? feedbackCategory
-      ? `\n\nYour reviewer has given specific feedback on THIS call, about the "${feedbackCategory.label}" category, that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust that category's score and explain in its notes how the feedback changed your assessment. Other categories should only change if this feedback genuinely bears on them too.`
-      : `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment.`
+    ? feedbackCategories.length
+      ? `\n\nYour reviewer has given specific feedback on THIS call, about ${feedbackCategories.length === 1 ? 'the' : 'these'} "${feedbackCategories.map(c => c.label).join('", "')}" categor${feedbackCategories.length === 1 ? 'y' : 'ies'}, that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust ${feedbackCategories.length === 1 ? 'that category\'s' : 'those categories\''} score and explain in ${feedbackCategories.length === 1 ? 'its' : 'their'} notes how the feedback changed your assessment. Every other category must stay exactly as given in the current results above, unless this feedback genuinely bears on it too.`
+      : `\n\nYour reviewer has given specific feedback on THIS call that you must incorporate into your re-scoring:\n"${oneOffFeedback}"\nAdjust whichever category score(s) this feedback bears on, and explain in that category's notes how the feedback changed your assessment. Every other category must stay exactly as given in the current results above.`
     : '';
 
   const repIdentityBlock = repName
@@ -150,7 +158,7 @@ For EVERY one of these ${rubric.categories.length} categories, without exception
 
 Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
 
-When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}${sentimentBlock}${glossaryBlock}
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${currentResultBlock}${feedbackBlock}${sentimentBlock}${glossaryBlock}
 
 Call the submit_grading tool exactly once, with one scores entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — no more, no fewer.`;
 }
@@ -456,7 +464,8 @@ function stripMarkup(text) {
   return (text || '').replace(/<\/?[a-z][^>]*>/gi, '').trim();
 }
 
-async function gradeCall(transcriptText, rubricType, repName = null, feedback = null, feedbackCategoryKey = null, sentimentScore = null) {
+async function gradeCall(transcriptText, rubricType, repName = null, options = {}) {
+  const { feedback = null, feedbackCategoryKeys = [], sentimentScore = null, currentResult = null } = options;
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -484,7 +493,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   }
   const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey, sentimentScore, glossaryBlock);
+  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, oneOffFeedback: feedback, feedbackCategoryKeys, sentimentScore, glossaryBlock, currentResult });
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {
@@ -578,30 +587,33 @@ async function saveEvaluation({ recordingId, repName, callType, rubricType, call
 // new call. The new scores/notes become the current state; the feedback
 // itself is preserved separately (see logEvaluationFeedback) so nothing is
 // lost across any number of re-grades.
-async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, reviewerFeedbackCategory }) {
+async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, reviewerFeedbackCategories }) {
   const db = getDb();
+  const keys = reviewerFeedbackCategories || [];
   await db.execute({
     sql: `UPDATE call_evaluations
           SET category_scores = ?, overall_score = ?, outcome = ?, summary = ?,
-              reviewer_feedback = ?, reviewer_feedback_category = ?, updated_at = now()
+              reviewer_feedback = ?, reviewer_feedback_category = ?, reviewer_feedback_categories = ?, updated_at = now()
           WHERE id = ?`,
     args: [
       JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary,
-      reviewerFeedback || null, reviewerFeedbackCategory || null, evaluationId
+      reviewerFeedback || null, keys[0] || null, keys.length ? JSON.stringify(keys) : null, evaluationId
     ]
   });
 }
 
 // One entry in the append-only feedback conversation thread for an
 // evaluation — every round of "Give Feedback & Re-grade" adds one of these,
-// no matter how many times a reviewer comes back to the same call.
-async function logEvaluationFeedback(evaluationId, feedbackText, categoryKey, createdBy) {
+// no matter how many times a reviewer comes back to the same call. A single
+// round can target more than one category at once.
+async function logEvaluationFeedback(evaluationId, feedbackText, categoryKeys, createdBy) {
   const db = getDb();
   const id = uuidv4();
+  const keys = categoryKeys || [];
   await db.execute({
-    sql: `INSERT INTO call_evaluation_feedback (id, evaluation_id, category_key, feedback_text, created_by)
-          VALUES (?, ?, ?, ?, ?)`,
-    args: [id, evaluationId, categoryKey || null, feedbackText, createdBy || null]
+    sql: `INSERT INTO call_evaluation_feedback (id, evaluation_id, category_key, category_keys, feedback_text, created_by)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [id, evaluationId, keys[0] || null, keys.length ? JSON.stringify(keys) : null, feedbackText, createdBy || null]
   });
   return id;
 }
