@@ -1,7 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
-const { searchKnowledge } = require('./aiService');
+const { searchKnowledge, getGlossaryBlock } = require('./aiService');
 const { classifyOperationalNote } = require('./faqClassifier');
 
 function getClient() {
@@ -82,7 +82,7 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null, sentimentScore = null) {
+function buildSystemPrompt(rubric, repName, knowledgeMatches = [], calibration = { general: [], byCategory: {} }, oneOffFeedback = null, feedbackCategoryKey = null, sentimentScore = null, glossaryBlock = '') {
   const categoryList = rubric.categories.map(c => {
     let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
@@ -150,7 +150,7 @@ For EVERY one of these ${rubric.categories.length} categories, without exception
 
 Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
 
-When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}${sentimentBlock}
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}${sentimentBlock}${glossaryBlock}
 
 Call the submit_grading tool exactly once, with one scores entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — no more, no fewer.`;
 }
@@ -482,8 +482,9 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   } catch (err) {
     console.error('Knowledge base lookup failed during call grading (continuing without it):', err.message);
   }
+  const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey, sentimentScore);
+  const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibration, feedback, feedbackCategoryKey, sentimentScore, glossaryBlock);
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {

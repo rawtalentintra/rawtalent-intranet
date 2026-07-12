@@ -6,6 +6,24 @@ function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
+// The glossary is small and internal-jargon-heavy (WWCC, ASQA, DNU, etc.),
+// so rather than relying on it turning up via full-text search — which
+// misses whenever a question describes the concept without using the exact
+// acronym — it's always included in full wherever RawTalent's AI answers
+// questions or grades a call, guaranteeing every term is "known" regardless
+// of phrasing.
+async function getGlossaryBlock(db) {
+  try {
+    const result = await db.execute('SELECT term, definition FROM glossary ORDER BY term');
+    if (!result.rows.length) return '';
+    const lines = result.rows.map(g => `- **${g.term}**: ${g.definition}`).join('\n');
+    return `\n\n## RawTalent Glossary\nInternal terms and acronyms you may see in questions, articles, or calls — always treat these as authoritative:\n${lines}`;
+  } catch (err) {
+    console.error('Glossary lookup failed (continuing without it):', err.message);
+    return '';
+  }
+}
+
 async function searchKnowledge(db, question, limit = 6) {
   // websearch_to_tsquery tolerates arbitrary free-text input directly — no
   // need to hand-build FTS5-style quoted/prefix terms the way SQLite needed.
@@ -244,11 +262,12 @@ async function streamQuestion(question, askedBy, history, res) {
 
   res.write(`data: ${JSON.stringify({ type: 'sources', sources })}\n\n`);
 
+  const glossaryBlock = await getGlossaryBlock(db);
   let fullAnswer = '';
   const stream = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 700,
-    system: SYSTEM_PROMPT,
+    system: SYSTEM_PROMPT + glossaryBlock,
     messages,
     stream: true
   });
@@ -288,10 +307,11 @@ async function askQuestion(question, askedBy, history = []) {
     messages = [...history, { role: 'user', content: question }];
   }
 
+  const glossaryBlock = await getGlossaryBlock(db);
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 700,
-    system: SYSTEM_PROMPT,
+    system: SYSTEM_PROMPT + glossaryBlock,
     messages
   });
 
@@ -306,4 +326,4 @@ async function askQuestion(question, askedBy, history = []) {
   return { answer, sources, history: updatedHistory };
 }
 
-module.exports = { askQuestion, streamQuestion, searchKnowledge };
+module.exports = { askQuestion, streamQuestion, searchKnowledge, getGlossaryBlock };
