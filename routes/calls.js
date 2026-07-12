@@ -10,6 +10,8 @@ const {
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 } = require('../services/callGradingService');
 const { generateReport, answerQuestion } = require('../services/callReportService');
+const { extractFaqsFromCall } = require('../services/faqClassifier');
+const { v4: uuidv4 } = require('uuid');
 const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../services/storageService');
 
 // Call recordings are confidential, but admins (not just super_admin) get
@@ -421,6 +423,41 @@ router.get('/evaluations', async (req, res) => {
     const result = await getDb().execute('SELECT * FROM call_evaluations ORDER BY created_at DESC LIMIT 200');
     res.json(result.rows);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pulls a call's transcript and asks Claude to find genuinely reusable FAQ
+// material in it — each becomes a normal pending candidate in the same
+// review queue Slack/Fathom/document scans feed, so nothing reaches the
+// knowledge base without a human approving it. Super_admin only, matching
+// every other FAQ-candidate source.
+router.post('/:recordingId/extract-faqs', requireSuperAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const localRes = await db.execute({ sql: 'SELECT id, rep_name, start_time, transcript FROM call_recordings WHERE id = ?', args: [req.params.recordingId] });
+    const local = localRes.rows[0];
+    if (!local) return res.status(404).json({ error: 'Call not found in local store' });
+    if (!local.transcript?.trim()) return res.status(400).json({ error: 'No transcript available for this call yet' });
+
+    const callContext = `a call on ${local.start_time || 'an unknown date'}`;
+    const { candidates } = await extractFaqsFromCall(local.transcript, callContext);
+
+    let candidatesFound = 0;
+    for (const c of candidates) {
+      if (!c.question?.trim() || !c.answer?.trim()) continue;
+      const id = uuidv4();
+      await db.execute({
+        sql: `INSERT INTO faq_candidates
+              (id, source, source_ref, source_date, raw_excerpt, suggested_question, suggested_answer, classification_reason)
+              VALUES (?, 'call', ?, ?, ?, ?, ?, ?)`,
+        args: [id, req.params.recordingId, local.start_time || null, local.transcript.slice(0, 2000), c.question.trim(), c.answer.trim(), 'Extracted from a call transcript']
+      });
+      candidatesFound++;
+    }
+    res.json({ candidatesFound });
+  } catch (err) {
+    console.error('Call FAQ extraction error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

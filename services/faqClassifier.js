@@ -78,6 +78,64 @@ If there is truly nothing extractable, return {"candidates": []}.`,
   }
 }
 
+// Same intent as extractFaqsFromDocument, but for a real call transcript —
+// candidates come from what was actually SAID (policy explained, a process
+// walked through, a compliance question answered), never from anything
+// identifying who was on the call. Uses a forced tool call rather than
+// free-text JSON so a transcript full of quotes/line breaks can't produce
+// unparseable output the way the document/conversation prompts below still
+// can.
+async function extractFaqsFromCall(transcript, callContext) {
+  const client = getClassifierClient();
+  if (!client) return { candidates: [] };
+
+  const tool = {
+    name: 'submit_faq_candidates',
+    description: 'Submit the reusable FAQ candidates found in this call transcript.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        candidates: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'A general, standalone question a staff member might ask.' },
+              answer: { type: 'string', description: 'A self-contained answer in formal Australian English, with no reference to this call or the people on it.' }
+            },
+            required: ['question', 'answer']
+          }
+        }
+      },
+      required: ['candidates']
+    }
+  };
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 4096,
+    system: `You are reading a transcript of a real RawTalent call (${callContext}) to extract genuinely reusable FAQ material for a staff knowledge base. RawTalent is an Australian childcare staffing agency.
+
+Read the whole transcript and extract every distinct, general, reusable question-and-answer pair you can find or reasonably construct from what was actually discussed — e.g. a policy explained, a process walked through, a compliance question answered, a common scenario resolved. Skip small talk, scheduling logistics specific to this one call, and anything with no answerable question behind it.
+
+Do not include anything containing:
+- Names of specific staff, educators, centres, or families
+- Wages, pay rates, disciplinary matters, performance issues, complaints
+- Anything personal, sensitive, or identifying about the people on this call
+
+Rewrite each question and answer in a fully generalised, anonymised form — remove ALL names and identifying specifics. Each answer must be self-contained and clear without needing the rest of the call for context. Write in formal Australian English throughout (e.g. "organise", "recognise", "behaviour", "centre", "realise") — never American spelling.
+
+Call the submit_faq_candidates tool exactly once. If there is truly nothing extractable, submit an empty candidates array.`,
+    tools: [tool],
+    tool_choice: { type: 'tool', name: 'submit_faq_candidates' },
+    messages: [{ role: 'user', content: transcript.slice(0, 15000) }]
+  });
+
+  const toolUse = response.content.find(b => b.type === 'tool_use' && b.name === 'submit_faq_candidates');
+  const candidates = toolUse?.input?.candidates;
+  return { candidates: Array.isArray(candidates) ? candidates : [] };
+}
+
 const OPERATIONAL_NOTE_PROMPT = `You review internal notes from RawTalent's call-quality grading system — corrections a reviewer has taught the AI, or new grading instructions for a rubric category — to decide if the underlying insight is general company or industry knowledge worth adding to the staff knowledge base, as distinct from something that only matters to how AI grades calls.
 
 Only accept it if it reflects a genuine, generalisable policy, process, or compliance fact that would help ANY staff member — e.g. "WWCC renewal takes 10 business days in VIC" is worth sharing; "score this category more leniently" or "this rep specifically struggled with X" is not.
@@ -110,4 +168,4 @@ async function classifyOperationalNote(noteText) {
   }
 }
 
-module.exports = { classifyConversation, extractFaqsFromDocument, classifyOperationalNote };
+module.exports = { classifyConversation, extractFaqsFromDocument, extractFaqsFromCall, classifyOperationalNote };
