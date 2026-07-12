@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
 const {
   RUBRICS, gradeCall, gradeManual, saveEvaluation,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
-  getAllEffectiveRubrics, saveRubricInstructions
+  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 } = require('../services/callGradingService');
 const { generateReport } = require('../services/callReportService');
 const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../services/storageService');
@@ -137,38 +137,28 @@ router.get('/local/:id/audio', async (req, res) => {
   }
 });
 
-// Diagnostic only — surfaces the raw recording detail response so we can find
-// which field actually holds a playable audio URL before building real
-// playback controls into the UI.
-router.get('/:recordingId/playback-info', async (req, res) => {
+// Fetches audio + transcript for one call on demand — used from the Browse
+// Calls "Fetch Content" action so a specific Pending/Audio-only call doesn't
+// have to wait for its turn in the batch Sync pass.
+router.post('/:recordingId/fetch-content', async (req, res) => {
   try {
-    const result = await dubberService.getRecordingPlaybackInfo(req.params.recordingId, req.query.listener);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const db = getDb();
+    const localRes = await db.execute({ sql: 'SELECT id, has_audio, transcript FROM call_recordings WHERE id = ?', args: [req.params.recordingId] });
+    const local = localRes.rows[0];
+    if (!local) return res.status(404).json({ error: 'Call not found in local store — sync it first' });
 
-// Diagnostic step: tries every plausible transcript endpoint for one real
-// recording and reports which one(s) actually return data. Requests are spaced
-// out to respect Dubber's 2 calls/second limit.
-router.get('/find-transcript/:recordingId', async (req, res) => {
-  try {
-    const result = await dubberService.findTranscript(req.params.recordingId);
-    res.json(result);
-  } catch (err) {
-    console.error('Dubber find-transcript error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    const result = await dubberService.fetchContentForRecording(req.params.recordingId, {
+      skipAudio: !!local.has_audio,
+      existingTranscript: local.transcript
+    });
 
-// Diagnostic step: same approach, but for finding a playable audio URL.
-router.get('/find-playback/:recordingId', async (req, res) => {
-  try {
-    const result = await dubberService.findPlayback(req.params.recordingId);
-    res.json(result);
+    const updated = await db.execute({
+      sql: `SELECT has_audio, (transcript IS NOT NULL AND transcript != '') AS has_transcript FROM call_recordings WHERE id = ?`,
+      args: [req.params.recordingId]
+    });
+    res.json({ ...result, ...updated.rows[0] });
   } catch (err) {
-    console.error('Dubber find-playback error:', err.message);
+    console.error('Fetch call content error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -191,6 +181,24 @@ router.put('/rubrics/:rubricType/:categoryKey/instructions', async (req, res) =>
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('Save rubric instructions error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lets a super_admin hand-edit the short reference description directly,
+// bypassing the AI re-summarisation that normally happens when instructions
+// are saved. Leaves the in-depth instructions untouched either way.
+router.put('/rubrics/:rubricType/:categoryKey/description', requireSuperAdmin, async (req, res) => {
+  if (!RUBRICS[req.params.rubricType]) return res.status(400).json({ error: 'Unknown rubric type' });
+  const bullets = Array.isArray(req.body.description)
+    ? req.body.description.map(x => String(x).trim()).filter(Boolean)
+    : String(req.body.description || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (!bullets.length) return res.status(400).json({ error: 'Description cannot be empty' });
+  try {
+    const result = await saveRubricDescription(req.params.rubricType, req.params.categoryKey, bullets, req.user.email);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Save rubric description error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

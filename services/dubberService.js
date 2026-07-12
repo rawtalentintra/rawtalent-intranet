@@ -120,6 +120,56 @@ async function downloadRecordingAudio(recordingId) {
 
 function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// Fetches audio + transcript for one recording and persists whatever succeeds.
+// Shared by the batch sync pass and the single-call "Fetch Content" action on
+// a Pending row — skipAudio/existingTranscript let the caller avoid redoing
+// work that's already done for that recording.
+async function fetchContentForRecording(recordingId, { skipAudio = false, existingTranscript = null } = {}) {
+  const db = getDb();
+  let audio = null, audioFetched = false, audioError = null;
+
+  if (!skipAudio) {
+    try {
+      audio = await downloadRecordingAudio(recordingId);
+      await db.execute({ sql: 'UPDATE call_recordings SET has_audio = true WHERE id = ?', args: [recordingId] });
+      const mimetype = audio.mimetype || 'audio/mpeg';
+      const path = `${recordingId}.${extForMimetype(mimetype)}`;
+      await uploadBase64(BUCKETS.callRecordings, path, audio.data, mimetype);
+      await db.execute({
+        sql: `INSERT INTO call_recording_audio (recording_id, storage_path, mimetype, filesize) VALUES (?, ?, ?, ?)
+              ON CONFLICT(recording_id) DO UPDATE SET storage_path = excluded.storage_path, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = now()`,
+        args: [recordingId, path, mimetype, audio.data?.length || null]
+      });
+      audioFetched = true;
+    } catch (err) {
+      audioError = err.message;
+    }
+  }
+
+  let transcript = existingTranscript || null;
+  let transcriptFetched = false;
+  if (!transcript) {
+    let transcriptError = null;
+    try {
+      transcript = await getTranscript(recordingId);
+    } catch (err) {
+      if (audio) {
+        try { transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype); }
+        catch (groqErr) { transcriptError = groqErr.message; }
+      } else {
+        transcriptError = err.message;
+      }
+    }
+    if (transcript) {
+      await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, recordingId] });
+      transcriptFetched = true;
+    }
+    return { audioFetched, audioError, transcriptFetched, transcriptError };
+  }
+
+  return { audioFetched, audioError, transcriptFetched, transcriptError: null };
+}
+
 const SYNC_PAGE_SIZE = 100;
 const SYNC_MAX_PAGES = 5; // 'recent' mode: caps a click at ~500 recordings checked, cheap (1 API call/page)
 const BACKFILL_MAX_PAGES = 15; // 'older' mode: pages much further back per click — safe since before_id is a real cursor, not the unconfirmed "offset" param
@@ -219,40 +269,11 @@ async function syncRecordings(direction = 'recent') {
   const contentErrors = [];
   for (const row of pending.rows) {
     if (audioFetched + transcriptFetched > 0) await sleepMs(600); // paces Dubber-side requests
-    let audio = null;
-    try {
-      audio = await downloadRecordingAudio(row.id);
-      await db.execute({ sql: 'UPDATE call_recordings SET has_audio = true WHERE id = ?', args: [row.id] });
-      const mimetype = audio.mimetype || 'audio/mpeg';
-      const path = `${row.id}.${extForMimetype(mimetype)}`;
-      await uploadBase64(BUCKETS.callRecordings, path, audio.data, mimetype);
-      await db.execute({
-        sql: `INSERT INTO call_recording_audio (recording_id, storage_path, mimetype, filesize) VALUES (?, ?, ?, ?)
-              ON CONFLICT(recording_id) DO UPDATE SET storage_path = excluded.storage_path, mimetype = excluded.mimetype, filesize = excluded.filesize, fetched_at = now()`,
-        args: [row.id, path, mimetype, audio.data?.length || null]
-      });
-      audioFetched++;
-    } catch (err) {
-      contentErrors.push({ recordingId: row.id, type: 'audio', reason: err.message });
-    }
-
-    if (!row.transcript) {
-      let transcript = null;
-      try {
-        transcript = await getTranscript(row.id);
-      } catch (err) {
-        if (audio) {
-          try { transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype); }
-          catch (groqErr) { contentErrors.push({ recordingId: row.id, type: 'transcript', reason: groqErr.message }); }
-        } else {
-          contentErrors.push({ recordingId: row.id, type: 'transcript', reason: err.message });
-        }
-      }
-      if (transcript) {
-        await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, row.id] });
-        transcriptFetched++;
-      }
-    }
+    const result = await fetchContentForRecording(row.id, { existingTranscript: row.transcript });
+    if (result.audioFetched) audioFetched++;
+    if (result.audioError) contentErrors.push({ recordingId: row.id, type: 'audio', reason: result.audioError });
+    if (result.transcriptFetched) transcriptFetched++;
+    if (result.transcriptError) contentErrors.push({ recordingId: row.id, type: 'transcript', reason: result.transcriptError });
   }
   const contentFetched = audioFetched; // audio is the currently-achievable metric
 
@@ -263,14 +284,6 @@ async function syncRecordings(direction = 'recent') {
   });
 
   return { totalSeen, totalNew, contentFetched, transcriptFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3), reachedEnd };
-}
-
-// Diagnostic only — the recording detail endpoint hasn't shown a playback URL
-// field in samples so far; this surfaces the raw response so we can find it
-// (e.g. by passing ?listener=, per third-party docs) before building real
-// playback into the UI.
-async function getRecordingPlaybackInfo(recordingId, listener) {
-  return dubberCall(`/recordings/${recordingId}`, listener ? { listener } : {});
 }
 
 // Diagnostic only — pulls a very small sample so a super_admin can inspect the
@@ -287,79 +300,4 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// Dubber's rate limit is 2 calls/second — firing several diagnostic requests
-// back-to-back would trip "Forbidden: Account Over Queries Per Second Limit"
-// (code 1021), which looks like a real rejection but actually means we never
-// got a conclusive answer. This spaces requests out and retries once on a
-// rate-limit response before giving up on that candidate.
-async function rateLimitedFetch(url, token) {
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = text.slice(0, 500); }
-  if (res.status === 403 && body?.code === 1021) {
-    await sleep(1200);
-    const retryRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-    const retryText = await retryRes.text();
-    let retryBody;
-    try { retryBody = JSON.parse(retryText); } catch { retryBody = retryText.slice(0, 500); }
-    return { status: retryRes.status, ok: retryRes.ok, body: retryBody, rateLimitedFirstTry: true };
-  }
-  return { status: res.status, ok: res.ok, body };
-}
-
-// Diagnostic only — the recordings endpoint returns a document_sentiment score,
-// proving Dubber transcribes calls behind the scenes, but no public docs confirm
-// where the actual transcript text lives. Rather than guess, try every plausible
-// path for one real recording and report which ones actually return data.
-async function findTranscript(recordingId) {
-  const token = await getAccessToken();
-  const candidates = [
-    { label: 'GET /recordings/{id}/transcript', path: `/recordings/${recordingId}/transcript` },
-    { label: 'GET /recordings/{id}/transcription', path: `/recordings/${recordingId}/transcription` },
-    { label: 'GET /recordings/{id}/document', path: `/recordings/${recordingId}/document` },
-    { label: 'GET /recordings/{id}/insights', path: `/recordings/${recordingId}/insights` },
-    { label: 'GET /recordings/{id}?include_transcript=true', path: `/recordings/${recordingId}`, params: { include_transcript: 'true' } },
-    { label: 'GET /documents/{id}', path: `/documents/${recordingId}` }
-  ];
-
-  const results = [];
-  for (const c of candidates) {
-    if (results.length > 0) await sleep(600); // stay under 2 calls/second
-    const qs = c.params ? `?${new URLSearchParams(c.params).toString()}` : '';
-    try {
-      const result = await rateLimitedFetch(`${BASE_URL}${c.path}${qs}`, token);
-      results.push({ label: c.label, ...result });
-    } catch (err) {
-      results.push({ label: c.label, status: null, ok: false, body: err.message });
-    }
-  }
-  return { recordingId, attempts: results };
-}
-
-// Diagnostic only — same rate-limit-aware approach as findTranscript, but for
-// finding which field/endpoint holds a playable audio URL.
-async function findPlayback(recordingId) {
-  const token = await getAccessToken();
-  const candidates = [
-    { label: 'GET /recordings/{id}', path: `/recordings/${recordingId}` },
-    { label: `GET /recordings/{id}?listener=${LISTENER_EMAIL}`, path: `/recordings/${recordingId}`, params: { listener: LISTENER_EMAIL } }
-  ];
-
-  const results = [];
-  for (const c of candidates) {
-    if (results.length > 0) await sleep(600);
-    const qs = c.params ? `?${new URLSearchParams(c.params).toString()}` : '';
-    try {
-      const result = await rateLimitedFetch(`${BASE_URL}${c.path}${qs}`, token);
-      results.push({ label: c.label, ...result });
-    } catch (err) {
-      results.push({ label: c.label, status: null, ok: false, body: err.message });
-    }
-  }
-  return { recordingId, attempts: results };
-}
-
-module.exports = { isConfigured, listRecordings, getRecording, getTranscript, downloadRecordingAudio, testConnection, findTranscript, findPlayback, syncRecordings, getRecordingPlaybackInfo };
+module.exports = { isConfigured, listRecordings, getRecording, getTranscript, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording };

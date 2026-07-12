@@ -750,17 +750,6 @@
         </div>
 
         <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">🔎 Find the Transcript &amp; Playback</div>
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Requests are spaced out to respect Dubber's 2 calls/second limit — a rate-limit response counts as inconclusive, not "doesn't exist", and is retried once automatically.</div>
-          <div style="display:flex;gap:8px;margin-bottom:10px">
-            <input type="text" id="callsTranscriptRecordingId" class="form-control" placeholder="Recording ID (from Test Connection above)" style="flex:1">
-            <button class="btn-add" id="callsFindTranscriptBtn" onclick="findTranscript()">Find Transcript</button>
-            <button class="btn-add" id="callsFindPlaybackBtn" onclick="findPlayback()">Find Playback</button>
-          </div>
-          <div id="callsFindTranscriptStatus" style="display:none;margin-top:10px"></div>
-        </div>
-
-        <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">⬇️ Sync Calls</div>
           <div id="callsSyncStatusLine" style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Checking local store…</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -3381,43 +3370,39 @@
 
     async function loadRubricReference() {
       const container = document.getElementById('rubricReferenceBody');
+      const isSuperAdmin = currentUserRole === 'super_admin';
       try {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
         container.innerHTML = Object.entries(callRubrics).map(([type, rubric]) => `
-          <div style="margin-bottom:22px">
-            <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:2px">${escHtml(rubric.label)}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(rubric.description)}</div>
-            <div style="overflow-x:auto">
-              <table class="data-table" style="font-size:12.5px">
+          <div style="margin-bottom:20px">
+            <div style="font-weight:700;font-size:13px;color:var(--navy)">${escHtml(rubric.label)}</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">${escHtml(rubric.description)} · scored 1–5 per category</div>
+            <div style="overflow-x:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
+              <table class="data-table" style="font-size:12px">
                 <thead>
                   <tr>
-                    <th>Section</th>
+                    <th style="width:150px">Category</th>
                     <th>Description</th>
-                    <th style="width:60px">Points</th>
-                    <th style="width:60px">Weight</th>
-                    <th style="width:150px"></th>
+                    <th style="width:52px">Wt.</th>
+                    <th style="width:${isSuperAdmin ? '210' : '110'}px"></th>
                   </tr>
                 </thead>
                 <tbody>
                   ${rubric.categories.map(c => `
                     <tr>
-                      <td style="font-weight:700;color:var(--navy);vertical-align:top">
+                      <td style="font-weight:700;color:var(--navy);vertical-align:top;padding:8px 12px">
                         ${escHtml(c.label)}
-                        ${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;display:inline-block;margin-top:4px">⛔ Zero-tolerance</div>' : ''}
+                        ${c.critical ? '<div style="font-size:9px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 5px;border-radius:4px;display:inline-block;margin-top:3px">⛔ Zero-tol.</div>' : ''}
                       </td>
-                      <td style="vertical-align:top">
-                        <ul style="margin:0;padding-left:16px;color:var(--text-muted);line-height:1.5">
-                          ${c.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}
-                        </ul>
-                      </td>
-                      <td style="text-align:center;color:var(--text-muted);vertical-align:top">1–5</td>
-                      <td style="text-align:center;font-weight:700;color:var(--orange);vertical-align:top">${c.weight}%</td>
-                      <td style="vertical-align:top">
+                      <td style="vertical-align:top;padding:8px 12px;color:var(--text-muted);line-height:1.45" id="rubric-desc-${type}-${c.key}">${escHtml(c.criteria.join(' · '))}</td>
+                      <td style="text-align:center;font-weight:700;color:var(--orange);vertical-align:top;padding:8px 12px">${c.weight}%</td>
+                      <td style="vertical-align:top;padding:8px 12px;white-space:nowrap">
                         <button class="action-btn edit" onclick="toggleRubricInstructions('${type}','${c.key}')">${c.instructions ? '📝 Instructions' : '+ Instructions'}</button>
+                        ${isSuperAdmin ? `<button class="action-btn edit" onclick="toggleRubricDescriptionEdit('${type}','${c.key}')">✏️ Description</button>` : ''}
                       </td>
                     </tr>
                     <tr id="rubric-instructions-${type}-${c.key}" style="display:none">
-                      <td colspan="5" style="background:var(--offwhite)">
+                      <td colspan="4" style="background:var(--offwhite)">
                         <label class="form-label-modal">In-depth grading instructions — ${escHtml(c.label)} (${escHtml(rubric.label)})</label>
                         <textarea id="rubric-instructions-text-${type}-${c.key}" class="form-control textarea" style="min-height:80px;margin-top:6px">${escHtml(c.instructions || '')}</textarea>
                         <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Saving re-summarises the Description column automatically via AI, and applies these instructions to every future AI evaluation for this category.</div>
@@ -3427,6 +3412,18 @@
                         </div>
                       </td>
                     </tr>
+                    ${isSuperAdmin ? `
+                    <tr id="rubric-description-edit-${type}-${c.key}" style="display:none">
+                      <td colspan="4" style="background:var(--offwhite)">
+                        <label class="form-label-modal">Edit description — ${escHtml(c.label)} (${escHtml(rubric.label)})</label>
+                        <textarea id="rubric-description-text-${type}-${c.key}" class="form-control textarea" style="min-height:70px;margin-top:6px">${escHtml(c.criteria.join('\n'))}</textarea>
+                        <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">One bullet per line. Saves directly, no AI rewrite — super admin only.</div>
+                        <div style="display:flex;gap:8px;margin-top:10px">
+                          <button class="btn-add" onclick="submitRubricDescription('${type}','${c.key}')">Save Description</button>
+                          <button class="btn-secondary" onclick="toggleRubricDescriptionEdit('${type}','${c.key}')">Cancel</button>
+                        </div>
+                      </td>
+                    </tr>` : ''}
                   `).join('')}
                 </tbody>
               </table>
@@ -3466,6 +3463,27 @@
         toast('Reverted to default description', 'success');
         await loadRubricReference();
       } catch { toast('Failed to clear', 'error'); }
+    }
+
+    function toggleRubricDescriptionEdit(type, key) {
+      const row = document.getElementById(`rubric-description-edit-${type}-${key}`);
+      row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+    }
+
+    async function submitRubricDescription(type, key) {
+      const text = document.getElementById(`rubric-description-text-${type}-${key}`).value;
+      const bullets = text.split('\n').map(x => x.trim()).filter(Boolean);
+      if (!bullets.length) { toast('Description cannot be empty', 'error'); return; }
+      try {
+        const res = await fetch(`/api/calls/rubrics/${type}/${key}/description`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: bullets })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
+        toast('Description saved', 'success');
+        await loadRubricReference();
+      } catch { toast('Save failed', 'error'); }
     }
 
     let allCalibrationNotes = [];
@@ -3805,6 +3823,7 @@
             <td>
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
                 <button class="action-btn edit" onclick="copyRecordingId('${r.id}')" title="${escHtml(r.id)}">Copy ID</button>
+                ${!gradeReady ? `<button class="action-btn edit" onclick="fetchCallContent('${r.id}', this)">⬇️ Fetch Transcription &amp; Audio</button>` : ''}
                 ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
                 ${r.has_transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
                 <select id="rubric-${escHtml(r.id)}" class="form-control" style="font-size:11px;padding:4px 6px;width:100px">
@@ -4228,59 +4247,23 @@
           <div style="font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Raw response (for inspecting the real data shape)</div>
           <pre style="background:var(--gray-100);border-radius:var(--radius);padding:14px;font-size:11px;line-height:1.5;overflow:auto;max-height:400px;white-space:pre-wrap">${escHtml(JSON.stringify(data, null, 2))}</pre>
         `;
-        const sampleId = data.listResponse?.recordings?.[0]?.id;
-        if (sampleId) document.getElementById('callsTranscriptRecordingId').value = sampleId;
       } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Connection test failed.</div>'; }
       finally { btn.disabled = false; btn.textContent = 'Test Connection'; }
     }
 
-    function renderFindAttempts(data) {
-      return data.attempts.map(a => `
-        <div style="padding:10px 14px;margin-bottom:6px;border-radius:var(--radius);background:${a.ok ? '#f0fdf4' : 'var(--gray-100)'};border:1px solid ${a.ok ? '#1a8a4a' : 'var(--gray-200)'}">
-          <div style="font-size:12px;font-weight:700;color:${a.ok ? '#1a8a4a' : 'var(--text-muted)'};margin-bottom:4px">${a.ok ? '✓' : '✗'} ${escHtml(a.label)} — HTTP ${a.status ?? 'error'}${a.rateLimitedFirstTry ? ' (rate-limited on first try, retried)' : ''}</div>
-          <pre style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;margin:0;max-height:200px;overflow:auto">${escHtml(typeof a.body === 'string' ? a.body : JSON.stringify(a.body, null, 2))}</pre>
-        </div>
-      `).join('');
-    }
-
-    async function findTranscript() {
-      const recordingId = document.getElementById('callsTranscriptRecordingId').value.trim();
-      if (!recordingId) { toast('Enter a recording ID first (or run Test Connection above)', 'error'); return; }
-      const btn = document.getElementById('callsFindTranscriptBtn');
-      const resultEl = document.getElementById('callsFindTranscriptStatus');
-      btn.disabled = true; btn.textContent = 'Searching…';
-      resultEl.style.display = 'block';
-      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Trying transcript endpoints (spaced out to respect rate limits, may take a few seconds)…';
+    async function fetchCallContent(recordingId, btn) {
+      const original = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Fetching…';
       try {
-        const res = await fetch(`/api/calls/find-transcript/${encodeURIComponent(recordingId)}`);
+        const res = await fetch(`/api/calls/${recordingId}/fetch-content`, { method: 'POST' });
         const data = await res.json();
-        if (!res.ok) {
-          resultEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Search failed')}</div>`;
-          return;
-        }
-        resultEl.innerHTML = renderFindAttempts(data);
-      } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Search failed.</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'Find Transcript'; }
-    }
-
-    async function findPlayback() {
-      const recordingId = document.getElementById('callsTranscriptRecordingId').value.trim();
-      if (!recordingId) { toast('Enter a recording ID first (or run Test Connection above)', 'error'); return; }
-      const btn = document.getElementById('callsFindPlaybackBtn');
-      const resultEl = document.getElementById('callsFindTranscriptStatus');
-      btn.disabled = true; btn.textContent = 'Searching…';
-      resultEl.style.display = 'block';
-      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Trying playback endpoints (spaced out to respect rate limits, may take a few seconds)…';
-      try {
-        const res = await fetch(`/api/calls/find-playback/${encodeURIComponent(recordingId)}`);
-        const data = await res.json();
-        if (!res.ok) {
-          resultEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Search failed')}</div>`;
-          return;
-        }
-        resultEl.innerHTML = renderFindAttempts(data);
-      } catch { resultEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Search failed.</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'Find Playback'; }
+        if (!res.ok) { toast(data.error || 'Fetch failed', 'error'); return; }
+        const errors = [data.audioError, data.transcriptError].filter(Boolean);
+        if (errors.length) toast(`Partially fetched — ${errors.join('; ')}`, 'error');
+        else toast('Content fetched', 'success');
+        loadCallsList();
+      } catch { toast('Fetch failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = original; }
     }
 
     init();

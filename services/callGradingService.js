@@ -136,10 +136,43 @@ For EVERY one of these ${rubric.categories.length} categories, without exception
 
 Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
 
-When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently). Use single quotation marks ('like this') around quoted excerpts rather than double quotes, so nothing you write can ever break the JSON format below.${knowledgeBlock}${calibrationBlock}${feedbackBlock}
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${feedbackBlock}
 
-Respond with ONLY valid JSON, no other text, in this exact shape:
-{"scores": [{"key": "${rubric.categories[0]?.key || 'opening'}", "score": 1-5, "notes": "3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone"}, ...one entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')}...], "summary": "4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager's perspective, referencing specific moments and the overall risk/coaching priority"}`;
+Call the submit_grading tool exactly once, with one scores entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — no more, no fewer.`;
+}
+
+// Grading is submitted as a tool call rather than free-text JSON — the API
+// guarantees the arguments are well-formed, so a long note with a stray
+// quote, apostrophe, or line break can no longer produce unparseable output
+// (previously the single biggest cause of "Could not parse the AI grading
+// response", since the model had to hand-escape its own JSON string values).
+function buildGradingTool(rubric) {
+  const keys = rubric.categories.map(c => c.key);
+  return {
+    name: 'submit_grading',
+    description: 'Submit the completed call quality grading — one score and note per category, plus an overall summary.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        scores: {
+          type: 'array',
+          minItems: keys.length,
+          maxItems: keys.length,
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: keys },
+              score: { type: 'integer', minimum: 1, maximum: 5 },
+              notes: { type: 'string', description: '3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone.' }
+            },
+            required: ['key', 'score', 'notes']
+          }
+        },
+        summary: { type: 'string', description: '4-5 sentence overall summary in formal Australian English, of how the call went from an operations manager\'s perspective, referencing specific moments and the overall risk/coaching priority.' }
+      },
+      required: ['scores', 'summary']
+    }
+  };
 }
 
 async function getCalibrationNotes() {
@@ -289,6 +322,31 @@ async function saveRubricInstructions(rubricType, categoryKey, instructions, upd
   return { description: bullets, instructions: trimmed };
 }
 
+// Direct, non-AI edit of the reference description — for a super_admin who
+// wants to fix the wording themselves rather than re-summarising via AI.
+// Any existing in-depth instructions for this category are left untouched.
+async function saveRubricDescription(rubricType, categoryKey, bullets, updatedBy) {
+  const rubric = RUBRICS[rubricType];
+  if (!rubric) throw new Error(`Unknown rubric type: ${rubricType}`);
+  const category = rubric.categories.find(c => c.key === categoryKey);
+  if (!category) throw new Error(`Unknown category: ${categoryKey}`);
+
+  const db = getDb();
+  const existing = await db.execute({
+    sql: 'SELECT instructions FROM call_rubric_customizations WHERE rubric_type = ? AND category_key = ?',
+    args: [rubricType, categoryKey]
+  });
+  const instructions = existing.rows[0]?.instructions ?? null;
+  const id = uuidv4();
+  await db.execute({
+    sql: `INSERT INTO call_rubric_customizations (id, rubric_type, category_key, description, instructions, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(rubric_type, category_key) DO UPDATE SET description = excluded.description, updated_by = excluded.updated_by, updated_at = now()`,
+    args: [id, rubricType, categoryKey, JSON.stringify(bullets), instructions, updatedBy || null]
+  });
+  return { description: bullets, instructions };
+}
+
 // Shared by AI grading and manual (human) grading so both produce comparable
 // weighted scores/outcomes for the future Call Quality Reporting rollup.
 function computeResult(rubric, rawScores, summary) {
@@ -354,16 +412,19 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
   }
 
   const system = buildSystemPrompt(rubric, repName, knowledgeMatches, calibrationNotes, feedback);
+  const tool = buildGradingTool(rubric);
 
   async function runOnce() {
     // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
     // operational stake + justification + coaching action), plus a richer
     // summary, plus any calibration/feedback context, needs real headroom —
-    // too little was cutting the JSON off mid-response and failing to parse.
+    // too little was cutting the response off mid-way.
     const response = await client.messages.create({
       model: 'claude-sonnet-5',
       max_tokens: 6144,
       system,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'submit_grading' },
       messages: [{ role: 'user', content: cleanTranscript.slice(0, 12000) }]
     });
 
@@ -371,19 +432,16 @@ async function gradeCall(transcriptText, rubricType, repName = null, feedback = 
       throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again.');
     }
 
-    // Sonnet 5 can emit a thinking block before the actual text block, so the
-    // final answer isn't reliably content[0] — find the text block explicitly.
-    // (Grabbing content[0] blindly silently defaulted every score to 3 with
-    // empty notes whenever a thinking block came first.)
-    const textBlock = response.content.find(b => b.type === 'text');
-    const raw = textBlock?.text || '{}';
-    const match = raw.match(/\{[\s\S]*\}/);
-    let parsed;
-    try { parsed = JSON.parse(match ? match[0] : raw); }
-    catch {
-      console.error('Call grading JSON parse failure. Raw response (first 1000 chars):', raw.slice(0, 1000));
-      throw new Error('Could not parse the AI grading response — please try again.');
+    // Tool-call input arrives pre-parsed by the API — no hand-rolled JSON
+    // extraction/parsing needed, and no risk of a note containing a stray
+    // quote or line break breaking the response (the old free-text-JSON
+    // approach's main failure mode).
+    const toolUse = response.content.find(b => b.type === 'tool_use' && b.name === 'submit_grading');
+    if (!toolUse) {
+      console.error('Call grading response had no submit_grading tool call. stop_reason:', response.stop_reason, 'content types:', response.content.map(b => b.type));
+      throw new Error('The AI did not submit a grading — please try again.');
     }
+    const parsed = toolUse.input || {};
 
     // Sanitize whatever the model returned regardless of cause, then check
     // every category actually got a substantive note — an empty one with a
@@ -432,5 +490,5 @@ async function saveEvaluation({ recordingId, repName, callType, rubricType, call
 module.exports = {
   RUBRICS, gradeCall, gradeManual, saveEvaluation,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
-  getAllEffectiveRubrics, saveRubricInstructions
+  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
 };
