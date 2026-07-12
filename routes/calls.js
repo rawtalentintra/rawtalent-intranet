@@ -85,11 +85,12 @@ router.get('/sync-status', requireSuperAdmin, async (req, res) => {
 // Browses the local cache — filterable, paginated, never hits Dubber's API.
 router.get('/local', async (req, res) => {
   try {
-    const { repName, phone, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
+    const { repName, phone, recordingId, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
     const conditions = [];
     const args = [];
     if (repName) { conditions.push('rep_name LIKE ?'); args.push(`%${repName}%`); }
     if (phone) { conditions.push('(to_number LIKE ? OR from_number LIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
+    if (recordingId) { conditions.push('id LIKE ?'); args.push(`%${recordingId}%`); }
     if (dateFrom) { conditions.push('start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
     if (dateTo) { conditions.push('start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -585,7 +586,14 @@ router.get('/volume-stats', async (req, res) => {
 
 router.get('/evaluations/:id', async (req, res) => {
   try {
-    const result = await getDb().execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    // Joined to call_recordings for the contact number — the evaluation
+    // itself never stored it, so this is the only way to show it alongside
+    // the recording ID in the detail view.
+    const result = await getDb().execute({
+      sql: `SELECT e.*, r.to_number, r.from_number FROM call_evaluations e
+            LEFT JOIN call_recordings r ON r.id = e.recording_id WHERE e.id = ?`,
+      args: [req.params.id]
+    });
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Evaluation not found' });
     res.json(row);

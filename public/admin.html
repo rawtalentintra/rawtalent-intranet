@@ -805,6 +805,7 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
             <input type="text" id="callsFilterRep" class="form-control" placeholder="Filter by rep name…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
             <input type="text" id="callsFilterPhone" class="form-control" placeholder="Filter by phone #…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
+            <input type="text" id="callsFilterRecordingId" class="form-control" placeholder="Filter by recording ID…" style="flex:1;min-width:160px" oninput="debounceFilterCalls()">
             <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
             <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
           </div>
@@ -4128,10 +4129,12 @@
         const params = new URLSearchParams({ page: callsCurrentPage, pageSize: 25 });
         const rep = document.getElementById('callsFilterRep').value.trim();
         const phone = document.getElementById('callsFilterPhone').value.trim();
+        const recordingId = document.getElementById('callsFilterRecordingId').value.trim();
         const from = document.getElementById('callsFilterFrom').value;
         const to = document.getElementById('callsFilterTo').value;
         if (rep) params.set('repName', rep);
         if (phone) params.set('phone', phone);
+        if (recordingId) params.set('recordingId', recordingId);
         if (from) params.set('dateFrom', from);
         if (to) params.set('dateTo', to);
 
@@ -4499,6 +4502,7 @@
           <div><strong style="color:var(--navy)">Call date:</strong> ${escHtml(e.call_date || '—')}</div>
           <div><strong style="color:var(--navy)">Duration:</strong> ${fmtDuration(e.duration_seconds)}</div>
           <div><strong style="color:var(--navy)">Recording ID:</strong> ${escHtml(e.recording_id)}</div>
+          <div><strong style="color:var(--navy)">Phone:</strong> ${escHtml((e.call_type === 'outbound' ? e.to_number : e.from_number) || '—')}</div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <div style="font-size:13px;color:var(--text-muted);max-width:600px">${escHtml(e.summary) || '<span style="font-style:italic">No summary provided.</span>'}</div>
