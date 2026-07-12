@@ -649,7 +649,7 @@ button { cursor: pointer; font-family: inherit; }
 /* ─── Admin Page ──────────────────────────────────────────────── */
 .admin-layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 244px 1fr;
   min-height: calc(100vh - 64px);
 }
 
