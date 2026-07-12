@@ -454,8 +454,8 @@ function computeResult(rubric, rawScores, summary) {
 
   let outcome;
   if (criticalFailed) outcome = 'escalate';
-  else if (overallScore >= 85) outcome = 'pass';
-  else if (overallScore >= 70) outcome = 'coaching';
+  else if (overallScore >= 75) outcome = 'pass';
+  else if (overallScore >= 50) outcome = 'coaching';
   else outcome = 'escalate';
 
   return { categoryScores, overallScore: Math.round(overallScore * 10) / 10, outcome, summary: summary || '' };
