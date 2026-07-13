@@ -2942,17 +2942,25 @@
     // Extend init to also load glossary
     const _origInit = init;
     // ── AI Sources ────────────────────────────────────────────────
-    let allSources = [];
+    // Server-side paginated/filtered — this table runs into the tens of
+    // thousands of rows, so fetching everything just to show 20 at a time
+    // was pure wasted bandwidth. Only currentPageSources is held in memory;
+    // a full fetch only happens on-demand for CSV export.
+    let currentPageSources = [];
+    let sourcesTotal = 0;
     let sourcesFilter = '';
     let sourcesPage = 1;
+    let sourcesSearchDebounce = null;
     const SOURCES_PER_PAGE = 20;
 
     async function loadSources() {
       document.getElementById('sourcesList').innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
-        const res = await fetch('/api/sources').then(r => r.json());
-        allSources = res;
-        sourcesPage = 1;
+        const params = new URLSearchParams({ page: sourcesPage, pageSize: SOURCES_PER_PAGE });
+        if (sourcesFilter) params.set('search', sourcesFilter);
+        const res = await fetch(`/api/sources?${params}`).then(r => r.json());
+        currentPageSources = res.sources;
+        sourcesTotal = res.total;
         renderSourcesList();
       } catch {
         document.getElementById('sourcesList').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load sources.</div>';
@@ -2960,39 +2968,37 @@
     }
 
     function filterSources(q) {
-      sourcesFilter = q.trim().toLowerCase();
-      sourcesPage = 1;
-      renderSourcesList();
+      clearTimeout(sourcesSearchDebounce);
+      sourcesSearchDebounce = setTimeout(() => {
+        sourcesFilter = q.trim();
+        sourcesPage = 1;
+        loadSources();
+      }, 300);
     }
 
     function changeSourcesPage(delta) {
       sourcesPage += delta;
-      renderSourcesList();
+      loadSources();
     }
 
     function renderSourcesList() {
       const el = document.getElementById('sourcesList');
-      const sources = sourcesFilter
-        ? allSources.filter(s => s.title.toLowerCase().includes(sourcesFilter) || (s.origin || '').toLowerCase().includes(sourcesFilter))
-        : allSources;
       document.getElementById('sourcesCount').textContent = sourcesFilter
-        ? `${sources.length} of ${allSources.length} source${allSources.length !== 1 ? 's' : ''}`
-        : `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
-      if (sources.length === 0) {
-        el.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">${allSources.length === 0 ? 'No sources yet. Upload a document or add a website URL above.' : 'No sources match your search.'}</div>`;
+        ? `${sourcesTotal} matching source${sourcesTotal !== 1 ? 's' : ''}`
+        : `${sourcesTotal} source${sourcesTotal !== 1 ? 's' : ''}`;
+      if (currentPageSources.length === 0) {
+        el.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">${sourcesTotal === 0 && !sourcesFilter ? 'No sources yet. Upload a document or add a website URL above.' : 'No sources match your search.'}</div>`;
         return;
       }
-      const totalPages = Math.max(1, Math.ceil(sources.length / SOURCES_PER_PAGE));
+      const totalPages = Math.max(1, Math.ceil(sourcesTotal / SOURCES_PER_PAGE));
       if (sourcesPage > totalPages) sourcesPage = totalPages;
-      const start = (sourcesPage - 1) * SOURCES_PER_PAGE;
-      const pageItems = sources.slice(start, start + SOURCES_PER_PAGE);
       const pagination = totalPages > 1 ? `
         <div style="display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 20px">
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeSourcesPage(-1)" ${sourcesPage === 1 ? 'disabled' : ''}>← Prev</button>
           <span style="font-size:13px;color:var(--text-muted)">Page ${sourcesPage} of ${totalPages}</span>
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeSourcesPage(1)" ${sourcesPage === totalPages ? 'disabled' : ''}>Next →</button>
         </div>` : '';
-      el.innerHTML = pageItems.map(s => `
+      el.innerHTML = currentPageSources.map(s => `
         <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--gray-100)">
           <span style="font-size:22px">${s.type === 'website' ? '🌐' : '📄'}</span>
           <div style="flex:1;min-width:0">
@@ -3128,24 +3134,35 @@
       } catch { toast('Delete failed', 'error'); }
     }
 
-    function exportSourcesToCsv() {
-      if (!allSources.length) { toast('No sources to export', 'error'); return; }
-      const headers = ['Title', 'Type', 'Source URL', 'Added By', 'Created', 'Updated'];
-      const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const rows = allSources.map(s => [
-        s.title, s.type, s.origin || '', s.added_by || '', s.created_at || '', s.updated_at || ''
-      ].map(csvEscape).join(','));
-      const csv = [headers.map(csvEscape).join(','), ...rows].join('\r\n');
-      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai-sources-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast(`Exported ${allSources.length} sources to CSV`, 'success');
+    async function exportSourcesToCsv() {
+      const btn = document.getElementById('exportCsvBtn');
+      const originalText = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Exporting…';
+      try {
+        // The list view only ever holds one page in memory — pull every row
+        // in one shot here, since export is the one case that genuinely needs it.
+        const params = new URLSearchParams({ all: 'true' });
+        if (sourcesFilter) params.set('search', sourcesFilter);
+        const { sources } = await fetch(`/api/sources?${params}`).then(r => r.json());
+        if (!sources.length) { toast('No sources to export', 'error'); return; }
+        const headers = ['Title', 'Type', 'Source URL', 'Added By', 'Created', 'Updated'];
+        const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const rows = sources.map(s => [
+          s.title, s.type, s.origin || '', s.added_by || '', s.created_at || '', s.updated_at || ''
+        ].map(csvEscape).join(','));
+        const csv = [headers.map(csvEscape).join(','), ...rows].join('\r\n');
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ai-sources-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast(`Exported ${sources.length} sources to CSV`, 'success');
+      } catch { toast('Export failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = originalText; }
     }
 
     async function refreshAllSources() {

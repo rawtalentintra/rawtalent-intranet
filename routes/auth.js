@@ -11,8 +11,12 @@ router.post('/login', (req, res, next) => {
     if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
     req.logIn(user, async (err) => {
       if (err) return res.status(500).json({ error: 'Login failed' });
-      await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [user.id] });
-      res.json({ success: true, user: { email: user.email, name: user.name, role: user.role } });
+      try {
+        await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [user.id] });
+        res.json({ success: true, user: { email: user.email, name: user.name, role: user.role } });
+      } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+      }
     });
   })(req, res, next);
 });
@@ -22,7 +26,11 @@ if (process.env.GOOGLE_CLIENT_ID) {
   router.get('/google/callback',
     passport.authenticate('google', { failureRedirect: '/login.html?error=1' }),
     async (req, res) => {
-      await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [req.user.id] });
+      try {
+        await getDb().execute({ sql: "UPDATE users SET last_login = now() WHERE id = ?", args: [req.user.id] });
+      } catch (err) {
+        console.error('Google login last_login update error:', err.message);
+      }
       res.redirect('/');
     }
   );
@@ -86,18 +94,22 @@ router.put('/change-password', async (req, res) => {
   if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both fields are required' });
   if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
 
-  const db = getDb();
-  const userRes = await db.execute({ sql: 'SELECT password_hash FROM users WHERE id = ?', args: [req.user.id] });
-  const user = userRes.rows[0];
-  if (!user || !user.password_hash) {
-    return res.status(400).json({ error: 'Password change is not available for Google sign-in accounts' });
-  }
-  const match = await bcrypt.compare(currentPassword, user.password_hash);
-  if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+  try {
+    const db = getDb();
+    const userRes = await db.execute({ sql: 'SELECT password_hash FROM users WHERE id = ?', args: [req.user.id] });
+    const user = userRes.rows[0];
+    if (!user || !user.password_hash) {
+      return res.status(400).json({ error: 'Password change is not available for Google sign-in accounts' });
+    }
+    const match = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
 
-  const hash = await bcrypt.hash(newPassword, 12);
-  await db.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [hash, req.user.id] });
-  res.json({ success: true });
+    const hash = await bcrypt.hash(newPassword, 12);
+    await db.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [hash, req.user.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

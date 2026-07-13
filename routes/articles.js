@@ -8,38 +8,41 @@ const { BUCKETS, downloadAsBuffer } = require('../services/storageService');
 router.get('/search', requireAuth, async (req, res) => {
   const { q, category, limit = 20 } = req.query;
   const db = getDb();
-  let rows;
 
-  if (q && q.trim().length > 0) {
-    // websearch_to_tsquery tolerates arbitrary free-text user input (unlike
-    // plainto_tsquery/to_tsquery, which can throw on certain syntax), so
-    // there's no need for the LIKE-based fallback the old FTS5 MATCH query
-    // used to need for malformed search terms.
-    const result = await db.execute({
-      sql: `SELECT id, title, summary, category, tags, created_at, updated_at
-            FROM articles
-            WHERE published = true
-              AND search_vector @@ websearch_to_tsquery('english', ?)
-              ${category ? 'AND category = ?' : ''}
-            ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC
-            LIMIT ?`,
-      args: [q.trim(), ...(category ? [category] : []), q.trim(), parseInt(limit)]
-    });
-    rows = result.rows;
-  } else {
-    const result = await db.execute({
-      sql: `SELECT id, title, summary, category, tags, created_at, updated_at
-            FROM articles
-            WHERE published = true
-              ${category ? 'AND category = ?' : ''}
-            ORDER BY updated_at DESC
-            LIMIT ?`,
-      args: [...(category ? [category] : []), parseInt(limit)]
-    });
-    rows = result.rows;
+  try {
+    let rows;
+    if (q && q.trim().length > 0) {
+      // websearch_to_tsquery tolerates arbitrary free-text user input (unlike
+      // plainto_tsquery/to_tsquery, which can throw on certain syntax), so
+      // there's no need for the LIKE-based fallback the old FTS5 MATCH query
+      // used to need for malformed search terms.
+      const result = await db.execute({
+        sql: `SELECT id, title, summary, category, tags, created_at, updated_at
+              FROM articles
+              WHERE published = true
+                AND search_vector @@ websearch_to_tsquery('english', ?)
+                ${category ? 'AND category = ?' : ''}
+              ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC
+              LIMIT ?`,
+        args: [q.trim(), ...(category ? [category] : []), q.trim(), parseInt(limit)]
+      });
+      rows = result.rows;
+    } else {
+      const result = await db.execute({
+        sql: `SELECT id, title, summary, category, tags, created_at, updated_at
+              FROM articles
+              WHERE published = true
+                ${category ? 'AND category = ?' : ''}
+              ORDER BY updated_at DESC
+              LIMIT ?`,
+        args: [...(category ? [category] : []), parseInt(limit)]
+      });
+      rows = result.rows;
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.json(rows);
 });
 
 // Get categories

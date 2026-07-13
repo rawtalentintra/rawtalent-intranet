@@ -9,10 +9,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.108.0",
-    "@libsql/client": "^0.14.0",
     "@supabase/supabase-js": "^2.110.2",
     "bcryptjs": "^2.4.3",
     "cheerio": "^1.2.0",
+    "compression": "^1.8.1",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "express-session": "^1.17.3",

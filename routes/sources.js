@@ -37,13 +37,38 @@ router.post('/ask', requireAuth, async (req, res) => {
 // ── Everything below is super_admin only ─────────────────────────
 router.use(requireSuperAdmin);
 
-// List all sources
+// List sources — paginated/filtered server-side by default (this table runs
+// into the tens of thousands of rows, and the admin list only ever shows 20
+// at a time), with an explicit `all=true` escape hatch for the CSV export,
+// which genuinely needs every row in one shot.
 router.get('/', async (req, res) => {
   try {
-    const result = await getDb().execute(
-      'SELECT id, type, title, origin, added_by, created_at, updated_at FROM knowledge_sources ORDER BY updated_at DESC'
-    );
-    res.json(result.rows);
+    const db = getDb();
+    const { search, all } = req.query;
+    const conditions = [];
+    const args = [];
+    if (search) { conditions.push('(title ILIKE ? OR origin ILIKE ?)'); args.push(`%${search}%`, `%${search}%`); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (all === 'true') {
+      const result = await db.execute({
+        sql: `SELECT id, type, title, origin, added_by, created_at, updated_at FROM knowledge_sources ${where} ORDER BY updated_at DESC`,
+        args
+      });
+      return res.json({ sources: result.rows, total: result.rows.length });
+    }
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Number(req.query.pageSize) || 20);
+    const offset = (page - 1) * pageSize;
+    const [rows, countRes] = await Promise.all([
+      db.execute({
+        sql: `SELECT id, type, title, origin, added_by, created_at, updated_at FROM knowledge_sources ${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+        args: [...args, pageSize, offset]
+      }),
+      db.execute({ sql: `SELECT COUNT(*) as n FROM knowledge_sources ${where}`, args })
+    ]);
+    res.json({ sources: rows.rows, total: Number(countRes.rows[0].n) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -107,11 +132,11 @@ router.post('/website', async (req, res) => {
 
 // Refresh a website source (re-fetch its content)
 router.post('/:id/refresh', async (req, res) => {
-  const db = getDb();
-  const result = await db.execute({ sql: "SELECT origin FROM knowledge_sources WHERE id = ? AND type = 'website'", args: [req.params.id] });
-  const src = result.rows[0];
-  if (!src) return res.status(404).json({ error: 'Website source not found' });
   try {
+    const db = getDb();
+    const result = await db.execute({ sql: "SELECT origin FROM knowledge_sources WHERE id = ? AND type = 'website'", args: [req.params.id] });
+    const src = result.rows[0];
+    if (!src) return res.status(404).json({ error: 'Website source not found' });
     const { title, text } = await fetchWebText(src.origin);
     await db.execute({
       sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=now() WHERE id=?",
@@ -209,47 +234,55 @@ router.post('/crawl', async (req, res) => {
 
 // Refresh all website sources
 router.post('/refresh-all', async (req, res) => {
-  const db = getDb();
-  const result = await db.execute("SELECT id, origin FROM knowledge_sources WHERE type = 'website' AND origin != ''");
-  const sources = result.rows;
-  const refreshed = [], failed = [];
-  const BATCH = 3;
-  for (let i = 0; i < sources.length; i += BATCH) {
-    await Promise.allSettled(sources.slice(i, i + BATCH).map(async (src) => {
-      try {
-        const { title, text } = await fetchWebText(src.origin);
-        await db.execute({
-          sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=now() WHERE id=?",
-          args: [title, text.trim(), src.id]
-        });
-        refreshed.push(src.origin);
-      } catch (e) { failed.push({ origin: src.origin, reason: e.message }); }
-    }));
-    if (i + BATCH < sources.length) await new Promise(r => setTimeout(r, 600));
+  try {
+    const db = getDb();
+    const result = await db.execute("SELECT id, origin FROM knowledge_sources WHERE type = 'website' AND origin != ''");
+    const sources = result.rows;
+    const refreshed = [], failed = [];
+    const BATCH = 3;
+    for (let i = 0; i < sources.length; i += BATCH) {
+      await Promise.allSettled(sources.slice(i, i + BATCH).map(async (src) => {
+        try {
+          const { title, text } = await fetchWebText(src.origin);
+          await db.execute({
+            sql: "UPDATE knowledge_sources SET title=?, content=?, updated_at=now() WHERE id=?",
+            args: [title, text.trim(), src.id]
+          });
+          refreshed.push(src.origin);
+        } catch (e) { failed.push({ origin: src.origin, reason: e.message }); }
+      }));
+      if (i + BATCH < sources.length) await new Promise(r => setTimeout(r, 600));
+    }
+    res.json({ refreshed: refreshed.length, failed: failed.length, total: sources.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.json({ refreshed: refreshed.length, failed: failed.length, total: sources.length });
 });
 
 // Remove duplicate sources (same origin URL — keep newest)
 router.post('/dedup', async (req, res) => {
-  const db = getDb();
-  const result = await db.execute(
-    `SELECT origin, COUNT(*) as cnt, MIN(created_at) as oldest_created
-     FROM knowledge_sources WHERE origin != '' GROUP BY origin HAVING cnt > 1`
-  );
-  let removed = 0;
-  for (const row of result.rows) {
-    const dupes = await db.execute({
-      sql: 'SELECT id FROM knowledge_sources WHERE origin = ? ORDER BY created_at DESC',
-      args: [row.origin]
-    });
-    // Keep the first (newest), delete the rest
-    for (const dupe of dupes.rows.slice(1)) {
-      await db.execute({ sql: 'DELETE FROM knowledge_sources WHERE id = ?', args: [dupe.id] });
-      removed++;
+  try {
+    const db = getDb();
+    const result = await db.execute(
+      `SELECT origin, COUNT(*) as cnt, MIN(created_at) as oldest_created
+       FROM knowledge_sources WHERE origin != '' GROUP BY origin HAVING cnt > 1`
+    );
+    let removed = 0;
+    for (const row of result.rows) {
+      const dupes = await db.execute({
+        sql: 'SELECT id FROM knowledge_sources WHERE origin = ? ORDER BY created_at DESC',
+        args: [row.origin]
+      });
+      // Keep the first (newest), delete the rest
+      for (const dupe of dupes.rows.slice(1)) {
+        await db.execute({ sql: 'DELETE FROM knowledge_sources WHERE id = ?', args: [dupe.id] });
+        removed++;
+      }
     }
+    res.json({ removed, duplicateGroups: result.rows.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.json({ removed, duplicateGroups: result.rows.length });
 });
 
 // Delete a source
