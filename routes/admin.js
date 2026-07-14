@@ -387,8 +387,8 @@ router.delete('/glossary/:id', async (req, res) => {
   }
 });
 
-// ── Feedback (super_admin only) ───────────────────────────────────
-router.get('/feedback', requireSuperAdmin, async (req, res) => {
+// ── Feedback (admin and super_admin — router-level requireAdmin above covers this) ──
+router.get('/feedback', async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM feedback ORDER BY created_at DESC');
     res.json(result.rows);
@@ -397,7 +397,7 @@ router.get('/feedback', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.put('/feedback/:id', requireSuperAdmin, async (req, res) => {
+router.put('/feedback/:id', async (req, res) => {
   const { status, adminComments } = req.body;
   try {
     await getDb().execute({
@@ -410,7 +410,7 @@ router.put('/feedback/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.delete('/feedback/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/feedback/:id', async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM feedback WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });

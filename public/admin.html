@@ -214,12 +214,12 @@
           <span class="admin-nav-icon">📞</span> Call Quality Evaluator
         </div>
       </div>
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Insights</div>
         <div class="admin-nav-item" onclick="showSection('feedback', this)">
           <span class="admin-nav-icon">💬</span> Feedback
         </div>
-        <div class="admin-nav-item" onclick="showSection('logs', this)">
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('logs', this)">
           <span class="admin-nav-icon">📋</span> Change Logs
         </div>
       </div>
@@ -1988,7 +1988,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'feedback', 'logs', 'sources', 'faq'];
+    const superAdminSections = ['users', 'logs', 'sources', 'faq'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
