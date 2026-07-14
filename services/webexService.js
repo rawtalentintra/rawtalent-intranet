@@ -102,32 +102,49 @@ async function fetchAgentStatuses() {
   const usersRes = await db.execute("SELECT email, name, role FROM users WHERE active = true");
   const byEmail = new Map(usersRes.rows.map(u => [String(u.email).toLowerCase(), u]));
 
-  const agents = people
-    .filter(p => p.email && byEmail.has(p.email.toLowerCase()))
-    .map(p => {
-      const user = byEmail.get(p.email.toLowerCase());
-      const since = recordStatusSince(p.email.toLowerCase(), p.status);
-      return { email: p.email, name: user.name || p.displayName, role: user.role, status: p.status, statusSince: since };
-    });
+  const matched = people.filter(p => p.email && byEmail.has(p.email.toLowerCase()));
+  const sinceByEmail = await recordStatusSince(db, matched);
+
+  const agents = matched.map(p => {
+    const user = byEmail.get(p.email.toLowerCase());
+    return { email: p.email, name: user.name || p.displayName, role: user.role, status: p.status, statusSince: sinceByEmail.get(p.email.toLowerCase()) };
+  });
 
   return { configured: true, agents };
 }
 
 // Duration isn't something Webex's API exposes — it's derived from our own
-// poll history: the first time we observe a given status for someone, we
-// timestamp it, and every poll after that (while the status is unchanged)
-// just reports elapsed time since. This means duration is only accurate
-// from whenever this process last started — a deploy/restart resets the
-// clock, which is an acceptable trade-off for a live dashboard indicator,
-// not an audit record.
-const statusSinceByEmail = new Map();
-function recordStatusSince(email, status) {
-  const prev = statusSinceByEmail.get(email);
-  if (!prev || prev.status !== status) {
-    statusSinceByEmail.set(email, { status, since: Date.now() });
-    return Date.now();
+// poll history, persisted in the DB (not memory) so a deploy/restart doesn't
+// silently reset every agent's duration to zero. The first time we observe a
+// given status for someone, we timestamp it; every poll after that, while
+// the status is unchanged, just reports elapsed time since.
+async function recordStatusSince(db, people) {
+  const emails = people.map(p => p.email.toLowerCase());
+  const existingRes = emails.length
+    ? await db.execute({
+        sql: `SELECT email, status, since FROM webex_agent_status_state WHERE email = ANY(?)`,
+        args: [emails]
+      })
+    : { rows: [] };
+  const existingByEmail = new Map(existingRes.rows.map(r => [String(r.email).toLowerCase(), r]));
+
+  const result = new Map();
+  for (const p of people) {
+    const email = p.email.toLowerCase();
+    const existing = existingByEmail.get(email);
+    if (existing && existing.status === p.status) {
+      result.set(email, Number(existing.since));
+      continue;
+    }
+    const since = Date.now();
+    result.set(email, since);
+    await db.execute({
+      sql: `INSERT INTO webex_agent_status_state (email, status, since, updated_at) VALUES (?, ?, ?, now())
+            ON CONFLICT (email) DO UPDATE SET status = excluded.status, since = excluded.since, updated_at = now()`,
+      args: [email, p.status, since]
+    });
   }
-  return prev.since;
+  return result;
 }
 
 // Cache briefly so N browser tabs polling this page don't each trigger their

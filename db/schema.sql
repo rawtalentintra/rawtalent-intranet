@@ -401,3 +401,14 @@ CREATE TABLE IF NOT EXISTS webex_auth_state (
   access_token_expires_at BIGINT,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- How long each agent has held their current Webex status — Webex's API has
+-- no such field, so this is derived from our own poll history and must be
+-- persisted (not kept in memory) so a deploy/restart doesn't reset every
+-- agent's duration back to zero.
+CREATE TABLE IF NOT EXISTS webex_agent_status_state (
+  email CITEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  since BIGINT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
