@@ -594,8 +594,8 @@
           <div class="form-group-modal">
             <label class="form-label-modal">Source Material</label>
             <textarea id="newCourseMaterial" class="form-control textarea" style="min-height:140px" placeholder="Paste the training material here…"></textarea>
-            <div class="form-hint">Or upload a document instead of pasting — whichever you provide, the pasted text is ignored if a file is attached.</div>
-            <input type="file" id="newCourseFile" accept=".pdf,.docx,.txt" style="margin-top:8px">
+            <div class="form-hint">Or upload one or more documents instead of pasting (hold Cmd/Ctrl to select several) — the pasted text is ignored if any files are attached.</div>
+            <input type="file" id="newCourseFile" accept=".pdf,.docx,.txt" multiple style="margin-top:8px">
           </div>
           <div style="display:flex;gap:8px;margin-top:14px">
             <button class="btn-secondary" onclick="closeNewCourseForm()">Cancel</button>
@@ -3003,9 +3003,9 @@
       const title = document.getElementById('newCourseTitle').value.trim();
       const description = document.getElementById('newCourseDescription').value.trim();
       const material = document.getElementById('newCourseMaterial').value.trim();
-      const file = document.getElementById('newCourseFile').files[0];
+      const files = document.getElementById('newCourseFile').files;
       if (!title) { toast('Course title is required', 'error'); return; }
-      if (!material && !file) { toast('Paste the training material or upload a document', 'error'); return; }
+      if (!material && !files.length) { toast('Paste the training material or upload a document', 'error'); return; }
 
       const btn = document.getElementById('generateCourseBtn');
       btn.disabled = true; btn.textContent = 'Generating… this can take a minute';
@@ -3013,7 +3013,7 @@
         const formData = new FormData();
         formData.append('title', title);
         formData.append('description', description);
-        if (file) formData.append('document', file);
+        if (files.length) { for (const f of files) formData.append('documents', f); }
         else formData.append('material', material);
 
         const res = await fetch('/api/training/courses/generate', { method: 'POST', body: formData });

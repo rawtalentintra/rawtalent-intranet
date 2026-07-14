@@ -1,10 +1,76 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
+const { searchKnowledge, getGlossaryBlock } = require('./aiService');
+const { listCalibrationNotes } = require('./callGradingService');
 
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
+
+// Pulls in everything else RawTalent already knows that's topically related
+// to this course — articles, AI sources, FAQs, glossary terms, and real
+// coaching takeaways from call evaluations/calibration notes — so the
+// generated course reflects the same institutional knowledge as the rest of
+// the app, not just whatever was pasted/uploaded in isolation. This is
+// supplementary grounding for the model, not primary content: the uploaded
+// material stays the spine of the course.
+async function gatherCourseContext(db, title, description) {
+  const query = [title, description].filter(Boolean).join(' ');
+  const parts = [];
+
+  try {
+    const glossaryBlock = await getGlossaryBlock(db);
+    if (glossaryBlock) parts.push(glossaryBlock);
+  } catch (err) {
+    console.error('Training context: glossary lookup failed (continuing without it):', err.message);
+  }
+
+  try {
+    const knowledgeResults = await searchKnowledge(db, query, 12);
+    if (knowledgeResults.length) {
+      const blocks = knowledgeResults.map(r =>
+        `### [${r.source_type}] ${r.title}\n${(r.content || '').slice(0, 1500)}`
+      ).join('\n\n');
+      parts.push(`\n\n## Related Internal Articles, AI Sources & FAQs\n${blocks}`);
+    }
+  } catch (err) {
+    console.error('Training context: knowledge search failed (continuing without it):', err.message);
+  }
+
+  try {
+    const words = query.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+    if (words.length) {
+      const conditions = words.slice(0, 5).map(() => 'summary ILIKE ?').join(' OR ');
+      const args = words.slice(0, 5).map(w => `%${w}%`);
+      const evalRes = await db.execute({
+        sql: `SELECT summary, rubric_type FROM call_evaluations WHERE (${conditions}) AND summary IS NOT NULL ORDER BY created_at DESC LIMIT 5`,
+        args
+      });
+      if (evalRes.rows.length) {
+        // Deliberately excludes rep names — this is background context on
+        // real call patterns for the model to draw on, not material to
+        // quote verbatim into learner-facing content.
+        const blocks = evalRes.rows.map(r => `- (${r.rubric_type}) ${r.summary}`).join('\n');
+        parts.push(`\n\n## Real Call Evaluation Themes (anonymised — use to identify common real-world mistakes worth addressing, do not quote verbatim)\n${blocks}`);
+      }
+    }
+  } catch (err) {
+    console.error('Training context: evaluation search failed (continuing without it):', err.message);
+  }
+
+  try {
+    const notes = await listCalibrationNotes();
+    if (notes.length) {
+      const blocks = notes.slice(0, 15).map(n => `- ${n.note}`).join('\n');
+      parts.push(`\n\n## Standing Call-Grading Calibration Notes (human-reviewed corrections — treat as authoritative)\n${blocks}`);
+    }
+  } catch (err) {
+    console.error('Training context: calibration notes lookup failed (continuing without it):', err.message);
+  }
+
+  return parts.join('');
 }
 
 // ── AI generation ────────────────────────────────────────────────
@@ -58,8 +124,15 @@ async function generateCourseFromMaterial({ title, description, material, create
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
   if (!material?.trim()) throw new Error('Source material is required to generate a course.');
 
+  const db = getDb();
+  const contextBlock = await gatherCourseContext(db, title, description);
+
   const tool = buildGenerationTool();
-  const system = `You are building internal staff training for RawTalent, an Australian childcare staffing agency. Given raw source material (a process doc, SOP, or reference sheet), break it into a logical sequence of study modules a new consultant can work through — each module should cover one coherent chunk of the material (e.g. one process, one concept area), not an arbitrary page split. After each module, write 1-3 multiple-choice comprehension questions that check whether the learner actually understood THAT module's content — plausible wrong answers, not trick questions. Then write a final assessment of at least 5 multiple-choice questions drawing across the whole course, testing real retention. Write everything in clear, formal Australian English. Call submit_course exactly once.`;
+  const system = `You are building internal staff training for RawTalent, an Australian childcare staffing agency. Given raw source material (a process doc, SOP, or reference sheet) plus supplementary context pulled from RawTalent's own knowledge base (internal articles, AI sources, FAQs, glossary, and real call-evaluation/calibration data), break the material into a logical sequence of study modules a new consultant can work through — each module should cover one coherent chunk of the material (e.g. one process, one concept area), not an arbitrary page split.
+
+The uploaded/pasted source material is the SPINE of the course — build modules from it directly. Use the supplementary context to enrich and correct that content: apply glossary terms precisely wherever they're relevant, fold in directly relevant detail from related articles/FAQs/AI sources where it fills a gap the source material leaves open, and — where the call-evaluation themes or calibration notes surface a common real mistake related to this topic — make sure a module or question addresses it. Don't force in unrelated context just because it was provided; only use what's actually relevant to this course's material.
+
+After each module, write 1-3 multiple-choice comprehension questions that check whether the learner actually understood THAT module's content — plausible wrong answers, not trick questions. Then write a final assessment of at least 5 multiple-choice questions drawing across the whole course, testing real retention. Write everything in clear, formal Australian English. Call submit_course exactly once.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
@@ -67,7 +140,7 @@ async function generateCourseFromMaterial({ title, description, material, create
     system,
     tools: [tool],
     tool_choice: { type: 'tool', name: 'submit_course' },
-    messages: [{ role: 'user', content: `Course title: ${title}\n${description ? `Course description: ${description}\n` : ''}\nSource material:\n${material.slice(0, 30000)}` }]
+    messages: [{ role: 'user', content: `Course title: ${title}\n${description ? `Course description: ${description}\n` : ''}\nSource material:\n${material.slice(0, 30000)}${contextBlock ? `\n\n---\n# Supplementary RawTalent Knowledge Base Context\n${contextBlock.slice(0, 15000)}` : ''}` }]
   });
 
   if (response.stop_reason === 'max_tokens') {
@@ -303,6 +376,7 @@ async function getCourseResults(courseId) {
 
 module.exports = {
   generateCourseFromMaterial,
+  gatherCourseContext,
   saveCourse,
   listCourses,
   getCourseDetail,

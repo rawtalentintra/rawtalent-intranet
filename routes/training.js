@@ -29,16 +29,22 @@ router.get('/courses/:id', async (req, res) => {
   }
 });
 
-// Accepts either a pasted `material` string or an uploaded document
-// (pdf/docx/txt) — whichever is present wins.
-router.post('/courses/generate', upload.single('document'), async (req, res) => {
+// Accepts either a pasted `material` string or one or more uploaded
+// documents (pdf/docx/txt) — uploaded files win over pasted text if both
+// are present. Each file's text is kept under a heading naming the source
+// file, so the model can tell where one document ends and the next begins.
+router.post('/courses/generate', upload.array('documents', 10), async (req, res) => {
   try {
     const { title, description } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Course title is required' });
 
     let material = req.body.material || '';
-    if (req.file) {
-      material = await extractPlainText(req.file.buffer, req.file.originalname);
+    if (req.files?.length) {
+      const extracted = await Promise.all(req.files.map(async f => {
+        const text = await extractPlainText(f.buffer, f.originalname);
+        return `--- ${f.originalname} ---\n${text}`;
+      }));
+      material = extracted.join('\n\n');
     }
     if (!material.trim()) return res.status(400).json({ error: 'Paste the training material or upload a document' });
 
