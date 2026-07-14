@@ -215,6 +215,12 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label">Workforce Management</div>
+        <div class="admin-nav-item" onclick="showSection('workforce-queue', this)">
+          <span class="admin-nav-icon">🧑‍💻</span> Workforce Queue
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Insights</div>
         <div class="admin-nav-item" onclick="showSection('feedback', this)">
           <span class="admin-nav-icon">💬</span> Feedback
@@ -520,6 +526,22 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- Workforce Queue -->
+      <div class="admin-section" id="section-workforce-queue">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Workforce Queue</div>
+            <div class="admin-page-sub">Live view of who's on a call, in a meeting, or available right now</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:20px">
+          <button class="cat-chip active" id="wf-view-agent-status">Agent Status</button>
+        </div>
+        <div id="workforceAgentStatusBody">
+          <div class="loading-spinner"><div class="spinner"></div></div>
         </div>
       </div>
 
@@ -2012,6 +2034,8 @@
       if (id === 'calls-dashboard') loadCallsDashboard();
       if (id === 'call-rubrics') loadRubricReference();
       if (id === 'team') loadOurTeam();
+      if (id === 'workforce-queue') startWorkforceStatusPolling();
+      else stopWorkforceStatusPolling();
       closeMobileSidebar();
     }
 
@@ -2696,6 +2720,63 @@
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    // ── Workforce Queue — Agent Status ──────────────────────────────
+    // Only polls while the section is actually visible (started/stopped
+    // from showSection) — no point hitting the Webex API in the background
+    // for a dashboard nobody's looking at.
+    let workforceStatusInterval = null;
+    const WORKFORCE_STATUS_LABELS = {
+      call: { label: 'On a call', color: '#c0392b', bg: '#fef2f2' },
+      meeting: { label: 'In a meeting', color: '#7c3aed', bg: 'rgba(124,58,237,.1)' },
+      DoNotDisturb: { label: 'Do not disturb', color: '#c0392b', bg: '#fef2f2' },
+      active: { label: 'Available', color: '#15803d', bg: 'rgba(34,197,94,.12)' },
+      OutOfOffice: { label: 'Out of office', color: 'var(--text-muted)', bg: 'var(--gray-100)' },
+      pending: { label: 'Away', color: 'var(--text-muted)', bg: 'var(--gray-100)' },
+      inactive: { label: 'Inactive', color: 'var(--text-muted)', bg: 'var(--gray-100)' },
+      unknown: { label: 'Unknown', color: 'var(--text-muted)', bg: 'var(--gray-100)' }
+    };
+
+    function startWorkforceStatusPolling() {
+      loadWorkforceAgentStatus();
+      stopWorkforceStatusPolling();
+      workforceStatusInterval = setInterval(loadWorkforceAgentStatus, 20 * 1000);
+    }
+
+    function stopWorkforceStatusPolling() {
+      if (workforceStatusInterval) { clearInterval(workforceStatusInterval); workforceStatusInterval = null; }
+    }
+
+    async function loadWorkforceAgentStatus() {
+      const body = document.getElementById('workforceAgentStatusBody');
+      try {
+        const res = await fetch('/api/workforce/agent-status').then(r => r.json());
+        if (res.error) { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">${escHtml(res.error)}</div>`; return; }
+        if (!res.configured) {
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Webex isn't connected yet — add WEBEX_CLIENT_ID / WEBEX_CLIENT_SECRET / WEBEX_REFRESH_TOKEN to get live agent status here.</div>`;
+          return;
+        }
+        if (!res.agents.length) {
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No matching agents found — make sure their RawTalent KB email matches their Webex email.</div>`;
+          return;
+        }
+        const rows = res.agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map(a => {
+          const s = WORKFORCE_STATUS_LABELS[a.status] || WORKFORCE_STATUS_LABELS.unknown;
+          return `
+            <tr>
+              <td style="font-weight:600;color:var(--navy)">${escHtml(a.name)}</td>
+              <td style="color:var(--text-muted);font-size:12.5px">${escHtml(a.email)}</td>
+              <td><span class="badge" style="background:${s.bg};color:${s.color}">${s.label}</span></td>
+            </tr>`;
+        }).join('');
+        body.innerHTML = `
+          <table class="data-table">
+            <thead><tr><th>Agent</th><th>Email</th><th>Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call.</div>`;
+      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
     }
 
     // ── Feedback ──────────────────────────────────────────────────

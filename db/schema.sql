@@ -388,3 +388,16 @@ CREATE INDEX IF NOT EXISTS idx_team_members_manager_id ON team_members(manager_i
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_article_id ON feedback(article_id);
 CREATE INDEX IF NOT EXISTS idx_article_logs_article_id ON article_logs(article_id);
+
+-- Single-row token store for the Webex Service App (Workforce Management).
+-- Access tokens last 14 days and refresh tokens rotate (a new one is issued)
+-- on every refresh, so both must be persisted here rather than left as a
+-- static env var — WEBEX_REFRESH_TOKEN in .env only seeds this table once,
+-- on first boot.
+CREATE TABLE IF NOT EXISTS webex_auth_state (
+  id INTEGER PRIMARY KEY,
+  access_token TEXT,
+  refresh_token TEXT,
+  access_token_expires_at BIGINT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

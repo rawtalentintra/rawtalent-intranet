@@ -50,6 +50,7 @@ app.use('/api/faq', require('./routes/faq'));
 app.use('/api/calls', require('./routes/calls'));
 app.use('/api/team', require('./routes/team'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/workforce', require('./routes/workforce'));
 
 function guardRoute(req, res, file, adminOnly = false) {
   if (!req.isAuthenticated()) return res.redirect('/login.html');
