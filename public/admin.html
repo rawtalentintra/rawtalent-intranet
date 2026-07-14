@@ -220,12 +220,12 @@
           <span class="admin-nav-icon">🧑‍💻</span> Workforce Queue
         </div>
       </div>
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Training Hub</div>
         <div class="admin-nav-item" onclick="showSection('training-dashboard', this)">
           <span class="admin-nav-icon">🎓</span> Training Dashboard
         </div>
-        <div class="admin-nav-item" onclick="showSection('training-build', this)">
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('training-build', this)">
           <span class="admin-nav-icon">🛠️</span> Build Training
         </div>
       </div>
@@ -2116,7 +2116,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'faq', 'training-dashboard', 'training-build'];
+    const superAdminSections = ['users', 'logs', 'sources', 'faq', 'training-build'];
 
     function showSection(id, el) {
       if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -2916,7 +2916,7 @@
       try {
         trainingCourses = await fetch('/api/training/courses').then(r => r.json());
         if (!trainingCourses.length) {
-          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No courses yet — head to Build Training to create one.</div>`;
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No courses yet${currentUserRole === 'super_admin' ? ' — head to Build Training to create one' : ' — ask a super admin to build one'}.</div>`;
           return;
         }
         body.innerHTML = `

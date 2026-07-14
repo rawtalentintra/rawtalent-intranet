@@ -1,15 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const training = require('../services/trainingService');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-// Training Hub is super_admin only for now — nobody else can even see this
-// nav section, let alone hit these routes.
-router.use(requireSuperAdmin);
+// Training Dashboard (read-only: course list, detail, results) is open to
+// admin + super_admin. Everything else — building/editing/publishing a
+// course and taking it — is super_admin only, gated per-route below.
+router.use(requireAdmin);
 
 router.get('/courses', async (req, res) => {
   try {
@@ -29,11 +30,19 @@ router.get('/courses/:id', async (req, res) => {
   }
 });
 
+router.get('/courses/:id/results', async (req, res) => {
+  try {
+    res.json(await training.getCourseResults(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Accepts either a pasted `material` string or one or more uploaded
 // documents (pdf/docx/txt) — uploaded files win over pasted text if both
 // are present. Each file's text is kept under a heading naming the source
 // file, so the model can tell where one document ends and the next begins.
-router.post('/courses/generate', upload.array('documents', 10), async (req, res) => {
+router.post('/courses/generate', requireSuperAdmin, upload.array('documents', 10), async (req, res) => {
   try {
     const { title, description } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Course title is required' });
@@ -61,7 +70,7 @@ router.post('/courses/generate', upload.array('documents', 10), async (req, res)
   }
 });
 
-router.put('/courses/:id', async (req, res) => {
+router.put('/courses/:id', requireSuperAdmin, async (req, res) => {
   try {
     await training.updateCourse(req.params.id, req.body);
     res.json({ success: true });
@@ -70,7 +79,7 @@ router.put('/courses/:id', async (req, res) => {
   }
 });
 
-router.delete('/courses/:id', async (req, res) => {
+router.delete('/courses/:id', requireSuperAdmin, async (req, res) => {
   try {
     await training.deleteCourse(req.params.id);
     res.json({ success: true });
@@ -79,7 +88,7 @@ router.delete('/courses/:id', async (req, res) => {
   }
 });
 
-router.put('/modules/:moduleId', async (req, res) => {
+router.put('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
   try {
     await training.updateModule(req.params.moduleId, req.body);
     res.json({ success: true });
@@ -88,7 +97,7 @@ router.put('/modules/:moduleId', async (req, res) => {
   }
 });
 
-router.delete('/modules/:moduleId', async (req, res) => {
+router.delete('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
   try {
     await training.deleteModule(req.params.moduleId);
     res.json({ success: true });
@@ -97,7 +106,7 @@ router.delete('/modules/:moduleId', async (req, res) => {
   }
 });
 
-router.put('/questions/:questionId', async (req, res) => {
+router.put('/questions/:questionId', requireSuperAdmin, async (req, res) => {
   try {
     await training.updateQuestion(req.params.questionId, req.body);
     res.json({ success: true });
@@ -106,7 +115,7 @@ router.put('/questions/:questionId', async (req, res) => {
   }
 });
 
-router.delete('/questions/:questionId', async (req, res) => {
+router.delete('/questions/:questionId', requireSuperAdmin, async (req, res) => {
   try {
     await training.deleteQuestion(req.params.questionId);
     res.json({ success: true });
@@ -115,17 +124,9 @@ router.delete('/questions/:questionId', async (req, res) => {
   }
 });
 
-router.get('/courses/:id/results', async (req, res) => {
-  try {
-    res.json(await training.getCourseResults(req.params.id));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Taking a course (super_admin only, for now — same gate as everything
-// else in this file, since nobody else can reach Training Hub yet) ──
-router.post('/courses/:id/attempts', async (req, res) => {
+// ── Taking a course (super_admin only, for now — Build Training's own
+// preview flow, not part of Training Dashboard access) ──
+router.post('/courses/:id/attempts', requireSuperAdmin, async (req, res) => {
   try {
     const attempt = await training.startAttempt(req.params.id, req.user.email);
     res.json(attempt);
@@ -134,7 +135,7 @@ router.post('/courses/:id/attempts', async (req, res) => {
   }
 });
 
-router.get('/attempts/:id', async (req, res) => {
+router.get('/attempts/:id', requireSuperAdmin, async (req, res) => {
   try {
     const attempt = await training.getAttempt(req.params.id);
     if (!attempt) return res.status(404).json({ error: 'Attempt not found' });
@@ -144,7 +145,7 @@ router.get('/attempts/:id', async (req, res) => {
   }
 });
 
-router.post('/attempts/:id/modules/:moduleId/answers', async (req, res) => {
+router.post('/attempts/:id/modules/:moduleId/answers', requireSuperAdmin, async (req, res) => {
   try {
     const result = await training.submitModuleAnswers(req.params.id, req.params.moduleId, req.body.answers || {});
     res.json(result);
@@ -153,7 +154,7 @@ router.post('/attempts/:id/modules/:moduleId/answers', async (req, res) => {
   }
 });
 
-router.post('/attempts/:id/final', async (req, res) => {
+router.post('/attempts/:id/final', requireSuperAdmin, async (req, res) => {
   try {
     const result = await training.submitFinalAssessment(req.params.id, req.body.answers || {});
     res.json(result);
