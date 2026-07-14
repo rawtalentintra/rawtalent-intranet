@@ -203,9 +203,12 @@ async function listCourses() {
     SELECT course_id, COUNT(*) AS attempts, COUNT(*) FILTER (WHERE status = 'completed') AS completed,
            COUNT(*) FILTER (WHERE final_passed = true) AS passed
     FROM training_attempts GROUP BY course_id`);
+  const modulesRes = await db.execute('SELECT course_id, COUNT(*) AS module_count FROM training_modules GROUP BY course_id');
   const statsByCourseId = new Map(attemptsRes.rows.map(r => [r.course_id, r]));
+  const moduleCountByCourseId = new Map(modulesRes.rows.map(r => [r.course_id, Number(r.module_count)]));
   return coursesRes.rows.map(c => ({
     ...c,
+    module_count: moduleCountByCourseId.get(c.id) || 0,
     stats: statsByCourseId.get(c.id) || { attempts: 0, completed: 0, passed: 0 }
   }));
 }

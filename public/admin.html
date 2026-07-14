@@ -2927,11 +2927,14 @@
                 <tr>
                   <td style="font-weight:600;color:var(--navy)">${escHtml(c.title)}</td>
                   <td>${trainingStatusBadge(c.status)}</td>
-                  <td style="text-align:center">${c.modules?.length ?? '—'}</td>
+                  <td style="text-align:center">${c.module_count ?? '—'}</td>
                   <td style="text-align:center">${c.stats.attempts}</td>
                   <td style="text-align:center">${c.stats.completed}</td>
                   <td style="text-align:center">${c.stats.passed}</td>
-                  <td><button class="action-btn edit" onclick="openCourseResults('${c.id}','${escHtml(c.title)}')">View Results</button></td>
+                  <td>
+                    ${c.status === 'live' ? `<button class="action-btn edit" onclick="startTakeCourse('${c.id}')">▶ Take Course</button>` : ''}
+                    <button class="action-btn edit" onclick="openCourseResults('${c.id}','${escHtml(c.title)}')">View Results</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3189,6 +3192,10 @@
     async function previewCourse() {
       const courseId = currentCourseEditor.id;
       closeCourseEditor();
+      startTakeCourse(courseId);
+    }
+
+    async function startTakeCourse(courseId) {
       document.getElementById('takeCourseModal').classList.add('open');
       const body = document.getElementById('takeCourseBody');
       body.innerHTML = `<div class="loading-spinner"><div class="spinner"></div></div>`;

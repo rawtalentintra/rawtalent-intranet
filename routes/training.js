@@ -124,9 +124,9 @@ router.delete('/questions/:questionId', requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ── Taking a course (super_admin only, for now — Build Training's own
-// preview flow, not part of Training Dashboard access) ──
-router.post('/courses/:id/attempts', requireSuperAdmin, async (req, res) => {
+// ── Taking a course — open to anyone who can reach Training Dashboard
+// (admin + super_admin), same gate as the read-only routes above ──
+router.post('/courses/:id/attempts', async (req, res) => {
   try {
     const attempt = await training.startAttempt(req.params.id, req.user.email);
     res.json(attempt);
@@ -135,7 +135,7 @@ router.post('/courses/:id/attempts', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.get('/attempts/:id', requireSuperAdmin, async (req, res) => {
+router.get('/attempts/:id', async (req, res) => {
   try {
     const attempt = await training.getAttempt(req.params.id);
     if (!attempt) return res.status(404).json({ error: 'Attempt not found' });
@@ -145,7 +145,7 @@ router.get('/attempts/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.post('/attempts/:id/modules/:moduleId/answers', requireSuperAdmin, async (req, res) => {
+router.post('/attempts/:id/modules/:moduleId/answers', async (req, res) => {
   try {
     const result = await training.submitModuleAnswers(req.params.id, req.params.moduleId, req.body.answers || {});
     res.json(result);
@@ -154,7 +154,7 @@ router.post('/attempts/:id/modules/:moduleId/answers', requireSuperAdmin, async 
   }
 });
 
-router.post('/attempts/:id/final', requireSuperAdmin, async (req, res) => {
+router.post('/attempts/:id/final', async (req, res) => {
   try {
     const result = await training.submitFinalAssessment(req.params.id, req.body.answers || {});
     res.json(result);
