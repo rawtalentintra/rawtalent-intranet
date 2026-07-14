@@ -2738,6 +2738,17 @@
       unknown: { label: 'Unknown', color: 'var(--text-muted)', bg: 'var(--gray-100)' }
     };
 
+    function formatWorkforceDuration(statusSince) {
+      if (!statusSince) return '—';
+      const totalSeconds = Math.max(0, Math.floor((Date.now() - statusSince) / 1000));
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
     function startWorkforceStatusPolling() {
       loadWorkforceAgentStatus();
       stopWorkforceStatusPolling();
@@ -2768,14 +2779,15 @@
               <td style="font-weight:600;color:var(--navy)">${escHtml(a.name)}</td>
               <td style="color:var(--text-muted);font-size:12.5px">${escHtml(a.email)}</td>
               <td><span class="badge" style="background:${s.bg};color:${s.color}">${s.label}</span></td>
+              <td style="color:var(--text-muted);font-size:12.5px">${formatWorkforceDuration(a.statusSince)}</td>
             </tr>`;
         }).join('');
         body.innerHTML = `
           <table class="data-table">
-            <thead><tr><th>Agent</th><th>Email</th><th>Status</th></tr></thead>
+            <thead><tr><th>Agent</th><th>Email</th><th>Status</th><th>Duration</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
-          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call.</div>`;
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration is tracked from when this app first saw the status change, so it resets after a deploy/restart.</div>`;
       } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
     }
 

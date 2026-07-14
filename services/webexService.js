@@ -106,10 +106,28 @@ async function fetchAgentStatuses() {
     .filter(p => p.email && byEmail.has(p.email.toLowerCase()))
     .map(p => {
       const user = byEmail.get(p.email.toLowerCase());
-      return { email: p.email, name: user.name || p.displayName, role: user.role, status: p.status };
+      const since = recordStatusSince(p.email.toLowerCase(), p.status);
+      return { email: p.email, name: user.name || p.displayName, role: user.role, status: p.status, statusSince: since };
     });
 
   return { configured: true, agents };
+}
+
+// Duration isn't something Webex's API exposes — it's derived from our own
+// poll history: the first time we observe a given status for someone, we
+// timestamp it, and every poll after that (while the status is unchanged)
+// just reports elapsed time since. This means duration is only accurate
+// from whenever this process last started — a deploy/restart resets the
+// clock, which is an acceptable trade-off for a live dashboard indicator,
+// not an audit record.
+const statusSinceByEmail = new Map();
+function recordStatusSince(email, status) {
+  const prev = statusSinceByEmail.get(email);
+  if (!prev || prev.status !== status) {
+    statusSinceByEmail.set(email, { status, since: Date.now() });
+    return Date.now();
+  }
+  return prev.since;
 }
 
 // Cache briefly so N browser tabs polling this page don't each trigger their
