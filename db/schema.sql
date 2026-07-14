@@ -412,3 +412,75 @@ CREATE TABLE IF NOT EXISTS webex_agent_status_state (
   since BIGINT NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- ── Training Hub (LMS) ──────────────────────────────────────────────
+-- A course is generated from source material (pasted or uploaded), broken
+-- into modules with a short comprehension check after each one, plus a
+-- final graded assessment. super_admin only for now — access is gated at
+-- the route level, not the schema.
+CREATE TABLE IF NOT EXISTS training_courses (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft', -- 'draft' | 'live'
+  source_material TEXT,
+  pass_threshold INTEGER NOT NULL DEFAULT 80, -- % correct on the final assessment required to pass
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_modules (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_training_modules_course_id ON training_modules(course_id);
+
+-- module_id is NULL for final-assessment questions, set for a per-module
+-- comprehension check. question_type is fixed to 'multiple_choice' for now
+-- (options/correct_answer only make sense for that) — a future
+-- 'short_answer'/AI-graded type can reuse this table without a schema change.
+CREATE TABLE IF NOT EXISTS training_questions (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  module_id TEXT,
+  question_type TEXT NOT NULL DEFAULT 'multiple_choice',
+  question_text TEXT NOT NULL,
+  options JSONB,
+  correct_answer TEXT,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_training_questions_course_id ON training_questions(course_id);
+CREATE INDEX IF NOT EXISTS idx_training_questions_module_id ON training_questions(module_id);
+
+CREATE TABLE IF NOT EXISTS training_attempts (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  user_email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'in_progress', -- 'in_progress' | 'completed'
+  current_module_index INTEGER NOT NULL DEFAULT 0,
+  module_results JSONB DEFAULT '[]',
+  final_score REAL,
+  final_passed BOOLEAN,
+  started_at TIMESTAMPTZ DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_training_attempts_course_id ON training_attempts(course_id);
+CREATE INDEX IF NOT EXISTS idx_training_attempts_user_email ON training_attempts(user_email);
+
+CREATE TABLE IF NOT EXISTS training_answers (
+  id TEXT PRIMARY KEY,
+  attempt_id TEXT NOT NULL,
+  question_id TEXT NOT NULL,
+  selected_answer TEXT,
+  is_correct BOOLEAN,
+  answered_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_training_answers_attempt_id ON training_answers(attempt_id);
