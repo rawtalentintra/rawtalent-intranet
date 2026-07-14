@@ -51,7 +51,7 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.post('/users', requireSuperAdmin, async (req, res) => {
-  const { email, name, password, role = 'user' } = req.body;
+  const { email, name, password, role = 'user', active = true } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });
   if (!email.toLowerCase().endsWith('@rawtalent.com.au')) {
     return res.status(400).json({ error: 'Only @rawtalent.com.au email addresses are allowed' });
@@ -64,8 +64,8 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 
     const hash = password ? await bcrypt.hash(password, 12) : null;
     await db.execute({
-      sql: 'INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, ?)',
-      args: [email.toLowerCase(), name, hash, role]
+      sql: 'INSERT INTO users (email, name, password_hash, role, active) VALUES (?, ?, ?, ?, ?)',
+      args: [email.toLowerCase(), name, hash, role, !!active]
     });
     await logActivity('user', email.toLowerCase(), 'created', `User "${name}" (${role}) created`, req.user.email);
     res.json({ success: true });

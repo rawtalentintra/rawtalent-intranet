@@ -2463,7 +2463,7 @@
         const method = id ? 'PUT' : 'POST';
         const body = id
           ? { name, role, active, ...(password ? { password } : {}) }
-          : { email, name, password, role };
+          : { email, name, password, role, active };
 
         const res = await fetch(url, {
           method,
