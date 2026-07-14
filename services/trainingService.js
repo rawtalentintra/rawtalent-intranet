@@ -134,14 +134,19 @@ The uploaded/pasted source material is the SPINE of the course — build modules
 
 After each module, write 1-3 multiple-choice comprehension questions that check whether the learner actually understood THAT module's content — plausible wrong answers, not trick questions. Then write a final assessment of at least 5 multiple-choice questions drawing across the whole course, testing real retention. Write everything in clear, formal Australian English. Call submit_course exactly once.`;
 
-  const response = await client.messages.create({
+  // Streamed (not a plain create()) because a multi-module course with rich
+  // per-module HTML, comprehension questions, and a final assessment can
+  // legitimately need tens of thousands of output tokens — well past the
+  // point where a non-streaming request risks an SDK HTTP timeout.
+  const stream = client.messages.stream({
     model: 'claude-sonnet-5',
-    max_tokens: 8192,
+    max_tokens: 64000,
     system,
     tools: [tool],
     tool_choice: { type: 'tool', name: 'submit_course' },
     messages: [{ role: 'user', content: `Course title: ${title}\n${description ? `Course description: ${description}\n` : ''}\nSource material:\n${material.slice(0, 30000)}${contextBlock ? `\n\n---\n# Supplementary RawTalent Knowledge Base Context\n${contextBlock.slice(0, 15000)}` : ''}` }]
   });
+  const response = await stream.finalMessage();
 
   if (response.stop_reason === 'max_tokens') {
     throw new Error('The AI response was cut off before it finished — try shortening the source material or splitting it into a smaller course.');
