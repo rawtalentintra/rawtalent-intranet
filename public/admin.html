@@ -2961,7 +2961,7 @@
         }
         body.innerHTML = `
           <table class="data-table">
-            <thead><tr><th>User</th><th>Status</th><th>Score</th><th>Result</th><th>Started</th></tr></thead>
+            <thead><tr><th>User</th><th>Status</th><th>Score</th><th>Result</th><th>Started</th><th></th></tr></thead>
             <tbody>
               ${results.map(r => `
                 <tr>
@@ -2970,6 +2970,7 @@
                   <td>${r.final_score != null ? r.final_score + '%' : '—'}</td>
                   <td>${r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>')}</td>
                   <td style="font-size:12.5px;color:var(--text-muted)">${fmtDate(r.started_at)}</td>
+                  <td>${currentUserRole === 'super_admin' ? `<button class="action-btn delete" onclick="resetAttemptConfirm('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}')">Reset</button>` : ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -2977,6 +2978,20 @@
       } catch { body.innerHTML = `<div style="padding:24px;text-align:center;color:#c0392b">Failed to load results.</div>`; }
     }
     function closeCourseResults() { document.getElementById('courseResultsModal').classList.remove('open'); }
+
+    function resetAttemptConfirm(courseId, courseTitle, userEmail) {
+      document.getElementById('confirmTitle').textContent = 'Reset Progress';
+      document.getElementById('confirmMsg').textContent = `Clear all attempts and scores for "${userEmail}" on this course? They'll start completely fresh next time they take it.`;
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          const res = await fetch(`/api/training/courses/${courseId}/results/${encodeURIComponent(userEmail)}`, { method: 'DELETE' });
+          if (res.ok) { toast('Progress reset', 'success'); await openCourseResults(courseId, courseTitle); }
+          else toast('Reset failed', 'error');
+        } catch { toast('Network error', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
+    }
 
     // ── Build Training — course list ──
     async function loadTrainingBuildList() {

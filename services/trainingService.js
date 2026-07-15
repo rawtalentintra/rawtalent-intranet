@@ -382,6 +382,29 @@ async function getCourseResults(courseId) {
   return res.rows;
 }
 
+// Deletes a single attempt (and its answers), letting that person start
+// the course fresh — clears both a stuck in-progress attempt and a
+// completed score.
+async function deleteAttempt(attemptId) {
+  const db = getDb();
+  await db.execute({ sql: 'DELETE FROM training_answers WHERE attempt_id = ?', args: [attemptId] });
+  await db.execute({ sql: 'DELETE FROM training_attempts WHERE id = ?', args: [attemptId] });
+}
+
+// Deletes every attempt a person has made on a course, in case they have
+// more than one (e.g. an old completed run plus a stuck in-progress one).
+async function resetUserAttempts(courseId, userEmail) {
+  const db = getDb();
+  const attempts = await db.execute({
+    sql: 'SELECT id FROM training_attempts WHERE course_id = ? AND user_email = ?',
+    args: [courseId, userEmail]
+  });
+  for (const a of attempts.rows) {
+    await deleteAttempt(a.id);
+  }
+  return attempts.rows.length;
+}
+
 module.exports = {
   generateCourseFromMaterial,
   gatherCourseContext,
@@ -398,5 +421,7 @@ module.exports = {
   getAttempt,
   submitModuleAnswers,
   submitFinalAssessment,
-  getCourseResults
+  getCourseResults,
+  deleteAttempt,
+  resetUserAttempts
 };

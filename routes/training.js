@@ -163,4 +163,15 @@ router.post('/attempts/:id/final', async (req, res) => {
   }
 });
 
+// Reset a person's course progress — deletes every attempt they have on
+// this course so their next "Take Course" starts completely fresh.
+router.delete('/courses/:id/results/:userEmail', requireSuperAdmin, async (req, res) => {
+  try {
+    const count = await training.resetUserAttempts(req.params.id, decodeURIComponent(req.params.userEmail));
+    res.json({ success: true, attemptsRemoved: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
