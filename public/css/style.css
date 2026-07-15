@@ -657,6 +657,10 @@ button { cursor: pointer; font-family: inherit; }
   background: var(--navy);
   padding: 16px 0;
   border-right: 1px solid rgba(255,255,255,.06);
+  position: sticky;
+  top: 64px;
+  height: calc(100vh - 64px);
+  overflow-y: auto;
 }
 
 .admin-nav-section {

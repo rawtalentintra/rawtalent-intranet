@@ -1887,6 +1887,8 @@
       document.getElementById('teamProfilePersonal').innerHTML = `
         <strong>Full Name:</strong> ${escHtml(m.legal_name || m.name)}<br>
         <strong>Nickname:</strong> ${escHtml(m.name)}<br>
+        <strong>Email:</strong> ${escHtml(m.email || '—')}<br>
+        <strong>Phone / WhatsApp:</strong> ${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}<br>
         <strong>Employment Date:</strong> ${escHtml(m.employment_date || '—')}<br>
         <strong>Birthdate:</strong> ${escHtml(m.birthdate || '—')}<br>
         <strong>Address:</strong> ${escHtml(m.address || '—')}<br>
