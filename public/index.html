@@ -551,54 +551,26 @@
     .empty-title { font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
     .spinner-wrap { display: flex; justify-content: center; padding: 60px; }
 
-    /* Org chart — read-only mirror of the admin panel's version */
-    #teamChartContainer { overflow: hidden; text-align: center; background: white; border-radius: var(--radius-lg); padding: 44px 24px; border: 1px solid var(--gray-200); }
-    .org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; text-align: center; }
-    .org-tree { display: inline-block; white-space: nowrap; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    .org-tree ul { display: flex; padding-top: 20px; position: relative; }
-    .org-tree li { display: inline-flex; flex-direction: column; align-items: center; padding: 20px 8px 0 8px; position: relative; white-space: normal; }
-    .org-tree li::before, .org-tree li::after {
-      content: ''; position: absolute; top: 0; right: 50%;
-      border-top: 2px solid var(--gray-200); width: 50%; height: 20px;
-    }
-    .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--gray-200); }
-    .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
-    .org-tree li:only-child { padding-top: 0; }
-    .org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
-    .org-tree li:last-child::before { border-right: 2px solid var(--gray-200); border-radius: 0 6px 0 0; }
-    .org-tree li:first-child::after { border-radius: 6px 0 0 0; }
-    .org-tree ul::before {
-      content: ''; position: absolute; top: 0; left: 50%;
-      border-left: 2px solid var(--gray-200); width: 0; height: 20px;
-    }
-    .org-tree li > ul { margin-top: 0; }
+    /* Org chart — read-only mirror of the admin panel's free-canvas version.
+       Positions come from chart_x/chart_y (or an auto-arranged grid default
+       when unset) — purely spatial, not derived from manager_id. */
+    #teamChartContainer { overflow: auto; background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--gray-200); }
+    .org-canvas { position: relative; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .org-node {
-      display: inline-block; min-width: 100px; padding: 8px 12px; border-radius: 8px;
-      background: var(--gray-100); border: 1px solid var(--gray-200); cursor: pointer;
-      transition: transform .15s ease, box-shadow .15s ease;
+      position: absolute; width: 148px; box-sizing: border-box; padding: 9px 12px;
+      border-radius: 10px; background: white; border: 1.5px solid var(--gray-200);
+      text-align: center; cursor: pointer; user-select: none;
+      transition: box-shadow .15s ease, border-color .15s ease;
     }
-    .org-node:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.08); border-color: var(--orange); }
-    .org-node.org-node-manager { background: #e4e9fd; border: 1.5px solid #8b9cf0; }
-    .org-node.org-node-founder {
-      background: var(--navy); border-color: var(--navy); min-width: 120px;
-      align-self: stretch; box-sizing: border-box;
-    }
+    .org-node:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); border-color: var(--orange); }
+    .org-node.org-node-founder { background: var(--navy); border-color: var(--navy); }
     .org-node.org-node-founder .org-node-name, .org-node.org-node-founder .org-node-position { color: white; }
     .org-node.org-node-tohire { background: var(--gray-100); border: 1.5px dashed var(--gray-300); cursor: default; opacity: .75; }
-    .org-node-name { font-weight: 700; font-size: 12px; color: var(--navy); line-height: 1.3; white-space: nowrap; }
-    .org-node-position { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.25; white-space: nowrap; }
+    .org-node-name { font-weight: 700; font-size: 12px; color: var(--navy); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .org-node-position { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .org-node-founder .org-node-name { font-size: 14.5px; }
     .org-node-founder .org-node-position { font-size: 11px; }
-    .org-team-pill {
-      display: inline-block; background: var(--navy); color: white; font-size: 8.5px; font-weight: 700;
-      letter-spacing: .3px; padding: 3px 9px; border-radius: 20px; margin-bottom: 6px; white-space: nowrap;
-    }
-    .org-misc-column { display: flex; flex-direction: column; align-items: stretch; gap: 16px; position: relative; padding-left: 26px; padding-top: 4px; }
-    .org-misc-column::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; width: 2px; background: var(--gray-300); }
-    .org-misc-item { position: relative; display: flex; flex-direction: column; align-items: stretch; }
-    .org-misc-item::before { content: ''; position: absolute; left: -26px; top: 20px; width: 26px; height: 2px; background: var(--gray-300); }
-    .org-misc-item > ul { padding-top: 20px; }
-    .org-misc-item > .org-node { width: 100%; box-sizing: border-box; }
+    .org-node-team { font-size: 8.5px; font-weight: 700; letter-spacing: .4px; color: var(--orange); margin-top: 4px; }
     .team-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     .team-table th { text-align: left; padding: 7px 14px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); background: var(--gray-100); border-bottom: 1px solid var(--gray-200); }
     .team-table td { padding: 5px 14px; font-size: 12.5px; line-height: 1.3; border-bottom: 1px solid var(--gray-100); color: var(--text); vertical-align: middle; }
@@ -1141,107 +1113,53 @@
       try {
         allTeamMembers = await fetch('/api/team').then(r => r.json());
         list.innerHTML = `
-          <div id="teamChartContainer">${renderOrgChart(allTeamMembers)}</div>
+          <div id="teamChartContainer">${renderOrgCanvas(allTeamMembers)}</div>
           <div style="overflow-x:auto">${renderTeamTable(allTeamMembers)}</div>
         `;
-        const chartEl = document.getElementById('teamChartContainer');
-        if (chartEl) {
-          fitOrgChart(chartEl);
-          setTimeout(() => fitOrgChart(chartEl), 60);
-        }
+        document.querySelectorAll('#teamChartContainer .org-node').forEach(node => {
+          if (node.classList.contains('org-node-tohire')) return;
+          node.addEventListener('click', () => openTeamProfile(node.dataset.id));
+        });
       } catch {
         list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load team.</div></div>';
       }
     }
 
-    function renderOrgChart(members) {
+    const ORG_NODE_W = 148, ORG_NODE_H = 64;
+    function orgDefaultPosition(index) {
+      const cols = 6, spacingX = 188, spacingY = 116;
+      return { x: 24 + (index % cols) * spacingX, y: 20 + Math.floor(index / cols) * spacingY };
+    }
+    function orgNodePosition(member, index) {
+      const def = orgDefaultPosition(index);
+      return {
+        x: member.chart_x != null ? member.chart_x : def.x,
+        y: member.chart_y != null ? member.chart_y : def.y
+      };
+    }
+
+    function renderOrgCanvas(members) {
       if (members.length === 0) {
         return '<div style="text-align:center;padding:20px;color:var(--text-muted)">No team members yet.</div>';
       }
-      const byManager = {};
-      members.forEach(m => {
-        const key = m.manager_id || 'root';
-        (byManager[key] = byManager[key] || []).push(m);
-      });
-      Object.values(byManager).forEach(l => l.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
-      const root = (byManager['root'] || [])[0];
-      if (!root) return '<div style="text-align:center;padding:20px;color:var(--text-muted)">No founder set.</div>';
-
-      // Direct reports who lead a team of their own render as their own
-      // branch; everyone else is stacked vertically into one "misc" column
-      // so the middle branch lands directly under the founder.
-      const directReports = byManager[root.id] || [];
-      const branches = [], misc = [];
-      directReports.forEach(child => {
-        const grandchildren = byManager[child.id] || [];
-        (grandchildren.some(g => g.team) ? branches : misc).push(child);
-      });
-      const branchHtml = branches.map(b => renderOrgNode(b, byManager, root.id)).join('');
-      const miscHtml = misc.length ? renderMiscColumn(misc, byManager, root.id) : '';
-      const childrenHtml = branchHtml + miscHtml;
-      return `<div class="org-tree"><ul><li>${renderNodeBox(root, [], root.id)}${childrenHtml ? `<ul>${childrenHtml}</ul>` : ''}</li></ul></div>`;
-    }
-
-    function renderNodeBox(member, children, rootId) {
-      const isFounder = !member.manager_id;
-      const isToHire = member.status === 'to_hire';
-      const isManagerTier = member.manager_id === rootId || children.length > 0;
-      const tierClass = isFounder ? 'org-node-founder' : isToHire ? 'org-node-tohire' : isManagerTier ? 'org-node-manager' : '';
-      return `
-        <div class="org-node ${tierClass}" ${isToHire ? '' : `onclick="openTeamProfile('${member.id}')"`}>
-          <div class="org-node-name">${escHtml(member.name)}</div>
-          ${member.position ? `<div class="org-node-position">${escHtml(member.position)}</div>` : ''}
-        </div>
-      `;
-    }
-
-    function renderOrgNode(member, byManager, rootId) {
-      const children = byManager[member.id] || [];
-      const showTeamPill = member.team && children.some(c => c.team === member.team);
-      return `
-        <li>
-          ${showTeamPill ? `<div class="org-team-pill">${escHtml(member.team.toUpperCase())}</div>` : ''}
-          ${renderNodeBox(member, children, rootId)}
-          ${children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager, rootId)).join('')}</ul>` : ''}
-        </li>
-      `;
-    }
-
-    function renderMiscColumn(miscMembers, byManager, rootId) {
-      const items = miscMembers.map(m => {
-        const children = byManager[m.id] || [];
-        const childUl = children.length ? `<ul>${children.map(c => renderOrgNode(c, byManager, rootId)).join('')}</ul>` : '';
-        return `<div class="org-misc-item">${renderNodeBox(m, children, rootId)}${childUl}</div>`;
+      let maxX = 0, maxY = 0;
+      const nodes = members.map((m, i) => {
+        const { x, y } = orgNodePosition(m, i);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+        const isFounder = /founder/i.test(m.position || '');
+        const isToHire = m.status === 'to_hire';
+        const tierClass = isFounder ? 'org-node-founder' : isToHire ? 'org-node-tohire' : '';
+        return `
+          <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px">
+            <div class="org-node-name">${escHtml(m.name)}</div>
+            ${m.position ? `<div class="org-node-position">${escHtml(m.position)}</div>` : ''}
+            ${m.team ? `<div class="org-node-team">${escHtml(m.team.toUpperCase())}</div>` : ''}
+          </div>`;
       }).join('');
-      return `<li><div class="org-misc-column">${items}</div></li>`;
+      const canvasW = Math.max(maxX + ORG_NODE_W + 30, 700);
+      const canvasH = Math.max(maxY + ORG_NODE_H + 30, 260);
+      return `<div class="org-canvas" style="width:${canvasW}px;height:${canvasH}px">${nodes}</div>`;
     }
-
-    // Lower floor than the admin panel's — this page's results column caps
-    // out narrower (860px), so the chart needs more headroom to shrink
-    // before it would otherwise overflow.
-    const ORG_CHART_MIN_SCALE = 0.55;
-    function fitOrgChart(container) {
-      const tree = container.querySelector('.org-tree');
-      if (!tree) return;
-      tree.style.transform = 'none';
-      tree.style.marginLeft = '';
-      container.style.height = '';
-      const naturalWidth = tree.scrollWidth;
-      const cs = getComputedStyle(container);
-      const paddingX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-      const availableWidth = container.clientWidth - paddingX - 4;
-      if (naturalWidth > availableWidth && naturalWidth > 0) {
-        const scale = Math.max(availableWidth / naturalWidth, ORG_CHART_MIN_SCALE);
-        tree.style.transform = `scale(${scale})`;
-        tree.style.transformOrigin = 'top left';
-        tree.style.marginLeft = Math.max(0, (availableWidth - naturalWidth * scale) / 2) + 'px';
-        container.style.height = (tree.scrollHeight * scale + 24) + 'px';
-      }
-    }
-    window.addEventListener('resize', () => {
-      const el = document.getElementById('teamChartContainer');
-      if (el && currentMode === 'team') fitOrgChart(el);
-    });
 
     // Table view intentionally hides the birth year (month/day only) — the
     // full profile popup still shows the complete date.

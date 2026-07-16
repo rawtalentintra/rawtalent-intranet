@@ -356,6 +356,11 @@ CREATE TABLE IF NOT EXISTS team_members (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Freely-draggable position on the Our Team org canvas. NULL until someone
+-- drags a box for the first time, at which point it locks that person's
+-- position in place instead of following the auto-arranged grid default.
+ALTER TABLE team_members ADD COLUMN IF NOT EXISTS chart_x DOUBLE PRECISION;
+ALTER TABLE team_members ADD COLUMN IF NOT EXISTS chart_y DOUBLE PRECISION;
 
 -- Fun team-culture feature: birthday/work-anniversary greetings between
 -- logged-in users. Upcoming-date reminders themselves are computed live from

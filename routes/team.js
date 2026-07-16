@@ -119,6 +119,25 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Persists where someone's box was dragged to on the Our Team org canvas.
+// Deliberately separate from PUT /:id — a drag shouldn't have to carry (or
+// risk overwriting) every other field on the person's record.
+router.patch('/:id/position', requireSuperAdmin, async (req, res) => {
+  const { chart_x, chart_y } = req.body;
+  if (typeof chart_x !== 'number' || typeof chart_y !== 'number') {
+    return res.status(400).json({ error: 'chart_x and chart_y must be numbers' });
+  }
+  try {
+    await getDb().execute({
+      sql: 'UPDATE team_members SET chart_x = ?, chart_y = ?, updated_at = now() WHERE id = ?',
+      args: [chart_x, chart_y, req.params.id]
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:id/photo', requireSuperAdmin, photoUpload.single('photo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
