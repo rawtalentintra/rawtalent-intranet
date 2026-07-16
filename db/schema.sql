@@ -381,6 +381,30 @@ CREATE TABLE IF NOT EXISTS team_greetings (
 );
 CREATE INDEX IF NOT EXISTS idx_team_greetings_team_member_id ON team_greetings(team_member_id);
 
+-- Admin-authored broadcast announcements — visible to every signed-in user
+-- via the same notification bell as birthday/anniversary greetings.
+-- send_at lets an admin schedule one for a future moment; a row simply
+-- doesn't show up (and isn't counted unread) until send_at has passed —
+-- no background job needed, the 5-minute notification poll picks it up.
+CREATE TABLE IF NOT EXISTS announcements (
+  id TEXT PRIMARY KEY,
+  message TEXT NOT NULL,
+  send_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by_email TEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_send_at ON announcements(send_at);
+
+-- Per-user read state — every signed-in user (not just team_members rows)
+-- can read an announcement, so this keys on email rather than a FK.
+CREATE TABLE IF NOT EXISTS announcement_reads (
+  announcement_id TEXT NOT NULL,
+  user_email TEXT NOT NULL,
+  read_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (announcement_id, user_email)
+);
+
 -- Every one of these backs a WHERE/ORDER BY that route handlers run on every
 -- request (call browsing/filtering, article listing, team lookups, session/
 -- login checks) — without an index each is a full table scan that gets

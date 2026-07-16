@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 
 router.use(requireAuth);
 
@@ -146,8 +146,53 @@ router.get('/', async (req, res) => {
       upcomingEvents.sort((a, b) => a.daysUntil - b.daysUntil);
     }
 
-    const unreadCount = receivedGreetings.filter(g => !g.is_read).length + upcomingEvents.filter(e => !e.alreadySent).length;
-    res.json({ upcomingEvents, receivedGreetings, unreadCount });
+    // Announcements — visible to everyone once send_at has passed. A row
+    // scheduled for the future simply doesn't show up yet.
+    const annRes = await db.execute({
+      sql: `SELECT a.*, (r.user_email IS NOT NULL) AS is_read
+            FROM announcements a
+            LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_email = ?
+            WHERE a.send_at <= now()
+            ORDER BY a.send_at DESC LIMIT 30`,
+      args: [req.user.email]
+    });
+    const announcements = annRes.rows;
+
+    const unreadCount = receivedGreetings.filter(g => !g.is_read).length
+      + upcomingEvents.filter(e => !e.alreadySent).length
+      + announcements.filter(a => !a.is_read).length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, unreadCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admins schedule (or immediately send, by omitting send_at) a broadcast
+// announcement to every signed-in user.
+router.post('/announcements', requireAdmin, async (req, res) => {
+  const { message, send_at } = req.body;
+  if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
+  try {
+    const id = uuidv4();
+    await getDb().execute({
+      sql: `INSERT INTO announcements (id, message, send_at, created_by_email, created_by_name)
+            VALUES (?, ?, COALESCE(?, now()), ?, ?)`,
+      args: [id, message.trim(), send_at || null, req.user.email, req.user.name || req.user.email]
+    });
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/announcements/:id/read', async (req, res) => {
+  try {
+    await getDb().execute({
+      sql: `INSERT INTO announcement_reads (announcement_id, user_email) VALUES (?, ?)
+            ON CONFLICT (announcement_id, user_email) DO NOTHING`,
+      args: [req.params.id, req.user.email]
+    });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -216,6 +261,12 @@ router.post('/read-all', async (req, res) => {
     if (me) {
       await db.execute({ sql: 'UPDATE team_greetings SET is_read = true WHERE team_member_id = ?', args: [me.id] });
     }
+    await db.execute({
+      sql: `INSERT INTO announcement_reads (announcement_id, user_email)
+            SELECT id, ? FROM announcements WHERE send_at <= now()
+            ON CONFLICT (announcement_id, user_email) DO NOTHING`,
+      args: [req.user.email]
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

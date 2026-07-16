@@ -103,7 +103,10 @@
         <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
           <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
             <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
-            <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+            <div style="display:flex;gap:10px;align-items:center">
+              <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
+              <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+            </div>
           </div>
           <div id="notifPanelBody" style="padding:8px"></div>
         </div>
@@ -1156,6 +1159,30 @@
     </div>
   </div>
 
+  <!-- New Announcement Modal -->
+  <div class="modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <div class="modal-title">New Announcement</div>
+        <button class="modal-close" onclick="closeAnnouncementModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Message</label>
+          <textarea id="announcementMessage" class="form-control" style="min-height:100px;resize:vertical" placeholder="What should everyone know?"></textarea>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Notify everyone <span class="optional">(leave blank to send now)</span></label>
+          <input type="datetime-local" id="announcementSendAt" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeAnnouncementModal()">Cancel</button>
+        <button class="btn-add" onclick="submitAnnouncement()">Send Announcement</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Calibration Note Modal -->
   <div class="modal-overlay" id="calibrationNoteModal" onclick="if(event.target===this)closeCalibrationNoteModal()">
     <div class="modal" style="max-width:560px">
@@ -1518,6 +1545,7 @@
         if (me.error || (me.role !== 'admin' && me.role !== 'super_admin')) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
+        document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         document.getElementById('adminName').textContent = me.name || me.email.split('@')[0];
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
@@ -1546,7 +1574,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -1573,6 +1601,17 @@
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
+      if (notifData.announcements?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Announcements</div>
+          ${notifData.announcements.map(a => `
+            <div style="background:${a.is_read ? 'white' : '#eef2ff'};border:1px solid ${a.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openAnnouncementRead('${a.id}')">
+              <div style="font-weight:${a.is_read ? '500' : '700'};color:${a.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px;white-space:pre-wrap">📢 ${escHtml(a.message)}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${escHtml(a.created_by_name || 'Admin')} · ${fmtDate(a.send_at)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
       if (notifData.upcomingEvents?.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Upcoming</div>
@@ -1664,6 +1703,41 @@
 
     function markAllGreetingsRead() {
       fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    function openAnnouncementRead(id) {
+      const a = notifData.announcements.find(x => x.id === id);
+      if (!a) return;
+      if (!a.is_read) {
+        fetch(`/api/notifications/announcements/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
+      }
+    }
+
+    function openAnnouncementModal() {
+      document.getElementById('announcementMessage').value = '';
+      document.getElementById('announcementSendAt').value = '';
+      document.getElementById('announcementModal').classList.add('open');
+      toggleNotifPanel();
+    }
+    function closeAnnouncementModal() {
+      document.getElementById('announcementModal').classList.remove('open');
+    }
+    async function submitAnnouncement() {
+      const message = document.getElementById('announcementMessage').value.trim();
+      if (!message) { toast('Write a message first', 'error'); return; }
+      const sendAtLocal = document.getElementById('announcementSendAt').value;
+      const send_at = sendAtLocal ? new Date(sendAtLocal).toISOString() : null;
+      try {
+        const res = await fetch('/api/notifications/announcements', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, send_at })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
+        toast(send_at ? 'Announcement scheduled' : 'Announcement sent', 'success');
+        closeAnnouncementModal();
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
     }
 
     function spawnConfetti(container) {
