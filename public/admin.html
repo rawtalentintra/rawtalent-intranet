@@ -5186,6 +5186,7 @@
         </div>
         <div style="display:flex;gap:8px;margin-bottom:16px">
           ${e.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playRecording('${e.recording_id}')">▶ Play Recording</button>` : ''}
+          ${e.has_audio ? `<a class="btn-secondary" style="font-size:12.5px;padding:6px 14px;text-decoration:none;display:inline-flex;align-items:center" href="/api/calls/local/${e.recording_id}/audio" download="call-${e.recording_id}.mp3">⬇ Download Call</a>` : ''}
           ${e.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${e.recording_id}')">📄 View Transcript</button>` : ''}
           ${!e.has_audio && !e.has_transcript ? '<span style="font-size:12px;color:var(--text-muted);font-style:italic">No recording or transcript available for this call.</span>' : ''}
         </div>
