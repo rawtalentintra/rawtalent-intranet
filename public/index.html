@@ -149,6 +149,47 @@
     .ai-mode-banner.show { display: block; }
 
 
+    /* Quick Links */
+    .quick-links-bar {
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 14px 32px;
+    }
+    .quick-links-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .quick-links-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .quick-link-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--offwhite);
+      border: 1px solid var(--gray-200);
+      color: var(--navy);
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: all .15s;
+    }
+    .quick-link-chip:hover {
+      background: var(--orange-glow);
+      border-color: var(--orange);
+      color: var(--orange);
+      transform: translateY(-1px);
+    }
+
     /* Category bar */
     .cat-bar {
       background: white;
@@ -657,6 +698,22 @@
       ✨ AI answers are generated from your knowledge base — documents, articles, and reference websites
     </div>
 
+  </div>
+
+  <!-- Quick Links -->
+  <div class="quick-links-bar">
+    <div class="quick-links-label">Quick Links</div>
+    <div class="quick-links-row">
+      <a class="quick-link-chip" href="https://online.immi.gov.au/evo/firstParty?actionType=query" target="_blank" rel="noopener">🛂 Visa Holder Enquiry</a>
+      <a class="quick-link-chip" href="https://www.service.vic.gov.au/services/working-with-children-check-status-checker/transaction#done" target="_blank" rel="noopener">🪪 WWCC Status Checker</a>
+      <a class="quick-link-chip" href="https://www.vit.vic.edu.au/search-the-register?firstname=Sumitra+&lastname=Bhattarai&registrationnumber=622768&op=search&form_build_id=form-m2-SVwuSlyflg-oB6g1UAbRGZRvxvAoFbzxVcsy5e5A&form_id=vit_register_search_form#vit-register-search-form" target="_blank" rel="noopener">🎓 Register of Teachers — VIC</a>
+      <a class="quick-link-chip" href="https://crmpub.trb.sa.edu.au/Home/TeacherSearch" target="_blank" rel="noopener">🎓 Register of Teachers — SA</a>
+      <a class="quick-link-chip" href="https://www.workerscreening.sa.gov.au/Organisation/s/login/" target="_blank" rel="noopener">🔍 Screening SA</a>
+      <a class="quick-link-chip" href="https://admin.hireflix.com/en/jobs/" target="_blank" rel="noopener">🎥 HireFlix</a>
+      <a class="quick-link-chip" href="https://immi.homeaffairs.gov.au/visas/already-have-a-visa/check-visa-details-and-conditions/check-conditions-online" target="_blank" rel="noopener">🛂 VEVO</a>
+      <a class="quick-link-chip" href="https://www.acecqa.gov.au/qualifications/nqf-approved" target="_blank" rel="noopener">🏫 ACECQA</a>
+      <a class="quick-link-chip" href="https://startingblocks.gov.au/find-child-care" target="_blank" rel="noopener">🧸 Find Child Care</a>
+    </div>
   </div>
 
   <!-- Category bar -->
