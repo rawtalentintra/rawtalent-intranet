@@ -337,7 +337,6 @@
               ${a.category ? `<div class="article-category-badge">${escHtml(a.category)}</div>` : ''}
               <h1 class="article-title">${escHtml(a.title)}</h1>
               <div class="article-meta-row">
-                ${a.author_name ? `<span class="article-meta-item">✍ ${escHtml(a.author_name)}</span>` : ''}
                 <span class="article-meta-item">📅 Updated ${updatedDate}</span>
                 ${createdDate !== updatedDate ? `<span class="article-meta-item" style="color:var(--gray-400)">Created ${createdDate}</span>` : ''}
               </div>
