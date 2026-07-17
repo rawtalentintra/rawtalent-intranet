@@ -1394,10 +1394,35 @@
       <div class="modal-footer" style="justify-content:space-between">
         <button class="action-btn delete" onclick="deleteCourseConfirm()">Delete Course</button>
         <div style="display:flex;gap:8px">
+          <button class="btn-secondary" onclick="openAssignCourseModal()">👤 Assign</button>
           <button class="btn-secondary" onclick="previewCourse()">▶ Take This Course</button>
           <button class="btn-secondary" id="coursePublishBtn" onclick="toggleCoursePublish()">Publish</button>
           <button class="btn-add" onclick="saveCourseEdits()">Save Changes</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Assign Course Modal -->
+  <div class="modal-overlay" id="assignCourseModal" onclick="if(event.target===this)closeAssignCourseModal()">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <div class="modal-title">Assign Course</div>
+        <button class="modal-close" onclick="closeAssignCourseModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Assign to</label>
+          <div id="assignCourseUserList" style="max-height:220px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;padding:8px"></div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Due date <span class="optional">(optional)</span></label>
+          <input type="date" id="assignCourseDueDate" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeAssignCourseModal()">Cancel</button>
+        <button class="btn-add" onclick="submitAssignCourse()">Assign and notify</button>
       </div>
     </div>
   </div>
@@ -1574,7 +1599,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -1601,6 +1626,18 @@
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
+      if (notifData.trainingAssignments?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Training assigned to you</div>
+          ${notifData.trainingAssignments.map(a => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">📚 ${escHtml(a.course_title)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${a.due_date ? `Due ${fmtDate(a.due_date)}` : 'No due date'} · assigned by ${escHtml(a.assigned_by_name || 'a super admin')}</div>
+              <button onclick="goToAssignedTraining('${a.course_id}')" style="background:var(--orange);color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${a.attempt_status === 'in_progress' ? 'Continue Training →' : 'Start Training →'}</button>
+            </div>
+          `).join('')}
+        `);
+      }
       if (notifData.announcements?.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Announcements</div>
@@ -1711,6 +1748,12 @@
       if (!a.is_read) {
         fetch(`/api/notifications/announcements/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
       }
+    }
+
+    function goToAssignedTraining(courseId) {
+      document.getElementById('notifPanel').style.display = 'none';
+      showSection('training-dashboard', document.querySelector('[onclick*="training-dashboard"]'));
+      setTimeout(() => startTakeCourse(courseId), 300);
     }
 
     function openAnnouncementModal() {
@@ -2974,21 +3017,23 @@
       try {
         const results = await fetch(`/api/training/courses/${courseId}/results`).then(r => r.json());
         if (!results.length) {
-          body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted)">Nobody has started this course yet.</div>`;
+          body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted)">Nobody has been assigned or started this course yet.</div>`;
           return;
         }
+        const statusLabel = { completed: 'Completed', in_progress: 'In progress', not_started: 'Not started' };
         body.innerHTML = `
           <table class="data-table">
-            <thead><tr><th>User</th><th>Status</th><th>Score</th><th>Result</th><th>Started</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Status</th><th>Due</th><th>Score</th><th>Result</th><th>Started</th><th></th></tr></thead>
             <tbody>
               ${results.map(r => `
                 <tr>
                   <td>${escHtml(r.user_email)}</td>
-                  <td>${r.status === 'completed' ? 'Completed' : 'In progress'}</td>
+                  <td>${statusLabel[r.status] || r.status}</td>
+                  <td style="font-size:12.5px;color:var(--text-muted)">${r.due_date ? fmtDate(r.due_date) : '—'}</td>
                   <td>${r.final_score != null ? r.final_score + '%' : '—'}</td>
                   <td>${r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>')}</td>
-                  <td style="font-size:12.5px;color:var(--text-muted)">${fmtDate(r.started_at)}</td>
-                  <td>${currentUserRole === 'super_admin' ? `<button class="action-btn delete" onclick="resetAttemptConfirm('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}')">Reset</button>` : ''}</td>
+                  <td style="font-size:12.5px;color:var(--text-muted)">${r.started_at ? fmtDate(r.started_at) : '—'}</td>
+                  <td>${currentUserRole === 'super_admin' && r.status !== 'not_started' ? `<button class="action-btn delete" onclick="resetAttemptConfirm('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}')">Reset</button>` : ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3225,6 +3270,36 @@
         } catch { toast('Delete failed', 'error'); }
       };
       document.getElementById('confirmModal').classList.add('open');
+    }
+
+    // ── Assigning a course to specific people ──
+    function openAssignCourseModal() {
+      const list = document.getElementById('assignCourseUserList');
+      list.innerHTML = allUsers.filter(u => u.active).map(u => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;font-size:13px">
+          <input type="checkbox" value="${escHtml(u.email)}">
+          <span>${escHtml(u.name || u.email)}</span>
+          <span style="color:var(--text-muted);font-size:11.5px">${escHtml(u.email)}</span>
+        </label>
+      `).join('') || '<div style="color:var(--text-muted);font-size:12.5px;padding:8px">No users found.</div>';
+      document.getElementById('assignCourseDueDate').value = '';
+      document.getElementById('assignCourseModal').classList.add('open');
+    }
+    function closeAssignCourseModal() { document.getElementById('assignCourseModal').classList.remove('open'); }
+    async function submitAssignCourse() {
+      const emails = Array.from(document.querySelectorAll('#assignCourseUserList input:checked')).map(el => el.value);
+      if (!emails.length) { toast('Pick at least one person', 'error'); return; }
+      const due_date = document.getElementById('assignCourseDueDate').value || null;
+      try {
+        const res = await fetch(`/api/training/courses/${currentCourseEditor.id}/assign`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails, due_date })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to assign', 'error'); return; }
+        toast(`Assigned to ${data.count} ${data.count === 1 ? 'person' : 'people'}`, 'success');
+        closeAssignCourseModal();
+      } catch { toast('Network error', 'error'); }
     }
 
     // ── Taking a course ──

@@ -513,3 +513,19 @@ CREATE TABLE IF NOT EXISTS training_answers (
   answered_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_training_answers_attempt_id ON training_answers(attempt_id);
+
+-- Pushing a course to specific people. One row per (course, person) — a
+-- re-assignment (e.g. changing the due date) upserts rather than
+-- duplicating. Shows up on that person's Training Dashboard and as a
+-- pending item in their notification bell until their attempt is completed.
+CREATE TABLE IF NOT EXISTS training_assignments (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  user_email TEXT NOT NULL,
+  due_date DATE,
+  assigned_by_email TEXT,
+  assigned_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(course_id, user_email)
+);
+CREATE INDEX IF NOT EXISTS idx_training_assignments_user_email ON training_assignments(user_email);

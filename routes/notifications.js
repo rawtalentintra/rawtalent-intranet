@@ -158,10 +158,30 @@ router.get('/', async (req, res) => {
     });
     const announcements = annRes.rows;
 
+    // Training assigned to me — stays in the bell as a standing reminder
+    // until I actually complete it (no separate read/unread state; a
+    // pending assignment is inherently "unread" every time).
+    const assignRes = await db.execute({
+      sql: `SELECT ta.id, ta.course_id, ta.due_date, ta.assigned_by_name, tc.title AS course_title,
+                   att.status AS attempt_status
+            FROM training_assignments ta
+            JOIN training_courses tc ON tc.id = ta.course_id
+            LEFT JOIN LATERAL (
+              SELECT status FROM training_attempts
+              WHERE course_id = ta.course_id AND user_email = ta.user_email
+              ORDER BY started_at DESC LIMIT 1
+            ) att ON true
+            WHERE ta.user_email = ?
+            ORDER BY ta.due_date ASC NULLS LAST, ta.created_at DESC`,
+      args: [req.user.email]
+    });
+    const trainingAssignments = assignRes.rows.filter(a => a.attempt_status !== 'completed');
+
     const unreadCount = receivedGreetings.filter(g => !g.is_read).length
       + upcomingEvents.filter(e => !e.alreadySent).length
-      + announcements.filter(a => !a.is_read).length;
-    res.json({ upcomingEvents, receivedGreetings, announcements, unreadCount });
+      + announcements.filter(a => !a.is_read).length
+      + trainingAssignments.length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,20 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const training = require('../services/trainingService');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-// Training Dashboard (read-only: course list, detail, results) is open to
-// admin + super_admin. Everything else — building/editing/publishing a
-// course and taking it — is super_admin only, gated per-route below.
-router.use(requireAdmin);
+function isStaff(role) { return role === 'admin' || role === 'super_admin'; }
+
+// Training Dashboard (read-only: course list, detail, results) and taking a
+// course are open to every signed-in user — assigning a course to someone
+// only helps if they can actually see and take it. Building/editing/
+// publishing/deleting a course, and assigning it, stays super_admin only,
+// gated per-route below.
+router.use(requireAuth);
 
 router.get('/courses', async (req, res) => {
   try {
-    res.json(await training.listCourses());
+    const courses = await training.listCourses(req.user.email);
+    // Regular staff only ever see live courses (their own assignments and
+    // attempts are still merged in regardless of status). Admins/super
+    // admins see everything, including drafts, same as before.
+    const visible = isStaff(req.user.role) ? courses : courses.filter(c => c.status === 'live' || c.my_assignment);
+    res.json(visible);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -24,15 +33,28 @@ router.get('/courses/:id', async (req, res) => {
   try {
     const course = await training.getCourseDetail(req.params.id);
     if (!course) return res.status(404).json({ error: 'Course not found' });
+    if (course.status !== 'live' && !isStaff(req.user.role)) return res.status(404).json({ error: 'Course not found' });
     res.json(course);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/courses/:id/results', async (req, res) => {
+router.get('/courses/:id/results', requireAdmin, async (req, res) => {
   try {
     res.json(await training.getCourseResults(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Push a course to specific people, with an optional due date.
+router.post('/courses/:id/assign', requireSuperAdmin, async (req, res) => {
+  const { emails, due_date } = req.body;
+  if (!Array.isArray(emails) || !emails.length) return res.status(400).json({ error: 'Pick at least one person' });
+  try {
+    const count = await training.assignCourse(req.params.id, emails, due_date, req.user.email, req.user.name || req.user.email);
+    res.json({ success: true, count });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -124,10 +146,13 @@ router.delete('/questions/:questionId', requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ── Taking a course — open to anyone who can reach Training Dashboard
-// (admin + super_admin), same gate as the read-only routes above ──
+// ── Taking a course — open to any signed-in user, same as the read-only
+// routes above ──
 router.post('/courses/:id/attempts', async (req, res) => {
   try {
+    const course = await training.getCourseDetail(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Course not found' });
+    if (course.status !== 'live' && !isStaff(req.user.role)) return res.status(404).json({ error: 'Course not found' });
     const attempt = await training.startAttempt(req.params.id, req.user.email);
     res.json(attempt);
   } catch (err) {

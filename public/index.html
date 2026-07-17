@@ -654,6 +654,7 @@
         <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
         <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
         <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
+        <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -761,6 +762,19 @@
     </div>
   </div>
 
+  <!-- Take Course Modal -->
+  <div class="modal-overlay" id="takeCourseModal">
+    <div class="modal" style="max-width:900px;width:92vw;height:88vh;display:flex;flex-direction:column;overflow:hidden">
+      <div class="modal-header">
+        <div class="modal-title" id="takeCourseTitle">Course</div>
+        <button class="modal-close" onclick="closeTakeCourse()">×</button>
+      </div>
+      <div class="modal-body" style="flex:1;overflow-y:auto" id="takeCourseBody">
+        <div class="loading-spinner"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -806,7 +820,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -833,6 +847,18 @@
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
+      if (notifData.trainingAssignments?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Training assigned to you</div>
+          ${notifData.trainingAssignments.map(a => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">📚 ${escHtml(a.course_title)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${a.due_date ? `Due ${fmtDate(a.due_date)}` : 'No due date'} · assigned by ${escHtml(a.assigned_by_name || 'a super admin')}</div>
+              <button onclick="goToAssignedTraining('${a.course_id}')" style="background:var(--orange);color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">${a.attempt_status === 'in_progress' ? 'Continue Training →' : 'Start Training →'}</button>
+            </div>
+          `).join('')}
+        `);
+      }
       if (notifData.announcements?.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Announcements</div>
@@ -1012,12 +1038,14 @@
       const isGlossary = mode === 'glossary';
       const isFaq = mode === 'faq';
       const isTeam = mode === 'team';
+      const isTraining = mode === 'training';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
       document.getElementById('tabTeam').classList.toggle('active', isTeam);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam);
+      document.getElementById('tabTraining').classList.toggle('active', isTraining);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1025,12 +1053,14 @@
       document.getElementById('heroTitle').textContent = isGlossary ? 'Glossary of terms'
         : isFaq ? 'Frequently asked questions'
         : isTeam ? 'Our Team'
+        : isTraining ? 'Training'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Ask AI anything — searches across all articles, documents, and reference sites'
         : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
         : isFaq ? 'Real questions from the team, reviewed and approved'
         : isTeam ? 'Team hierarchy and HR profiles'
+        : isTraining ? 'Courses assigned to you, and anything else you want to brush up on'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -1047,6 +1077,8 @@
         loadFaqView();
       } else if (isTeam) {
         loadTeamView();
+      } else if (isTraining) {
+        loadTrainingView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
@@ -1190,6 +1222,177 @@
       } catch {
         list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load team.</div></div>';
       }
+    }
+
+    // ── Training ──────────────────────────────────────────────────
+    let allTrainingCourses = [];
+
+    async function loadTrainingView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        allTrainingCourses = await fetch('/api/training/courses').then(r => r.json());
+        const assigned = allTrainingCourses.filter(c => c.my_assignment);
+        const others = allTrainingCourses.filter(c => !c.my_assignment);
+        if (!allTrainingCourses.length) {
+          list.innerHTML = '<div class="empty-wrap"><div class="empty-icon">🎓</div><div class="empty-title">No training courses yet</div></div>';
+          return;
+        }
+        list.innerHTML = `
+          ${assigned.length ? `
+            <div class="results-label" style="display:block;font-weight:700;color:var(--navy)">Assigned to you</div>
+            <div class="results-grid" style="margin-bottom:28px">${assigned.map(trainingCourseCard).join('')}</div>
+          ` : ''}
+          ${others.length ? `
+            <div class="results-label" style="display:block">${assigned.length ? 'Other courses' : 'Courses'}</div>
+            <div class="results-grid">${others.map(trainingCourseCard).join('')}</div>
+          ` : ''}
+        `;
+      } catch {
+        list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load training.</div></div>';
+      }
+    }
+
+    function trainingCourseCard(c) {
+      const status = c.my_attempt?.status;
+      const passed = c.my_attempt?.final_passed;
+      let actionLabel = 'Start Course →';
+      if (status === 'in_progress') actionLabel = 'Continue Course →';
+      else if (status === 'completed') actionLabel = passed ? 'Review (Passed) ↻' : 'Retake Course ↻';
+      const dueBadge = c.my_assignment?.due_date
+        ? `<span style="font-size:11px;color:var(--orange);font-weight:700">Due ${fmtDate(c.my_assignment.due_date)}</span>` : '';
+      return `
+        <div class="article-card" style="cursor:pointer" onclick="startTakeCourse('${c.id}')">
+          <div class="card-cat">${escHtml((c.module_count || 0) + ' module' + (c.module_count === 1 ? '' : 's'))}</div>
+          <div class="card-title">${escHtml(c.title)}</div>
+          <div class="card-summary">${escHtml(c.description || 'No description provided.')}</div>
+          <div class="card-footer">
+            ${dueBadge || '<span></span>'}
+            <span style="font-size:12.5px;font-weight:700;color:var(--orange)">${actionLabel}</span>
+          </div>
+        </div>`;
+    }
+
+    function goToAssignedTraining(courseId) {
+      const panel = document.getElementById('notifPanel');
+      if (panel) panel.style.display = 'none';
+      setMode('training');
+      setTimeout(() => startTakeCourse(courseId), 200);
+    }
+
+    // ── Taking a course ──────────────────────────────────────────
+    let currentTakeCourse = null;
+
+    async function startTakeCourse(courseId) {
+      document.getElementById('takeCourseModal').classList.add('open');
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const course = await fetch(`/api/training/courses/${courseId}`).then(r => r.json());
+        const attempt = await fetch(`/api/training/courses/${courseId}/attempts`, { method: 'POST' }).then(r => r.json());
+        currentTakeCourse = { course, attempt, moduleIndex: attempt.current_module_index || 0 };
+        document.getElementById('takeCourseTitle').textContent = course.title;
+        renderTakeCourseStep();
+      } catch { body.innerHTML = '<div style="padding:24px;text-align:center;color:#c0392b">Failed to start this course.</div>'; }
+    }
+
+    function closeTakeCourse() {
+      document.getElementById('takeCourseModal').classList.remove('open');
+      currentTakeCourse = null;
+      if (currentMode === 'training') loadTrainingView();
+    }
+
+    function renderTakeCourseStep() {
+      const { course, moduleIndex } = currentTakeCourse;
+      const body = document.getElementById('takeCourseBody');
+      if (moduleIndex >= course.modules.length) { renderFinalAssessment(); return; }
+      const m = course.modules[moduleIndex];
+      body.innerHTML = `
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">Module ${moduleIndex + 1} of ${course.modules.length}</div>
+        <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">${escHtml(m.title)}</div>
+        <div class="article-content">${m.content}</div>
+        <button class="btn-add" style="margin-top:16px" onclick="renderModuleQuiz()">Continue to Questions →</button>`;
+    }
+
+    function trainingQuestionFormHtml(q, i) {
+      return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600;color:var(--navy);margin-bottom:6px">${i + 1}. ${escHtml(q.question_text)}</div>
+          ${(q.options || []).map(o => `
+            <label style="display:block;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;margin-top:6px;cursor:pointer">
+              <input type="radio" name="q-${q.id}" value="${escHtml(o)}"> ${escHtml(o)}
+            </label>
+          `).join('')}
+        </div>`;
+    }
+
+    function renderModuleQuiz() {
+      const { course, moduleIndex } = currentTakeCourse;
+      const m = course.modules[moduleIndex];
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = `
+        <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:14px">Quick check — ${escHtml(m.title)}</div>
+        ${m.questions.map((q, i) => trainingQuestionFormHtml(q, i)).join('')}
+        <button class="btn-add" onclick="submitModuleQuiz()">Submit Answers</button>`;
+    }
+
+    async function submitModuleQuiz() {
+      const { course, attempt, moduleIndex } = currentTakeCourse;
+      const m = course.modules[moduleIndex];
+      const answers = {};
+      m.questions.forEach(q => {
+        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+        if (checked) answers[q.id] = checked.value;
+      });
+      try {
+        const result = await fetch(`/api/training/attempts/${attempt.id}/modules/${m.id}/answers`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers })
+        }).then(r => r.json());
+        const body = document.getElementById('takeCourseBody');
+        body.innerHTML = `
+          <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">You got ${result.correct} of ${result.total} correct</div>
+          <button class="btn-add" onclick="advanceModule()">${moduleIndex + 1 >= course.modules.length ? 'Continue to Final Assessment →' : 'Next Module →'}</button>`;
+      } catch { toast('Failed to submit answers', 'error'); }
+    }
+
+    function advanceModule() {
+      currentTakeCourse.moduleIndex++;
+      renderTakeCourseStep();
+    }
+
+    function renderFinalAssessment() {
+      const { course } = currentTakeCourse;
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = `
+        <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:14px">Final Assessment</div>
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">You need ${course.pass_threshold}% correct to pass.</div>
+        ${course.finalAssessment.map((q, i) => trainingQuestionFormHtml(q, i)).join('')}
+        <button class="btn-add" onclick="submitFinalQuiz()">Submit Final Assessment</button>`;
+    }
+
+    async function submitFinalQuiz() {
+      const { course, attempt } = currentTakeCourse;
+      const answers = {};
+      course.finalAssessment.forEach(q => {
+        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+        if (checked) answers[q.id] = checked.value;
+      });
+      try {
+        const result = await fetch(`/api/training/attempts/${attempt.id}/final`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers })
+        }).then(r => r.json());
+        const body = document.getElementById('takeCourseBody');
+        body.innerHTML = `
+          <div style="text-align:center;padding:20px 0">
+            <div style="font-size:40px">${result.passed ? '🎉' : '📘'}</div>
+            <div style="font-weight:700;font-size:20px;color:var(--navy);margin-top:8px">${result.score}%</div>
+            <div style="margin-top:6px">${result.passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Not yet — try again</span>'}</div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px">${result.correct} of ${result.total} correct</div>
+            <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+          </div>`;
+      } catch { toast('Failed to submit the final assessment', 'error'); }
     }
 
     const ORG_NODE_W = 148, ORG_NODE_H = 64;

@@ -196,7 +196,11 @@ async function saveCourse({ title, description, material, generated, createdBy }
 }
 
 // ── CRUD ────────────────────────────────────────────────────────
-async function listCourses() {
+// forUserEmail is optional — when given, each course also carries that
+// person's own assignment (if any) and their latest attempt, so a plain
+// learner's dashboard can show "assigned to you, due X" and their own
+// progress without a second round of requests.
+async function listCourses(forUserEmail) {
   const db = getDb();
   const coursesRes = await db.execute('SELECT * FROM training_courses ORDER BY created_at DESC');
   const attemptsRes = await db.execute(`
@@ -206,10 +210,27 @@ async function listCourses() {
   const modulesRes = await db.execute('SELECT course_id, COUNT(*) AS module_count FROM training_modules GROUP BY course_id');
   const statsByCourseId = new Map(attemptsRes.rows.map(r => [r.course_id, r]));
   const moduleCountByCourseId = new Map(modulesRes.rows.map(r => [r.course_id, Number(r.module_count)]));
+
+  let myAssignmentByCourseId = new Map();
+  let myAttemptByCourseId = new Map();
+  if (forUserEmail) {
+    const assignRes = await db.execute({ sql: 'SELECT * FROM training_assignments WHERE user_email = ?', args: [forUserEmail] });
+    myAssignmentByCourseId = new Map(assignRes.rows.map(r => [r.course_id, r]));
+    const myAttemptsRes = await db.execute({
+      sql: 'SELECT * FROM training_attempts WHERE user_email = ? ORDER BY started_at DESC',
+      args: [forUserEmail]
+    });
+    for (const a of myAttemptsRes.rows) {
+      if (!myAttemptByCourseId.has(a.course_id)) myAttemptByCourseId.set(a.course_id, a);
+    }
+  }
+
   return coursesRes.rows.map(c => ({
     ...c,
     module_count: moduleCountByCourseId.get(c.id) || 0,
-    stats: statsByCourseId.get(c.id) || { attempts: 0, completed: 0, passed: 0 }
+    stats: statsByCourseId.get(c.id) || { attempts: 0, completed: 0, passed: 0 },
+    my_assignment: myAssignmentByCourseId.get(c.id) || null,
+    my_attempt: myAttemptByCourseId.get(c.id) || null
   }));
 }
 
@@ -374,12 +395,53 @@ async function submitFinalAssessment(attemptId, answers) {
   return { correct, total, score, passed };
 }
 
+// Merges assignments and attempts by user so someone who's been assigned
+// the course but hasn't started it yet still shows up (as "not started"
+// with their due date) instead of being invisible until their first
+// attempt exists.
 async function getCourseResults(courseId) {
-  const res = await getDb().execute({
-    sql: `SELECT * FROM training_attempts WHERE course_id = ? ORDER BY started_at DESC`,
-    args: [courseId]
-  });
-  return res.rows;
+  const db = getDb();
+  const [attemptsRes, assignRes] = await Promise.all([
+    db.execute({ sql: 'SELECT * FROM training_attempts WHERE course_id = ? ORDER BY started_at DESC', args: [courseId] }),
+    db.execute({ sql: 'SELECT * FROM training_assignments WHERE course_id = ?', args: [courseId] })
+  ]);
+
+  const byEmail = new Map();
+  for (const a of assignRes.rows) {
+    byEmail.set(a.user_email, {
+      user_email: a.user_email, status: 'not_started', final_score: null, final_passed: null,
+      started_at: null, due_date: a.due_date, assigned_by_name: a.assigned_by_name
+    });
+  }
+  const seenAttempt = new Set();
+  for (const at of attemptsRes.rows) {
+    if (seenAttempt.has(at.user_email)) continue; // newest attempt wins (already sorted DESC)
+    seenAttempt.add(at.user_email);
+    const existing = byEmail.get(at.user_email) || { user_email: at.user_email, due_date: null, assigned_by_name: null };
+    byEmail.set(at.user_email, {
+      ...existing, status: at.status, final_score: at.final_score,
+      final_passed: at.final_passed, started_at: at.started_at
+    });
+  }
+  // started_at comes back as a Date object (or null), not a string.
+  return Array.from(byEmail.values()).sort((a, b) => (b.started_at ? b.started_at.getTime() : 0) - (a.started_at ? a.started_at.getTime() : 0));
+}
+
+// Assigns a course to specific people, upserting so re-assigning someone
+// (e.g. to change their due date) doesn't create a duplicate row.
+async function assignCourse(courseId, emails, dueDate, assignedByEmail, assignedByName) {
+  const db = getDb();
+  const courseRes = await db.execute({ sql: 'SELECT id FROM training_courses WHERE id = ?', args: [courseId] });
+  if (!courseRes.rows[0]) throw new Error('Course not found');
+  for (const email of emails) {
+    await db.execute({
+      sql: `INSERT INTO training_assignments (id, course_id, user_email, due_date, assigned_by_email, assigned_by_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (course_id, user_email) DO UPDATE SET due_date = EXCLUDED.due_date, assigned_by_email = EXCLUDED.assigned_by_email, assigned_by_name = EXCLUDED.assigned_by_name`,
+      args: [uuidv4(), courseId, email, dueDate || null, assignedByEmail || null, assignedByName || null]
+    });
+  }
+  return emails.length;
 }
 
 // Deletes a single attempt (and its answers), letting that person start
@@ -423,5 +485,6 @@ module.exports = {
   submitFinalAssessment,
   getCourseResults,
   deleteAttempt,
-  resetUserAttempts
+  resetUserAttempts,
+  assignCourse
 };
