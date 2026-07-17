@@ -410,14 +410,14 @@ async function getCourseResults(courseId) {
   for (const a of assignRes.rows) {
     byEmail.set(a.user_email, {
       user_email: a.user_email, status: 'not_started', final_score: null, final_passed: null,
-      started_at: null, due_date: a.due_date, assigned_by_name: a.assigned_by_name
+      started_at: null, due_date: a.due_date, assigned_by_name: a.assigned_by_name, is_assigned: true
     });
   }
   const seenAttempt = new Set();
   for (const at of attemptsRes.rows) {
     if (seenAttempt.has(at.user_email)) continue; // newest attempt wins (already sorted DESC)
     seenAttempt.add(at.user_email);
-    const existing = byEmail.get(at.user_email) || { user_email: at.user_email, due_date: null, assigned_by_name: null };
+    const existing = byEmail.get(at.user_email) || { user_email: at.user_email, due_date: null, assigned_by_name: null, is_assigned: false };
     byEmail.set(at.user_email, {
       ...existing, status: at.status, final_score: at.final_score,
       final_passed: at.final_passed, started_at: at.started_at

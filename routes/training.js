@@ -60,6 +60,17 @@ router.post('/courses/:id/assign', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Change one person's due date on an existing assignment — same upsert as
+// /assign, just scoped to a single already-assigned person.
+router.patch('/courses/:id/assignments/:userEmail', requireSuperAdmin, async (req, res) => {
+  try {
+    await training.assignCourse(req.params.id, [decodeURIComponent(req.params.userEmail)], req.body.due_date, req.user.email, req.user.name || req.user.email);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Accepts either a pasted `material` string or one or more uploaded
 // documents (pdf/docx/txt) — uploaded files win over pasted text if both
 // are present. Each file's text is kept under a heading naming the source

@@ -1427,6 +1427,27 @@
     </div>
   </div>
 
+  <!-- Edit Due Date Modal -->
+  <div class="modal-overlay" id="editDueDateModal" onclick="if(event.target===this)closeEditDueDateModal()">
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header">
+        <div class="modal-title">Edit Due Date</div>
+        <button class="modal-close" onclick="closeEditDueDateModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="editDueDateFor" style="font-size:13px;color:var(--text-muted);margin-bottom:12px"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Due date <span class="optional">(clear to remove it)</span></label>
+          <input type="date" id="editDueDateInput" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeEditDueDateModal()">Cancel</button>
+        <button class="btn-add" onclick="submitEditDueDate()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Take Course Modal -->
   <div class="modal-overlay" id="takeCourseModal">
     <div class="modal" style="max-width:1200px;width:95vw;height:90vh;display:flex;flex-direction:column;overflow:hidden">
@@ -3029,7 +3050,10 @@
                 <tr>
                   <td>${escHtml(r.user_email)}</td>
                   <td>${statusLabel[r.status] || r.status}</td>
-                  <td style="font-size:12.5px;color:var(--text-muted)">${r.due_date ? fmtDate(r.due_date) : '—'}</td>
+                  <td style="font-size:12.5px;color:var(--text-muted)">
+                    ${r.due_date ? fmtDate(r.due_date) : '—'}
+                    ${r.is_assigned && currentUserRole === 'super_admin' ? `<button class="action-btn edit" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="openEditDueDate('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}',${r.due_date ? `'${new Date(r.due_date).toISOString().slice(0,10)}'` : 'null'})">✎</button>` : ''}
+                  </td>
                   <td>${r.final_score != null ? r.final_score + '%' : '—'}</td>
                   <td>${r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>')}</td>
                   <td style="font-size:12.5px;color:var(--text-muted)">${r.started_at ? fmtDate(r.started_at) : '—'}</td>
@@ -3270,6 +3294,30 @@
         } catch { toast('Delete failed', 'error'); }
       };
       document.getElementById('confirmModal').classList.add('open');
+    }
+
+    let editDueDateContext = null;
+    function openEditDueDate(courseId, courseTitle, userEmail, currentDueDate) {
+      editDueDateContext = { courseId, courseTitle, userEmail };
+      document.getElementById('editDueDateFor').textContent = `${userEmail} — ${courseTitle}`;
+      document.getElementById('editDueDateInput').value = currentDueDate || '';
+      document.getElementById('editDueDateModal').classList.add('open');
+    }
+    function closeEditDueDateModal() { document.getElementById('editDueDateModal').classList.remove('open'); editDueDateContext = null; }
+    async function submitEditDueDate() {
+      if (!editDueDateContext) return;
+      const { courseId, courseTitle, userEmail } = editDueDateContext;
+      const due_date = document.getElementById('editDueDateInput').value || null;
+      try {
+        const res = await fetch(`/api/training/courses/${courseId}/assignments/${encodeURIComponent(userEmail)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ due_date })
+        });
+        if (!res.ok) { toast('Failed to update due date', 'error'); return; }
+        toast('Due date updated', 'success');
+        closeEditDueDateModal();
+        await openCourseResults(courseId, courseTitle);
+      } catch { toast('Network error', 'error'); }
     }
 
     // ── Assigning a course to specific people ──
