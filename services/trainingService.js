@@ -420,11 +420,54 @@ async function getCourseResults(courseId) {
     const existing = byEmail.get(at.user_email) || { user_email: at.user_email, due_date: null, assigned_by_name: null, is_assigned: false };
     byEmail.set(at.user_email, {
       ...existing, status: at.status, final_score: at.final_score,
-      final_passed: at.final_passed, started_at: at.started_at
+      final_passed: at.final_passed, started_at: at.started_at, attempt_id: at.id
     });
   }
   // started_at comes back as a Date object (or null), not a string.
   return Array.from(byEmail.values()).sort((a, b) => (b.started_at ? b.started_at.getTime() : 0) - (a.started_at ? a.started_at.getTime() : 0));
+}
+
+// Full per-module and per-question breakdown for one attempt — module_results
+// (correct/total per module, saved as each module is submitted) plus the
+// individual answers so an admin can see exactly which questions someone
+// got wrong, not just the aggregate score.
+async function getAttemptDetail(attemptId) {
+  const db = getDb();
+  const attempt = await getAttempt(attemptId);
+  if (!attempt) return null;
+
+  const [course, modulesRes, questionsRes, answersRes] = await Promise.all([
+    db.execute({ sql: 'SELECT * FROM training_courses WHERE id = ?', args: [attempt.course_id] }).then(r => r.rows[0]),
+    db.execute({ sql: 'SELECT * FROM training_modules WHERE course_id = ? ORDER BY order_index ASC', args: [attempt.course_id] }),
+    db.execute({ sql: 'SELECT * FROM training_questions WHERE course_id = ? ORDER BY order_index ASC', args: [attempt.course_id] }),
+    db.execute({ sql: 'SELECT * FROM training_answers WHERE attempt_id = ?', args: [attemptId] })
+  ]);
+
+  const answerByQuestionId = new Map(answersRes.rows.map(a => [a.question_id, a]));
+  const moduleResultByModuleId = new Map((attempt.module_results || []).map(mr => [mr.moduleId, mr]));
+
+  function withAnswers(questions) {
+    return questions.map(q => {
+      const a = answerByQuestionId.get(q.id);
+      return {
+        question_text: q.question_text, options: q.options, correct_answer: q.correct_answer,
+        selected_answer: a?.selected_answer ?? null, is_correct: a?.is_correct ?? false, answered: !!a
+      };
+    });
+  }
+
+  const modules = modulesRes.rows.map(m => {
+    const questions = questionsRes.rows.filter(q => q.module_id === m.id);
+    const mr = moduleResultByModuleId.get(m.id);
+    return { id: m.id, title: m.title, correct: mr?.correct ?? null, total: mr?.total ?? questions.length, questions: withAnswers(questions) };
+  });
+  const finalQuestions = questionsRes.rows.filter(q => !q.module_id);
+
+  return {
+    course_title: course?.title, user_email: attempt.user_email, status: attempt.status,
+    final_score: attempt.final_score, final_passed: attempt.final_passed,
+    modules, finalAssessment: withAnswers(finalQuestions)
+  };
 }
 
 // Assigns a course to specific people, upserting so re-assigning someone
@@ -486,5 +529,6 @@ module.exports = {
   getCourseResults,
   deleteAttempt,
   resetUserAttempts,
-  assignCourse
+  assignCourse,
+  getAttemptDetail
 };

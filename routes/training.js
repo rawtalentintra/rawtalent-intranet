@@ -181,6 +181,18 @@ router.get('/attempts/:id', async (req, res) => {
   }
 });
 
+// Per-module and per-question breakdown for one attempt — same audience as
+// the results table itself (admin + super_admin).
+router.get('/attempts/:id/detail', requireAdmin, async (req, res) => {
+  try {
+    const detail = await training.getAttemptDetail(req.params.id);
+    if (!detail) return res.status(404).json({ error: 'Attempt not found' });
+    res.json(detail);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/attempts/:id/modules/:moduleId/answers', async (req, res) => {
   try {
     const result = await training.submitModuleAnswers(req.params.id, req.params.moduleId, req.body.answers || {});

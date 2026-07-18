@@ -1474,6 +1474,19 @@
     </div>
   </div>
 
+  <!-- Attempt Detail Modal -->
+  <div class="modal-overlay" id="attemptDetailModal" onclick="if(event.target===this)closeAttemptDetailModal()">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header">
+        <div class="modal-title" id="attemptDetailTitle">Attempt Detail</div>
+        <button class="modal-close" onclick="closeAttemptDetailModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:72vh;overflow-y:auto" id="attemptDetailBody">
+        <div class="loading-spinner"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Evaluation Detail Modal -->
   <div class="modal-overlay" id="evalDetailModal" onclick="if(event.target===this)closeEvalDetailModal()">
     <div class="modal" style="max-width:800px">
@@ -3057,7 +3070,10 @@
                   <td>${r.final_score != null ? r.final_score + '%' : '—'}</td>
                   <td>${r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>')}</td>
                   <td style="font-size:12.5px;color:var(--text-muted)">${r.started_at ? fmtDate(r.started_at) : '—'}</td>
-                  <td>${currentUserRole === 'super_admin' && r.status !== 'not_started' ? `<button class="action-btn delete" onclick="resetAttemptConfirm('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}')">Reset</button>` : ''}</td>
+                  <td style="white-space:nowrap">
+                    ${r.attempt_id ? `<button class="action-btn edit" onclick="openAttemptDetail('${r.attempt_id}')">Detail</button>` : ''}
+                    ${currentUserRole === 'super_admin' && r.status !== 'not_started' ? `<button class="action-btn delete" onclick="resetAttemptConfirm('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}')">Reset</button>` : ''}
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3079,6 +3095,45 @@
       };
       document.getElementById('confirmModal').classList.add('open');
     }
+
+    function attemptDetailQuestionHtml(q, i) {
+      const color = q.answered ? (q.is_correct ? '#15803d' : '#c0392b') : 'var(--text-muted)';
+      const mark = q.answered ? (q.is_correct ? '✓' : '✕') : '—';
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
+          <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-weight:700;color:${color}">${mark}</span>
+            <span style="font-size:13px;color:var(--navy);font-weight:600">${i + 1}. ${escHtml(q.question_text)}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-left:20px;margin-top:2px">
+            ${q.answered ? `Answered: ${escHtml(q.selected_answer || '(blank)')}` : 'Not answered'}
+            ${!q.is_correct ? ` · Correct: ${escHtml(q.correct_answer)}` : ''}
+          </div>
+        </div>`;
+    }
+
+    async function openAttemptDetail(attemptId) {
+      document.getElementById('attemptDetailModal').classList.add('open');
+      const body = document.getElementById('attemptDetailBody');
+      body.innerHTML = `<div class="loading-spinner"><div class="spinner"></div></div>`;
+      try {
+        const d = await fetch(`/api/training/attempts/${attemptId}/detail`).then(r => r.json());
+        if (d.error) { body.innerHTML = `<div style="padding:24px;text-align:center;color:#c0392b">${escHtml(d.error)}</div>`; return; }
+        document.getElementById('attemptDetailTitle').textContent = `${d.user_email} — ${d.course_title}`;
+        body.innerHTML = `
+          ${d.modules.map(m => `
+            <div style="margin-bottom:18px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:6px">${escHtml(m.title)} — ${m.correct != null ? `${m.correct}/${m.total}` : 'not attempted'}</div>
+              ${m.questions.map(attemptDetailQuestionHtml).join('') || '<div style="font-size:12px;color:var(--text-muted)">No questions on this module.</div>'}
+            </div>
+          `).join('')}
+          <div style="margin-top:8px">
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:6px">Final Assessment — ${d.final_score != null ? `${d.final_score}%` : 'not attempted'}</div>
+            ${d.finalAssessment.map(attemptDetailQuestionHtml).join('') || '<div style="font-size:12px;color:var(--text-muted)">Not reached yet.</div>'}
+          </div>`;
+      } catch { body.innerHTML = `<div style="padding:24px;text-align:center;color:#c0392b">Failed to load attempt detail.</div>`; }
+    }
+    function closeAttemptDetailModal() { document.getElementById('attemptDetailModal').classList.remove('open'); }
 
     // ── Build Training — course list ──
     async function loadTrainingBuildList() {
