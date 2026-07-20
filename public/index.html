@@ -207,6 +207,23 @@
     .cat-pill:hover { color: var(--navy); }
     .cat-pill.active { color: var(--orange); border-bottom-color: var(--orange); }
 
+    /* Announcements */
+    .announcements-bar { background: white; border-bottom: 1px solid var(--gray-200); padding: 18px 24px; }
+    .announcements-inner { max-width: 1000px; margin: 0 auto; }
+    .announcements-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .announcements-title { font-size: 13px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 6px; }
+    .announcements-row { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .announcements-row::-webkit-scrollbar { display: none; }
+    .announcement-card {
+      flex: 0 0 260px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: 10px;
+      padding: 12px 14px; cursor: pointer; transition: all .15s;
+    }
+    .announcement-card:hover { border-color: var(--orange); }
+    .announcement-card.unread { background: #eef2ff; border-color: #c7d2fe; }
+    .announcement-card-msg { font-size: 12.5px; color: var(--navy); line-height: 1.5; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .announcement-card.unread .announcement-card-msg { font-weight: 600; }
+    .announcement-card-meta { font-size: 11px; color: var(--text-muted); }
+
     /* Results */
     .results-wrap {
       max-width: 860px;
@@ -681,6 +698,17 @@
 
   </div>
 
+  <!-- Announcements -->
+  <div class="announcements-bar" id="announcementsBar" style="display:none">
+    <div class="announcements-inner">
+      <div class="announcements-header">
+        <div class="announcements-title">📢 Announcements</div>
+        <button id="homeNewAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:12px;font-weight:700;cursor:pointer">+ New Announcement</button>
+      </div>
+      <div class="announcements-row" id="announcementsRow"></div>
+    </div>
+  </div>
+
   <!-- Category bar -->
   <div class="cat-bar" id="catBar" style="display:none">
     <button class="cat-pill active" data-cat="" onclick="selectCat('', this)">All Topics</button>
@@ -793,6 +821,7 @@
         currentUserRole = me.role;
         if (me.role === 'admin' || me.role === 'super_admin') {
           document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
+          document.getElementById('homeNewAnnouncementBtn').style.display = 'inline-block';
         }
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const nameEl = document.getElementById('navName');
@@ -833,7 +862,22 @@
           badge.style.display = 'none';
         }
         renderNotifPanel();
+        renderAnnouncementsSection();
       } catch {}
+    }
+
+    function renderAnnouncementsSection() {
+      const bar = document.getElementById('announcementsBar');
+      const row = document.getElementById('announcementsRow');
+      const items = notifData.announcements || [];
+      if (!items.length) { bar.style.display = 'none'; return; }
+      bar.style.display = 'block';
+      row.innerHTML = items.map(a => `
+        <div class="announcement-card ${a.is_read ? '' : 'unread'}" onclick="openAnnouncementRead('${a.id}')">
+          <div class="announcement-card-msg">${escHtml(a.message)}</div>
+          <div class="announcement-card-meta">${escHtml(a.created_by_name || 'Admin')} · ${fmtDate(a.send_at)}</div>
+        </div>
+      `).join('');
     }
 
     function greetingButtonLabel(ev) {
