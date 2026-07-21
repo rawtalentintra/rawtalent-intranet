@@ -4688,6 +4688,77 @@
         </svg>`;
     }
 
+    const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`);
+
+    // Same per-day-observed averaging as normalizeDow, just bucketed by
+    // hour-of-day (0-23, Melbourne local — see MELBOURNE_TZ in calls.js)
+    // instead of weekday.
+    function normalizeHour(byHour) {
+      const map = new Map((byHour || []).map(h => [h.hour, h]));
+      return HOUR_LABELS.map((label, hour) => {
+        const d = map.get(hour);
+        const daysObserved = d ? d.daysObserved : 0;
+        return {
+          label,
+          hour,
+          total: d ? d.total : 0,
+          inbound: d ? d.inbound : 0,
+          outbound: d ? d.outbound : 0,
+          daysObserved,
+          avgInbound: daysObserved ? d.inbound / daysObserved : 0,
+          avgOutbound: daysObserved ? d.outbound / daysObserved : 0,
+          avg: daysObserved ? Math.round((d.total / daysObserved) * 10) / 10 : 0
+        };
+      });
+    }
+
+    // Same smooth-line treatment as the day-of-week chart, just with 24
+    // points instead of 7 — every 3rd hour gets an axis label so it doesn't
+    // crowd, and only the topmost few hours get a value label so the peak
+    // is legible without cluttering the line.
+    function renderHourTrendChart(byHour) {
+      const rows = normalizeHour(byHour);
+      if (!rows.some(r => r.total > 0)) return '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">No calls match these filters.</div>';
+      const w = 900, h = 220, padL = 34, padB = 28, padT = 20, padR = 10;
+      const innerW = w - padL - padR, innerH = h - padT - padB;
+      const maxAvg = Math.max(1, ...rows.map(r => Math.max(r.avgInbound, r.avgOutbound)));
+      const n = rows.length;
+      const xStep = n > 1 ? innerW / (n - 1) : 0;
+      const yScale = v => padT + innerH - (v / maxAvg) * innerH;
+      const xAt = i => padL + i * xStep;
+
+      const inPoints = rows.map((r, i) => [xAt(i), yScale(r.avgInbound)]);
+      const outPoints = rows.map((r, i) => [xAt(i), yScale(r.avgOutbound)]);
+
+      const dots = (points, color) => rows.map((r, i) => {
+        const [x, y] = points[i];
+        const tip = `${r.label}: avg ${r.avg} calls/hour (${r.total} total over ${r.daysObserved} day${r.daysObserved === 1 ? '' : 's'}) — ${r.inbound} in / ${r.outbound} out`;
+        return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" stroke="white" stroke-width="1.3"><title>${tip}</title></circle>`;
+      }).join('');
+
+      const labels = rows.map((r, i) => (i % 3 === 0 || i === n - 1)
+        ? `<text x="${xAt(i)}" y="${h - 8}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle">${r.label}</text>`
+        : '').join('');
+
+      const peakAvg = Math.max(...rows.map(r => r.avg));
+      const totalLabels = rows.map((r, i) => (r.avg > 0 && r.avg >= peakAvg * 0.85)
+        ? `<text x="${xAt(i)}" y="${Math.min(yScale(r.avgInbound), yScale(r.avgOutbound)) - 8}" font-size="10" font-weight="700" fill="var(--navy)" text-anchor="middle">${r.avg}</text>`
+        : '').join('');
+
+      return `
+        <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="Average calls by hour of day">
+          <line x1="${padL}" y1="${padT + innerH}" x2="${w - padR}" y2="${padT + innerH}" stroke="var(--gray-200)" stroke-width="1"/>
+          <text x="4" y="${padT + 8}" font-size="9.5" fill="var(--text-muted)">${maxAvg}</text>
+          <text x="4" y="${padT + innerH}" font-size="9.5" fill="var(--text-muted)">0</text>
+          <path d="${smoothPath(outPoints)}" fill="none" stroke="${VOLUME_COLORS.outbound}" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="${smoothPath(inPoints)}" fill="none" stroke="${VOLUME_COLORS.inbound}" stroke-width="2.5" stroke-linecap="round"/>
+          ${dots(outPoints, VOLUME_COLORS.outbound)}
+          ${dots(inPoints, VOLUME_COLORS.inbound)}
+          ${totalLabels}
+          ${labels}
+        </svg>`;
+    }
+
     // Horizontal bars, one per agent, inbound/outbound stacked, sorted by
     // volume — bar length is magnitude (sequential use of the same two
     // fixed colours), with % of the grand total as the direct label so the
@@ -4765,7 +4836,19 @@
             <td style="text-align:center;color:var(--text-muted)">${volumePct(r.total, data.total)}%</td>
           </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-muted)">No calls match these filters.</td></tr>';
 
+        const hourRowsData = normalizeHour(data.byHour);
+        const hourRows = hourRowsData.map(r => `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${r.label}</td>
+            <td style="text-align:center;font-weight:700">${r.total}</td>
+            <td style="text-align:center;color:var(--text-muted)">${r.inbound}</td>
+            <td style="text-align:center;color:var(--text-muted)">${r.outbound}</td>
+            <td style="text-align:center;color:var(--text-muted)">${r.avg}</td>
+            <td style="text-align:center;color:var(--text-muted)">${volumePct(r.total, data.total)}%</td>
+          </tr>`).join('');
+
         output.innerHTML = `
+          <div style="font-size:11px;color:var(--text-muted);margin-top:12px">🕐 All dates and times below are Melbourne local time (${escHtml(data.timezone || 'Australia/Melbourne')}), matching what Dubber records — daylight saving is handled automatically.</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:16px 0">
             <div style="background:var(--offwhite);border-radius:var(--radius);padding:16px;text-align:center">
               <div style="font-size:26px;font-weight:800;color:var(--navy)">${data.total}</div>
@@ -4794,6 +4877,13 @@
             ${renderDowTrendChart(data.byDow)}
           </div>
 
+          <div style="margin-bottom:20px">
+            <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px">Average Calls by Hour of Day</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">Which hours run busiest (Melbourne time), averaged over the selected date range</div>
+            ${volumeLegend()}
+            ${renderHourTrendChart(data.byHour)}
+          </div>
+
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:16px">
             <div>
               <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">By Agent</div>
@@ -4808,9 +4898,14 @@
             </div>
           </div>
 
-          <details>
+          <details style="margin-bottom:16px">
             <summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">By ${data.groupBy} — table view</summary>
             <table class="data-table" style="font-size:12.5px"><thead><tr><th>Period</th>${showDowColumn ? '<th style="text-align:center">Day</th>' : ''}<th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th><th style="text-align:center">% of Total</th></tr></thead><tbody>${periodRows}</tbody></table>
+          </details>
+
+          <details>
+            <summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">By hour of day — table view (Melbourne time)</summary>
+            <table class="data-table" style="font-size:12.5px"><thead><tr><th>Hour</th><th style="text-align:center">Total</th><th style="text-align:center">In</th><th style="text-align:center">Out</th><th style="text-align:center">Avg / Day</th><th style="text-align:center">% of Total</th></tr></thead><tbody>${hourRows}</tbody></table>
           </details>
         `;
       } catch { output.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Failed to load call volume.</div>'; }

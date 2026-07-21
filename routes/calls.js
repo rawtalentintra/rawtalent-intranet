@@ -586,9 +586,23 @@ router.post('/ask', async (req, res) => {
   }
 });
 
+// Dubber sends start_time with an explicit UTC offset (e.g. "+1000"), which
+// dubberService.js already normalizes to a true UTC instant in
+// start_time_iso before it's stored — so the raw timestamps are correct.
+// What was missing is the *reporting* side: every GROUP BY below has to
+// bucket by Melbourne wall-clock day/weekday/hour, not by the Postgres
+// session's timezone (UTC on this DB), or a call placed at, say, 8am
+// Melbourne (a business-hours call) lands in the previous UTC calendar day
+// and gets silently miscounted. `AT TIME ZONE 'Australia/Melbourne'`
+// converts the stored instant to Melbourne local time — and unlike a fixed
+// +10/+11 offset, Postgres resolves it against the real IANA tz database,
+// so daylight saving transitions are handled automatically.
+const MELBOURNE_TZ = 'Australia/Melbourne';
+
 // Raw call volume (from Dubber's synced metadata, not evaluations) —
 // inbound/outbound counts and a per-period trend, filterable by rep and
-// date range, with the grouping granularity chosen by the caller.
+// date range, with the grouping granularity chosen by the caller. All
+// date/time bucketing is in Melbourne local time (see MELBOURNE_TZ above).
 router.get('/volume-stats', async (req, res) => {
   const { repName, callType, dateFrom, dateTo } = req.query;
   const groupBy = ['day', 'week', 'month'].includes(req.query.groupBy) ? req.query.groupBy : 'month';
@@ -597,12 +611,16 @@ router.get('/volume-stats', async (req, res) => {
     const args = [];
     if (repName) { conditions.push('rep_name ILIKE ?'); args.push(`%${repName}%`); }
     if (callType === 'inbound' || callType === 'outbound') { conditions.push('call_type = ?'); args.push(callType); }
-    if (dateFrom) { conditions.push('start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
-    if (dateTo) { conditions.push('start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+    // dateFrom/dateTo are plain YYYY-MM-DD dates picked against a Melbourne
+    // calendar, so compare them against the Melbourne calendar date the
+    // call actually falls on — not the raw UTC instant, which would shift
+    // the boundary by up to 11 hours.
+    if (dateFrom) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
+    if (dateTo) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
     const where = `WHERE ${conditions.join(' AND ')}`;
 
     const db = getDb();
-    const [totalsRes, byRepRes, byPeriodRes, byDowRes] = await Promise.all([
+    const [totalsRes, byRepRes, byPeriodRes, byDowRes, byHourRes] = await Promise.all([
       db.execute({
         sql: `SELECT COUNT(*) AS total,
                      COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
@@ -620,7 +638,7 @@ router.get('/volume-stats', async (req, res) => {
         args
       }),
       db.execute({
-        sql: `SELECT to_char(date_trunc('${groupBy}', start_time_iso::timestamptz), 'YYYY-MM-DD') AS period,
+        sql: `SELECT to_char(date_trunc('${groupBy}', start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}'), 'YYYY-MM-DD') AS period,
                      COUNT(*) AS total,
                      COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
                      COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound
@@ -636,13 +654,26 @@ router.get('/volume-stats', async (req, res) => {
       // rather than a raw total that's skewed by how many of each weekday
       // happen to fall in the selected range.
       db.execute({
-        sql: `SELECT EXTRACT(ISODOW FROM start_time_iso::timestamptz)::int AS dow,
+        sql: `SELECT EXTRACT(ISODOW FROM start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::int AS dow,
                      COUNT(*) AS total,
                      COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
                      COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound,
-                     COUNT(DISTINCT date_trunc('day', start_time_iso::timestamptz)) AS days_observed
+                     COUNT(DISTINCT date_trunc('day', start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')) AS days_observed
               FROM call_recordings ${where}
               GROUP BY dow ORDER BY dow ASC`,
+        args
+      }),
+      // Hour-of-day trend (0-23, Melbourne local) — same per-day-observed
+      // averaging as the weekday chart, so a hot 9am is comparable to a hot
+      // 2pm even if the date range doesn't cover every hour evenly.
+      db.execute({
+        sql: `SELECT EXTRACT(HOUR FROM start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::int AS hour,
+                     COUNT(*) AS total,
+                     COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
+                     COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound,
+                     COUNT(DISTINCT date_trunc('day', start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')) AS days_observed
+              FROM call_recordings ${where}
+              GROUP BY hour ORDER BY hour ASC`,
         args
       })
     ]);
@@ -654,7 +685,9 @@ router.get('/volume-stats', async (req, res) => {
       byRep: byRepRes.rows.map(r => ({ repName: r.rep_name || 'Unknown', total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
       byPeriod: byPeriodRes.rows.map(r => ({ period: r.period, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
       byDow: byDowRes.rows.map(r => ({ dow: r.dow, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound), daysObserved: Number(r.days_observed) })),
-      groupBy
+      byHour: byHourRes.rows.map(r => ({ hour: r.hour, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound), daysObserved: Number(r.days_observed) })),
+      groupBy,
+      timezone: MELBOURNE_TZ
     });
   } catch (err) {
     console.error('Call volume stats error:', err.message);
