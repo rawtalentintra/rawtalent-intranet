@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
 const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+
+const announcementFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 router.use(requireAuth);
 
@@ -205,7 +209,38 @@ router.post('/announcements', requireAdmin, async (req, res) => {
   }
 });
 
-router.post('/announcements/:id/read', async (req, res) => {
+// Full archive — every announcement ever sent, like the article list.
+// Admins/super_admins also see not-yet-sent (scheduled) ones; everyone else
+// only sees announcements whose send_at has passed.
+router.get('/announcements/all', async (req, res) => {
+  const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
+  try {
+    const result = await getDb().execute({
+      sql: `SELECT a.*, (r.user_email IS NOT NULL) AS is_acked, r.read_at AS acked_at,
+                   COALESCE(f.files, '[]'::json) AS files
+            FROM announcements a
+            LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_email = ?
+            LEFT JOIN LATERAL (
+              SELECT json_agg(json_build_object(
+                'id', af.id, 'filename', af.filename, 'mimetype', af.mimetype,
+                'filesize', af.filesize, 'display_mode', af.display_mode
+              ) ORDER BY af.created_at ASC) AS files
+              FROM announcement_files af WHERE af.announcement_id = a.id
+            ) f ON true
+            WHERE a.send_at <= now() OR ?
+            ORDER BY a.send_at DESC`,
+      args: [req.user.email, isAdmin]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Explicit acknowledgment — the tickbox flow. Unlike the old auto-mark-read,
+// this is the ONLY way an announcement gets recorded as read; nothing else
+// (viewing it, the bulk read-all endpoint) marks it read on the user's behalf.
+router.post('/announcements/:id/ack', async (req, res) => {
   try {
     await getDb().execute({
       sql: `INSERT INTO announcement_reads (announcement_id, user_email) VALUES (?, ?)
@@ -213,6 +248,79 @@ router.post('/announcements/:id/read', async (req, res) => {
       args: [req.params.id, req.user.email]
     });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Per-announcement acknowledgment report — every active user, and whether/
+// when they've ticked "I have read and understood this update".
+router.get('/announcements/:id/report', requireAdmin, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: `SELECT u.email, u.name, (r.user_email IS NOT NULL) AS acked, r.read_at AS acked_at
+            FROM users u
+            LEFT JOIN announcement_reads r ON r.announcement_id = ? AND r.user_email = u.email
+            WHERE u.active = true
+            ORDER BY acked ASC, u.name ASC`,
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/announcements/:id/files', requireAdmin, announcementFileUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const { displayMode = 'download' } = req.body;
+  try {
+    const db = getDb();
+    const annRes = await db.execute({ sql: 'SELECT id FROM announcements WHERE id = ?', args: [req.params.id] });
+    if (!annRes.rows[0]) return res.status(404).json({ error: 'Announcement not found' });
+
+    const result = await db.execute({
+      sql: 'INSERT INTO announcement_files (announcement_id, filename, mimetype, filesize, display_mode) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, displayMode]
+    });
+    const fileId = result.rows[0].id;
+    const storagePath = `${fileId}.${extForMimetype(req.file.mimetype)}`;
+    await ensureBucket(BUCKETS.announcementFiles);
+    await uploadBuffer(BUCKETS.announcementFiles, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE announcement_files SET storage_path = ? WHERE id = ?', args: [storagePath, fileId] });
+
+    res.json({ success: true, id: fileId, filename: req.file.originalname, displayMode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/announcements/files/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT storage_path FROM announcement_files WHERE id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM announcement_files WHERE id = ?', args: [req.params.id] });
+    if (existing.rows[0]?.storage_path) {
+      try { await removeFile(BUCKETS.announcementFiles, existing.rows[0].storage_path); } catch { /* orphaned storage object, non-fatal */ }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/announcements/file/:fileId', async (req, res) => {
+  try {
+    const file = (await getDb().execute({ sql: 'SELECT * FROM announcement_files WHERE id = ?', args: [req.params.fileId] })).rows[0];
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
+    const buffer = await downloadAsBuffer(BUCKETS.announcementFiles, file.storage_path);
+    res.setHeader('Content-Type', file.mimetype);
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Content-Disposition', file.display_mode === 'download'
+      ? `attachment; filename="${encodeURIComponent(file.filename)}"`
+      : `inline; filename="${encodeURIComponent(file.filename)}"`);
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -273,6 +381,9 @@ router.post('/:id/read', async (req, res) => {
   }
 });
 
+// Bulk-marks greetings read, but deliberately leaves announcements alone —
+// those only get acknowledged one at a time, by ticking the checkbox on the
+// Announcements tab.
 router.post('/read-all', async (req, res) => {
   try {
     const db = getDb();
@@ -281,12 +392,6 @@ router.post('/read-all', async (req, res) => {
     if (me) {
       await db.execute({ sql: 'UPDATE team_greetings SET is_read = true WHERE team_member_id = ?', args: [me.id] });
     }
-    await db.execute({
-      sql: `INSERT INTO announcement_reads (announcement_id, user_email)
-            SELECT id, ? FROM announcements WHERE send_at <= now()
-            ON CONFLICT (announcement_id, user_email) DO NOTHING`,
-      args: [req.user.email]
-    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

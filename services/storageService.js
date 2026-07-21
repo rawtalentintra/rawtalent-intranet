@@ -13,8 +13,27 @@ function getStorageClient() {
 const BUCKETS = {
   teamPhotos: 'team-photos',
   articleFiles: 'article-files',
-  callRecordings: 'call-recordings'
+  callRecordings: 'call-recordings',
+  announcementFiles: 'announcement-files'
 };
+
+// Every other bucket above was provisioned manually in Supabase ahead of
+// time. This one wasn't, so create it on first use if it's missing —
+// private, same as the rest (reads go through downloadAsBuffer, never a
+// public URL).
+const ensuredBuckets = new Set();
+async function ensureBucket(bucket) {
+  if (ensuredBuckets.has(bucket)) return;
+  const storage = getStorageClient().storage;
+  const { data, error } = await storage.getBucket(bucket);
+  if (error && !data) {
+    const { error: createError } = await storage.createBucket(bucket, { public: false });
+    if (createError && !/already exists/i.test(createError.message)) {
+      throw new Error(`Bucket creation failed (${bucket}): ${createError.message}`);
+    }
+  }
+  ensuredBuckets.add(bucket);
+}
 
 async function uploadBuffer(bucket, path, buffer, contentType) {
   const { error } = await getStorageClient().storage.from(bucket).upload(path, buffer, { contentType, upsert: true });
@@ -61,4 +80,4 @@ function parseDataUri(uri) {
   return { mimetype: m[1], base64: m[2] };
 }
 
-module.exports = { BUCKETS, uploadBuffer, uploadBase64, getSignedUrl, downloadAsBuffer, remove, extForMimetype, parseDataUri };
+module.exports = { BUCKETS, uploadBuffer, uploadBase64, getSignedUrl, downloadAsBuffer, remove, extForMimetype, parseDataUri, ensureBucket };

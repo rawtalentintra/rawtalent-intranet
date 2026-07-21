@@ -396,6 +396,17 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 CREATE INDEX IF NOT EXISTS idx_announcements_send_at ON announcements(send_at);
 
+CREATE TABLE IF NOT EXISTS announcement_files (
+  id SERIAL PRIMARY KEY,
+  announcement_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  display_mode TEXT DEFAULT 'download',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Per-user read state — every signed-in user (not just team_members rows)
 -- can read an announcement, so this keys on email rather than a FK.
 CREATE TABLE IF NOT EXISTS announcement_reads (

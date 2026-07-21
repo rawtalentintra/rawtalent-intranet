@@ -207,22 +207,22 @@
     .cat-pill:hover { color: var(--navy); }
     .cat-pill.active { color: var(--orange); border-bottom-color: var(--orange); }
 
-    /* Announcements */
-    .announcements-bar { background: white; border-bottom: 1px solid var(--gray-200); padding: 18px 24px; }
-    .announcements-inner { max-width: 1000px; margin: 0 auto; }
-    .announcements-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .announcements-title { font-size: 13px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 6px; }
-    .announcements-row { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-    .announcements-row::-webkit-scrollbar { display: none; }
-    .announcement-card {
-      flex: 0 0 260px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: 10px;
-      padding: 12px 14px; cursor: pointer; transition: all .15s;
+    /* Announcements — a full tab, styled like the Glossary/FAQ list */
+    .announce-item { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 20px 24px; margin-bottom: 14px; }
+    .announce-item.unacked { border-color: #fed7aa; background: #fffaf5; }
+    .announce-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .announce-message { font-size: 15px; color: var(--text); line-height: 1.7; white-space: pre-wrap; margin-bottom: 12px; }
+    .announce-files { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+    .announce-files img { max-width: 100%; border-radius: 8px; display: block; }
+    .announce-file-link {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--gray-50);
+      border: 1px solid var(--gray-200); border-radius: 8px; text-decoration: none; color: var(--navy);
+      font-weight: 600; font-size: 12.5px; width: fit-content;
     }
-    .announcement-card:hover { border-color: var(--orange); }
-    .announcement-card.unread { background: #eef2ff; border-color: #c7d2fe; }
-    .announcement-card-msg { font-size: 12.5px; color: var(--navy); line-height: 1.5; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .announcement-card.unread .announcement-card-msg { font-weight: 600; }
-    .announcement-card-meta { font-size: 11px; color: var(--text-muted); }
+    .announce-ack-box { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 12px 14px; margin-top: 12px; }
+    .announce-ack-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--navy); cursor: pointer; margin-bottom: 10px; }
+    .announce-acked-note { font-size: 12px; color: #15803d; font-weight: 600; margin-top: 12px; }
+    .announce-report-link { font-size: 11.5px; color: var(--orange); cursor: pointer; font-weight: 600; }
 
     /* Results */
     .results-wrap {
@@ -668,6 +668,7 @@
       <div class="mode-tabs">
         <button class="mode-tab active" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
         <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
+        <button class="mode-tab" id="tabAnnouncements" onclick="setMode('announcements')">📢 Announcements</button>
         <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
         <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
         <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
@@ -696,17 +697,6 @@
       ✨ AI answers are generated from your knowledge base — documents, articles, and reference websites
     </div>
 
-  </div>
-
-  <!-- Announcements -->
-  <div class="announcements-bar" id="announcementsBar" style="display:none">
-    <div class="announcements-inner">
-      <div class="announcements-header">
-        <div class="announcements-title">📢 Announcements</div>
-        <button id="homeNewAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:12px;font-weight:700;cursor:pointer">+ New Announcement</button>
-      </div>
-      <div class="announcements-row" id="announcementsRow"></div>
-    </div>
   </div>
 
   <!-- Category bar -->
@@ -782,10 +772,30 @@
           <label class="form-label-modal">Notify everyone <span class="optional">(leave blank to send now)</span></label>
           <input type="datetime-local" id="announcementSendAt" class="form-control">
         </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Attach a visual or file <span class="optional">(optional)</span></label>
+          <input type="file" id="announcementFile" class="form-control">
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeAnnouncementModal()">Cancel</button>
         <button class="btn-add" onclick="submitAnnouncement()">Send Announcement</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Announcement Acknowledgment Report Modal -->
+  <div class="modal-overlay" id="announcementReportModal" onclick="if(event.target===this)closeAnnouncementReportModal()">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div class="modal-title">Acknowledgment Report</div>
+        <button class="modal-close" onclick="closeAnnouncementReportModal()">×</button>
+      </div>
+      <div class="modal-body" id="announcementReportBody" style="max-height:60vh;overflow-y:auto">
+        <div class="spinner-wrap"><div class="spinner"></div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeAnnouncementReportModal()">Close</button>
       </div>
     </div>
   </div>
@@ -821,7 +831,6 @@
         currentUserRole = me.role;
         if (me.role === 'admin' || me.role === 'super_admin') {
           document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
-          document.getElementById('homeNewAnnouncementBtn').style.display = 'inline-block';
         }
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const nameEl = document.getElementById('navName');
@@ -843,9 +852,13 @@
       } catch { location.href = '/login.html'; return; }
 
       loadCategories();
-      loadResults();
       loadNotifications();
       setInterval(loadNotifications, 5 * 60 * 1000);
+      if (new URLSearchParams(location.search).get('tab') === 'announcements') {
+        setMode('announcements');
+      } else {
+        loadResults();
+      }
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
@@ -862,22 +875,7 @@
           badge.style.display = 'none';
         }
         renderNotifPanel();
-        renderAnnouncementsSection();
       } catch {}
-    }
-
-    function renderAnnouncementsSection() {
-      const bar = document.getElementById('announcementsBar');
-      const row = document.getElementById('announcementsRow');
-      const items = notifData.announcements || [];
-      if (!items.length) { bar.style.display = 'none'; return; }
-      bar.style.display = 'block';
-      row.innerHTML = items.map(a => `
-        <div class="announcement-card ${a.is_read ? '' : 'unread'}" onclick="openAnnouncementRead('${a.id}')">
-          <div class="announcement-card-msg">${escHtml(a.message)}</div>
-          <div class="announcement-card-meta">${escHtml(a.created_by_name || 'Admin')} · ${fmtDate(a.send_at)}</div>
-        </div>
-      `).join('');
     }
 
     function greetingButtonLabel(ev) {
@@ -1008,18 +1006,18 @@
     }
 
     function openAnnouncementRead(id) {
-      const a = notifData.announcements.find(x => x.id === id);
-      if (!a) return;
-      if (!a.is_read) {
-        fetch(`/api/notifications/announcements/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
-      }
+      // Clicking a bell announcement no longer marks it read — acknowledgment
+      // only happens by ticking the checkbox on the Announcements tab.
+      toggleNotifPanel();
+      setMode('announcements');
     }
 
     function openAnnouncementModal() {
       document.getElementById('announcementMessage').value = '';
       document.getElementById('announcementSendAt').value = '';
+      document.getElementById('announcementFile').value = '';
       document.getElementById('announcementModal').classList.add('open');
-      toggleNotifPanel();
+      document.getElementById('notifPanel').style.display = 'none';
     }
     function closeAnnouncementModal() {
       document.getElementById('announcementModal').classList.remove('open');
@@ -1029,6 +1027,8 @@
       if (!message) { toast('Write a message first', 'error'); return; }
       const sendAtLocal = document.getElementById('announcementSendAt').value;
       const send_at = sendAtLocal ? new Date(sendAtLocal).toISOString() : null;
+      const fileInput = document.getElementById('announcementFile');
+      const file = fileInput.files[0];
       try {
         const res = await fetch('/api/notifications/announcements', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1036,10 +1036,122 @@
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
+
+        if (file) {
+          const displayMode = file.type.startsWith('image/') || file.type === 'application/pdf' ? 'inline' : 'download';
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('displayMode', displayMode);
+          const fileRes = await fetch(`/api/notifications/announcements/${data.id}/files`, { method: 'POST', body: formData });
+          if (!fileRes.ok) toast('Announcement sent, but the attachment failed to upload', 'error');
+        }
+
         toast(send_at ? 'Announcement scheduled' : 'Announcement sent', 'success');
         closeAnnouncementModal();
         loadNotifications();
+        if (currentMode === 'announcements') loadAnnouncementsView();
       } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Announcements ─────────────────────────────────────────────
+    let allAnnouncements = [];
+
+    async function loadAnnouncementsView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        allAnnouncements = await fetch('/api/notifications/announcements/all').then(r => r.json());
+        renderAnnouncementsList(allAnnouncements);
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load announcements.</div></div>';
+      }
+    }
+
+    function renderAnnouncementsList(items) {
+      const list = document.getElementById('resultsList');
+      const isAdmin = currentUserRole === 'admin' || currentUserRole === 'super_admin';
+      const header = isAdmin ? `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+          <button class="btn-add" onclick="openAnnouncementModal()">+ New Announcement</button>
+        </div>` : '';
+      if (items.length === 0) {
+        list.innerHTML = header + `
+          <div class="empty-wrap">
+            <div class="empty-icon">📢</div>
+            <div class="empty-title">No announcements yet</div>
+          </div>`;
+        return;
+      }
+      const now = Date.now();
+      const html = items.map(a => {
+        const isFuture = new Date(a.send_at).getTime() > now;
+        const files = a.files || [];
+        const inlineFiles = files.filter(f => f.display_mode === 'inline');
+        const downloadFiles = files.filter(f => f.display_mode !== 'inline');
+        const filesHtml = files.length ? `
+          <div class="announce-files">
+            ${inlineFiles.map(f => f.mimetype === 'application/pdf'
+              ? `<iframe src="/api/notifications/announcements/file/${f.id}" style="width:100%;height:420px;border:1px solid var(--gray-200);border-radius:8px"></iframe>`
+              : `<img src="/api/notifications/announcements/file/${f.id}" alt="${escHtml(f.filename)}">`).join('')}
+            ${downloadFiles.map(f => `<a class="announce-file-link" href="/api/notifications/announcements/file/${f.id}" download="${escHtml(f.filename)}">📎 ${escHtml(f.filename)}</a>`).join('')}
+          </div>` : '';
+        const ackHtml = a.is_acked ? `<div class="announce-acked-note">✓ Acknowledged ${fmtDate(a.acked_at)}</div>` : (isFuture ? '' : `
+          <div class="announce-ack-box">
+            <label class="announce-ack-label">
+              <input type="checkbox" onchange="if(this.checked) ackAnnouncement('${a.id}', this)">
+              I have read and understood this update
+            </label>
+          </div>`);
+        const reportHtml = isAdmin ? `<span class="announce-report-link" onclick="openAnnouncementReport('${a.id}')">📊 Acknowledgment report</span>` : '';
+        return `
+          <div class="announce-item ${!a.is_acked && !isFuture ? 'unacked' : ''}">
+            <div class="announce-meta">
+              <span>📢 ${escHtml(a.created_by_name || 'Admin')}</span>
+              <span>·</span>
+              <span>${isFuture ? `Scheduled for ${fmtDate(a.send_at)}` : fmtDate(a.send_at)}</span>
+              ${reportHtml}
+            </div>
+            <div class="announce-message">${escHtml(a.message)}</div>
+            ${filesHtml}
+            ${ackHtml}
+          </div>`;
+      }).join('');
+      list.innerHTML = header + html;
+    }
+
+    async function ackAnnouncement(id, checkboxEl) {
+      checkboxEl.disabled = true;
+      try {
+        const res = await fetch(`/api/notifications/announcements/${id}/ack`, { method: 'POST' });
+        if (!res.ok) { checkboxEl.disabled = false; checkboxEl.checked = false; toast('Failed to acknowledge', 'error'); return; }
+        loadAnnouncementsView();
+        loadNotifications();
+      } catch { checkboxEl.disabled = false; checkboxEl.checked = false; toast('Network error', 'error'); }
+    }
+
+    async function openAnnouncementReport(id) {
+      document.getElementById('announcementReportModal').classList.add('open');
+      const body = document.getElementById('announcementReportBody');
+      body.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        const rows = await fetch(`/api/notifications/announcements/${id}/report`).then(r => r.json());
+        const ackedCount = rows.filter(r => r.acked).length;
+        body.innerHTML = `
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">${ackedCount} of ${rows.length} have acknowledged</div>
+          ${rows.map(r => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--gray-100)">
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--navy)">${escHtml(r.name || r.email)}</div>
+                <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(r.email)}</div>
+              </div>
+              <div style="font-size:11.5px;font-weight:600;color:${r.acked ? '#15803d' : '#b45309'}">${r.acked ? `✓ ${fmtDate(r.acked_at)}` : 'Not yet'}</div>
+            </div>`).join('')}
+        `;
+      } catch {
+        body.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load report.</div></div>';
+      }
+    }
+    function closeAnnouncementReportModal() {
+      document.getElementById('announcementReportModal').classList.remove('open');
     }
 
     function spawnConfetti(container) {
@@ -1079,12 +1191,14 @@
     function setMode(mode) {
       currentMode = mode;
       const isAI = mode === 'ai';
+      const isAnnouncements = mode === 'announcements';
       const isGlossary = mode === 'glossary';
       const isFaq = mode === 'faq';
       const isTeam = mode === 'team';
       const isTraining = mode === 'training';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
+      document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
       document.getElementById('tabTeam').classList.toggle('active', isTeam);
@@ -1094,13 +1208,15 @@
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiBanner').classList.toggle('show', isAI);
-      document.getElementById('heroTitle').textContent = isGlossary ? 'Glossary of terms'
+      document.getElementById('heroTitle').textContent = isAnnouncements ? 'Announcements'
+        : isGlossary ? 'Glossary of terms'
         : isFaq ? 'Frequently asked questions'
         : isTeam ? 'Our Team'
         : isTraining ? 'Training'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Ask AI anything — searches across all articles, documents, and reference sites'
+        : isAnnouncements ? 'Company updates and childcare industry news'
         : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
         : isFaq ? 'Real questions from the team, reviewed and approved'
         : isTeam ? 'Team hierarchy and HR profiles'
@@ -1115,6 +1231,8 @@
             <p style="font-size:14px;margin-top:4px">Try: "What are the WWCC requirements for Victoria?" or "How do I handle a no-show?"</p>
           </div>`;
         setTimeout(() => document.getElementById('aiInput').focus(), 50);
+      } else if (isAnnouncements) {
+        loadAnnouncementsView();
       } else if (isGlossary) {
         loadGlossaryView();
       } else if (isFaq) {
