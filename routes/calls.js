@@ -602,7 +602,7 @@ router.get('/volume-stats', async (req, res) => {
     const where = `WHERE ${conditions.join(' AND ')}`;
 
     const db = getDb();
-    const [totalsRes, byRepRes, byPeriodRes] = await Promise.all([
+    const [totalsRes, byRepRes, byPeriodRes, byDowRes] = await Promise.all([
       db.execute({
         sql: `SELECT COUNT(*) AS total,
                      COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
@@ -627,6 +627,23 @@ router.get('/volume-stats', async (req, res) => {
               FROM call_recordings ${where}
               GROUP BY period ORDER BY period ASC`,
         args
+      }),
+      // Day-of-week trend — independent of the groupBy above (which
+      // collapses to week/month), so this always answers "which weekdays
+      // run busiest" over the filtered range. days_observed counts the
+      // distinct calendar dates that fell on each weekday and had at least
+      // one call, so total/days_observed gives a fair per-weekday average
+      // rather than a raw total that's skewed by how many of each weekday
+      // happen to fall in the selected range.
+      db.execute({
+        sql: `SELECT EXTRACT(ISODOW FROM start_time_iso::timestamptz)::int AS dow,
+                     COUNT(*) AS total,
+                     COUNT(*) FILTER (WHERE call_type = 'inbound') AS inbound,
+                     COUNT(*) FILTER (WHERE call_type = 'outbound') AS outbound,
+                     COUNT(DISTINCT date_trunc('day', start_time_iso::timestamptz)) AS days_observed
+              FROM call_recordings ${where}
+              GROUP BY dow ORDER BY dow ASC`,
+        args
       })
     ]);
 
@@ -636,6 +653,7 @@ router.get('/volume-stats', async (req, res) => {
       outbound: Number(totalsRes.rows[0]?.outbound || 0),
       byRep: byRepRes.rows.map(r => ({ repName: r.rep_name || 'Unknown', total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
       byPeriod: byPeriodRes.rows.map(r => ({ period: r.period, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound) })),
+      byDow: byDowRes.rows.map(r => ({ dow: r.dow, total: Number(r.total), inbound: Number(r.inbound), outbound: Number(r.outbound), daysObserved: Number(r.days_observed) })),
       groupBy
     });
   } catch (err) {
