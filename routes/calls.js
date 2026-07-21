@@ -15,6 +15,16 @@ const { extractFaqsFromCall } = require('../services/faqClassifier');
 const { v4: uuidv4 } = require('uuid');
 const { BUCKETS, uploadBase64, downloadAsBuffer, extForMimetype } = require('../services/storageService');
 
+// Dubber sends start_time with an explicit UTC offset (e.g. "+1000"), and
+// dubberService.js normalizes that to a true UTC instant in start_time_iso
+// before it's stored, so the raw timestamps are correct. Every date filter
+// in this file compares against a plain YYYY-MM-DD picked in the UI against
+// a Melbourne calendar, though — so it has to compare the Melbourne calendar
+// date the call falls on, not the raw UTC instant, or the boundary shifts by
+// up to 11 hours. `AT TIME ZONE` resolves against the real IANA tz database,
+// so daylight saving is handled automatically rather than a fixed offset.
+const MELBOURNE_TZ = 'Australia/Melbourne';
+
 // Call recordings are confidential, but admins (not just super_admin) get
 // full access here — evaluate, delete, and manage rubric/calibration.
 router.use(requireAdmin);
@@ -92,8 +102,9 @@ router.get('/local', async (req, res) => {
     if (repName) { conditions.push('rep_name LIKE ?'); args.push(`%${repName}%`); }
     if (phone) { conditions.push('(to_number LIKE ? OR from_number LIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
     if (recordingId) { conditions.push('id LIKE ?'); args.push(`%${recordingId}%`); }
-    if (dateFrom) { conditions.push('start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
-    if (dateTo) { conditions.push('start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+    // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
+    if (dateFrom) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
+    if (dateTo) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const offset = (Math.max(1, Number(page)) - 1) * Number(pageSize);
@@ -542,8 +553,9 @@ async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType 
   // calls and train the AI grader, and must never count against a rep.
   const conditions = ["e.outcome != 'calibration_only'"];
   const args = [];
-  if (dateFrom) { conditions.push('r.start_time_iso >= ?'); args.push(new Date(dateFrom).toISOString()); }
-  if (dateTo) { conditions.push('r.start_time_iso <= ?'); args.push(new Date(dateTo).toISOString()); }
+  // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
+  if (dateFrom) { conditions.push(`(r.start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
+  if (dateTo) { conditions.push(`(r.start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
   if (repName) { conditions.push('e.rep_name = ?'); args.push(repName); }
   if (rubricType && RUBRICS[rubricType]) { conditions.push('e.rubric_type = ?'); args.push(rubricType); }
   const where = `WHERE ${conditions.join(' AND ')}`;
@@ -585,19 +597,6 @@ router.post('/ask', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Dubber sends start_time with an explicit UTC offset (e.g. "+1000"), which
-// dubberService.js already normalizes to a true UTC instant in
-// start_time_iso before it's stored — so the raw timestamps are correct.
-// What was missing is the *reporting* side: every GROUP BY below has to
-// bucket by Melbourne wall-clock day/weekday/hour, not by the Postgres
-// session's timezone (UTC on this DB), or a call placed at, say, 8am
-// Melbourne (a business-hours call) lands in the previous UTC calendar day
-// and gets silently miscounted. `AT TIME ZONE 'Australia/Melbourne'`
-// converts the stored instant to Melbourne local time — and unlike a fixed
-// +10/+11 offset, Postgres resolves it against the real IANA tz database,
-// so daylight saving transitions are handled automatically.
-const MELBOURNE_TZ = 'Australia/Melbourne';
 
 // Raw call volume (from Dubber's synced metadata, not evaluations) —
 // inbound/outbound counts and a per-period trend, filterable by rep and

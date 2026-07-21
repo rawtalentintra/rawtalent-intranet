@@ -871,7 +871,7 @@
                   <th style="width:38px">Dir.</th>
                   <th style="width:130px">Contact</th>
                   <th style="width:42px">Dur.</th>
-                  <th style="width:150px">Date</th>
+                  <th style="width:190px">Date (Melbourne)</th>
                   <th style="width:110px">Status</th>
                   <th style="width:460px"></th>
                 </tr>
@@ -2764,6 +2764,23 @@
       if (!iso) return '';
       try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
       catch { return iso; }
+    }
+
+    // Explicitly renders in Melbourne local time regardless of the viewing
+    // device's own timezone/clock — unlike fmtDate (which uses whatever
+    // timezone the browser happens to be set to), this always matches what
+    // Dubber recorded and what the Call Quality Dashboard reports use.
+    // timeZoneName: 'short' shows AEST/AEDT so daylight saving is explicit.
+    function fmtCallDateTime(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleString('en-AU', {
+          timeZone: 'Australia/Melbourne',
+          day: 'numeric', month: 'short', year: 'numeric',
+          hour: 'numeric', minute: '2-digit', hour12: true,
+          timeZoneName: 'short'
+        });
+      } catch { return iso; }
     }
 
     async function logout() {
@@ -5202,7 +5219,7 @@
             <td style="color:var(--text-muted)" title="${escHtml(r.call_type || '—')}">${r.call_type === 'outbound' ? 'Out' : r.call_type === 'inbound' ? 'In' : '—'}</td>
             <td>${escHtml(contact || '—')}</td>
             <td style="color:var(--text-muted);white-space:nowrap">${fmtDuration(r.duration_seconds)}</td>
-            <td style="color:var(--text-muted);white-space:nowrap">${escHtml(r.start_time || '—')}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${escHtml(fmtCallDateTime(r.start_time_iso) || '—')}</td>
             <td><span class="badge ${badge.cls}">${badge.label}</span></td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
