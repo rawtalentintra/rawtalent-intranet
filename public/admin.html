@@ -4631,35 +4631,60 @@
     // language as the chronological trend chart above, but answers a
     // different question ("which weekdays run busiest?") instead of "is
     // volume trending up or down over time?".
+    // Catmull-Rom -> cubic Bezier, so the line reads as one continuous curve
+    // through every weekday's point rather than straight-line segments.
+    function smoothPath(points) {
+      if (points.length < 2) return '';
+      if (points.length === 2) return `M ${points[0][0]},${points[0][1]} L ${points[1][0]},${points[1][1]}`;
+      let d = `M ${points[0][0]},${points[0][1]}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i - 1] || points[i];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[i + 2] || p2;
+        const cp1x = p1[0] + (p2[0] - p0[0]) / 6, cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const cp2x = p2[0] - (p3[0] - p1[0]) / 6, cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+      }
+      return d;
+    }
+
     function renderDowTrendChart(byDow) {
       const rows = normalizeDow(byDow);
       if (!rows.some(r => r.total > 0)) return '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">No calls match these filters.</div>';
       const w = 900, h = 220, padL = 34, padB = 28, padT = 20, padR = 10;
       const innerW = w - padL - padR, innerH = h - padT - padB;
-      const maxAvg = Math.max(1, ...rows.map(r => r.avg));
-      const n = rows.length, gap = 16;
-      const barW = (innerW - gap * (n - 1)) / n;
-      const yScale = v => (v / maxAvg) * innerH;
+      const maxAvg = Math.max(1, ...rows.map(r => Math.max(r.avgInbound, r.avgOutbound)));
+      const n = rows.length;
+      const xStep = n > 1 ? innerW / (n - 1) : 0;
+      const yScale = v => padT + innerH - (v / maxAvg) * innerH;
+      const xAt = i => padL + i * xStep;
 
-      const bars = rows.map((r, i) => {
-        const x = padL + i * (barW + gap);
-        const inH = yScale(r.avgInbound), outH = yScale(r.avgOutbound);
+      const inPoints = rows.map((r, i) => [xAt(i), yScale(r.avgInbound)]);
+      const outPoints = rows.map((r, i) => [xAt(i), yScale(r.avgOutbound)]);
+
+      const dots = (points, values, color) => rows.map((r, i) => {
+        const [x, y] = points[i];
         const tip = `${r.label}: avg ${r.avg} calls/day (${r.total} total over ${r.daysObserved} day${r.daysObserved === 1 ? '' : 's'}) — ${r.inbound} in / ${r.outbound} out`;
-        return `
-          <g>
-            <rect x="${x}" y="${padT + innerH - inH - outH}" width="${barW}" height="${outH}" fill="${VOLUME_COLORS.outbound}" rx="2"><title>${tip}</title></rect>
-            <rect x="${x}" y="${padT + innerH - inH}" width="${barW}" height="${inH}" fill="${VOLUME_COLORS.inbound}" rx="2"><title>${tip}</title></rect>
-            ${r.avg > 0 ? `<text x="${x + barW / 2}" y="${padT + innerH - inH - outH - 4}" font-size="10.5" font-weight="700" fill="var(--navy)" text-anchor="middle">${r.avg}</text>` : ''}
-            <text x="${x + barW / 2}" y="${h - 8}" font-size="10.5" fill="var(--text-muted)" text-anchor="middle">${r.label}</text>
-          </g>`;
+        return `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"><title>${tip}</title></circle>`;
       }).join('');
+
+      const labels = rows.map((r, i) => `<text x="${xAt(i)}" y="${h - 8}" font-size="10.5" fill="var(--text-muted)" text-anchor="middle">${r.label}</text>`).join('');
+      const totalLabels = rows.map((r, i) => r.avg > 0
+        ? `<text x="${xAt(i)}" y="${Math.min(yScale(r.avgInbound), yScale(r.avgOutbound)) - 8}" font-size="10.5" font-weight="700" fill="var(--navy)" text-anchor="middle">${r.avg}</text>`
+        : '').join('');
 
       return `
         <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="Average calls by day of week">
           <line x1="${padL}" y1="${padT + innerH}" x2="${w - padR}" y2="${padT + innerH}" stroke="var(--gray-200)" stroke-width="1"/>
           <text x="4" y="${padT + 8}" font-size="9.5" fill="var(--text-muted)">${maxAvg}</text>
           <text x="4" y="${padT + innerH}" font-size="9.5" fill="var(--text-muted)">0</text>
-          ${bars}
+          <path d="${smoothPath(outPoints)}" fill="none" stroke="${VOLUME_COLORS.outbound}" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="${smoothPath(inPoints)}" fill="none" stroke="${VOLUME_COLORS.inbound}" stroke-width="2.5" stroke-linecap="round"/>
+          ${dots(outPoints, rows, VOLUME_COLORS.outbound)}
+          ${dots(inPoints, rows, VOLUME_COLORS.inbound)}
+          ${totalLabels}
+          ${labels}
         </svg>`;
     }
 
