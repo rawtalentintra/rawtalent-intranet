@@ -4705,18 +4705,21 @@
         </svg>`;
     }
 
-    const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`);
+    function hourLabel(h) { return h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`; }
+    // Scoped to Melbourne business hours (4am-8pm) rather than the full
+    // 24h day — the overnight hours are always zero and just waste space.
+    const HOUR_RANGE = Array.from({ length: 17 }, (_, i) => i + 4);
 
     // Same per-day-observed averaging as normalizeDow, just bucketed by
-    // hour-of-day (0-23, Melbourne local — see MELBOURNE_TZ in calls.js)
-    // instead of weekday.
+    // hour-of-day (Melbourne local — see MELBOURNE_TZ in calls.js) instead
+    // of weekday.
     function normalizeHour(byHour) {
       const map = new Map((byHour || []).map(h => [h.hour, h]));
-      return HOUR_LABELS.map((label, hour) => {
+      return HOUR_RANGE.map(hour => {
         const d = map.get(hour);
         const daysObserved = d ? d.daysObserved : 0;
         return {
-          label,
+          label: hourLabel(hour),
           hour,
           total: d ? d.total : 0,
           inbound: d ? d.inbound : 0,
@@ -4729,48 +4732,65 @@
       });
     }
 
-    // Same smooth-line treatment as the day-of-week chart, just with 24
-    // points instead of 7 — every 3rd hour gets an axis label so it doesn't
-    // crowd, and only the topmost few hours get a value label so the peak
-    // is legible without cluttering the line.
+    const TOTAL_COLOR = 'var(--navy)';
+    function volumeLegendWithTotal() {
+      return `
+        <div style="display:flex;gap:16px;font-size:11.5px;color:var(--text-muted);margin-bottom:8px">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${TOTAL_COLOR};display:inline-block"></span>Total</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${VOLUME_COLORS.inbound};display:inline-block"></span>Inbound</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${VOLUME_COLORS.outbound};display:inline-block"></span>Outbound</span>
+        </div>`;
+    }
+
+    // Same smooth-line treatment as the day-of-week chart, plus a third
+    // Total line (= inbound + outbound, so it always sits at or above the
+    // other two) — every hour gets an axis label and every point on every
+    // line gets its value labelled, since the 4am-8pm window is narrow
+    // enough that it doesn't turn into visual noise.
     function renderHourTrendChart(byHour) {
       const rows = normalizeHour(byHour);
       if (!rows.some(r => r.total > 0)) return '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">No calls match these filters.</div>';
-      const w = 900, h = 220, padL = 34, padB = 28, padT = 20, padR = 10;
+      const w = 900, h = 260, padL = 34, padB = 28, padT = 26, padR = 10;
       const innerW = w - padL - padR, innerH = h - padT - padB;
-      const maxAvg = Math.max(1, ...rows.map(r => Math.max(r.avgInbound, r.avgOutbound)));
+      const maxAvg = Math.max(1, ...rows.map(r => r.avg));
       const n = rows.length;
       const xStep = n > 1 ? innerW / (n - 1) : 0;
       const yScale = v => padT + innerH - (v / maxAvg) * innerH;
       const xAt = i => padL + i * xStep;
+      const fmt1 = v => Math.round(v * 10) / 10;
 
+      const totalPoints = rows.map((r, i) => [xAt(i), yScale(r.avg)]);
       const inPoints = rows.map((r, i) => [xAt(i), yScale(r.avgInbound)]);
       const outPoints = rows.map((r, i) => [xAt(i), yScale(r.avgOutbound)]);
 
       const dots = (points, color) => rows.map((r, i) => {
         const [x, y] = points[i];
-        const tip = `${r.label}: avg ${r.avg} calls/hour (${r.total} total over ${r.daysObserved} day${r.daysObserved === 1 ? '' : 's'}) — ${r.inbound} in / ${r.outbound} out`;
+        const tip = `${r.label}: avg ${r.avg} calls/hour total (${r.inbound} in / ${r.outbound} out over ${r.daysObserved} day${r.daysObserved === 1 ? '' : 's'})`;
         return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" stroke="white" stroke-width="1.3"><title>${tip}</title></circle>`;
       }).join('');
 
-      const labels = rows.map((r, i) => (i % 3 === 0 || i === n - 1)
-        ? `<text x="${xAt(i)}" y="${h - 8}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle">${r.label}</text>`
-        : '').join('');
+      const totalLabels = rows.map((r, i) => r.avg > 0
+        ? `<text x="${xAt(i)}" y="${yScale(r.avg) - 8}" font-size="9.5" font-weight="700" fill="${TOTAL_COLOR}" text-anchor="middle">${r.avg}</text>` : '').join('');
+      const outLabels = rows.map((r, i) => r.avgOutbound > 0
+        ? `<text x="${xAt(i)}" y="${yScale(r.avgOutbound) - 8}" font-size="8.5" fill="${VOLUME_COLORS.outbound}" text-anchor="middle">${fmt1(r.avgOutbound)}</text>` : '').join('');
+      const inLabels = rows.map((r, i) => r.avgInbound > 0
+        ? `<text x="${xAt(i)}" y="${yScale(r.avgInbound) + 15}" font-size="8.5" fill="${VOLUME_COLORS.inbound}" text-anchor="middle">${fmt1(r.avgInbound)}</text>` : '').join('');
 
-      const peakAvg = Math.max(...rows.map(r => r.avg));
-      const totalLabels = rows.map((r, i) => (r.avg > 0 && r.avg >= peakAvg * 0.85)
-        ? `<text x="${xAt(i)}" y="${Math.min(yScale(r.avgInbound), yScale(r.avgOutbound)) - 8}" font-size="10" font-weight="700" fill="var(--navy)" text-anchor="middle">${r.avg}</text>`
-        : '').join('');
+      const labels = rows.map((r, i) => `<text x="${xAt(i)}" y="${h - 8}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle">${r.label}</text>`).join('');
 
       return `
         <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="Average calls by hour of day">
           <line x1="${padL}" y1="${padT + innerH}" x2="${w - padR}" y2="${padT + innerH}" stroke="var(--gray-200)" stroke-width="1"/>
           <text x="4" y="${padT + 8}" font-size="9.5" fill="var(--text-muted)">${maxAvg}</text>
           <text x="4" y="${padT + innerH}" font-size="9.5" fill="var(--text-muted)">0</text>
-          <path d="${smoothPath(outPoints)}" fill="none" stroke="${VOLUME_COLORS.outbound}" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="${smoothPath(inPoints)}" fill="none" stroke="${VOLUME_COLORS.inbound}" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="${smoothPath(outPoints)}" fill="none" stroke="${VOLUME_COLORS.outbound}" stroke-width="2" stroke-linecap="round"/>
+          <path d="${smoothPath(inPoints)}" fill="none" stroke="${VOLUME_COLORS.inbound}" stroke-width="2" stroke-linecap="round"/>
+          <path d="${smoothPath(totalPoints)}" fill="none" stroke="${TOTAL_COLOR}" stroke-width="2.5" stroke-linecap="round"/>
           ${dots(outPoints, VOLUME_COLORS.outbound)}
           ${dots(inPoints, VOLUME_COLORS.inbound)}
+          ${dots(totalPoints, TOTAL_COLOR)}
+          ${outLabels}
+          ${inLabels}
           ${totalLabels}
           ${labels}
         </svg>`;
@@ -4895,9 +4915,9 @@
           </div>
 
           <div style="margin-bottom:20px">
-            <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px">Average Calls by Hour of Day</div>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">Which hours run busiest (Melbourne time), averaged over the selected date range</div>
-            ${volumeLegend()}
+            <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px">Average Calls by Hour of Day (4am-8pm Melbourne)</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">Which hours run busiest, averaged over the selected date range</div>
+            ${volumeLegendWithTotal()}
             ${renderHourTrendChart(data.byHour)}
           </div>
 
