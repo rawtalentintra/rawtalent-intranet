@@ -96,12 +96,13 @@ router.get('/sync-status', requireSuperAdmin, async (req, res) => {
 // Browses the local cache — filterable, paginated, never hits Dubber's API.
 router.get('/local', async (req, res) => {
   try {
-    const { repName, phone, recordingId, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
+    const { repName, phone, recordingId, callType, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
     const conditions = [];
     const args = [];
     if (repName) { conditions.push('rep_name LIKE ?'); args.push(`%${repName}%`); }
     if (phone) { conditions.push('(to_number LIKE ? OR from_number LIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
     if (recordingId) { conditions.push('id LIKE ?'); args.push(`%${recordingId}%`); }
+    if (callType === 'inbound' || callType === 'outbound') { conditions.push('call_type = ?'); args.push(callType); }
     // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
     if (dateFrom) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
     if (dateTo) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
@@ -141,16 +142,42 @@ router.get('/local/:id', async (req, res) => {
   }
 });
 
-// Serves audio that was already fetched and stored at sync time.
+// Serves audio that was already fetched and stored at sync time. Supports
+// HTTP Range requests (206 Partial Content) — without this, the browser's
+// <audio> element can't reliably seek/drag the scrubber, since it has no
+// way to fetch just the byte range under the cursor.
 router.get('/local/:id/audio', async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM call_recording_audio WHERE recording_id = ?', args: [req.params.id] });
     const row = result.rows[0];
     if (!row || !row.storage_path) return res.status(404).json({ error: 'Audio not synced for this call yet' });
     const buffer = await downloadAsBuffer(BUCKETS.callRecordings, row.storage_path);
-    res.setHeader('Content-Type', row.mimetype || 'audio/mpeg');
-    res.setHeader('Content-Length', buffer.length);
-    res.send(buffer);
+    const mimetype = row.mimetype || 'audio/mpeg';
+    const total = buffer.length;
+
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', mimetype);
+
+    const range = req.headers.range;
+    if (!range) {
+      res.setHeader('Content-Length', total);
+      return res.send(buffer);
+    }
+
+    const match = /bytes=(\d*)-(\d*)/.exec(range);
+    let start = match && match[1] ? parseInt(match[1], 10) : 0;
+    let end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+    if (Number.isNaN(start) || start < 0) start = 0;
+    if (Number.isNaN(end) || end >= total) end = total - 1;
+    if (start > end) {
+      res.status(416).setHeader('Content-Range', `bytes */${total}`);
+      return res.end();
+    }
+
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+    res.setHeader('Content-Length', end - start + 1);
+    res.end(buffer.subarray(start, end + 1));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

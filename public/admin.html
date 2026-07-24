@@ -860,6 +860,11 @@
             <input type="text" id="callsFilterRep" class="form-control" placeholder="Filter by rep name…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
             <input type="text" id="callsFilterPhone" class="form-control" placeholder="Filter by phone #…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
             <input type="text" id="callsFilterRecordingId" class="form-control" placeholder="Filter by recording ID…" style="flex:1;min-width:160px" oninput="debounceFilterCalls()">
+            <select id="callsFilterDirection" class="form-control" style="width:140px" onchange="filterCalls()">
+              <option value="">In + Out</option>
+              <option value="inbound">Inbound only</option>
+              <option value="outbound">Outbound only</option>
+            </select>
             <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
             <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
           </div>
@@ -5160,6 +5165,9 @@
     }
 
     let callsFilterTimer, callsCurrentPage = 1;
+    // Keyed by recording id — lets playRecording() show who/what/when
+    // without threading escaped strings through inline onclick handlers.
+    let callsListCache = {};
 
     function debounceFilterCalls() {
       clearTimeout(callsFilterTimer);
@@ -5201,11 +5209,13 @@
         const rep = document.getElementById('callsFilterRep').value.trim();
         const phone = document.getElementById('callsFilterPhone').value.trim();
         const recordingId = document.getElementById('callsFilterRecordingId').value.trim();
+        const direction = document.getElementById('callsFilterDirection').value;
         const from = document.getElementById('callsFilterFrom').value;
         const to = document.getElementById('callsFilterTo').value;
         if (rep) params.set('repName', rep);
         if (phone) params.set('phone', phone);
         if (recordingId) params.set('recordingId', recordingId);
+        if (direction) params.set('callType', direction);
         if (from) params.set('dateFrom', from);
         if (to) params.set('dateTo', to);
 
@@ -5225,8 +5235,15 @@
           list.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No calls match — ${currentUserRole === 'super_admin' ? 'try Sync Calls Now above, or adjust filters.' : 'adjust filters, or ask a super admin to sync calls.'}</td></tr>`;
           return;
         }
+        callsListCache = {};
         list.innerHTML = recordings.map(r => {
           const contact = r.call_type === 'outbound' ? r.to_number : r.from_number;
+          callsListCache[r.id] = {
+            repName: r.rep_name || 'Unknown',
+            contact: contact || '—',
+            direction: r.call_type === 'outbound' ? 'Out' : r.call_type === 'inbound' ? 'In' : '—',
+            dateLabel: fmtCallDateTime(r.start_time_iso) || '—'
+          };
           const gradeReady = !!r.has_transcript;
           const badge = gradeReady
             ? { cls: 'badge-published', label: '✓ Ready' }
@@ -5261,15 +5278,30 @@
     }
 
     function playRecording(recordingId) {
-      const existing = document.getElementById('callAudioPlayer');
+      const existing = document.getElementById('callAudioPlayerWrap');
       if (existing) existing.remove();
+
+      const info = callsListCache[recordingId] || {};
+      const wrap = document.createElement('div');
+      wrap.id = 'callAudioPlayerWrap';
+      wrap.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:1000;background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:8px 10px';
+      wrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+          <div style="font-size:11.5px;line-height:1.45">
+            <div style="font-weight:700;color:var(--navy)">${escHtml(info.repName || 'Unknown')} · ${escHtml(info.direction || '—')} · ${escHtml(info.contact || '—')}</div>
+            <div style="color:var(--text-muted)">${escHtml(info.dateLabel || '')}</div>
+          </div>
+          <button onclick="document.getElementById('callAudioPlayerWrap').remove()" title="Close" style="background:none;border:none;cursor:pointer;font-size:15px;line-height:1;color:var(--text-muted);padding:0">×</button>
+        </div>
+      `;
       const player = document.createElement('audio');
       player.id = 'callAudioPlayer';
       player.controls = true;
       player.autoplay = true;
+      player.style.cssText = 'display:block;width:300px';
       player.src = `/api/calls/local/${recordingId}/audio`;
-      player.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:1000;background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15)';
-      document.body.appendChild(player);
+      wrap.appendChild(player);
+      document.body.appendChild(wrap);
     }
 
     async function viewTranscript(recordingId) {
