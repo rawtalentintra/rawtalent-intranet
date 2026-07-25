@@ -825,26 +825,26 @@
         </div>
 
         <div class="super-admin-only" style="display:none">
-          <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:20px;padding:16px 20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start">
+          <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:14px;padding:10px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:center">
             <div>
-              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">📞 Dubber Connection</div>
-              <div id="callsConfigStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Checking configuration…</div>
-              <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()" style="padding:5px 12px;font-size:12px">Test Connection</button>
-              <div id="callsTestStatus" style="display:none;margin-top:10px"></div>
+              <div style="font-weight:700;font-size:11px;margin-bottom:1px;color:var(--navy)">📞 Dubber Connection</div>
+              <div id="callsConfigStatus" style="font-size:11px;color:var(--text-muted);margin-bottom:5px">Checking configuration…</div>
+              <button class="btn-add" id="callsTestBtn" onclick="testDubberConnection()" style="padding:3px 9px;font-size:10.5px">Test Connection</button>
+              <div id="callsTestStatus" style="display:none;margin-top:6px"></div>
             </div>
             <div>
-              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">🗣️ Groq Transcription</div>
-              <div id="groqConfigStatus" style="font-size:12px;color:var(--text-muted)">Checking configuration…</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Runs automatically after audio syncs.</div>
+              <div style="font-weight:700;font-size:11px;margin-bottom:1px;color:var(--navy)">🗣️ Groq Transcription</div>
+              <div id="groqConfigStatus" style="font-size:11px;color:var(--text-muted)">Checking configuration…</div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px">Runs automatically after audio syncs.</div>
             </div>
             <div>
-              <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:var(--navy)">⬇️ Sync Calls</div>
-              <div id="callsSyncStatusLine" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Checking local store…</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn-add" id="callsSyncBtn" onclick="syncCalls('recent')" style="padding:5px 12px;font-size:12px">Sync Calls Now</button>
-                <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history" style="padding:5px 12px;font-size:12px">Sync Older Calls</button>
+              <div style="font-weight:700;font-size:11px;margin-bottom:1px;color:var(--navy)">⬇️ Sync Calls</div>
+              <div id="callsSyncStatusLine" style="font-size:11px;color:var(--text-muted);margin-bottom:5px">Checking local store…</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn-add" id="callsSyncBtn" onclick="syncCalls('recent')" style="padding:3px 9px;font-size:10.5px">Sync Calls Now</button>
+                <button class="btn-secondary" id="callsSyncOlderBtn" onclick="syncCalls('older')" title="Pages backward from the oldest call currently stored to backfill older history" style="padding:3px 9px;font-size:10.5px">Sync Older Calls</button>
               </div>
-              <div id="callsSyncStatus" style="display:none;margin-top:10px"></div>
+              <div id="callsSyncStatus" style="display:none;margin-top:6px"></div>
             </div>
           </div>
         </div>
@@ -5159,23 +5159,25 @@
       btn.disabled = true; otherBtn.disabled = true;
       btn.textContent = direction === 'older' ? 'Syncing older calls…' : 'Syncing…';
       statusEl.style.display = 'block';
-      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> ${direction === 'older' ? 'Backfilling older calls from Dubber…' : 'Pulling recent calls from Dubber…'}`;
+      statusEl.style.fontSize = '11px';
+      statusEl.style.color = 'var(--text-muted)';
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> ${direction === 'older' ? 'Backfilling older calls from Dubber…' : 'Pulling recent calls from Dubber…'}`;
       try {
         const res = await fetch('/api/calls/sync', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ direction })
         });
         const data = await res.json();
-        if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:6px 10px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:11px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
         const olderNote = direction === 'older'
           ? (data.reachedEnd ? ' · reached the earliest call Dubber has' : ' · more calls remain further back — click Sync Older Calls again')
           : '';
-        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:13px">
+        statusEl.innerHTML = `<div style="padding:6px 10px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:11px">
           ✓ ${data.totalNew} new call${data.totalNew !== 1 ? 's' : ''} stored (${data.totalSeen} checked) · ${data.contentFetched} got audio, ${data.transcriptFetched} transcribed this run${data.contentPending > 0 ? `, ${data.contentPending} still pending — click Sync again` : ''}${olderNote}
-        </div>` + (data.contentErrors?.length ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">${data.contentErrors.slice(0, 3).map(e => `${escHtml(e.type)}: ${escHtml(e.reason)}`).join(' · ')}</div>` : '');
+        </div>` + (data.contentErrors?.length ? `<div style="margin-top:4px;font-size:10.5px;color:var(--text-muted)">${data.contentErrors.slice(0, 3).map(e => `${escHtml(e.type)}: ${escHtml(e.reason)}`).join(' · ')}</div>` : '');
         loadSyncStatus();
         loadCallsList();
-      } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Sync failed.</div>'; }
+      } catch { statusEl.innerHTML = '<div style="padding:6px 10px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:11px">Sync failed.</div>'; }
       finally { btn.disabled = false; otherBtn.disabled = false; btn.textContent = originalLabel; }
     }
 
@@ -5821,7 +5823,8 @@
       const resultEl = document.getElementById('callsTestStatus');
       btn.disabled = true; btn.textContent = 'Testing…';
       resultEl.style.display = 'block';
-      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:6px;width:14px;height:14px"></span> Connecting to Dubber…';
+      resultEl.style.fontSize = '11px';
+      resultEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Connecting to Dubber…';
       try {
         const res = await fetch('/api/calls/test-connection');
         const data = await res.json();
