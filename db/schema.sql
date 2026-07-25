@@ -294,6 +294,14 @@ CREATE TABLE IF NOT EXISTS call_recordings (
 );
 ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS detected_rubric_type TEXT;
 ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS detected_rubric_reasoning TEXT;
+-- Dubber's AI-info endpoint (the same one that supplies the transcript) also
+-- returns a genuine audio-derived emotion breakdown when the account's AI
+-- config has it enabled — document_emotion is call-level (7 dimensions:
+-- analytical/anger/confident/fear/joy/sadness/tentative), sentence_emotion is
+-- per-sentence (same dimensions + that sentence's own sentiment score), so
+-- the grader can point to specific moments rather than one aggregate number.
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS document_emotion JSONB;
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS sentence_emotion JSONB;
 
 -- `data` (base64 audio blob) is replaced by `storage_path` — populated in
 -- Phase 4 when existing call audio is uploaded to the `call-recordings` bucket.

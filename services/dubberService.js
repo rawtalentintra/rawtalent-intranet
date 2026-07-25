@@ -87,8 +87,14 @@ async function getRecording(recordingId) {
 // Confirmed via Dubber's official "Get AI Information" doc: transcript text
 // lives in this account's Unified Capture Plus One license, at
 // GET /accounts/{account_id}/recordings/{recording_id}/ai, one entry per
-// sentence under sentences[].content (optionally with a speaker label).
-async function getTranscript(recordingId) {
+// sentence under sentences[].content (optionally with a speaker label). The
+// same response also carries document_sentiment, document_emotion (7
+// dimensions: analytical/anger/confident/fear/joy/sadness/tentative), and a
+// parallel emotion[] array with the same 7-dimension breakdown per sentence
+// — all measured from the actual audio, not inferred from the transcript.
+// These are only present when the account's AI config has them enabled, so
+// every field here can legitimately be null/undefined.
+async function getAiInfo(recordingId) {
   const info = await dubberCall(`/accounts/${getAccountId()}/recordings/${recordingId}/ai`);
   const sentences = info.sentences || [];
   if (!sentences.length) throw new Error('Dubber AI info response had no sentences — transcript may not be ready yet for this call.');
@@ -96,9 +102,27 @@ async function getTranscript(recordingId) {
   // highlighting) — strip it here so nothing downstream (grading, display,
   // search) ever has to deal with stray tags leaking into plain text.
   const stripMarkup = text => (text || '').replace(/<[^>]+>/g, '').trim();
-  return sentences
+  const transcript = sentences
     .map(s => s.speaker ? `${stripMarkup(s.speaker)}: ${stripMarkup(s.content)}` : stripMarkup(s.content))
     .join('\n');
+
+  // emotion[] is a parallel array over the same sentences — zip by index
+  // rather than storing it separately, so downstream consumers get one
+  // per-sentence record instead of having to re-correlate two arrays.
+  const emotionEntries = info.emotion || [];
+  const sentenceEmotion = sentences.map((s, i) => ({
+    speaker: s.speaker ? stripMarkup(s.speaker) : null,
+    content: stripMarkup(s.content),
+    sentiment: s.sentiment ?? null,
+    emotion: emotionEntries[i]?.score || null
+  }));
+
+  return {
+    transcript,
+    documentSentiment: info.document_sentiment?.score ?? null,
+    documentEmotion: info.document_emotion || null,
+    sentenceEmotion: sentenceEmotion.some(s => s.emotion) ? sentenceEmotion : null
+  };
 }
 
 const LISTENER_EMAIL = process.env.DUBBER_LISTENER_EMAIL || 'joy@rawtalent.com.au';
@@ -150,8 +174,10 @@ async function fetchContentForRecording(recordingId, { skipAudio = false, existi
   let transcriptFetched = false;
   if (!transcript) {
     let transcriptError = null;
+    let aiInfo = null;
     try {
-      transcript = await getTranscript(recordingId);
+      aiInfo = await getAiInfo(recordingId);
+      transcript = aiInfo.transcript;
     } catch (err) {
       if (audio) {
         try { transcript = await groqTranscription.transcribeAudio(audio.data, audio.mimetype); }
@@ -161,7 +187,15 @@ async function fetchContentForRecording(recordingId, { skipAudio = false, existi
       }
     }
     if (transcript) {
-      await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, recordingId] });
+      await db.execute({
+        sql: 'UPDATE call_recordings SET transcript = ?, document_emotion = ?, sentence_emotion = ? WHERE id = ?',
+        args: [
+          transcript,
+          aiInfo?.documentEmotion ? JSON.stringify(aiInfo.documentEmotion) : null,
+          aiInfo?.sentenceEmotion ? JSON.stringify(aiInfo.sentenceEmotion) : null,
+          recordingId
+        ]
+      });
       transcriptFetched = true;
     }
     return { audioFetched, audioError, transcriptFetched, transcriptError };
@@ -300,4 +334,4 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getTranscript, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording };
+module.exports = { isConfigured, listRecordings, getRecording, getAiInfo, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording };

@@ -82,7 +82,27 @@ const RUBRICS = {
   }
 };
 
-function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration = { general: [], byCategory: {} }, feedbackItems = [], sentimentScore = null, glossaryBlock = '', currentResult = null } = {}) {
+// Dubber's per-sentence emotion[] array runs the whole call, which can be
+// too much to paste into the prompt verbatim on a long call — pull out the
+// handful of moments that actually carry signal (visibly elevated negative
+// or positive emotion) rather than every sentence, so the model gets
+// concrete, quotable evidence without the token cost of the full array.
+function pickEmotionHighlights(sentenceEmotion, count = 4) {
+  if (!Array.isArray(sentenceEmotion) || !sentenceEmotion.length) return { concerning: [], positive: [] };
+  const scored = sentenceEmotion
+    .filter(s => s.emotion)
+    .map(s => ({
+      speaker: s.speaker,
+      content: s.content,
+      concernScore: Math.max(s.emotion.anger || 0, s.emotion.fear || 0, s.emotion.tentative || 0, s.emotion.sadness || 0),
+      positiveScore: Math.max(s.emotion.confident || 0, s.emotion.joy || 0)
+    }));
+  const concerning = [...scored].filter(s => s.concernScore > 0).sort((a, b) => b.concernScore - a.concernScore).slice(0, count);
+  const positive = [...scored].filter(s => s.positiveScore > 0).sort((a, b) => b.positiveScore - a.positiveScore).slice(0, count);
+  return { concerning, positive };
+}
+
+function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration = { general: [], byCategory: {} }, feedbackItems = [], sentimentScore = null, documentEmotion = null, sentenceEmotion = null, glossaryBlock = '', currentResult = null } = {}) {
   const categoryList = rubric.categories.map(c => {
     let block = `- **${c.label}** (${c.weight}%)${c.critical ? ' [ZERO-TOLERANCE]' : ''}\n${c.criteria.map(x => `  - ${x}`).join('\n')}`;
     if (c.instructions) block += `\n  Additional grading instructions for this category, from your reviewer: ${c.instructions}`;
@@ -128,12 +148,31 @@ function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration
 
   // You (the model) only ever receive the text transcript — there is no audio
   // fed to you, so you cannot hear pace, pitch, or vocal warmth directly.
-  // Dubber's own sentiment score is the one genuine tone-adjacent signal
-  // available: it comes from Dubber's own analysis of the actual call, not
-  // from the words alone, so it can pick up on delivery the transcript text
-  // doesn't fully capture. Treat it as a supporting cue only.
-  const sentimentBlock = (sentimentScore !== null && sentimentScore !== undefined && !Number.isNaN(Number(sentimentScore)))
-    ? `\n\nDubber's own automated analysis of this call's audio rated its overall sentiment/tone at ${sentimentScore} (Dubber's proprietary relative score — treat a higher number as a warmer, more positive tone). This is the only signal you have about how the call actually sounded, since you're working from the transcript text alone. Use it as a supporting cue where it's relevant (e.g. Opening & Rapport, Australian Cultural Fit) — if it disagrees with clear evidence in the transcript, the transcript wins, but if the transcript is ambiguous on tone, let this score inform your judgement and say so in the note.`
+  // Dubber's AI-info endpoint is the one genuine audio-derived signal
+  // available: an overall sentiment score, a 7-dimension emotion breakdown
+  // for the whole call, and (when available) that same 7-dimension
+  // breakdown per sentence — all measured from the actual call audio by
+  // Dubber's own analysis, not inferred from the words. Unlike a proxy,
+  // this is real evidence of delivery, so it isn't scoped to just one or
+  // two categories — apply it wherever tone, confidence, or hesitation is
+  // part of what's being judged.
+  const sentimentParts = [];
+  if (sentimentScore !== null && sentimentScore !== undefined && !Number.isNaN(Number(sentimentScore))) {
+    sentimentParts.push(`Overall sentiment score: ${sentimentScore} (Dubber's proprietary relative scale — higher is warmer/more positive).`);
+  }
+  if (documentEmotion && typeof documentEmotion === 'object') {
+    const dims = Object.entries(documentEmotion).map(([k, v]) => `${k}: ${v}`).join(', ');
+    sentimentParts.push(`Call-level emotion breakdown (0-1 scale per dimension): ${dims}.`);
+  }
+  const { concerning, positive } = pickEmotionHighlights(sentenceEmotion);
+  if (concerning.length) {
+    sentimentParts.push(`Specific moments where the audio showed elevated anger, fear, tentativeness, or sadness:\n${concerning.map(c => `  - ${c.speaker ? `${c.speaker}: ` : ''}"${c.content}"`).join('\n')}`);
+  }
+  if (positive.length) {
+    sentimentParts.push(`Specific moments where the audio showed elevated confidence or joy:\n${positive.map(c => `  - ${c.speaker ? `${c.speaker}: ` : ''}"${c.content}"`).join('\n')}`);
+  }
+  const sentimentBlock = sentimentParts.length
+    ? `\n\nDubber's own AI analysis of this call's actual audio — genuine evidence of how the call sounded, not inferred from the transcript text. Weigh it across every category where delivery is part of the criteria, not only Opening & Rapport: a confident, steady tone supports a strong Active Listening or Critical Thinking score even on a tricky topic; a tentative or fearful moment right where compliance requirements are being explained is worth naming under Compliance Accuracy; the emotional arc across the call is relevant to Closing. If the transcript text and this audio signal genuinely conflict on a factual claim, the transcript wins — it's the words actually said. But for anything about HOW something was said (warmth, confidence, hesitation, frustration), this is the most reliable evidence available, and when it changes your read of a category, name it explicitly in that category's notes rather than only citing the words.\n\n${sentimentParts.join('\n\n')}`
     : '';
 
   return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}${repIdentityBlock}
@@ -469,7 +508,7 @@ function stripMarkup(text) {
 }
 
 async function gradeCall(transcriptText, rubricType, repName = null, options = {}) {
-  const { feedbackItems = [], sentimentScore = null, currentResult = null } = options;
+  const { feedbackItems = [], sentimentScore = null, documentEmotion = null, sentenceEmotion = null, currentResult = null } = options;
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -497,7 +536,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
   }
   const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, glossaryBlock, currentResult });
+  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, documentEmotion, sentenceEmotion, glossaryBlock, currentResult });
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {

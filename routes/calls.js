@@ -327,12 +327,22 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     const recording = local || await dubberService.getRecording(req.params.recordingId);
 
     let transcript = local?.transcript;
+    // These ride along with the transcript from Dubber's AI-info endpoint —
+    // real audio-derived signal (not inferred from the transcript text).
+    // Already on `local` for any call that's been through a normal sync;
+    // only fetched fresh below if this call somehow reached evaluation
+    // without having gone through fetchContentForRecording first.
+    let documentEmotion = local?.document_emotion || null;
+    let sentenceEmotion = local?.sentence_emotion || null;
     if (!transcript) {
       // Prefer Dubber's own AI transcript (included in this account's Unified
       // Capture Plus One license) — only fall back to transcribing the audio
       // ourselves via Groq if Dubber's isn't available for this call yet.
       try {
-        transcript = await dubberService.getTranscript(req.params.recordingId);
+        const aiInfo = await dubberService.getAiInfo(req.params.recordingId);
+        transcript = aiInfo.transcript;
+        documentEmotion = aiInfo.documentEmotion;
+        sentenceEmotion = aiInfo.sentenceEmotion;
       } catch {
         const audioRes = await db.execute({ sql: 'SELECT storage_path, mimetype FROM call_recording_audio WHERE recording_id = ?', args: [req.params.recordingId] });
         const existingAudio = audioRes.rows[0];
@@ -356,7 +366,10 @@ router.post('/:recordingId/evaluate', async (req, res) => {
         transcript = await groqTranscription.transcribeAudio(audioBase64, audioMimetype);
       }
       if (local) {
-        await db.execute({ sql: 'UPDATE call_recordings SET transcript = ? WHERE id = ?', args: [transcript, req.params.recordingId] });
+        await db.execute({
+          sql: 'UPDATE call_recordings SET transcript = ?, document_emotion = ?, sentence_emotion = ? WHERE id = ?',
+          args: [transcript, documentEmotion ? JSON.stringify(documentEmotion) : null, sentenceEmotion ? JSON.stringify(sentenceEmotion) : null, req.params.recordingId]
+        });
       }
     }
 
@@ -386,7 +399,11 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     }
 
     const repName = firstNameOnly(recording.rep_name || recording.from_label || recording.to_label || recording.channel || null);
-    const result = await gradeCall(transcript, rubricType, repName, { sentimentScore: recording.sentiment_score ?? null });
+    const result = await gradeCall(transcript, rubricType, repName, {
+      sentimentScore: recording.sentiment_score ?? null,
+      documentEmotion,
+      sentenceEmotion
+    });
 
     const id = await saveEvaluation({
       recordingId: req.params.recordingId,
@@ -430,7 +447,7 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     const evaluation = evalRes.rows[0];
     if (!evaluation) return res.status(404).json({ error: 'Evaluation not found' });
 
-    const localRes = await db.execute({ sql: 'SELECT transcript, sentiment_score FROM call_recordings WHERE id = ?', args: [evaluation.recording_id] });
+    const localRes = await db.execute({ sql: 'SELECT transcript, sentiment_score, document_emotion, sentence_emotion FROM call_recordings WHERE id = ?', args: [evaluation.recording_id] });
     const local = localRes.rows[0];
     if (!local?.transcript) return res.status(400).json({ error: 'No transcript available for this call' });
 
@@ -443,6 +460,8 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     const result = await gradeCall(local.transcript, evaluation.rubric_type, evaluation.rep_name, {
       feedbackItems: items,
       sentimentScore: local.sentiment_score ?? null,
+      documentEmotion: local.document_emotion || null,
+      sentenceEmotion: local.sentence_emotion || null,
       currentResult
     });
 
