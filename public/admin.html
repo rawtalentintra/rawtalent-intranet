@@ -1629,6 +1629,16 @@
       loadTagsForDatalist();
       loadNotifications();
       setInterval(loadNotifications, 5 * 60 * 1000);
+
+      // Land back on whichever section was open before the refresh, instead
+      // of always resetting to Dashboard — showSection() keeps this in sync
+      // (and re-checks role access) on every navigation.
+      let savedSection = null;
+      try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
+      if (savedSection && savedSection !== 'dashboard' && document.getElementById(`section-${savedSection}`)) {
+        const navEl = document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
+        showSection(savedSection, navEl);
+      }
     }
 
     function applyRoleVisibility() {
@@ -2228,10 +2238,15 @@
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       }
+      const sectionEl = document.getElementById(`section-${id}`);
+      if (!sectionEl) return;
       document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
       document.querySelectorAll('.admin-nav-item').forEach(n => n.classList.remove('active'));
-      document.getElementById(`section-${id}`).classList.add('active');
+      sectionEl.classList.add('active');
       if (el) el.classList.add('active');
+      // Remembered across refreshes/re-logins (see init()) so navigating away
+      // and reloading doesn't dump you back on the Dashboard every time.
+      try { localStorage.setItem('adminActiveSection', id); } catch {}
       if (id === 'new-article') {
         initEditor();
         if (!editingArticleId) resetArticleForm();
