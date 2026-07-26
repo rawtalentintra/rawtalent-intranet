@@ -609,15 +609,30 @@ CREATE TABLE IF NOT EXISTS fathom_meetings (
   recording_start_time TIMESTAMPTZ,
   recording_end_time TIMESTAMPTZ,
   transcript JSONB,          -- full array of {speaker:{display_name,...}, text, timestamp}
+  transcript_text TEXT,      -- flattened "Speaker: line" text, computed at sync time — feeds search_vector and is what gets fed to Claude for Q&A
   speakers TEXT[],           -- denormalized distinct speaker display names, for fast filtering
   calendar_invitees JSONB,
   default_summary TEXT,
   action_items JSONB,
   highlights JSONB,
-  synced_at TIMESTAMPTZ DEFAULT now()
+  synced_at TIMESTAMPTZ DEFAULT now(),
+  search_vector tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(transcript_text, '')), 'B')
+  ) STORED
 );
+-- transcript_text/search_vector were added after fathom_meetings already
+-- shipped, so existing databases need these as explicit ALTERs (a bare
+-- CREATE TABLE IF NOT EXISTS above is a no-op once the table exists).
+ALTER TABLE fathom_meetings ADD COLUMN IF NOT EXISTS transcript_text TEXT;
+ALTER TABLE fathom_meetings ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (
+  setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+  setweight(to_tsvector('english', coalesce(transcript_text, '')), 'B')
+) STORED;
+
 CREATE INDEX IF NOT EXISTS idx_fathom_meetings_start_time ON fathom_meetings(recording_start_time);
 CREATE INDEX IF NOT EXISTS idx_fathom_meetings_speakers ON fathom_meetings USING GIN(speakers);
+CREATE INDEX IF NOT EXISTS idx_fathom_meetings_search ON fathom_meetings USING GIN(search_vector);
 
 -- Tracks how far the full-transcript sync has progressed, same pattern as
 -- fathom_scan_state (which drives the separate FAQ-candidate scan) — kept

@@ -217,6 +217,12 @@
           <span class="admin-nav-icon">📋</span> Change Logs
         </div>
       </div>
+      <div class="admin-nav-section super-admin-only" style="display:none">
+        <div class="admin-nav-label">Private</div>
+        <div class="admin-nav-item" onclick="showSection('meetings', this)">
+          <span class="admin-nav-icon">🗓️</span> Meetings
+        </div>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -321,6 +327,35 @@
                 <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Meetings (private — super_admin only) -->
+      <div class="admin-section" id="section-meetings">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🗓️ Meetings</div>
+            <div class="admin-page-sub">Ask a question and get an answer pulled straight from your Fathom meeting transcripts, with dates and links — private to you.</div>
+          </div>
+          <button class="btn-add" id="meetingsSyncBtn" onclick="syncMeetings()">🔄 Sync New Meetings</button>
+        </div>
+
+        <div style="background:white;border-radius:var(--radius-lg);padding:14px 20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:16px;font-size:12.5px;color:var(--text-muted)" id="meetingsSyncStatus">
+          Loading sync status…
+        </div>
+
+        <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);padding:24px;min-height:340px">
+          <div id="meetingsThread">
+            <div style="text-align:center;padding:40px 20px;color:var(--text-muted)">
+              <div style="font-size:32px;margin-bottom:10px">🗓️✨</div>
+              <div style="font-weight:700;color:var(--navy);font-size:15px;margin-bottom:4px">Ask about any past discussion</div>
+              <div style="font-size:13px">Try: "What did Liam say about the reference check redesign?" or "What's our OSHC pay rate plan?"</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:18px" id="meetingsInputRow">
+            <input type="text" id="meetingsInput" class="form-control" placeholder="Ask a question about your meetings…" onkeydown="if(event.key==='Enter')askMeetings()">
+            <button class="btn-add" id="meetingsAskBtn" onclick="askMeetings()" style="flex-shrink:0">Ask</button>
           </div>
         </div>
       </div>
@@ -2385,6 +2420,7 @@
       if (id === 'logs') loadLogs();
       if (id === 'glossary') loadGlossary();
       if (id === 'projects-dashboard') loadProjects();
+      if (id === 'meetings') loadMeetingsStatus();
       if (id === 'sources') loadSources();
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
@@ -3346,6 +3382,162 @@
     document.getElementById('projectFormModal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeProjectFormModal();
     });
+
+    // ── Meetings (private Fathom transcript Q&A) ────────────────────
+    let meetingsHistory = [];
+    let meetingsSources = [];
+    let meetingsTurns = [];
+
+    async function loadMeetingsStatus() {
+      const el = document.getElementById('meetingsSyncStatus');
+      try {
+        const s = await fetch('/api/meetings/status').then(r => r.json());
+        if (!s.configured) {
+          el.innerHTML = `<span style="color:#dc2626">Fathom isn't configured — set FATHOM_API_KEY to sync meetings.</span>`;
+          return;
+        }
+        const last = s.lastSyncedAt ? fmtDate(s.lastSyncedAt) : 'Never';
+        el.innerHTML = `📦 <strong>${s.meetingCount}</strong> meeting${s.meetingCount !== 1 ? 's' : ''} stored · Last synced: <strong>${last}</strong>`;
+      } catch { el.textContent = 'Failed to load sync status'; }
+    }
+
+    async function syncMeetings() {
+      const btn = document.getElementById('meetingsSyncBtn');
+      btn.disabled = true;
+      btn.textContent = '🔄 Syncing…';
+      try {
+        const result = await fetch('/api/meetings/sync', { method: 'POST' }).then(r => r.json());
+        if (result.error) throw new Error(result.error);
+        toast(`Synced — ${result.stored} meeting${result.stored !== 1 ? 's' : ''} added/updated`, 'success');
+        await loadMeetingsStatus();
+      } catch (err) {
+        toast(err.message || 'Sync failed', 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = '🔄 Sync New Meetings';
+    }
+
+    function processMeetingsAnswer(text) {
+      let s = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      const parts = [];
+      let listItems = [], paraLines = [];
+      function flushPara() { if (paraLines.length) { parts.push(`<p>${paraLines.join('<br>')}</p>`); paraLines = []; } }
+      function flushList() { if (listItems.length) { parts.push(`<ul>${listItems.map(li => `<li>${li}</li>`).join('')}</ul>`); listItems = []; } }
+      s.split('\n').forEach(line => {
+        const t = line.trim();
+        if (t.startsWith('## ') || t.startsWith('### ')) { flushPara(); flushList(); parts.push(`<h4 style="font-size:14px;color:var(--navy);margin:14px 0 6px">${t.replace(/^#{2,3} /,'')}</h4>`); }
+        else if (/^[-*] /.test(t)) { flushPara(); listItems.push(t.slice(2)); }
+        else if (t === '') { flushList(); flushPara(); }
+        else { flushList(); paraLines.push(t); }
+      });
+      flushPara(); flushList();
+      return parts.join('');
+    }
+
+    function renderMeetingsSources(sources) {
+      if (!sources || !sources.length) return '';
+      return `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--gray-100)">
+        <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Sources — ${sources.length} meeting${sources.length !== 1 ? 's' : ''} referenced</div>
+        ${sources.map(s => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px;font-size:12.5px">
+            <span style="color:var(--text)">${escHtml(s.title)}</span>
+            <span style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <span style="color:var(--gray-400)">${s.date ? fmtDate(s.date) : 'unknown date'}</span>
+              ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--orange);font-weight:600">Open ↗</a>` : ''}
+            </span>
+          </div>`).join('')}
+      </div>`;
+    }
+
+    function renderMeetingsThread() {
+      const el = document.getElementById('meetingsThread');
+      let html = '';
+      meetingsTurns.forEach((turn, idx) => {
+        html += `<div style="background:var(--gray-100);border-radius:var(--radius-lg);padding:10px 16px;margin-bottom:10px;font-weight:600;color:var(--navy);font-size:13.5px">${escHtml(turn.question)}</div>`;
+        if (turn.answer === null) {
+          html += `<div style="color:var(--text-muted);font-size:13px;margin-bottom:16px">✨ Thinking…</div>`;
+        } else {
+          const isStreaming = !!turn.streaming;
+          html += `<div style="border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:16px 20px;margin-bottom:16px">
+            <div style="font-size:13.5px;color:var(--text);line-height:1.7"${isStreaming ? ' id="meetings-streaming"' : ''}>${processMeetingsAnswer(turn.answer)}</div>
+            ${!isStreaming ? renderMeetingsSources(meetingsSources) : ''}
+          </div>`;
+        }
+      });
+      el.innerHTML = html || `<div style="text-align:center;padding:40px 20px;color:var(--text-muted)">
+        <div style="font-size:32px;margin-bottom:10px">🗓️✨</div>
+        <div style="font-weight:700;color:var(--navy);font-size:15px;margin-bottom:4px">Ask about any past discussion</div>
+        <div style="font-size:13px">Try: "What did Liam say about the reference check redesign?" or "What's our OSHC pay rate plan?"</div>
+      </div>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function askMeetings() {
+      const input = document.getElementById('meetingsInput');
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = '';
+      const btn = document.getElementById('meetingsAskBtn');
+      btn.disabled = true;
+
+      meetingsTurns.push({ question, answer: null, streaming: false });
+      renderMeetingsThread();
+      const turnIdx = meetingsTurns.length - 1;
+      let streamingText = '';
+      let streamingEl = null;
+
+      try {
+        const res = await fetch('/api/meetings/ask', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, history: meetingsHistory })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: 'Request failed' }));
+          throw new Error(errData.error || 'Request failed');
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop();
+          for (const part of chunks) {
+            if (!part.startsWith('data: ')) continue;
+            let data;
+            try { data = JSON.parse(part.slice(6)); } catch { continue; }
+            if (data.type === 'sources') {
+              meetingsSources = data.sources || [];
+            } else if (data.type === 'delta') {
+              streamingText += data.text;
+              if (!streamingEl) {
+                meetingsTurns[turnIdx].answer = streamingText;
+                meetingsTurns[turnIdx].streaming = true;
+                renderMeetingsThread();
+                streamingEl = document.getElementById('meetings-streaming');
+              } else {
+                streamingEl.innerHTML = processMeetingsAnswer(streamingText);
+              }
+            } else if (data.type === 'done') {
+              meetingsHistory = data.history;
+              meetingsTurns[turnIdx].answer = streamingText;
+              meetingsTurns[turnIdx].streaming = false;
+              renderMeetingsThread();
+            } else if (data.type === 'error') {
+              throw new Error(data.error);
+            }
+          }
+        }
+      } catch (err) {
+        meetingsTurns[turnIdx].answer = `Something went wrong: ${err.message}`;
+        meetingsTurns[turnIdx].streaming = false;
+        renderMeetingsThread();
+      }
+      btn.disabled = false;
+    }
 
     // ── File Attachments ──────────────────────────────────────────
     async function loadArticleFiles(articleId) {
