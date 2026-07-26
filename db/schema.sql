@@ -582,10 +582,48 @@ CREATE TABLE IF NOT EXISTS project_files (
 );
 CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id);
 
+-- ON CONFLICT targets id (the real primary key), not name — name is
+-- user-editable in the app, so a seed row whose name has since been changed
+-- must still be recognized as "already seeded" by id, not re-inserted.
 INSERT INTO projects (id, name, icon, color, description, status)
 VALUES
   ('proj-crm', 'Client Relationship Management', '🤝', '#3d6fff', 'Managing and growing relationships with client centres.', 'on_track'),
   ('proj-educator-engagement', 'Educator Engagement', '🎓', '#22c55e', 'Keeping educators supported, informed, and engaged.', 'on_track'),
   ('proj-call-quality', 'Quality Call Evaluation', '📞', '#f59e0b', 'Grading and improving the quality of recruitment/sales calls.', 'on_track'),
   ('proj-document-checker', 'Document Checker', '📋', '#7c3aed', 'Verifying compliance documents (WWCC, certificates, etc.) are valid and current.', 'on_track')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
+
+-- Full Fathom meeting transcripts, persisted so the team (and AI analysis of
+-- meeting content, e.g. SOP generation from Liam's instructions) never needs
+-- to re-hit the Fathom API for meetings already seen. Distinct from
+-- faq_candidates (which only keeps a 4000-char excerpt per meeting for FAQ
+-- detection) — this keeps the FULL transcript with per-line speaker
+-- attribution, since that's what's needed to reliably attribute who said
+-- what. recording_id is Fathom's own id, used as the natural key.
+CREATE TABLE IF NOT EXISTS fathom_meetings (
+  recording_id BIGINT PRIMARY KEY,
+  title TEXT,
+  meeting_url TEXT,
+  share_url TEXT,
+  fathom_created_at TIMESTAMPTZ,
+  recording_start_time TIMESTAMPTZ,
+  recording_end_time TIMESTAMPTZ,
+  transcript JSONB,          -- full array of {speaker:{display_name,...}, text, timestamp}
+  speakers TEXT[],           -- denormalized distinct speaker display names, for fast filtering
+  calendar_invitees JSONB,
+  default_summary TEXT,
+  action_items JSONB,
+  highlights JSONB,
+  synced_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fathom_meetings_start_time ON fathom_meetings(recording_start_time);
+CREATE INDEX IF NOT EXISTS idx_fathom_meetings_speakers ON fathom_meetings USING GIN(speakers);
+
+-- Tracks how far the full-transcript sync has progressed, same pattern as
+-- fathom_scan_state (which drives the separate FAQ-candidate scan) — kept
+-- separate so the two sync jobs can run independently.
+CREATE TABLE IF NOT EXISTS fathom_transcript_sync_state (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  last_synced_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
