@@ -303,8 +303,25 @@
 
         <div id="projectStatusFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
 
-        <div id="projectsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
-          <div class="loading-spinner"><div class="spinner"></div></div>
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Status</th>
+                  <th>Owner</th>
+                  <th style="min-width:150px">Timeline</th>
+                  <th>What does success look like?</th>
+                  <th>SOP</th>
+                  <th style="width:40px"></th>
+                </tr>
+              </thead>
+              <tbody id="projectsTableBody">
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -3076,36 +3093,37 @@
     }
 
     function renderProjectsGrid() {
-      const grid = document.getElementById('projectsGrid');
+      const body = document.getElementById('projectsTableBody');
       const filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
       if (!filtered.length) {
-        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</div>`;
+        body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
         return;
       }
-      grid.innerHTML = filtered.map(p => {
+      body.innerHTML = filtered.map(p => {
         const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
         const pct = projectTimelineProgress(p);
         const timelineHtml = (p.start_date && p.target_date)
-          ? `<div style="margin-bottom:3px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--gray-400)"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
+          ? `<div style="margin-bottom:3px;display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--gray-400)"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
              <div style="height:4px;background:var(--gray-100);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${meta.color};border-radius:2px"></div></div>`
-          : `<div style="font-size:11.5px;color:var(--gray-400)">No timeline set</div>`;
+          : `<span style="font-size:12px;color:var(--gray-400)">Not set</span>`;
         return `
-        <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);padding:18px;cursor:pointer;border-top:3px solid ${p.color || 'var(--orange)'};transition:box-shadow .15s"
-             onmouseover="this.style.boxShadow='0 4px 16px rgba(11,29,62,.1)'" onmouseout="this.style.boxShadow='var(--shadow-sm)'"
-             onclick="openProjectDetail('${p.id}')">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:24px;line-height:1">${p.icon || '🚀'}</div>
-            <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${meta.bg};color:${meta.color};flex-shrink:0">${meta.label}</span>
-          </div>
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">${escHtml(p.name)}</div>
-          <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px;min-height:32px;line-height:1.5">${escHtml(p.description || 'No description yet')}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">👤 ${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</div>
-          ${timelineHtml}
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:11.5px;color:var(--gray-400);display:flex;justify-content:space-between;align-items:center">
-            <span>${p.file_count > 0 ? `📎 ${p.file_count} SOP file${p.file_count != 1 ? 's' : ''}` : 'No SOP yet'}</span>
-            <span style="color:var(--orange);font-weight:600">View Details →</span>
-          </div>
-        </div>`;
+        <tr style="cursor:pointer" onclick="openProjectDetail('${p.id}')">
+          <td>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:19px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
+              <div>
+                <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(p.name)}</div>
+                <div style="font-size:11.5px;color:var(--text-muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
+              </div>
+            </div>
+          </td>
+          <td><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${meta.bg};color:${meta.color};white-space:nowrap">${meta.label}</span></td>
+          <td style="font-size:12.5px;color:${p.owner_name ? 'var(--text)' : 'var(--gray-400)'}">${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</td>
+          <td>${timelineHtml}</td>
+          <td style="font-size:12px;color:var(--text-muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.success_criteria ? escHtml(p.success_criteria) : '<span style="color:var(--gray-400)">Not defined yet</span>'}</td>
+          <td style="font-size:11.5px;color:var(--gray-400);white-space:nowrap">${p.file_count > 0 ? `📎 ${p.file_count} file${p.file_count != 1 ? 's' : ''}` : 'No SOP yet'}</td>
+          <td style="color:var(--orange);font-weight:700;font-size:15px;text-align:center">›</td>
+        </tr>`;
       }).join('');
     }
 
