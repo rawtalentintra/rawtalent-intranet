@@ -146,6 +146,12 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label">Projects</div>
+        <div class="admin-nav-item" onclick="showSection('projects-dashboard', this)">
+          <span class="admin-nav-icon">🚀</span> Projects Dashboard
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label">Content</div>
         <div class="admin-nav-item" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
@@ -282,6 +288,23 @@
             <button class="btn-add" onclick="showSection('new-article', document.querySelector('[onclick*=new-article]'))">✏️ Write New Article</button>
             <button class="btn-secondary super-admin-only" style="display:none" onclick="showSection('users', document.querySelector('[onclick*=users]'))">👥 Manage Users</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Projects Dashboard -->
+      <div class="admin-section" id="section-projects-dashboard">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Projects</div>
+            <div class="admin-page-sub">What we're running, who owns it, and what success looks like</div>
+          </div>
+          <button class="btn-add" onclick="openProjectFormModal()">+ New Project</button>
+        </div>
+
+        <div id="projectStatusFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
+
+        <div id="projectsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+          <div class="loading-spinner"><div class="spinner"></div></div>
         </div>
       </div>
 
@@ -1077,6 +1100,96 @@
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeGlossaryModal()">Cancel</button>
         <button class="btn-add" onclick="saveGlossaryTerm()">Save Term</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Create/Edit Modal -->
+  <div class="modal-overlay" id="projectFormModal" onclick="if(event.target===this)closeProjectFormModal()">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header">
+        <div class="modal-title" id="projectFormModalTitle">New Project</div>
+        <button class="modal-close" onclick="closeProjectFormModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editProjectId">
+        <div style="display:flex;gap:12px">
+          <div class="form-group-modal" style="width:70px;flex-shrink:0">
+            <label class="form-label-modal">Icon</label>
+            <input type="text" id="projectIcon" class="form-control" style="text-align:center;font-size:18px" maxlength="4" value="🚀">
+          </div>
+          <div class="form-group-modal" style="width:56px;flex-shrink:0">
+            <label class="form-label-modal">Color</label>
+            <input type="color" id="projectColor" class="form-control" style="padding:3px;height:40px" value="#3d6fff">
+          </div>
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Project Name <span style="color:#ef4444">*</span></label>
+            <input type="text" id="projectName" class="form-control" placeholder="e.g. Client Relationship Management">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Description</label>
+          <textarea id="projectDescription" class="form-control textarea" placeholder="One or two sentences on what this project covers…" style="min-height:60px"></textarea>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Status</label>
+            <select id="projectStatus" class="form-control">
+              <option value="planning">Planning</option>
+              <option value="on_track" selected>On Track</option>
+              <option value="at_risk">At Risk</option>
+              <option value="off_track">Off Track</option>
+              <option value="on_hold">On Hold</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Owner Name</label>
+            <input type="text" id="projectOwnerName" class="form-control" placeholder="Who runs this project">
+          </div>
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Owner Email</label>
+            <input type="email" id="projectOwnerEmail" class="form-control" placeholder="owner@rawtalent.com.au">
+          </div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Start Date</label>
+            <input type="date" id="projectStartDate" class="form-control">
+          </div>
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Target Date</label>
+            <input type="date" id="projectTargetDate" class="form-control">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">What does success look like?</label>
+          <textarea id="projectSuccessCriteria" class="form-control textarea" placeholder="e.g. 90%+ of calls scored 4/5 or above, evaluated within 24 hours of the call…" style="min-height:80px"></textarea>
+          <div class="form-hint">This is shown on the project card and in its detail view</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeProjectFormModal()">Cancel</button>
+        <button class="btn-add" onclick="saveProject()">💾 Save Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Detail Modal -->
+  <div class="modal-overlay" id="projectDetailModal" onclick="if(event.target===this)closeProjectDetailModal()">
+    <div class="modal" style="max-width:820px;width:92vw">
+      <div class="modal-header">
+        <div class="modal-title" id="projectDetailTitle">Project</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="action-btn edit" onclick="editProjectFromDetail()">Edit</button>
+          <button class="action-btn delete" onclick="deleteProjectFromDetail()">Delete</button>
+          <button class="modal-close" onclick="closeProjectDetailModal()">×</button>
+        </div>
+      </div>
+      <div class="modal-body" id="projectDetailBody" style="max-height:72vh;overflow-y:auto">
+        <div class="loading-spinner"><div class="spinner"></div></div>
       </div>
     </div>
   </div>
@@ -2254,6 +2367,7 @@
       if (id === 'feedback') loadFeedback();
       if (id === 'logs') loadLogs();
       if (id === 'glossary') loadGlossary();
+      if (id === 'projects-dashboard') loadProjects();
       if (id === 'sources') loadSources();
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
@@ -2908,6 +3022,311 @@
 
     document.getElementById('glossaryModal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeGlossaryModal();
+    });
+
+    // ── Projects ──────────────────────────────────────────────────
+    let allProjects = [];
+    let currentProjectId = null;
+    let currentProjectDetail = null;
+    let projectSopEditor = null;
+    let projectStatusFilter = 'all';
+
+    const PROJECT_STATUS_META = {
+      planning:   { label: 'Planning',   color: '#6b7280', bg: 'rgba(107,114,128,.12)' },
+      on_track:   { label: 'On Track',   color: '#15803d', bg: 'rgba(34,197,94,.12)' },
+      at_risk:    { label: 'At Risk',    color: '#b45309', bg: 'rgba(245,158,11,.15)' },
+      off_track:  { label: 'Off Track',  color: '#dc2626', bg: 'rgba(239,68,68,.12)' },
+      on_hold:    { label: 'On Hold',    color: '#7c3aed', bg: 'rgba(124,58,237,.12)' },
+      completed:  { label: 'Completed',  color: '#2563eb', bg: 'rgba(59,130,246,.12)' }
+    };
+
+    async function loadProjects() {
+      try {
+        allProjects = await fetch('/api/projects').then(r => r.json());
+        renderProjectStatusFilters();
+        renderProjectsGrid();
+      } catch { toast('Failed to load projects', 'error'); }
+    }
+
+    function renderProjectStatusFilters() {
+      const el = document.getElementById('projectStatusFilters');
+      const counts = { all: allProjects.length };
+      allProjects.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
+      const pill = (key, label) => {
+        const active = projectStatusFilter === key;
+        return `<button onclick="setProjectStatusFilter('${key}')" style="border:1px solid ${active ? 'var(--orange)' : 'var(--gray-200)'};background:${active ? 'var(--orange-glow)' : 'white'};color:${active ? 'var(--orange)' : 'var(--text-muted)'};font-weight:600;font-size:12.5px;padding:6px 14px;border-radius:20px;cursor:pointer;transition:all .15s">${label}${counts[key] ? ` (${counts[key]})` : ''}</button>`;
+      };
+      el.innerHTML = pill('all', 'All Projects') + Object.keys(PROJECT_STATUS_META).map(k => pill(k, PROJECT_STATUS_META[k].label)).join('');
+    }
+
+    function setProjectStatusFilter(key) {
+      projectStatusFilter = key;
+      renderProjectStatusFilters();
+      renderProjectsGrid();
+    }
+
+    function projectTimelineProgress(p) {
+      if (!p.start_date || !p.target_date) return null;
+      const start = new Date(p.start_date).getTime();
+      const target = new Date(p.target_date).getTime();
+      if (isNaN(start) || isNaN(target) || target <= start) return null;
+      if (p.status === 'completed') return 100;
+      const pct = ((Date.now() - start) / (target - start)) * 100;
+      return Math.max(0, Math.min(100, Math.round(pct)));
+    }
+
+    function renderProjectsGrid() {
+      const grid = document.getElementById('projectsGrid');
+      const filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
+      if (!filtered.length) {
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</div>`;
+        return;
+      }
+      grid.innerHTML = filtered.map(p => {
+        const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
+        const pct = projectTimelineProgress(p);
+        const timelineHtml = (p.start_date && p.target_date)
+          ? `<div style="margin-bottom:3px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--gray-400)"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
+             <div style="height:4px;background:var(--gray-100);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${meta.color};border-radius:2px"></div></div>`
+          : `<div style="font-size:11.5px;color:var(--gray-400)">No timeline set</div>`;
+        return `
+        <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);padding:18px;cursor:pointer;border-top:3px solid ${p.color || 'var(--orange)'};transition:box-shadow .15s"
+             onmouseover="this.style.boxShadow='0 4px 16px rgba(11,29,62,.1)'" onmouseout="this.style.boxShadow='var(--shadow-sm)'"
+             onclick="openProjectDetail('${p.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+            <div style="font-size:24px;line-height:1">${p.icon || '🚀'}</div>
+            <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${meta.bg};color:${meta.color};flex-shrink:0">${meta.label}</span>
+          </div>
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">${escHtml(p.name)}</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px;min-height:32px;line-height:1.5">${escHtml(p.description || 'No description yet')}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">👤 ${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</div>
+          ${timelineHtml}
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:11.5px;color:var(--gray-400);display:flex;justify-content:space-between;align-items:center">
+            <span>${p.file_count > 0 ? `📎 ${p.file_count} SOP file${p.file_count != 1 ? 's' : ''}` : 'No SOP yet'}</span>
+            <span style="color:var(--orange);font-weight:600">View Details →</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // ── Project Detail Modal ──
+    async function openProjectDetail(id) {
+      currentProjectId = id;
+      document.getElementById('projectDetailModal').classList.add('open');
+      document.getElementById('projectDetailBody').innerHTML = `<div class="loading-spinner"><div class="spinner"></div></div>`;
+      try {
+        currentProjectDetail = await fetch(`/api/projects/${id}`).then(r => r.json());
+        renderProjectDetailBody();
+      } catch { toast('Failed to load project', 'error'); }
+    }
+
+    function closeProjectDetailModal() {
+      document.getElementById('projectDetailModal').classList.remove('open');
+      currentProjectId = null;
+      currentProjectDetail = null;
+      projectSopEditor = null;
+    }
+
+    function renderProjectDetailBody(sopEditMode = false) {
+      const p = currentProjectDetail;
+      if (!p) return;
+      const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
+      document.getElementById('projectDetailTitle').innerHTML = `${p.icon || '🚀'} ${escHtml(p.name)}`;
+      const pct = projectTimelineProgress(p);
+
+      const filesHtml = (p.files || []).length
+        ? p.files.map(f => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px">
+            <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/projects/files/${f.id}/download','_blank')">📎 ${escHtml(f.filename)} <span style="color:var(--gray-400)">(${formatFileSize(f.filesize)})</span></span>
+            <button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteProjectFile(${f.id})">Remove</button>
+          </div>`).join('')
+        : `<div style="font-size:12.5px;color:var(--gray-400);margin-bottom:8px">No SOP files attached yet.</div>`;
+
+      document.getElementById('projectDetailBody').innerHTML = `
+        <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:22px">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Status</div>
+            <span style="font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;background:${meta.bg};color:${meta.color}">${meta.label}</span>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Owner</div>
+            <div style="font-size:13.5px;color:var(--navy);font-weight:600">${p.owner_name ? escHtml(p.owner_name) : '—'}</div>
+            ${p.owner_email ? `<div style="font-size:11.5px;color:var(--text-muted)">${escHtml(p.owner_email)}</div>` : ''}
+          </div>
+          <div style="min-width:200px">
+            <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Timeline</div>
+            ${(p.start_date && p.target_date) ? `
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-muted);margin-bottom:3px"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
+              <div style="height:5px;width:200px;background:var(--gray-100);border-radius:3px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${meta.color};border-radius:3px"></div></div>
+            ` : `<div style="font-size:12.5px;color:var(--gray-400)">Not set</div>`}
+          </div>
+        </div>
+
+        ${p.description ? `<div style="font-size:13.5px;color:var(--text);line-height:1.6;margin-bottom:22px">${escHtml(p.description)}</div>` : ''}
+
+        <div style="background:var(--orange-glow);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:22px">
+          <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:6px">🎯 What does success look like?</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.6;white-space:pre-wrap">${p.success_criteria ? escHtml(p.success_criteria) : 'Not defined yet — click Edit to add success criteria for this project.'}</div>
+        </div>
+
+        <div style="margin-bottom:22px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;font-size:13.5px;color:var(--navy)">📖 Standard Operating Procedure</div>
+            ${sopEditMode
+              ? `<div style="display:flex;gap:8px"><button class="btn-secondary" style="padding:5px 12px;font-size:12px" onclick="renderProjectDetailBody(false)">Cancel</button><button class="btn-add" style="padding:5px 12px;font-size:12px" onclick="saveProjectSop()">Save SOP</button></div>`
+              : `<button class="action-btn edit" onclick="renderProjectDetailBody(true)">Edit SOP</button>`}
+          </div>
+          ${sopEditMode
+            ? `<div id="projectSopEditor"></div>`
+            : `<div style="border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:16px 20px;font-size:13.5px;color:var(--text);line-height:1.7;min-height:60px">${p.sop_content && p.sop_content.trim() ? DOMPurify.sanitize(p.sop_content, { ADD_TAGS: ['table','thead','tbody','tr','th','td'] }) : '<span style="color:var(--gray-400)">No SOP written yet — click Edit SOP to document how this project should be run.</span>'}</div>`}
+        </div>
+
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;font-size:13.5px;color:var(--navy)">📎 SOP Files</div>
+            <label class="action-btn edit" style="cursor:pointer">Upload File<input type="file" style="display:none" onchange="uploadProjectFile(this)"></label>
+          </div>
+          ${filesHtml}
+        </div>
+      `;
+
+      if (sopEditMode) {
+        projectSopEditor = Jodit.make('#projectSopEditor', {
+          height: 300, minHeight: 220, toolbarButtonSize: 'small',
+          showCharsCounter: false, showWordsCounter: false, showXPathInStatusbar: false,
+          placeholder: 'Document the steps, checklist, or process for this project…',
+          buttons: ['paragraph', '|', 'bold', 'italic', 'underline', '|', 'ul', 'ol', '|', 'link', 'table', '|', 'undo', 'redo'],
+          style: { fontFamily: "'Inter', sans-serif", fontSize: '14px', color: '#334155', lineHeight: '1.7' },
+          uploader: { insertImageAsBase64URI: true },
+          removeButtons: ['video', 'file', 'about', 'print', 'dots', 'source', 'preview', 'image']
+        });
+        projectSopEditor.value = p.sop_content || '';
+      }
+    }
+
+    async function saveProjectSop() {
+      if (!projectSopEditor || !currentProjectId) return;
+      try {
+        await fetch(`/api/projects/${currentProjectId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sopContent: projectSopEditor.value })
+        });
+        toast('SOP saved', 'success');
+        currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+        projectSopEditor = null;
+        renderProjectDetailBody(false);
+      } catch { toast('Failed to save SOP', 'error'); }
+    }
+
+    async function uploadProjectFile(input) {
+      if (!input.files?.[0] || !currentProjectId) return;
+      const fd = new FormData();
+      fd.append('file', input.files[0]);
+      try {
+        await fetch(`/api/projects/${currentProjectId}/files`, { method: 'POST', body: fd });
+        toast('File uploaded', 'success');
+        currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+        renderProjectDetailBody(false);
+      } catch { toast('Upload failed', 'error'); }
+      input.value = '';
+    }
+
+    function deleteProjectFile(fileId) {
+      document.getElementById('confirmTitle').textContent = 'Remove File';
+      document.getElementById('confirmMsg').textContent = 'Remove this SOP file? This cannot be undone.';
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          await fetch(`/api/projects/files/${fileId}`, { method: 'DELETE' });
+          toast('File removed', 'success');
+          currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+          renderProjectDetailBody(false);
+        } catch { toast('Remove failed', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
+    }
+
+    function deleteProjectFromDetail() {
+      const p = currentProjectDetail;
+      if (!p) return;
+      document.getElementById('confirmTitle').textContent = 'Delete Project';
+      document.getElementById('confirmMsg').textContent = `Delete "${p.name}" and all of its SOP files? This cannot be undone.`;
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
+          toast('Project deleted', 'success');
+          closeProjectDetailModal();
+          await loadProjects();
+        } catch { toast('Delete failed', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
+    }
+
+    // ── Project Create/Edit Modal ──
+    function openProjectFormModal(id) {
+      document.getElementById('editProjectId').value = id || '';
+      document.getElementById('projectFormModalTitle').textContent = id ? 'Edit Project' : 'New Project';
+      const p = id ? allProjects.find(x => x.id === id) : null;
+      document.getElementById('projectIcon').value = p?.icon || '🚀';
+      document.getElementById('projectColor').value = p?.color || '#3d6fff';
+      document.getElementById('projectName').value = p?.name || '';
+      document.getElementById('projectDescription').value = p?.description || '';
+      document.getElementById('projectStatus').value = p?.status || 'planning';
+      document.getElementById('projectOwnerName').value = p?.owner_name || '';
+      document.getElementById('projectOwnerEmail').value = p?.owner_email || '';
+      document.getElementById('projectStartDate').value = p?.start_date ? String(p.start_date).slice(0, 10) : '';
+      document.getElementById('projectTargetDate').value = p?.target_date ? String(p.target_date).slice(0, 10) : '';
+      document.getElementById('projectSuccessCriteria').value = p?.success_criteria || '';
+      document.getElementById('projectFormModal').classList.add('open');
+    }
+
+    function editProjectFromDetail() {
+      if (!currentProjectDetail) return;
+      const p = currentProjectDetail;
+      const idx = allProjects.findIndex(x => x.id === p.id);
+      if (idx === -1) allProjects.push(p); else allProjects[idx] = p;
+      document.getElementById('projectDetailModal').classList.remove('open');
+      openProjectFormModal(p.id);
+    }
+
+    function closeProjectFormModal() {
+      document.getElementById('projectFormModal').classList.remove('open');
+    }
+
+    async function saveProject() {
+      const id = document.getElementById('editProjectId').value;
+      const name = document.getElementById('projectName').value.trim();
+      if (!name) return toast('Project name is required', 'error');
+      const payload = {
+        name,
+        icon: document.getElementById('projectIcon').value.trim() || '🚀',
+        color: document.getElementById('projectColor').value,
+        description: document.getElementById('projectDescription').value.trim(),
+        status: document.getElementById('projectStatus').value,
+        ownerName: document.getElementById('projectOwnerName').value.trim(),
+        ownerEmail: document.getElementById('projectOwnerEmail').value.trim(),
+        startDate: document.getElementById('projectStartDate').value || null,
+        targetDate: document.getElementById('projectTargetDate').value || null,
+        successCriteria: document.getElementById('projectSuccessCriteria').value.trim()
+      };
+      const url = id ? `/api/projects/${id}` : '/api/projects';
+      try {
+        const res = await fetch(url, {
+          method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Save failed');
+        toast(id ? 'Project updated' : 'Project created', 'success');
+        closeProjectFormModal();
+        await loadProjects();
+        if (id && currentProjectId === id) openProjectDetail(id);
+      } catch (err) { toast(err.message || 'Save failed', 'error'); }
+    }
+
+    document.getElementById('projectFormModal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeProjectFormModal();
     });
 
     // ── File Attachments ──────────────────────────────────────────

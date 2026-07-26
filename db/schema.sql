@@ -548,3 +548,44 @@ CREATE TABLE IF NOT EXISTS training_assignments (
   UNIQUE(course_id, user_email)
 );
 CREATE INDEX IF NOT EXISTS idx_training_assignments_user_email ON training_assignments(user_email);
+
+-- Internal projects (Client Relationship Management, Educator Engagement,
+-- etc.) — a lightweight status/owner/timeline/SOP tracker for admins, not a
+-- full task-management tool. name is UNIQUE so the starter set below can be
+-- seeded idempotently.
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  icon TEXT DEFAULT '🚀',
+  color TEXT DEFAULT '#3d6fff',
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'on_track', -- 'planning' | 'on_track' | 'at_risk' | 'off_track' | 'on_hold' | 'completed'
+  owner_name TEXT,
+  owner_email TEXT,
+  start_date DATE,
+  target_date DATE,
+  success_criteria TEXT,
+  sop_content TEXT DEFAULT '',
+  created_by_email TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS project_files (
+  id SERIAL PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id);
+
+INSERT INTO projects (id, name, icon, color, description, status)
+VALUES
+  ('proj-crm', 'Client Relationship Management', '🤝', '#3d6fff', 'Managing and growing relationships with client centres.', 'on_track'),
+  ('proj-educator-engagement', 'Educator Engagement', '🎓', '#22c55e', 'Keeping educators supported, informed, and engaged.', 'on_track'),
+  ('proj-call-quality', 'Quality Call Evaluation', '📞', '#f59e0b', 'Grading and improving the quality of recruitment/sales calls.', 'on_track'),
+  ('proj-document-checker', 'Document Checker', '📋', '#7c3aed', 'Verifying compliance documents (WWCC, certificates, etc.) are valid and current.', 'on_track')
+ON CONFLICT (name) DO NOTHING;

@@ -14,7 +14,8 @@ const BUCKETS = {
   teamPhotos: 'team-photos',
   articleFiles: 'article-files',
   callRecordings: 'call-recordings',
-  announcementFiles: 'announcement-files'
+  announcementFiles: 'announcement-files',
+  projectFiles: 'project-files'
 };
 
 // Every other bucket above was provisioned manually in Supabase ahead of
