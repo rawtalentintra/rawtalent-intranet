@@ -836,7 +836,7 @@
         const nameEl = document.getElementById('navName');
         nameEl.textContent = me.name || me.email.split('@')[0];
         nameEl.style.display = '';
-        if (me.role === 'admin' || me.role === 'super_admin') {
+        if (me.role === 'admin' || me.role === 'super_admin' || me.role === 'qa_view') {
           const btn = document.getElementById('adminNavBtn');
           btn.style.display = 'inline-flex';
           btn.textContent = me.role === 'super_admin' ? '⚙ Super Admin' : '⚙ Admin';
