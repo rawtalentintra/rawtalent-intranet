@@ -140,12 +140,6 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Overview</div>
-        <div class="admin-nav-item active" onclick="showSection('dashboard', this)">
-          <span class="admin-nav-icon">📊</span> Dashboard
-        </div>
-      </div>
-      <div class="admin-nav-section">
         <div class="admin-nav-label">Projects</div>
         <div class="admin-nav-item" onclick="showSection('projects-dashboard', this)">
           <span class="admin-nav-icon">🚀</span> Projects Dashboard
@@ -153,7 +147,7 @@
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label">Content</div>
-        <div class="admin-nav-item" onclick="showSection('articles', this)">
+        <div class="admin-nav-item active" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
         </div>
         <div class="admin-nav-item" onclick="showSection('new-article', this)">
@@ -276,30 +270,6 @@
         </div>
       </div>
 
-      <!-- Dashboard -->
-      <div class="admin-section active" id="section-dashboard">
-        <div class="admin-header">
-          <div>
-            <div class="admin-page-title">Dashboard</div>
-            <div class="admin-page-sub">Welcome back, <span id="adminName">Joy</span></div>
-          </div>
-        </div>
-        <div class="stats-grid" id="statsGrid">
-          <div class="stat-card"><div class="stat-icon">📄</div><div class="stat-num" id="stat-articles">—</div><div class="stat-label">Published Articles</div></div>
-          <div class="stat-card"><div class="stat-icon">📝</div><div class="stat-num" id="stat-drafts">—</div><div class="stat-label">Drafts</div></div>
-          <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-num" id="stat-users">—</div><div class="stat-label">Active Users</div></div>
-          <div class="stat-card"><div class="stat-icon">🗂</div><div class="stat-num" id="stat-cats">—</div><div class="stat-label">Categories</div></div>
-        </div>
-        <div id="driveBanner" style="display:none;border-radius:var(--radius-lg);padding:18px 22px;margin-bottom:16px;border:1px solid #fca5a5;background:#fef2f2"></div>
-        <div style="background:white;border-radius:var(--radius-lg);padding:28px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
-          <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">Quick Actions</div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-            <button class="btn-add" onclick="showSection('new-article', document.querySelector('[onclick*=new-article]'))">✏️ Write New Article</button>
-            <button class="btn-secondary super-admin-only" style="display:none" onclick="showSection('users', document.querySelector('[onclick*=users]'))">👥 Manage Users</button>
-          </div>
-        </div>
-      </div>
-
       <!-- Projects Dashboard -->
       <div class="admin-section" id="section-projects-dashboard">
         <div class="admin-header">
@@ -365,7 +335,7 @@
       </div>
 
       <!-- Articles List -->
-      <div class="admin-section" id="section-articles">
+      <div class="admin-section active" id="section-articles">
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Articles</div>
@@ -1859,7 +1829,6 @@
         currentUserEmail = me.email;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
-        document.getElementById('adminName').textContent = me.name || me.email.split('@')[0];
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
         document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on Admin View.`;
         document.getElementById('viewBanner').style.display = 'block';
@@ -1870,7 +1839,6 @@
         applyRoleVisibility();
       } catch { location.href = '/login.html'; return; }
 
-      if (currentUserRole !== 'qa_view') loadStats(); // dashboard stats aren't in qa_view's allowed section list
       loadArticles();
       if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
       loadCategoriesForDatalist();
@@ -1879,16 +1847,15 @@
       setInterval(loadNotifications, 5 * 60 * 1000);
 
       // Land back on whichever section was open before the refresh, instead
-      // of always resetting to Dashboard — showSection() keeps this in sync
-      // (and re-checks role access) on every navigation. qa_view has no
-      // Dashboard access at all, so it always lands on Articles instead
-      // unless the saved section is one it's actually allowed into.
+      // of always resetting to Articles — showSection() keeps this in sync
+      // (and re-checks role access) on every navigation. qa_view always
+      // lands on Articles unless the saved section is one it's allowed into.
       let savedSection = null;
       try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
       if (currentUserRole === 'qa_view') {
         const target = (savedSection && QA_VIEW_ALLOWED_SECTIONS.includes(savedSection)) ? savedSection : 'articles';
         showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
-      } else if (savedSection && savedSection !== 'dashboard' && document.getElementById(`section-${savedSection}`)) {
+      } else if (savedSection && document.getElementById(`section-${savedSection}`)) {
         const navEl = document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
         showSection(savedSection, navEl);
       }
@@ -2573,17 +2540,6 @@
       document.getElementById('mobileSidebarOverlay').classList.remove('open');
     }
 
-    // ── Stats ─────────────────────────────────────────────────────
-    async function loadStats() {
-      try {
-        const s = await fetch('/api/admin/stats').then(r => r.json());
-        document.getElementById('stat-articles').textContent = s.totalArticles;
-        document.getElementById('stat-drafts').textContent = s.draftArticles;
-        document.getElementById('stat-users').textContent = s.totalUsers;
-        document.getElementById('stat-cats').textContent = s.categories;
-      } catch {}
-    }
-
     // ── Articles ──────────────────────────────────────────────────
     let articlesFilter = '';
     let articlesPage = 1;
@@ -2768,7 +2724,6 @@
         editingArticleId = null;
         resetArticleForm();
         await loadArticles();
-        await loadStats();
         showSection('articles', document.querySelector('[onclick*="\'articles\'"]'));
       } catch { toast('Network error', 'error'); }
     }
@@ -2787,7 +2742,6 @@
         if (res.ok) {
           toast('Article deleted', 'success');
           await loadArticles();
-          await loadStats();
         } else {
           const d = await res.json();
           toast(d.error || 'Delete failed', 'error');
@@ -3048,7 +3002,6 @@
         toast(id ? 'User updated!' : 'User added!', 'success');
         closeUserModal();
         await loadUsers();
-        await loadStats();
       } catch { toast('Network error', 'error'); }
     }
 
@@ -3059,7 +3012,7 @@
         try {
           const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
           const d = await res.json();
-          if (res.ok) { toast('User removed', 'success'); await loadUsers(); await loadStats(); }
+          if (res.ok) { toast('User removed', 'success'); await loadUsers(); }
           else toast(d.error || 'Delete failed', 'error');
         } catch { toast('Network error', 'error'); }
         closeConfirm();
@@ -3074,42 +3027,6 @@
     // Close modals on overlay click
     document.getElementById('userModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeUserModal(); });
     document.getElementById('confirmModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeConfirm(); });
-
-    // ── Drive Sync ────────────────────────────────────────────────
-    async function checkDriveStatus() {
-      try {
-        const data = await fetch('/api/admin/drive-status').then(r => r.json());
-        const banner = document.getElementById('driveBanner');
-        if (!banner) return;
-        if (data.connected) {
-          banner.style.display = 'none';
-        } else {
-          banner.style.display = 'block';
-          const email = data.serviceAccountEmail
-            ? `<br><br>Share your Google Drive folder with this email address so articles can be saved:<br><strong style="font-size:13px;background:#fee2e2;padding:4px 10px;border-radius:6px;display:inline-block;margin-top:6px;user-select:all">${data.serviceAccountEmail}</strong>`
-            : '';
-          banner.innerHTML = `
-            <div style="display:flex;align-items:flex-start;gap:12px">
-              <span style="font-size:20px">⚠️</span>
-              <div>
-                <div style="font-weight:700;color:#991b1b;margin-bottom:4px">Google Drive backup is not connected — articles will be lost on redeploy</div>
-                <div style="font-size:13px;color:#7f1d1d">Articles won't survive a Render restart until Drive is connected.${email}</div>
-                <div style="margin-top:10px;font-size:12px;color:#7f1d1d">After sharing, click <strong>Sync from Google Drive</strong> above to test the connection.</div>
-              </div>
-            </div>`;
-        }
-      } catch {}
-    }
-
-    async function triggerSync() {
-      toast('Syncing from Google Drive…');
-      try {
-        const res = await fetch('/api/admin/sync', { method: 'POST' });
-        const data = await res.json();
-        if (res.ok) { toast(data.message, 'success'); await loadArticles(); await loadStats(); }
-        else toast(data.error || 'Sync failed', 'error');
-      } catch { toast('Sync failed', 'error'); }
-    }
 
     // ── Helpers ───────────────────────────────────────────────────
     function toast(msg, type = '') {
