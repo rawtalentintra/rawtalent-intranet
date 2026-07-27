@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
-const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { runSlackScan, isConfigured: isSlackConfigured } = require('../services/slackService');
 const { runFathomScan, isConfigured: isFathomConfigured } = require('../services/fathomService');
 const { extractFaqsFromDocument } = require('../services/faqClassifier');
@@ -17,6 +17,53 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const result = await getDb().execute('SELECT id, question, answer, created_at FROM faqs ORDER BY created_at DESC');
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── FAQ management (view/add/edit only, no delete) — super_admin (as ──
+// ── before) and qa_view, a role scoped to exactly this: writing/correcting ──
+// ── FAQ answers, with no access to the raw Slack/Fathom scan or review ──
+// ── queue. Deliberately NOT plain 'admin' — FAQ Review was always ──
+// ── super_admin-only and this doesn't change that. ──
+router.get('/manage/all', requireRole('super_admin', 'qa_view'), async (req, res) => {
+  try {
+    const result = await getDb().execute('SELECT * FROM faqs ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/', requireRole('super_admin', 'qa_view'), async (req, res) => {
+  const { question, answer } = req.body;
+  if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: 'Question and answer are required' });
+  try {
+    const db = getDb();
+    const id = uuidv4();
+    await db.execute({
+      sql: 'INSERT INTO faqs (id, question, answer, source, approved_by) VALUES (?, ?, ?, ?, ?)',
+      args: [id, question.trim(), answer.trim(), 'manual', req.user.email]
+    });
+    await logActivity('faq', question.trim(), 'created', 'FAQ added manually', req.user.email);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/:id', requireRole('super_admin', 'qa_view'), async (req, res) => {
+  const { question, answer } = req.body;
+  if (!question || !answer) return res.status(400).json({ error: 'Question and answer are required' });
+  try {
+    const db = getDb();
+    await db.execute({
+      sql: "UPDATE faqs SET question=?, answer=?, updated_at=now() WHERE id=?",
+      args: [question.trim(), answer.trim(), req.params.id]
+    });
+    await logActivity('faq', question.trim(), 'updated', 'FAQ edited', req.user.email);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -146,50 +193,6 @@ router.put('/candidates/:id/reject', async (req, res) => {
 router.delete('/candidates/:id', async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM faq_candidates WHERE id = ?', args: [req.params.id] });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Manually author an FAQ directly — no Slack/Fathom candidate needed, since
-// an admin writing it themselves needs no separate scrub/approval step.
-router.post('/', async (req, res) => {
-  const { question, answer } = req.body;
-  if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: 'Question and answer are required' });
-  try {
-    const db = getDb();
-    const id = uuidv4();
-    await db.execute({
-      sql: 'INSERT INTO faqs (id, question, answer, source, approved_by) VALUES (?, ?, ?, ?, ?)',
-      args: [id, question.trim(), answer.trim(), 'manual', req.user.email]
-    });
-    await logActivity('faq', question.trim(), 'created', 'FAQ added manually', req.user.email);
-    res.json({ success: true, id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/manage/all', async (req, res) => {
-  try {
-    const result = await getDb().execute('SELECT * FROM faqs ORDER BY created_at DESC');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/:id', async (req, res) => {
-  const { question, answer } = req.body;
-  if (!question || !answer) return res.status(400).json({ error: 'Question and answer are required' });
-  try {
-    const db = getDb();
-    await db.execute({
-      sql: "UPDATE faqs SET question=?, answer=?, updated_at=now() WHERE id=?",
-      args: [question.trim(), answer.trim(), req.params.id]
-    });
-    await logActivity('faq', question.trim(), 'updated', 'FAQ edited', req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

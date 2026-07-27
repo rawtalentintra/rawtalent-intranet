@@ -165,6 +165,9 @@
         <div class="admin-nav-item" onclick="showSection('users', this)">
           <span class="admin-nav-icon">👥</span> Users
         </div>
+        <div class="admin-nav-item" onclick="showSection('role-permissions', this)">
+          <span class="admin-nav-icon">🔑</span> Role Permissions
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label">Knowledge</div>
@@ -553,6 +556,37 @@
         </div>
       </div>
 
+      <!-- Role Permissions (reference only — super_admin only) -->
+      <div class="admin-section" id="section-role-permissions">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🔑 Role Permissions</div>
+            <div class="admin-page-sub">What each role can see and do — a reference for you, not an editable setting. Visible to you as super admin only.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead>
+                <tr>
+                  <th style="min-width:200px">Area</th>
+                  <th style="text-align:center">User</th>
+                  <th style="text-align:center">QA View</th>
+                  <th style="text-align:center">Admin</th>
+                  <th style="text-align:center">Super Admin</th>
+                </tr>
+              </thead>
+              <tbody id="rolePermissionsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
+          <strong>Note:</strong> QA View is a narrow role — Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only — no Slack/Fathom scanning, no candidate review, no delete), and Call Quality (Dashboard/Rubrics/Evaluator, same as Admin). Everything else in the admin panel is invisible to it, both in the nav and on every underlying route — hiding a nav item is a UX nicety here, the real enforcement is server-side on each API route.
+        </div>
+      </div>
+
       <!-- Glossary -->
       <div class="admin-section" id="section-glossary">
         <div class="admin-header">
@@ -807,11 +841,11 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">FAQ Review</div>
-            <div class="admin-page-sub">Slack and Fathom conversations are never used as AI sources directly — Claude only flags genuinely reusable, scrubbed Q&amp;As here for your approval. This whole page is visible to you as super admin only.</div>
+            <div class="admin-page-sub" id="faqPageSub">Slack and Fathom conversations are never used as AI sources directly — Claude only flags genuinely reusable, scrubbed Q&amp;As here for your approval. This whole page is visible to you as super admin only.</div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+        <div id="faqScanCardsGrid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
           <div style="background:white;border-radius:var(--radius-lg);padding:24px 26px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
             <div style="font-weight:700;font-size:15px;margin-bottom:6px;color:var(--navy)">💬 Scan Slack</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Checks channels the bot has access to for new threads — never auto-joins a channel, so it never surprises anyone.</div>
@@ -833,7 +867,7 @@
           </div>
         </div>
 
-        <div class="admin-table-card" style="margin-bottom:24px">
+        <div class="admin-table-card" style="margin-bottom:24px" id="faqCandidatesCard">
           <div class="admin-table-header">
             <span style="font-weight:600;font-size:14px;color:var(--navy)">Pending Candidates</span>
             <span id="faqCandidatesCount" style="font-size:13px;color:var(--text-muted)"></span>
@@ -856,7 +890,7 @@
           </div>
         </div>
 
-        <div class="admin-table-card">
+        <div class="admin-table-card" id="faqScannedCard">
           <div class="admin-table-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
               <span style="font-weight:600;font-size:14px;color:var(--navy)">All Scanned Conversations</span>
@@ -1313,6 +1347,7 @@
             <select id="userRole" class="form-control">
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
+              <option value="qa_view">QA View (articles, FAQ, call quality only)</option>
             </select>
           </div>
         </div>
@@ -1819,7 +1854,7 @@
     async function init() {
       try {
         const me = await fetch('/auth/me').then(r => r.json());
-        if (me.error || (me.role !== 'admin' && me.role !== 'super_admin')) { location.href = '/'; return; }
+        if (me.error || !['admin', 'super_admin', 'qa_view'].includes(me.role)) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
@@ -1835,7 +1870,7 @@
         applyRoleVisibility();
       } catch { location.href = '/login.html'; return; }
 
-      loadStats();
+      if (currentUserRole !== 'qa_view') loadStats(); // dashboard stats aren't in qa_view's allowed section list
       loadArticles();
       if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
       loadCategoriesForDatalist();
@@ -1845,18 +1880,53 @@
 
       // Land back on whichever section was open before the refresh, instead
       // of always resetting to Dashboard — showSection() keeps this in sync
-      // (and re-checks role access) on every navigation.
+      // (and re-checks role access) on every navigation. qa_view has no
+      // Dashboard access at all, so it always lands on Articles instead
+      // unless the saved section is one it's actually allowed into.
       let savedSection = null;
       try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
-      if (savedSection && savedSection !== 'dashboard' && document.getElementById(`section-${savedSection}`)) {
+      if (currentUserRole === 'qa_view') {
+        const target = (savedSection && QA_VIEW_ALLOWED_SECTIONS.includes(savedSection)) ? savedSection : 'articles';
+        showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
+      } else if (savedSection && savedSection !== 'dashboard' && document.getElementById(`section-${savedSection}`)) {
         const navEl = document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
         showSection(savedSection, navEl);
       }
     }
 
+    // The small set of admin-panel sections the 'qa_view' role can reach —
+    // articles (view/add/edit), FAQ management (add/edit only — the scan
+    // and candidate-review parts of that page are further hidden below),
+    // and call quality (dashboard/rubrics/evaluator). Enforced here for
+    // nav visibility AND in showSection() so a saved/typed section id
+    // outside this list can't be reached by editing localStorage or the URL
+    // — the real enforcement is server-side per route regardless.
+    const QA_VIEW_ALLOWED_SECTIONS = ['articles', 'new-article', 'faq', 'calls-dashboard', 'call-rubrics', 'calls'];
+
     function applyRoleVisibility() {
       if (currentUserRole === 'super_admin') {
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
+      }
+      if (currentUserRole === 'qa_view') {
+        document.querySelectorAll('.admin-nav-item').forEach(item => {
+          const match = item.getAttribute('onclick')?.match(/showSection\('([^']+)'/);
+          item.style.display = (match && QA_VIEW_ALLOWED_SECTIONS.includes(match[1])) ? '' : 'none';
+        });
+        document.querySelectorAll('.admin-nav-section').forEach(section => {
+          const anyVisible = [...section.querySelectorAll('.admin-nav-item')].some(i => i.style.display !== 'none');
+          section.style.display = anyVisible ? '' : 'none';
+        });
+        // FAQ Review, scoped down to just add/edit — no Slack/Fathom scan
+        // access and no candidate review queue (both stay super_admin only
+        // server-side too, this is just matching the UI to what's usable).
+        const scanGrid = document.getElementById('faqScanCardsGrid');
+        const candCard = document.getElementById('faqCandidatesCard');
+        const scannedCard = document.getElementById('faqScannedCard');
+        if (scanGrid) scanGrid.style.display = 'none';
+        if (candCard) candCard.style.display = 'none';
+        if (scannedCard) scannedCard.style.display = 'none';
+        const faqSub = document.getElementById('faqPageSub');
+        if (faqSub) faqSub.textContent = 'Add new FAQs and edit existing ones. Scanning Slack/Fathom and reviewing candidates is restricted to super admins.';
       }
     }
 
@@ -2444,10 +2514,19 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'faq', 'training-build'];
+    const superAdminSections = ['users', 'logs', 'sources', 'faq', 'training-build', 'role-permissions'];
 
     function showSection(id, el) {
-      if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
+      // qa_view has its own small allowlist (which includes 'faq', normally
+      // super_admin-only per superAdminSections below — the FAQ page itself
+      // hides the super-admin-only parts once loaded) instead of the
+      // superAdminSections check every other role uses.
+      if (currentUserRole === 'qa_view') {
+        if (!QA_VIEW_ALLOWED_SECTIONS.includes(id)) {
+          showSection('articles', document.querySelector(`[onclick*="showSection('articles'"]`));
+          return;
+        }
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       }
@@ -2466,6 +2545,7 @@
       }
       if (id === 'feedback') loadFeedback();
       if (id === 'logs') loadLogs();
+      if (id === 'role-permissions') renderRolePermissions();
       if (id === 'glossary') loadGlossary();
       if (id === 'projects-dashboard') loadProjects();
       if (id === 'meetings') loadMeetingsStatus();
@@ -2544,7 +2624,7 @@
             <div style="display:flex;gap:6px">
               <a class="action-btn view" href="/article?id=${a.id}" target="_blank">View</a>
               <button class="action-btn edit" onclick="editArticle('${a.id}')">Edit</button>
-              <button class="action-btn delete" onclick="deleteArticleConfirm('${a.id}','${escHtml(a.title)}')">Delete</button>
+              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteArticleConfirm('${a.id}','${escHtml(a.title)}')">Delete</button>` : ''}
             </div>
           </td>
         </tr>
@@ -2792,7 +2872,7 @@
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;font-size:13.5px;color:var(--navy)">${escHtml(s.name || s.email)} <span style="font-weight:400;color:var(--text-muted)">· ${escHtml(s.email)}</span></div>
             </div>
-            <span class="badge ${s.role === 'super_admin' ? 'badge-super' : s.role === 'admin' ? 'badge-admin' : 'badge-user'}" style="flex-shrink:0">${s.role === 'super_admin' ? 'Super Admin' : s.role === 'admin' ? 'Admin' : 'User'}</span>
+            <span style="flex-shrink:0">${roleBadge(s.role)}</span>
             <span style="font-size:11.5px;color:var(--text-muted);flex-shrink:0">${s.sessionCount} session${s.sessionCount !== 1 ? 's' : ''}</span>
           </div>
         `).join('');
@@ -2817,6 +2897,54 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // ── Role Permissions (static reference table, super_admin only) ──
+    // Kept as a plain data array (not derived from the live route/nav
+    // config) so it reads as a simple reference — update it by hand
+    // whenever access actually changes elsewhere in this file.
+    const ROLE_PERMISSIONS = [
+      { area: 'Public Knowledge Base — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, admin: true, superAdmin: true },
+      { area: 'Admin panel — access at all', user: false, qa: 'Limited', admin: true, superAdmin: true },
+      { area: 'Dashboard (site-wide stats)', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Projects Dashboard', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Articles — view, add, edit', user: false, qa: true, admin: true, superAdmin: true },
+      { area: 'Articles — delete', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Glossary — manage terms', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Users — create/edit/deactivate', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, admin: false, superAdmin: true },
+      { area: 'FAQ Review — scan Slack/Fathom/docs, review candidates, delete', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, admin: true, superAdmin: true },
+      { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Workforce Queue (live agent status)', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Workforce Call History Dashboard', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Training Dashboard — view courses/results', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Training — build courses, assign, reset attempts', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Feedback queue', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Change Logs', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Meetings — Fathom transcript Q&A', user: false, qa: false, admin: false, superAdmin: true },
+      { area: 'Create/edit other users’ roles, incl. Super Admin', user: false, qa: false, admin: false, superAdmin: true }
+    ];
+
+    function permCell(v) {
+      if (v === true) return `<span style="color:#15803d;font-weight:700">✓</span>`;
+      if (v === false) return `<span style="color:var(--gray-300)">—</span>`;
+      return `<span style="color:var(--orange);font-weight:600;font-size:11px">${escHtml(v)}</span>`;
+    }
+
+    function renderRolePermissions() {
+      const body = document.getElementById('rolePermissionsBody');
+      if (!body) return;
+      body.innerHTML = ROLE_PERMISSIONS.map(r => `
+        <tr>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(r.area)}</td>
+          <td style="text-align:center">${permCell(r.user)}</td>
+          <td style="text-align:center">${permCell(r.qa)}</td>
+          <td style="text-align:center">${permCell(r.admin)}</td>
+          <td style="text-align:center">${permCell(r.superAdmin)}</td>
+        </tr>`).join('');
+    }
+
     // ── Users ─────────────────────────────────────────────────────
     async function loadUsers() {
       try {
@@ -2836,7 +2964,7 @@
         <tr>
           <td style="font-weight:600">${escHtml(u.name || '—')}</td>
           <td style="font-size:13px">${escHtml(u.email)}</td>
-          <td><span class="badge ${u.role === 'super_admin' ? 'badge-super' : u.role === 'admin' ? 'badge-admin' : 'badge-user'}">${u.role === 'super_admin' ? 'Super Admin' : u.role === 'admin' ? 'Admin' : 'User'}</span></td>
+          <td>${roleBadge(u.role)}</td>
           <td><span class="badge ${u.active ? 'badge-published' : 'badge-draft'}">${u.active ? 'Active' : 'Disabled'}</span></td>
           <td style="font-size:13px;color:var(--text-muted)">${u.last_login ? fmtDate(u.last_login) : 'Never'}</td>
           <td>
@@ -2993,6 +3121,17 @@
 
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    const ROLE_META = {
+      super_admin: { cls: 'badge-super', label: 'Super Admin' },
+      admin: { cls: 'badge-admin', label: 'Admin' },
+      qa_view: { cls: 'badge-qa', label: 'QA View' },
+      user: { cls: 'badge-user', label: 'User' }
+    };
+    function roleBadge(role) {
+      const m = ROLE_META[role] || ROLE_META.user;
+      return `<span class="badge ${m.cls}">${m.label}</span>`;
     }
 
     function fmtDate(iso) {
@@ -5026,9 +5165,13 @@
 
     // ── FAQ Review ────────────────────────────────────────────────
     function loadFaqSection() {
-      loadFaqCandidates();
+      // qa_view can't reach /candidates (super_admin only) — its card is
+      // hidden anyway, so skip the doomed-to-403 requests entirely.
+      if (currentUserRole !== 'qa_view') {
+        loadFaqCandidates();
+        loadFaqScannedSources();
+      }
       loadApprovedFaqs();
-      loadFaqScannedSources();
     }
 
     async function scanSource(source) {
@@ -5197,7 +5340,7 @@
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               <button class="action-btn edit" onclick="editFaqPrompt('${f.id}','${escHtml(f.question)}','${escHtml(f.answer)}')">Edit</button>
-              <button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>
+              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>` : ''}
             </div>
           </div>
         `).join('');

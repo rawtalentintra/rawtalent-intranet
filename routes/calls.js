@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const dubberService = require('../services/dubberService');
 const groqTranscription = require('../services/groqTranscriptionService');
 const {
@@ -27,7 +27,12 @@ const MELBOURNE_TZ = 'Australia/Melbourne';
 
 // Call recordings are confidential, but admins (not just super_admin) get
 // full access here — evaluate, delete, and manage rubric/calibration.
-router.use(requireAdmin);
+// qa_view also gets full access to this router (Dashboard/Rubrics/Evaluator
+// is one of the sections that role is explicitly scoped to) — the
+// requireSuperAdmin calls sprinkled below (sync, test-connection,
+// extract-faqs, rubric description edits) still exclude both admin and
+// qa_view from those specific actions, unchanged.
+router.use(requireRole('admin', 'super_admin', 'qa_view'));
 
 // Grading notes should read naturally ("Gelliane handled this well") rather
 // than using a rep's full name or a Dubber extension number tacked on

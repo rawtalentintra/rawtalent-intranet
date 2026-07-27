@@ -55,9 +55,13 @@ app.use('/api/training', require('./routes/training'));
 app.use('/api/projects', require('./routes/projects'));
 app.use('/api/meetings', require('./routes/meetings'));
 
+// 'qa_view' gets into the admin panel shell — the panel itself then hides
+// everything except the small set of sections that role is scoped to
+// (articles, FAQ management, call quality), enforced both client-side and
+// on every underlying API route.
 function guardRoute(req, res, file, adminOnly = false) {
   if (!req.isAuthenticated()) return res.redirect('/login.html');
-  if (adminOnly && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+  if (adminOnly && !['admin', 'super_admin', 'qa_view'].includes(req.user.role)) {
     return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
   }
   res.sendFile(path.join(__dirname, 'public', file));

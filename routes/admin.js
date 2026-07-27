@@ -7,13 +7,156 @@ const multer = require('multer');
 const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
 const { getDb } = require('../db/database');
-const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
 const { logActivity } = require('../services/activityLog');
 const { invalidateUserCache } = require('../config/passport');
 const { BUCKETS, uploadBuffer, extForMimetype, remove: removeFile } = require('../services/storageService');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+// ── Articles (view/add/edit + attachments) — admin, super_admin, and ──
+// ── qa_view, a role scoped to exactly this plus FAQ management and call ──
+// ── quality. Registered ahead of the blanket requireAdmin below so qa_view ──
+// ── can reach these specific routes without gaining access to anything else ──
+// ── in this router (users, glossary, feedback, logs, drive sync, etc). ──
+const articleAccess = requireRole('admin', 'super_admin', 'qa_view');
+
+router.get('/articles', articleAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute(
+      'SELECT id, title, summary, category, tags, published, created_at, updated_at, author_email FROM articles ORDER BY updated_at DESC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/articles/:id', articleAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'SELECT * FROM articles WHERE id = ?', args: [req.params.id] });
+    const article = result.rows[0];
+    if (!article) return res.status(404).json({ error: 'Not found' });
+    res.json(article);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/articles', articleAccess, async (req, res) => {
+  try {
+    const { title, summary, content, category, tags, relatedIds, published = true } = req.body;
+    if (!title || !content) return res.status(400).json({ error: 'Title and content are required' });
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const db = getDb();
+
+    const driveFileId = await saveArticleToDrive({
+      id, title, summary, content, category,
+      tags: tags || [], relatedArticleIds: relatedIds || [],
+      author: req.user.email, published,
+      createdAt: now, updatedAt: now
+    });
+
+    await db.execute({
+      sql: `INSERT INTO articles (id, title, summary, content, category, tags, related_ids, author_email, published, drive_file_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, title, summary || '', content, category || '', JSON.stringify(tags || []),
+        JSON.stringify(relatedIds || []), req.user.email, !!published, driveFileId, now, now]
+    });
+
+    await db.execute({
+      sql: 'INSERT INTO article_logs (article_id, article_title, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
+      args: [id, title, 'created', 'Article created', req.user.email]
+    });
+
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('Create article error:', err);
+    res.status(500).json({ error: err.message || 'Failed to save article' });
+  }
+});
+
+router.put('/articles/:id', articleAccess, async (req, res) => {
+  try {
+    const { title, summary, content, category, tags, relatedIds, published } = req.body;
+    const db = getDb();
+    const existRes = await db.execute({ sql: 'SELECT * FROM articles WHERE id = ?', args: [req.params.id] });
+    const existing = existRes.rows[0];
+    if (!existing) return res.status(404).json({ error: 'Article not found' });
+
+    const changes = [];
+    if (title !== existing.title) changes.push(`Title: "${existing.title}" → "${title}"`);
+    if ((summary || '') !== (existing.summary || '')) changes.push('Summary updated');
+    if (content !== existing.content) changes.push('Content updated');
+    if ((category || '') !== (existing.category || '')) changes.push(`Category: "${existing.category || 'none'}" → "${category || 'none'}"`);
+    if (JSON.stringify(tags || []) !== JSON.stringify(existing.tags || [])) changes.push('Tags updated');
+    if (Boolean(published) !== Boolean(existing.published)) changes.push(`Status: ${existing.published ? 'Published' : 'Draft'} → ${published ? 'Published' : 'Draft'}`);
+
+    const now = new Date().toISOString();
+    await db.execute({
+      sql: `UPDATE articles SET title=?, summary=?, content=?, category=?, tags=?, related_ids=?, published=?, updated_at=? WHERE id=?`,
+      args: [title, summary || '', content, category || '', JSON.stringify(tags || []),
+        JSON.stringify(relatedIds || []), !!published, now, req.params.id]
+    });
+
+    await db.execute({
+      sql: 'INSERT INTO article_logs (article_id, article_title, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
+      args: [req.params.id, title, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email]
+    });
+
+    await saveArticleToDrive({
+      id: req.params.id, title, summary, content, category,
+      tags: tags || [], relatedArticleIds: relatedIds || [],
+      author: existing.author_email, published,
+      createdAt: existing.created_at, updatedAt: now,
+      drive_file_id: existing.drive_file_id
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Update article error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update article' });
+  }
+});
+
+router.post('/articles/:id/files', articleAccess, fileUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const { displayMode = 'download' } = req.body;
+  try {
+    const db = getDb();
+    const artRes = await db.execute({ sql: 'SELECT id FROM articles WHERE id = ?', args: [req.params.id] });
+    if (!artRes.rows[0]) return res.status(404).json({ error: 'Article not found' });
+
+    const result = await db.execute({
+      sql: 'INSERT INTO article_files (article_id, filename, mimetype, filesize, display_mode) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, displayMode]
+    });
+    const fileId = result.rows[0].id;
+    const storagePath = `${fileId}.${extForMimetype(req.file.mimetype)}`;
+    await uploadBuffer(BUCKETS.articleFiles, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE article_files SET storage_path = ? WHERE id = ?', args: [storagePath, fileId] });
+
+    res.json({ success: true, id: fileId, filename: req.file.originalname, displayMode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/articles/:id/files', articleAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: 'SELECT id, filename, mimetype, filesize, display_mode, created_at FROM article_files WHERE article_id = ? ORDER BY created_at ASC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.use(requireAdmin);
 
@@ -188,106 +331,9 @@ router.post('/impersonate/:id', requireSuperAdmin, async (req, res) => {
 });
 
 // ── Articles ──────────────────────────────────────────────────────
-router.get('/articles', async (req, res) => {
-  try {
-    const result = await getDb().execute(
-      'SELECT id, title, summary, category, tags, published, created_at, updated_at, author_email FROM articles ORDER BY updated_at DESC'
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/articles/:id', async (req, res) => {
-  try {
-    const result = await getDb().execute({ sql: 'SELECT * FROM articles WHERE id = ?', args: [req.params.id] });
-    const article = result.rows[0];
-    if (!article) return res.status(404).json({ error: 'Not found' });
-    res.json(article);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/articles', async (req, res) => {
-  try {
-    const { title, summary, content, category, tags, relatedIds, published = true } = req.body;
-    if (!title || !content) return res.status(400).json({ error: 'Title and content are required' });
-
-    const id = uuidv4();
-    const now = new Date().toISOString();
-    const db = getDb();
-
-    const driveFileId = await saveArticleToDrive({
-      id, title, summary, content, category,
-      tags: tags || [], relatedArticleIds: relatedIds || [],
-      author: req.user.email, published,
-      createdAt: now, updatedAt: now
-    });
-
-    await db.execute({
-      sql: `INSERT INTO articles (id, title, summary, content, category, tags, related_ids, author_email, published, drive_file_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, title, summary || '', content, category || '', JSON.stringify(tags || []),
-        JSON.stringify(relatedIds || []), req.user.email, !!published, driveFileId, now, now]
-    });
-
-    await db.execute({
-      sql: 'INSERT INTO article_logs (article_id, article_title, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
-      args: [id, title, 'created', 'Article created', req.user.email]
-    });
-
-    res.json({ success: true, id });
-  } catch (err) {
-    console.error('Create article error:', err);
-    res.status(500).json({ error: err.message || 'Failed to save article' });
-  }
-});
-
-router.put('/articles/:id', async (req, res) => {
-  try {
-    const { title, summary, content, category, tags, relatedIds, published } = req.body;
-    const db = getDb();
-    const existRes = await db.execute({ sql: 'SELECT * FROM articles WHERE id = ?', args: [req.params.id] });
-    const existing = existRes.rows[0];
-    if (!existing) return res.status(404).json({ error: 'Article not found' });
-
-    const changes = [];
-    if (title !== existing.title) changes.push(`Title: "${existing.title}" → "${title}"`);
-    if ((summary || '') !== (existing.summary || '')) changes.push('Summary updated');
-    if (content !== existing.content) changes.push('Content updated');
-    if ((category || '') !== (existing.category || '')) changes.push(`Category: "${existing.category || 'none'}" → "${category || 'none'}"`);
-    if (JSON.stringify(tags || []) !== JSON.stringify(existing.tags || [])) changes.push('Tags updated');
-    if (Boolean(published) !== Boolean(existing.published)) changes.push(`Status: ${existing.published ? 'Published' : 'Draft'} → ${published ? 'Published' : 'Draft'}`);
-
-    const now = new Date().toISOString();
-    await db.execute({
-      sql: `UPDATE articles SET title=?, summary=?, content=?, category=?, tags=?, related_ids=?, published=?, updated_at=? WHERE id=?`,
-      args: [title, summary || '', content, category || '', JSON.stringify(tags || []),
-        JSON.stringify(relatedIds || []), !!published, now, req.params.id]
-    });
-
-    await db.execute({
-      sql: 'INSERT INTO article_logs (article_id, article_title, action, changes_summary, changed_by) VALUES (?, ?, ?, ?, ?)',
-      args: [req.params.id, title, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email]
-    });
-
-    await saveArticleToDrive({
-      id: req.params.id, title, summary, content, category,
-      tags: tags || [], relatedArticleIds: relatedIds || [],
-      author: existing.author_email, published,
-      createdAt: existing.created_at, updatedAt: now,
-      drive_file_id: existing.drive_file_id
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Update article error:', err);
-    res.status(500).json({ error: err.message || 'Failed to update article' });
-  }
-});
-
+// GET/POST/PUT and file attachments are registered near the top of this
+// file (ahead of the blanket requireAdmin) so qa_view can reach them —
+// only delete stays here, admin/super_admin only.
 router.delete('/articles/:id', async (req, res) => {
   try {
     const db = getDb();
@@ -559,46 +605,8 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
 });
 
 // ── Article File Attachments ──────────────────────────────────────
-const fileUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }
-});
-
-router.post('/articles/:id/files', fileUpload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const { displayMode = 'download' } = req.body;
-  try {
-    const db = getDb();
-    const artRes = await db.execute({ sql: 'SELECT id FROM articles WHERE id = ?', args: [req.params.id] });
-    if (!artRes.rows[0]) return res.status(404).json({ error: 'Article not found' });
-
-    const result = await db.execute({
-      sql: 'INSERT INTO article_files (article_id, filename, mimetype, filesize, display_mode) VALUES (?, ?, ?, ?, ?) RETURNING id',
-      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, displayMode]
-    });
-    const fileId = result.rows[0].id;
-    const storagePath = `${fileId}.${extForMimetype(req.file.mimetype)}`;
-    await uploadBuffer(BUCKETS.articleFiles, storagePath, req.file.buffer, req.file.mimetype);
-    await db.execute({ sql: 'UPDATE article_files SET storage_path = ? WHERE id = ?', args: [storagePath, fileId] });
-
-    res.json({ success: true, id: fileId, filename: req.file.originalname, displayMode });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/articles/:id/files', async (req, res) => {
-  try {
-    const result = await getDb().execute({
-      sql: 'SELECT id, filename, mimetype, filesize, display_mode, created_at FROM article_files WHERE article_id = ? ORDER BY created_at ASC',
-      args: [req.params.id]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// POST/GET are registered near the top of this file (ahead of the blanket
+// requireAdmin) so qa_view can reach them — delete stays admin/super_admin.
 router.delete('/files/:id', async (req, res) => {
   try {
     const db = getDb();

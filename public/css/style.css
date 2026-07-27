@@ -800,6 +800,7 @@ button { cursor: pointer; font-family: inherit; }
 .badge-super { background: rgba(124,58,237,.12); color: #7c3aed; font-weight: 700; }
 .badge-admin { background: rgba(232,114,74,.15); color: var(--orange); }
 .badge-user { background: var(--gray-100); color: var(--gray-600); }
+.badge-qa { background: rgba(13,148,136,.12); color: #0d9488; font-weight: 700; }
 .badge-published { background: rgba(34,197,94,.12); color: #15803d; }
 .badge-draft { background: var(--gray-100); color: var(--gray-600); }
 
