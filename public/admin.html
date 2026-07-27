@@ -3146,6 +3146,7 @@
         <tr style="cursor:pointer" onclick="openProjectDetail('${p.id}')">
           <td>
             <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;border-radius:50%;background:${p.color || 'var(--orange)'};flex-shrink:0" title="Project colour"></span>
               <span style="font-size:19px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
               <div>
                 <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(p.name)}</div>
@@ -3185,7 +3186,7 @@
       const p = currentProjectDetail;
       if (!p) return;
       const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
-      document.getElementById('projectDetailTitle').innerHTML = `${p.icon || '🚀'} ${escHtml(p.name)}`;
+      document.getElementById('projectDetailTitle').innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.color || 'var(--orange)'};margin-right:4px" title="Project colour"></span>${p.icon || '🚀'} ${escHtml(p.name)}`;
       const pct = projectTimelineProgress(p);
 
       const filesHtml = (p.files || []).length
