@@ -25,11 +25,26 @@ async function getGlossaryBlock(db) {
 }
 
 async function searchKnowledge(db, question, limit = 6) {
-  // websearch_to_tsquery tolerates arbitrary free-text input directly — no
-  // need to hand-build FTS5-style quoted/prefix terms the way SQLite needed.
   async function query(sql, args) {
     try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
+
+  // OR the question's significant words together instead of ANDing them
+  // (websearch_to_tsquery ANDs every term). AND-only matching means any
+  // phrasing difference between a question and its source silently drops
+  // the right answer — e.g. asking about "applicants" finds nothing in a
+  // source that only ever says "candidates" — and irrelevant sources that
+  // happen to contain a couple of the literal words (a crawled form with
+  // "male"/"accepted" fields, say) can fill the result quota on their own
+  // and suppress the real source entirely, before the below fallback even
+  // gets a chance to broaden the search. ts_rank still rewards matching
+  // more of the question's words, so a source matching everything still
+  // ranks above one matching only one word.
+  let orQuery = question;
+  try {
+    const parsed = await db.execute({ sql: "SELECT plainto_tsquery('english', ?)::text AS q", args: [question] });
+    orQuery = (parsed.rows[0]?.q || '').replace(/ & /g, ' | ') || question;
+  } catch { /* fall through with raw question text; to_tsquery below will just no-op via query()'s catch */ }
 
   // Independent search lanes — internal sources always get their own slots
   // and can never be displaced by external websites
@@ -38,33 +53,33 @@ async function searchKnowledge(db, question, limit = 6) {
     query(
       `SELECT id, title, content, category, 'article' as source_type, NULL as origin
        FROM articles
-       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND published = true
-       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
-      [question, question]
+       WHERE search_vector @@ to_tsquery('english', ?) AND published = true
+       ORDER BY ts_rank(search_vector, to_tsquery('english', ?)) DESC LIMIT 2`,
+      [orQuery, orQuery]
     ),
     // Lane 2 — Internal: super_admin-approved FAQs (e.g. from Slack, scrubbed of PII)
     query(
       `SELECT id, question as title, answer as content, NULL as category, 'faq' as source_type, NULL as origin, source as faq_source, source_date
        FROM faqs
-       WHERE search_vector @@ websearch_to_tsquery('english', ?)
-       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
-      [question, question]
+       WHERE search_vector @@ to_tsquery('english', ?)
+       ORDER BY ts_rank(search_vector, to_tsquery('english', ?)) DESC LIMIT 2`,
+      [orQuery, orQuery]
     ),
     // Lane 3 — Internal: uploaded documents (PDF, DOCX, TXT)
     query(
       `SELECT id, title, content, NULL as category, type as source_type, origin
        FROM knowledge_sources
-       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'document'
-       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
-      [question, question]
+       WHERE search_vector @@ to_tsquery('english', ?) AND type = 'document'
+       ORDER BY ts_rank(search_vector, to_tsquery('english', ?)) DESC LIMIT 2`,
+      [orQuery, orQuery]
     ),
     // Lane 4 — External: crawled websites (regulatory / industry)
     query(
       `SELECT id, title, content, NULL as category, type as source_type, origin
        FROM knowledge_sources
-       WHERE search_vector @@ websearch_to_tsquery('english', ?) AND type = 'website'
-       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ?)) DESC LIMIT 2`,
-      [question, question]
+       WHERE search_vector @@ to_tsquery('english', ?) AND type = 'website'
+       ORDER BY ts_rank(search_vector, to_tsquery('english', ?)) DESC LIMIT 2`,
+      [orQuery, orQuery]
     )
   ]);
 
