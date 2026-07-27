@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
           'id', pm.id, 'name', pm.name, 'startDate', pm.start_date, 'endDate', pm.end_date
-        ) ORDER BY pm.start_date ASC NULLS LAST, pm.id ASC) AS milestones
+        ) ORDER BY pm.order_index ASC, pm.id ASC) AS milestones
         FROM project_milestones pm WHERE pm.project_id = p.id
       ) m ON true
       ORDER BY p.created_at ASC
@@ -49,7 +49,7 @@ router.get('/:id', async (req, res) => {
         args: [req.params.id]
       }),
       db.execute({
-        sql: 'SELECT id, name, start_date AS "startDate", end_date AS "endDate" FROM project_milestones WHERE project_id = ? ORDER BY start_date ASC NULLS LAST, id ASC',
+        sql: 'SELECT id, name, start_date AS "startDate", end_date AS "endDate" FROM project_milestones WHERE project_id = ? ORDER BY order_index ASC, id ASC',
         args: [req.params.id]
       })
     ]);
@@ -67,11 +67,38 @@ router.post('/:id/milestones', async (req, res) => {
     const projRes = await db.execute({ sql: 'SELECT id FROM projects WHERE id = ?', args: [req.params.id] });
     if (!projRes.rows[0]) return res.status(404).json({ error: 'Project not found' });
 
+    const maxRes = await db.execute({
+      sql: 'SELECT COALESCE(MAX(order_index), -1) AS max_order FROM project_milestones WHERE project_id = ?',
+      args: [req.params.id]
+    });
+    const nextOrder = Number(maxRes.rows[0].max_order) + 1;
+
     const result = await db.execute({
-      sql: 'INSERT INTO project_milestones (project_id, name, start_date, end_date) VALUES (?, ?, ?, ?) RETURNING id',
-      args: [req.params.id, name.trim(), startDate || null, endDate || null]
+      sql: 'INSERT INTO project_milestones (project_id, name, start_date, end_date, order_index) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      args: [req.params.id, name.trim(), startDate || null, endDate || null, nextOrder]
     });
     res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Body: { order: [milestoneId, ...] } in the desired display order — every
+// id's order_index becomes its position in that array. Scoped to :id so a
+// stray/forged id from another project can't have its order reshuffled by
+// a request for a different project.
+router.put('/:id/milestones/reorder', async (req, res) => {
+  const { order } = req.body;
+  if (!Array.isArray(order) || !order.length) return res.status(400).json({ error: 'order must be a non-empty array of milestone ids' });
+  try {
+    const db = getDb();
+    for (let i = 0; i < order.length; i++) {
+      await db.execute({
+        sql: 'UPDATE project_milestones SET order_index = ?, updated_at = now() WHERE id = ? AND project_id = ?',
+        args: [i, order[i], req.params.id]
+      });
+    }
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -124,36 +151,42 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Request-body key -> column name, in the order they should appear in SET.
+const PROJECT_FIELD_COLUMNS = {
+  name: 'name', icon: 'icon', color: 'color', description: 'description',
+  status: 'status', ownerName: 'owner_name', ownerEmail: 'owner_email',
+  startDate: 'start_date', targetDate: 'target_date',
+  successCriteria: 'success_criteria', sopContent: 'sop_content'
+};
+
 router.put('/:id', async (req, res) => {
-  const { name, icon, color, description, status, ownerName, ownerEmail, startDate, targetDate, successCriteria, sopContent } = req.body;
-  if (status && !STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status' });
+  const body = req.body || {};
+  if (body.status && !STATUSES.has(body.status)) return res.status(400).json({ error: 'Invalid status' });
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT id FROM projects WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Project not found' });
 
-    await db.execute({
-      sql: `UPDATE projects SET
-              name = COALESCE(?, name),
-              icon = COALESCE(?, icon),
-              color = COALESCE(?, color),
-              description = ?,
-              status = COALESCE(?, status),
-              owner_name = ?,
-              owner_email = ?,
-              start_date = ?,
-              target_date = ?,
-              success_criteria = ?,
-              sop_content = COALESCE(?, sop_content),
-              updated_at = now()
-            WHERE id = ?`,
-      args: [
-        name?.trim() || null, icon || null, color || null, description ?? null, status || null,
-        ownerName ?? null, ownerEmail ?? null, startDate ?? null, targetDate ?? null, successCriteria ?? null,
-        sopContent ?? null,
-        req.params.id
-      ]
-    });
+    // Only touch columns whose key is actually present in the request body
+    // — a caller that only wants to change one thing (e.g. the SOP editor's
+    // save, which sends just { sopContent }) must never wipe every other
+    // field to NULL just by omitting it. This also means an explicit
+    // `startDate: null` (the full edit form's way of clearing a date) still
+    // works, since the key IS present, just with a null value.
+    const setClauses = [];
+    const args = [];
+    for (const [key, column] of Object.entries(PROJECT_FIELD_COLUMNS)) {
+      if (!(key in body)) continue;
+      let value = body[key];
+      if (key === 'name') value = value?.trim() || null;
+      setClauses.push(`${column} = ?`);
+      args.push(value);
+    }
+    if (setClauses.length) {
+      setClauses.push('updated_at = now()');
+      args.push(req.params.id);
+      await db.execute({ sql: `UPDATE projects SET ${setClauses.join(', ')} WHERE id = ?`, args });
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

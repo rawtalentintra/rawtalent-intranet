@@ -151,14 +151,20 @@ router.get('/', async (req, res) => {
     }
 
     // Announcements — visible to everyone once send_at has passed. A row
-    // scheduled for the future simply doesn't show up yet.
+    // scheduled for the future simply doesn't show up yet. is_read here
+    // (bell/badge visibility) is genuinely acknowledged OR merely dismissed
+    // from the bell via "Mark all read" — dismissal never touches
+    // announcement_reads, so the Announcements tab's compliance tracking
+    // (who has actually ticked "I have read and understood this") is
+    // unaffected by clearing the bell badge.
     const annRes = await db.execute({
-      sql: `SELECT a.*, (r.user_email IS NOT NULL) AS is_read
+      sql: `SELECT a.*, (r.user_email IS NOT NULL OR d.user_email IS NOT NULL) AS is_read
             FROM announcements a
             LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_email = ?
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'announcement:' || a.id AND d.user_email = ?
             WHERE a.send_at <= now()
             ORDER BY a.send_at DESC LIMIT 30`,
-      args: [req.user.email]
+      args: [req.user.email, req.user.email]
     });
     const announcements = annRes.rows;
 
@@ -381,9 +387,14 @@ router.post('/:id/read', async (req, res) => {
   }
 });
 
-// Bulk-marks greetings read, but deliberately leaves announcements alone —
-// those only get acknowledged one at a time, by ticking the checkbox on the
-// Announcements tab.
+// Clears the bell badge: marks received greetings read, and dismisses any
+// currently-unread announcements from the bell (via notification_dismissals
+// — NOT announcement_reads, so this never fakes the "I have read and
+// understood this" compliance acknowledgment, which only the tickbox on the
+// Announcements tab can set). Deliberately leaves alone anything that
+// represents a required action rather than just information — training
+// assignments (only clear on actual completion) and birthday/anniversary
+// reminders (only clear once that greeting is actually sent).
 router.post('/read-all', async (req, res) => {
   try {
     const db = getDb();
@@ -392,6 +403,22 @@ router.post('/read-all', async (req, res) => {
     if (me) {
       await db.execute({ sql: 'UPDATE team_greetings SET is_read = true WHERE team_member_id = ?', args: [me.id] });
     }
+
+    const unreadAnn = await db.execute({
+      sql: `SELECT a.id FROM announcements a
+            LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_email = ?
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'announcement:' || a.id AND d.user_email = ?
+            WHERE a.send_at <= now() AND r.user_email IS NULL AND d.user_email IS NULL`,
+      args: [req.user.email, req.user.email]
+    });
+    for (const row of unreadAnn.rows) {
+      await db.execute({
+        sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
+              ON CONFLICT (user_email, notification_key) DO NOTHING`,
+        args: [req.user.email, `announcement:${row.id}`]
+      });
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

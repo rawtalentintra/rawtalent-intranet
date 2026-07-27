@@ -618,7 +618,7 @@
             <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
             <div style="display:flex;gap:10px;align-items:center">
               <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
-              <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+              <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
             </div>
           </div>
           <div id="notifPanelBody" style="padding:8px"></div>
@@ -1001,7 +1001,7 @@
       showCelebrationModal(g);
     }
 
-    function markAllGreetingsRead() {
+    function markAllNotificationsRead() {
       fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
     }
 

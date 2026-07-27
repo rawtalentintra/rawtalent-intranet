@@ -645,16 +645,37 @@ CREATE TABLE IF NOT EXISTS fathom_transcript_sync_state (
 
 -- Milestones within a project's overall timeline — the "where are we right
 -- now" view the Projects table shows, distinct from the project's own
--- start/target date range (the outer bar). Ordered by start_date, not a
--- manual sort column — a milestone's position in the sequence should always
--- match when it's actually scheduled to happen.
+-- start/target date range (the outer bar). Display order is manual
+-- (order_index, drag-to-reorder in the UI) rather than derived from
+-- start_date, since milestones don't always have dates yet and the team
+-- may want to sequence them before dates are confirmed; "which milestone
+-- are we currently at" is still computed from actual dates at render time.
 CREATE TABLE IF NOT EXISTS project_milestones (
   id SERIAL PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   start_date DATE,
   end_date DATE,
+  order_index INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_project_milestones_project_id ON project_milestones(project_id);
+
+-- order_index was added after project_milestones already shipped.
+ALTER TABLE project_milestones ADD COLUMN IF NOT EXISTS order_index INTEGER NOT NULL DEFAULT 0;
+
+-- "Mark all read" in the notification bell needs somewhere to record that a
+-- user dismissed an item from their bell/badge — deliberately NOT the same
+-- as announcement_reads (the tickbox "I have read and understood this"
+-- acknowledgment used for compliance reporting on the Announcements tab).
+-- Dismissing from the bell clears the badge; it is never treated as a
+-- genuine acknowledgment. notification_key is namespaced per type, e.g.
+-- 'announcement:<uuid>', so this table can cover future bell item types
+-- without a schema change.
+CREATE TABLE IF NOT EXISTS notification_dismissals (
+  user_email TEXT NOT NULL,
+  notification_key TEXT NOT NULL,
+  dismissed_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (user_email, notification_key)
+);

@@ -105,7 +105,7 @@
             <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
             <div style="display:flex;gap:10px;align-items:center">
               <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
-              <button onclick="markAllGreetingsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+              <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
             </div>
           </div>
           <div id="notifPanelBody" style="padding:8px"></div>
@@ -1984,7 +1984,7 @@
       showCelebrationModal(g);
     }
 
-    function markAllGreetingsRead() {
+    function markAllNotificationsRead() {
       fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
     }
 
@@ -3207,12 +3207,14 @@
       const milestones = p.milestones || [];
       if (!milestones.length) return `<div style="font-size:12.5px;color:var(--gray-400)">No milestones yet — break this project into phases so the dashboard can show where things currently stand.</div>`;
       const info = currentMilestoneInfo(p);
-      return milestones.map((m, i) => {
+      const rows = milestones.map((m, i) => {
         const isCurrent = !!(info && info.index === i && info.state === 'current');
         const isDone = !!(info && info.index === i && info.state === 'done') || (info && i < info.index);
         const pct = dateRangeProgress(m.startDate, m.endDate, isDone);
         return `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid ${isCurrent ? 'var(--orange)' : 'var(--gray-200)'};background:${isCurrent ? 'var(--orange-glow)' : 'white'};border-radius:var(--radius);margin-bottom:8px">
+        <div draggable="true" data-milestone-id="${m.id}" ondragstart="handleMilestoneDragStart(event, ${m.id})" ondragend="handleMilestoneDragEnd(event)"
+             style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border:1px solid ${isCurrent ? 'var(--orange)' : 'var(--gray-200)'};background:${isCurrent ? 'var(--orange-glow)' : 'white'};border-radius:var(--radius);margin-bottom:8px">
+          <span style="cursor:grab;color:var(--gray-300);font-size:14px;flex-shrink:0;user-select:none" title="Drag to reorder">⠿</span>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:12.5px;color:var(--navy)">${isCurrent ? '📍 ' : ''}${escHtml(m.name)}</div>
             ${(m.startDate && m.endDate) ? `
@@ -3226,6 +3228,54 @@
           </div>
         </div>`;
       }).join('');
+      return `<div id="milestonesListContainer" ondragover="handleMilestoneDragOver(event)" ondrop="handleMilestoneDrop(event)">${rows}</div>`;
+    }
+
+    let draggedMilestoneId = null;
+
+    function handleMilestoneDragStart(e, id) {
+      draggedMilestoneId = id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.target.style.opacity = '0.4';
+    }
+
+    function handleMilestoneDragEnd(e) {
+      e.target.style.opacity = '';
+    }
+
+    function getMilestoneDragAfterElement(container, y) {
+      const els = [...container.querySelectorAll('[data-milestone-id]')].filter(el => Number(el.dataset.milestoneId) !== draggedMilestoneId);
+      return els.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) return { offset, element: child };
+        return closest;
+      }, { offset: -Infinity, element: null }).element;
+    }
+
+    function handleMilestoneDragOver(e) {
+      e.preventDefault();
+      const container = document.getElementById('milestonesListContainer');
+      const dragged = container.querySelector(`[data-milestone-id="${draggedMilestoneId}"]`);
+      if (!dragged) return;
+      const afterEl = getMilestoneDragAfterElement(container, e.clientY);
+      if (afterEl == null) container.appendChild(dragged);
+      else container.insertBefore(dragged, afterEl);
+    }
+
+    async function handleMilestoneDrop(e) {
+      e.preventDefault();
+      const container = document.getElementById('milestonesListContainer');
+      const order = [...container.querySelectorAll('[data-milestone-id]')].map(el => Number(el.dataset.milestoneId));
+      try {
+        await fetch(`/api/projects/${currentProjectId}/milestones/reorder`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order })
+        });
+        currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+        renderProjectDetailBody(false);
+        await loadProjects();
+      } catch { toast('Failed to reorder milestones', 'error'); }
     }
 
     function openMilestoneFormModal(id) {
@@ -3310,8 +3360,8 @@
               <span style="width:7px;height:7px;border-radius:50%;background:${p.color || 'var(--orange)'};flex-shrink:0" title="Project colour"></span>
               <span style="font-size:16px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
               <div style="min-width:0">
-                <div style="font-weight:700;color:var(--navy);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px">${escHtml(p.name)}</div>
-                <div style="font-size:10.5px;color:var(--text-muted);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
+                <div style="font-weight:700;color:var(--navy);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
+                <div style="font-size:10.5px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
               </div>
             </div>
           </td>
