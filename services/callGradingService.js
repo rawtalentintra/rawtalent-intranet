@@ -26,7 +26,7 @@ const RUBRICS = {
         'Reflects back what was heard before moving on ("so you\'re saying...")',
         "Picks up on hesitation or concern in the educator's voice and addresses it directly"
       ]},
-      { key: 'compliance', label: 'Compliance Accuracy', weight: 20, critical: true, criteria: [
+      { key: 'compliance', label: 'Compliance Accuracy', weight: 20, critical: false, criteria: [
         'WWCC / qualification / First Aid status correctly checked before confirming',
         'States pay, shift details, and requirements accurately — nothing promised that isn\'t true'
       ]},
@@ -59,7 +59,7 @@ const RUBRICS = {
         'Captures the exact shift need — room, ratio, dates, urgency — without repeat questions',
         'Notices frustration (e.g. repeat unfilled shifts) and acknowledges it before problem-solving'
       ]},
-      { key: 'compliance', label: 'Compliance Accuracy', weight: 20, critical: true, criteria: [
+      { key: 'compliance', label: 'Compliance Accuracy', weight: 20, critical: false, criteria: [
         'Only offers educators who are genuinely qualified and cleared for the room/ratio requested',
         "Represents educator experience and availability truthfully — no overselling to win the booking"
       ]},
