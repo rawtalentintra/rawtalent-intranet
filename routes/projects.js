@@ -17,11 +17,17 @@ const STATUSES = new Set(['planning', 'on_track', 'at_risk', 'off_track', 'on_ho
 router.get('/', async (req, res) => {
   try {
     const result = await getDb().execute(`
-      SELECT p.*, COALESCE(f.file_count, 0) AS file_count
+      SELECT p.*, COALESCE(f.file_count, 0) AS file_count, COALESCE(m.milestones, '[]'::json) AS milestones
       FROM projects p
       LEFT JOIN LATERAL (
         SELECT COUNT(*) AS file_count FROM project_files pf WHERE pf.project_id = p.id
       ) f ON true
+      LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object(
+          'id', pm.id, 'name', pm.name, 'startDate', pm.start_date, 'endDate', pm.end_date
+        ) ORDER BY pm.start_date ASC NULLS LAST, pm.id ASC) AS milestones
+        FROM project_milestones pm WHERE pm.project_id = p.id
+      ) m ON true
       ORDER BY p.created_at ASC
     `);
     res.json(result.rows);
@@ -37,11 +43,60 @@ router.get('/:id', async (req, res) => {
     const project = projRes.rows[0];
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const filesRes = await db.execute({
-      sql: 'SELECT id, filename, mimetype, filesize, created_at FROM project_files WHERE project_id = ? ORDER BY created_at ASC',
-      args: [req.params.id]
+    const [filesRes, milestonesRes] = await Promise.all([
+      db.execute({
+        sql: 'SELECT id, filename, mimetype, filesize, created_at FROM project_files WHERE project_id = ? ORDER BY created_at ASC',
+        args: [req.params.id]
+      }),
+      db.execute({
+        sql: 'SELECT id, name, start_date AS "startDate", end_date AS "endDate" FROM project_milestones WHERE project_id = ? ORDER BY start_date ASC NULLS LAST, id ASC',
+        args: [req.params.id]
+      })
+    ]);
+    res.json({ ...project, files: filesRes.rows, milestones: milestonesRes.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/milestones', async (req, res) => {
+  const { name, startDate, endDate } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Milestone name is required' });
+  try {
+    const db = getDb();
+    const projRes = await db.execute({ sql: 'SELECT id FROM projects WHERE id = ?', args: [req.params.id] });
+    if (!projRes.rows[0]) return res.status(404).json({ error: 'Project not found' });
+
+    const result = await db.execute({
+      sql: 'INSERT INTO project_milestones (project_id, name, start_date, end_date) VALUES (?, ?, ?, ?) RETURNING id',
+      args: [req.params.id, name.trim(), startDate || null, endDate || null]
     });
-    res.json({ ...project, files: filesRes.rows });
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/milestones/:milestoneId', async (req, res) => {
+  const { name, startDate, endDate } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Milestone name is required' });
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: 'UPDATE project_milestones SET name = ?, start_date = ?, end_date = ?, updated_at = now() WHERE id = ?',
+      args: [name.trim(), startDate || null, endDate || null, req.params.milestoneId]
+    });
+    if (!result.rowsAffected) return res.status(404).json({ error: 'Milestone not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/milestones/:milestoneId', async (req, res) => {
+  try {
+    await getDb().execute({ sql: 'DELETE FROM project_milestones WHERE id = ?', args: [req.params.milestoneId] });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

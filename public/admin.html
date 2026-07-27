@@ -317,14 +317,15 @@
                   <th>Project</th>
                   <th>Status</th>
                   <th>Owner</th>
-                  <th style="min-width:150px">Timeline</th>
+                  <th style="min-width:130px">Progress</th>
+                  <th style="min-width:130px">Timeline</th>
                   <th>What does success look like?</th>
-                  <th>SOP</th>
-                  <th style="width:40px"></th>
+                  <th style="width:36px">SOP</th>
+                  <th style="width:30px"></th>
                 </tr>
               </thead>
               <tbody id="projectsTableBody">
-                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -1242,6 +1243,37 @@
       </div>
       <div class="modal-body" id="projectDetailBody" style="max-height:72vh;overflow-y:auto">
         <div class="loading-spinner"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Milestone Create/Edit Modal -->
+  <div class="modal-overlay" id="milestoneFormModal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title" id="milestoneFormModalTitle">Add Milestone</div>
+        <button class="modal-close" onclick="closeMilestoneFormModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editMilestoneId">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Milestone Name <span style="color:#ef4444">*</span></label>
+          <input type="text" id="milestoneName" class="form-control" placeholder="e.g. Discovery & Requirements">
+        </div>
+        <div style="display:flex;gap:12px">
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Start Date</label>
+            <input type="date" id="milestoneStartDate" class="form-control">
+          </div>
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">End Date</label>
+            <input type="date" id="milestoneEndDate" class="form-control">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeMilestoneFormModal()">Cancel</button>
+        <button class="btn-add" onclick="saveMilestone()">💾 Save Milestone</button>
       </div>
     </div>
   </div>
@@ -3118,21 +3150,150 @@
       renderProjectsGrid();
     }
 
-    function projectTimelineProgress(p) {
-      if (!p.start_date || !p.target_date) return null;
-      const start = new Date(p.start_date).getTime();
-      const target = new Date(p.target_date).getTime();
-      if (isNaN(start) || isNaN(target) || target <= start) return null;
-      if (p.status === 'completed') return 100;
-      const pct = ((Date.now() - start) / (target - start)) * 100;
+    function dateRangeProgress(start, end, forceComplete) {
+      if (!start || !end) return null;
+      if (forceComplete) return 100;
+      const s = new Date(start).getTime(), e = new Date(end).getTime();
+      if (isNaN(s) || isNaN(e) || e <= s) return null;
+      const pct = ((Date.now() - s) / (e - s)) * 100;
       return Math.max(0, Math.min(100, Math.round(pct)));
     }
+
+    function projectTimelineProgress(p) {
+      return dateRangeProgress(p.start_date, p.target_date, p.status === 'completed');
+    }
+
+    // Where a project currently sits among its milestones: the milestone
+    // whose date range spans today, or (if between milestones) the next
+    // upcoming one, or the last one if every milestone is already past.
+    function currentMilestoneInfo(project) {
+      const milestones = project.milestones || [];
+      if (!milestones.length) return null;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const parsed = milestones.map(m => ({
+        ...m,
+        start: m.startDate ? new Date(m.startDate) : null,
+        end: m.endDate ? new Date(m.endDate) : null
+      }));
+      let index = parsed.findIndex(m => m.start && m.end && today >= m.start && today <= m.end);
+      let state = 'current';
+      if (index === -1) {
+        index = parsed.findIndex(m => m.start && today < m.start);
+        if (index !== -1) state = 'upcoming';
+        else { index = parsed.length - 1; state = 'done'; }
+      }
+      return { milestone: parsed[index], index, total: parsed.length, state };
+    }
+
+    function renderProgressCell(p) {
+      const info = currentMilestoneInfo(p);
+      if (!info) return `<span style="font-size:11px;color:var(--gray-400)">No milestones</span>`;
+      const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
+      const dots = Array.from({ length: info.total }, (_, i) => {
+        if (i < info.index || (i === info.index && info.state === 'done')) {
+          return `<span style="width:6px;height:6px;border-radius:50%;background:var(--gray-400);display:inline-block"></span>`;
+        } else if (i === info.index) {
+          return `<span style="width:6px;height:6px;border-radius:50%;background:${meta.color};display:inline-block"></span>`;
+        }
+        return `<span style="width:6px;height:6px;border-radius:50%;border:1.5px solid var(--gray-200);display:inline-block"></span>`;
+      }).join('');
+      const prefix = info.state === 'upcoming' ? 'Next: ' : info.state === 'done' ? '✓ ' : '';
+      return `
+        <div style="font-size:11.5px;font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px" title="${escHtml(prefix + info.milestone.name)}">${prefix}${escHtml(info.milestone.name)}</div>
+        <div style="display:flex;gap:3px;margin-top:5px">${dots}</div>`;
+    }
+
+    function renderMilestonesList(p) {
+      const milestones = p.milestones || [];
+      if (!milestones.length) return `<div style="font-size:12.5px;color:var(--gray-400)">No milestones yet — break this project into phases so the dashboard can show where things currently stand.</div>`;
+      const info = currentMilestoneInfo(p);
+      return milestones.map((m, i) => {
+        const isCurrent = !!(info && info.index === i && info.state === 'current');
+        const isDone = !!(info && info.index === i && info.state === 'done') || (info && i < info.index);
+        const pct = dateRangeProgress(m.startDate, m.endDate, isDone);
+        return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid ${isCurrent ? 'var(--orange)' : 'var(--gray-200)'};background:${isCurrent ? 'var(--orange-glow)' : 'white'};border-radius:var(--radius);margin-bottom:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:12.5px;color:var(--navy)">${isCurrent ? '📍 ' : ''}${escHtml(m.name)}</div>
+            ${(m.startDate && m.endDate) ? `
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--gray-400);margin-top:4px;max-width:280px"><span>${fmtDate(m.startDate)}</span><span>${fmtDate(m.endDate)}</span></div>
+              <div style="height:4px;width:100%;max-width:280px;background:var(--gray-100);border-radius:2px;overflow:hidden;margin-top:2px"><div style="height:100%;width:${pct}%;background:var(--orange);border-radius:2px"></div></div>
+            ` : `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">No dates set</div>`}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="action-btn edit" style="padding:3px 8px;font-size:11px" onclick="openMilestoneFormModal(${m.id})">Edit</button>
+            <button class="action-btn delete" style="padding:3px 8px;font-size:11px" onclick="deleteMilestone(${m.id})">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function openMilestoneFormModal(id) {
+      const p = currentProjectDetail;
+      if (!p) return;
+      const m = id ? (p.milestones || []).find(x => x.id === id) : null;
+      document.getElementById('editMilestoneId').value = id || '';
+      document.getElementById('milestoneFormModalTitle').textContent = id ? 'Edit Milestone' : 'Add Milestone';
+      document.getElementById('milestoneName').value = m?.name || '';
+      document.getElementById('milestoneStartDate').value = m?.startDate ? String(m.startDate).slice(0, 10) : '';
+      document.getElementById('milestoneEndDate').value = m?.endDate ? String(m.endDate).slice(0, 10) : '';
+      document.getElementById('milestoneFormModal').classList.add('open');
+    }
+
+    function closeMilestoneFormModal() {
+      document.getElementById('milestoneFormModal').classList.remove('open');
+    }
+
+    async function saveMilestone() {
+      const id = document.getElementById('editMilestoneId').value;
+      const name = document.getElementById('milestoneName').value.trim();
+      if (!name) return toast('Milestone name is required', 'error');
+      const payload = {
+        name,
+        startDate: document.getElementById('milestoneStartDate').value || null,
+        endDate: document.getElementById('milestoneEndDate').value || null
+      };
+      const url = id ? `/api/projects/milestones/${id}` : `/api/projects/${currentProjectId}/milestones`;
+      try {
+        const res = await fetch(url, {
+          method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Save failed');
+        toast(id ? 'Milestone updated' : 'Milestone added', 'success');
+        closeMilestoneFormModal();
+        currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+        renderProjectDetailBody(false);
+        await loadProjects();
+      } catch (err) { toast(err.message || 'Save failed', 'error'); }
+    }
+
+    function deleteMilestone(id) {
+      document.getElementById('confirmTitle').textContent = 'Delete Milestone';
+      document.getElementById('confirmMsg').textContent = 'Remove this milestone? This cannot be undone.';
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          await fetch(`/api/projects/milestones/${id}`, { method: 'DELETE' });
+          toast('Milestone removed', 'success');
+          currentProjectDetail = await fetch(`/api/projects/${currentProjectId}`).then(r => r.json());
+          renderProjectDetailBody(false);
+          await loadProjects();
+        } catch { toast('Remove failed', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
+    }
+
+    document.getElementById('milestoneFormModal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeMilestoneFormModal();
+    });
 
     function renderProjectsGrid() {
       const body = document.getElementById('projectsTableBody');
       const filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
       if (!filtered.length) {
-        body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
         return;
       }
       body.innerHTML = filtered.map(p => {
@@ -3141,25 +3302,28 @@
         const timelineHtml = (p.start_date && p.target_date)
           ? `<div style="margin-bottom:3px;display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--gray-400)"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
              <div style="height:4px;background:var(--gray-100);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${meta.color};border-radius:2px"></div></div>`
-          : `<span style="font-size:12px;color:var(--gray-400)">Not set</span>`;
+          : `<span style="font-size:11px;color:var(--gray-400)">Not set</span>`;
         return `
         <tr style="cursor:pointer" onclick="openProjectDetail('${p.id}')">
           <td>
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="width:8px;height:8px;border-radius:50%;background:${p.color || 'var(--orange)'};flex-shrink:0" title="Project colour"></span>
-              <span style="font-size:19px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
-              <div>
-                <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(p.name)}</div>
-                <div style="font-size:11.5px;color:var(--text-muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="width:7px;height:7px;border-radius:50%;background:${p.color || 'var(--orange)'};flex-shrink:0" title="Project colour"></span>
+              <span style="font-size:16px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
+              <div style="min-width:0">
+                <div style="font-weight:700;color:var(--navy);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px">${escHtml(p.name)}</div>
+                <div style="font-size:10.5px;color:var(--text-muted);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
               </div>
             </div>
           </td>
           <td><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${meta.bg};color:${meta.color};white-space:nowrap">${meta.label}</span></td>
-          <td style="font-size:12.5px;color:${p.owner_name ? 'var(--text)' : 'var(--gray-400)'}">${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</td>
+          <td style="font-size:12px;color:${p.owner_name ? 'var(--text)' : 'var(--gray-400)'}">${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</td>
+          <td>${renderProgressCell(p)}</td>
           <td>${timelineHtml}</td>
-          <td style="font-size:12px;color:var(--text-muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.success_criteria ? escHtml(p.success_criteria) : '<span style="color:var(--gray-400)">Not defined yet</span>'}</td>
-          <td style="font-size:11.5px;color:var(--gray-400);white-space:nowrap">${p.file_count > 0 ? `📎 ${p.file_count} file${p.file_count != 1 ? 's' : ''}` : 'No SOP yet'}</td>
-          <td style="color:var(--orange);font-weight:700;font-size:15px;text-align:center">›</td>
+          <td style="font-size:11.5px;color:var(--text-muted);max-width:230px">
+            <div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4">${p.success_criteria ? escHtml(p.success_criteria) : '<span style="color:var(--gray-400)">Not defined yet</span>'}</div>
+          </td>
+          <td style="text-align:center"><span style="font-size:15px;color:${p.file_count > 0 ? 'var(--orange)' : 'var(--gray-200)'}" title="${p.file_count} SOP file${p.file_count != 1 ? 's' : ''}">📎</span></td>
+          <td style="color:var(--orange);font-weight:700;font-size:14px;text-align:center">›</td>
         </tr>`;
       }).join('');
     }
@@ -3218,6 +3382,14 @@
         </div>
 
         ${p.description ? `<div style="font-size:13.5px;color:var(--text);line-height:1.6;margin-bottom:22px">${escHtml(p.description)}</div>` : ''}
+
+        <div style="margin-bottom:22px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;font-size:13.5px;color:var(--navy)">🚩 Milestones</div>
+            <button class="action-btn edit" onclick="openMilestoneFormModal()">+ Add Milestone</button>
+          </div>
+          ${renderMilestonesList(p)}
+        </div>
 
         <div style="background:var(--orange-glow);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:22px">
           <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:6px">🎯 What does success look like?</div>

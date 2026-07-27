@@ -642,3 +642,19 @@ CREATE TABLE IF NOT EXISTS fathom_transcript_sync_state (
   last_synced_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Milestones within a project's overall timeline — the "where are we right
+-- now" view the Projects table shows, distinct from the project's own
+-- start/target date range (the outer bar). Ordered by start_date, not a
+-- manual sort column — a milestone's position in the sequence should always
+-- match when it's actually scheduled to happen.
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id SERIAL PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_date DATE,
+  end_date DATE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_project_milestones_project_id ON project_milestones(project_id);
