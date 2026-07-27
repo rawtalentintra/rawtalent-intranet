@@ -596,10 +596,26 @@
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:20px">
-          <button class="cat-chip active" id="wf-view-agent-status">Agent Status</button>
+          <button class="cat-chip active" id="wf-view-agent-status" onclick="switchWorkforceView('agent-status')">Agent Status</button>
+          <button class="cat-chip super-admin-only" style="display:none" id="wf-view-call-history" onclick="switchWorkforceView('call-history')">Call History</button>
         </div>
         <div id="workforceAgentStatusBody">
           <div class="loading-spinner"><div class="spinner"></div></div>
+        </div>
+        <div id="workforceCallHistoryBody" style="display:none">
+          <div class="admin-header" style="margin-bottom:14px">
+            <div id="callHistorySyncStatus" style="font-size:12.5px;color:var(--text-muted)">Loading sync status…</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div style="display:flex;gap:6px">
+                <button class="cat-chip active" id="ch-range-week" onclick="setCallHistoryRange('week')">Week</button>
+                <button class="cat-chip" id="ch-range-day" onclick="setCallHistoryRange('day')">Day</button>
+              </div>
+              <button class="btn-add" id="callHistorySyncBtn" onclick="syncCallHistory()">🔄 Sync Call History</button>
+            </div>
+          </div>
+          <div id="callHistoryStatsBody">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+          </div>
         </div>
       </div>
 
@@ -3886,6 +3902,102 @@
           </table>
           <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration is tracked from when this app first saw the status change, so it resets after a deploy/restart.</div>`;
       } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
+    }
+
+    // ── Workforce Queue — Call History (Workforce Management Dashboard, super_admin only) ──
+    let callHistoryRange = 'week';
+
+    function switchWorkforceView(view) {
+      document.getElementById('wf-view-agent-status').classList.toggle('active', view === 'agent-status');
+      document.getElementById('wf-view-call-history').classList.toggle('active', view === 'call-history');
+      document.getElementById('workforceAgentStatusBody').style.display = view === 'agent-status' ? '' : 'none';
+      document.getElementById('workforceCallHistoryBody').style.display = view === 'call-history' ? '' : 'none';
+      if (view === 'agent-status') startWorkforceStatusPolling();
+      else { stopWorkforceStatusPolling(); loadCallHistoryStatus(); loadCallHistoryStats(); }
+    }
+
+    function setCallHistoryRange(range) {
+      callHistoryRange = range;
+      document.getElementById('ch-range-week').classList.toggle('active', range === 'week');
+      document.getElementById('ch-range-day').classList.toggle('active', range === 'day');
+      loadCallHistoryStats();
+    }
+
+    async function loadCallHistoryStatus() {
+      const el = document.getElementById('callHistorySyncStatus');
+      try {
+        const s = await fetch('/api/workforce/call-history/status').then(r => r.json());
+        if (!s.configured) { el.innerHTML = `<span style="color:#c0392b">Webex isn't configured.</span>`; return; }
+        const last = s.lastSyncedAt ? fmtDate(s.lastSyncedAt) : 'Never';
+        el.innerHTML = `📞 <strong>${s.recordCount}</strong> call record${s.recordCount !== 1 ? 's' : ''} stored · Last synced: <strong>${last}</strong>`;
+      } catch { el.textContent = 'Failed to load sync status'; }
+    }
+
+    async function syncCallHistory() {
+      const btn = document.getElementById('callHistorySyncBtn');
+      btn.disabled = true;
+      btn.textContent = '🔄 Syncing…';
+      try {
+        const result = await fetch('/api/workforce/call-history/sync', { method: 'POST' }).then(r => r.json());
+        if (result.error) throw new Error(result.error);
+        toast(`Synced — ${result.stored} new record${result.stored !== 1 ? 's' : ''} (${result.scanned} scanned)`, 'success');
+        await loadCallHistoryStatus();
+        await loadCallHistoryStats();
+      } catch (err) {
+        toast(err.message || 'Sync failed', 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = '🔄 Sync Call History';
+    }
+
+    function formatCallDuration(seconds) {
+      if (seconds === null || seconds === undefined) return '—';
+      const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
+      return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    }
+
+    async function loadCallHistoryStats() {
+      const body = document.getElementById('callHistoryStatsBody');
+      try {
+        const data = await fetch(`/api/workforce/call-history/stats?range=${callHistoryRange}`).then(r => r.json());
+        if (data.error) { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">${escHtml(data.error)}</div>`; return; }
+        if (!data.reps.length) {
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No call records for this range yet — click Sync Call History above.</div>`;
+          return;
+        }
+        const rows = data.reps.map(r => `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(r.userName || r.userEmail || 'Unknown')}</td>
+            <td>${r.totalCalls}</td>
+            <td style="color:var(--text-muted)">${r.inbound} in / ${r.outbound} out</td>
+            <td>${r.answeredRate !== null ? `<span style="color:#15803d;font-weight:600">${r.answeredRate}%</span>` : '—'}</td>
+            <td>${r.missedRate !== null ? `<span style="color:${r.missedRate > 20 ? '#c0392b' : 'var(--text-muted)'};font-weight:600">${r.missedRate}%</span>` : '—'}</td>
+            <td style="color:var(--text-muted)">${formatCallDuration(r.avgDurationSeconds)}</td>
+          </tr>`).join('');
+
+        const gapsHtml = data.gaps.length ? `
+          <div style="margin-top:20px">
+            <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:8px">⚠️ Presence/Call Gaps</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Times someone's Webex status showed "On a call" with no matching call record in this range — could be a stuck status, a dropped call, or a call type this sync doesn't capture.</div>
+            <table class="data-table">
+              <thead><tr><th>Email</th><th>Started</th><th>Ended</th><th>Duration</th></tr></thead>
+              <tbody>${data.gaps.map(g => `
+                <tr>
+                  <td>${escHtml(g.email)}</td>
+                  <td style="color:var(--text-muted);font-size:12px">${fmtDate(g.started_at)}</td>
+                  <td style="color:var(--text-muted);font-size:12px">${fmtDate(g.ended_at)}</td>
+                  <td>${formatCallDuration(g.gap_seconds)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+          </div>` : '';
+
+        body.innerHTML = `
+          <table class="data-table">
+            <thead><tr><th>Rep</th><th>Total Calls</th><th>In / Out</th><th>Answered</th><th>Missed</th><th>Avg Duration</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${gapsHtml}`;
+      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load call history stats.</div>`; }
     }
 
     // ── Training Hub ─────────────────────────────────────────────

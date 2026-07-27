@@ -679,3 +679,58 @@ CREATE TABLE IF NOT EXISTS notification_dismissals (
   dismissed_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (user_email, notification_key)
 );
+
+-- Webex Calling Detailed Call History (CDRs), synced the same way as
+-- fathom_meetings: pulled incrementally and persisted so the Workforce
+-- Management Dashboard never needs to re-hit the Webex API to recompute
+-- stats. Webex's CDR feed has no single globally-unique id per row, so
+-- dedup on a composite key of the fields that together uniquely identify a
+-- call leg.
+CREATE TABLE IF NOT EXISTS webex_cdrs (
+  id SERIAL PRIMARY KEY,
+  start_time TIMESTAMPTZ NOT NULL,
+  answer_time TIMESTAMPTZ,
+  duration INTEGER,             -- seconds
+  ring_duration INTEGER,        -- seconds between start_time and answer/abandon, if Webex provides it — nullable until confirmed against real data
+  calling_number TEXT,
+  called_number TEXT,
+  user_name TEXT,                -- Webex "User" field — whose call leg this is
+  user_email TEXT,                -- resolved against users table where possible
+  direction TEXT,                 -- ORIGINATING | TERMINATING
+  call_type TEXT,
+  answered BOOLEAN,
+  correlation_id TEXT,            -- links legs of the same call session together
+  client_type TEXT,
+  location TEXT,
+  raw JSONB,                      -- full raw record, so new fields can be mined later without a re-sync
+  synced_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (start_time, calling_number, called_number, user_name)
+);
+CREATE INDEX IF NOT EXISTS idx_webex_cdrs_start_time ON webex_cdrs(start_time);
+CREATE INDEX IF NOT EXISTS idx_webex_cdrs_user_email ON webex_cdrs(user_email);
+
+CREATE TABLE IF NOT EXISTS webex_cdr_sync_state (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  last_synced_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- webex_agent_status_state (above) only ever holds each person's CURRENT
+-- status — every poll overwrites it, so there is no way to ask "was this
+-- person 'on a call' between 2pm and 2:15pm last Tuesday". This table adds
+-- that history: one row per status period, closed off (ended_at set) the
+-- moment the status changes, so the Workforce Management Dashboard can
+-- compare "on a call" periods against actual CDR call windows and flag
+-- gaps. Necessarily prospective only — it only has data from whenever this
+-- table started being written to, since Webex's own API doesn't expose
+-- historical presence.
+CREATE TABLE IF NOT EXISTS webex_agent_status_history (
+  id SERIAL PRIMARY KEY,
+  email CITEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_webex_agent_status_history_email ON webex_agent_status_history(email);
+CREATE INDEX IF NOT EXISTS idx_webex_agent_status_history_open ON webex_agent_status_history(email) WHERE ended_at IS NULL;
