@@ -175,9 +175,9 @@
           <span class="admin-nav-icon">📖</span> Glossary
         </div>
       </div>
-      <div class="admin-nav-section super-admin-only" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label">AI Knowledge</div>
-        <div class="admin-nav-item" onclick="showSection('sources', this)">
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('sources', this)">
           <span class="admin-nav-icon">🧠</span> AI Sources
         </div>
         <div class="admin-nav-item" onclick="showSection('faq', this)">
@@ -1916,6 +1916,8 @@
           const anyVisible = [...section.querySelectorAll('.admin-nav-item')].some(i => i.style.display !== 'none');
           section.style.display = anyVisible ? '' : 'none';
         });
+      }
+      if (currentUserRole === 'qa_view' || currentUserRole === 'admin') {
         // FAQ Review, scoped down to just add/edit — no Slack/Fathom scan
         // access and no candidate review queue (both stay super_admin only
         // server-side too, this is just matching the UI to what's usable).
@@ -2514,7 +2516,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'faq', 'training-build', 'role-permissions'];
+    const superAdminSections = ['users', 'logs', 'sources', 'training-build', 'role-permissions'];
 
     function showSection(id, el) {
       // qa_view has its own small allowlist (which includes 'faq', normally
@@ -2912,7 +2914,7 @@
       { area: 'Glossary — manage terms', user: false, qa: false, admin: true, superAdmin: true },
       { area: 'Users — create/edit/deactivate', user: false, qa: false, admin: false, superAdmin: true },
       { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, admin: false, superAdmin: true },
+      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, admin: true, superAdmin: true },
       { area: 'FAQ Review — scan Slack/Fathom/docs, review candidates, delete', user: false, qa: false, admin: false, superAdmin: true },
       { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, admin: true, superAdmin: true },
       { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, admin: false, superAdmin: true },
@@ -5165,9 +5167,9 @@
 
     // ── FAQ Review ────────────────────────────────────────────────
     function loadFaqSection() {
-      // qa_view can't reach /candidates (super_admin only) — its card is
-      // hidden anyway, so skip the doomed-to-403 requests entirely.
-      if (currentUserRole !== 'qa_view') {
+      // qa_view and admin can't reach /candidates (super_admin only) — that
+      // card is hidden anyway, so skip the doomed-to-403 requests entirely.
+      if (currentUserRole !== 'qa_view' && currentUserRole !== 'admin') {
         loadFaqCandidates();
         loadFaqScannedSources();
       }
@@ -5340,7 +5342,7 @@
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               <button class="action-btn edit" onclick="editFaqPrompt('${f.id}','${escHtml(f.question)}','${escHtml(f.answer)}')">Edit</button>
-              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>` : ''}
+              ${(currentUserRole !== 'qa_view' && currentUserRole !== 'admin') ? `<button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>` : ''}
             </div>
           </div>
         `).join('');

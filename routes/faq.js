@@ -22,12 +22,11 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// ── FAQ management (view/add/edit only, no delete) — super_admin (as ──
-// ── before) and qa_view, a role scoped to exactly this: writing/correcting ──
-// ── FAQ answers, with no access to the raw Slack/Fathom scan or review ──
-// ── queue. Deliberately NOT plain 'admin' — FAQ Review was always ──
-// ── super_admin-only and this doesn't change that. ──
-router.get('/manage/all', requireRole('super_admin', 'qa_view'), async (req, res) => {
+// ── FAQ management (view/add/edit only, no delete) — super_admin, plain ──
+// ── admin, and qa_view all get this: writing/correcting FAQ answers, with ──
+// ── no access to the raw Slack/Fathom scan or review queue (still ──
+// ── super_admin-only below). ──
+router.get('/manage/all', requireRole('super_admin', 'admin', 'qa_view'), async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM faqs ORDER BY created_at DESC');
     res.json(result.rows);
@@ -36,7 +35,7 @@ router.get('/manage/all', requireRole('super_admin', 'qa_view'), async (req, res
   }
 });
 
-router.post('/', requireRole('super_admin', 'qa_view'), async (req, res) => {
+router.post('/', requireRole('super_admin', 'admin', 'qa_view'), async (req, res) => {
   const { question, answer } = req.body;
   if (!question?.trim() || !answer?.trim()) return res.status(400).json({ error: 'Question and answer are required' });
   try {
@@ -53,7 +52,7 @@ router.post('/', requireRole('super_admin', 'qa_view'), async (req, res) => {
   }
 });
 
-router.put('/:id', requireRole('super_admin', 'qa_view'), async (req, res) => {
+router.put('/:id', requireRole('super_admin', 'admin', 'qa_view'), async (req, res) => {
   const { question, answer } = req.body;
   if (!question || !answer) return res.status(400).json({ error: 'Question and answer are required' });
   try {
