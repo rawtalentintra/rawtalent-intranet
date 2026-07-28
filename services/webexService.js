@@ -184,19 +184,27 @@ async function analyticsCall(path, params, accessToken) {
   throw new Error(`Webex analytics API error (${path}): too many rate-limit retries`);
 }
 
-const CDR_WINDOW_MS = 47 * 60 * 60 * 1000; // stay under Webex's documented 48h max window per request
+const CDR_WINDOW_MS = 11 * 60 * 60 * 1000; // Webex's actual max window per /cdr_feed request is 12h (confirmed live, not the 48h the docs implied)
 const CDR_FRESHNESS_BUFFER_MS = 6 * 60 * 1000; // Webex needs ~5 min after a call ends before it's queryable
 
-// Detailed Call History field names below are best-effort against Webex's
-// documented column labels (confirmed via developer docs, not yet against a
-// live response — this account didn't have calling_cdr_read scope until
-// now). Every raw row is also stored in full in the `raw` column, so if the
-// actual JSON keys turn out to be camelCase (or something else entirely)
-// once real data comes through, the mapping below can be corrected without
-// losing anything already synced.
+// Detailed Call History field names below are confirmed against a live
+// response (2026-07-28) — Webex returns the human-readable column labels
+// ("Start time", "Ring duration", "Correlation ID", etc.), not camelCase.
+// The camelCase candidates are kept as a fallback only. Every raw row is
+// also stored in full in the `raw` column regardless, so any future field
+// drift can be corrected without losing anything already synced.
 function pickCdrField(row, ...candidates) {
   for (const c of candidates) if (row[c] !== undefined) return row[c];
   return null;
+}
+
+// Unanswered/missed calls come back with "" for Answer time (and sometimes
+// Start time) — Postgres rejects '' for a timestamptz column, so this was
+// silently dropping every missed call before the fix, which is exactly the
+// data the missed-call-rate reporting needs.
+function pickCdrTimestamp(row, ...candidates) {
+  const value = pickCdrField(row, ...candidates);
+  return value === '' ? null : value;
 }
 
 async function syncCallHistory(triggeredBy) {
@@ -237,8 +245,8 @@ async function syncCallHistory(triggeredBy) {
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT (start_time, calling_number, called_number, user_name) DO NOTHING`,
             args: [
-              pickCdrField(row, 'Start time', 'startTime'),
-              pickCdrField(row, 'Answer time', 'answerTime'),
+              pickCdrTimestamp(row, 'Start time', 'startTime'),
+              pickCdrTimestamp(row, 'Answer time', 'answerTime'),
               pickCdrField(row, 'Duration', 'duration'),
               pickCdrField(row, 'Ring duration', 'ringDuration'),
               pickCdrField(row, 'Calling number', 'callingNumber'),
@@ -248,7 +256,7 @@ async function syncCallHistory(triggeredBy) {
               pickCdrField(row, 'Direction', 'direction'),
               pickCdrField(row, 'Call type', 'callType'),
               pickCdrField(row, 'Answered', 'answered'),
-              pickCdrField(row, 'Correlation Id', 'correlationId'),
+              pickCdrField(row, 'Correlation ID', 'correlationId'),
               pickCdrField(row, 'Client type', 'clientType'),
               pickCdrField(row, 'Location', 'location'),
               JSON.stringify(row)
