@@ -150,7 +150,7 @@
         <div class="admin-nav-item active" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
         </div>
-        <div class="admin-nav-item" onclick="showSection('new-article', this)">
+        <div class="admin-nav-item" id="navNewArticle" onclick="newArticle()">
           <span class="admin-nav-icon">✏️</span> New Article
         </div>
       </div>
@@ -341,7 +341,7 @@
             <div class="admin-page-title">Articles</div>
             <div class="admin-page-sub">Manage your knowledge base content</div>
           </div>
-          <button class="btn-add" onclick="showSection('new-article', document.querySelector('[onclick*=new-article]'))">+ New Article</button>
+          <button class="btn-add" onclick="newArticle()">+ New Article</button>
         </div>
         <div class="admin-table-card">
           <div class="admin-table-header">
@@ -2437,7 +2437,7 @@
 
         // Make sure the new-article section is active
         if (!document.getElementById('section-new-article').classList.contains('active')) {
-          showSection('new-article', document.querySelector('[onclick*="new-article"]'));
+          showSection('new-article', document.getElementById('navNewArticle'));
         }
 
         // Ensure editor is ready, wait for it to fully initialize
@@ -2483,7 +2483,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'training-build', 'role-permissions'];
+    const superAdminSections = ['users', 'logs', 'sources', 'training-build', 'role-permissions', 'meetings'];
 
     function showSection(id, el) {
       // qa_view has its own small allowlist (which includes 'faq', normally
@@ -2562,7 +2562,7 @@
         ? `${articles.length} of ${allArticles.length} article${allArticles.length !== 1 ? 's' : ''}`
         : `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
       if (articles.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">${allArticles.length === 0 ? `No articles yet. <a href="#" onclick="showSection('new-article',null);return false" style="color:var(--orange)">Create your first article →</a>` : 'No articles match your search.'}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">${allArticles.length === 0 ? `No articles yet. <a href="#" onclick="newArticle();return false" style="color:var(--orange)">Create your first article →</a>` : 'No articles match your search.'}</td></tr>`;
         return;
       }
       const totalPages = Math.max(1, Math.ceil(articles.length / ARTICLES_PER_PAGE));
@@ -2633,7 +2633,7 @@
         if (logsBtn) logsBtn.style.display = 'inline-flex';
         const filePanel = document.getElementById('fileAttachmentsPanel');
         if (filePanel) { filePanel.style.display = 'block'; loadArticleFiles(id); }
-        showSection('new-article', document.querySelector('[onclick*="new-article"]'));
+        showSection('new-article', document.getElementById('navNewArticle'));
         // Set editor content after editor is visible
         setTimeout(() => {
           if (joditEditor) {
@@ -2648,6 +2648,20 @@
       editingArticleId = null;
       resetArticleForm();
       showSection('articles', document.querySelector('[onclick*="\'articles\'"]'));
+    }
+
+    // Any genuine "start a new article" entry point must go through here,
+    // not straight to showSection('new-article', ...) — showSection only
+    // resets the form when editingArticleId is empty (so editArticle() can
+    // navigate there without wiping the fields it just populated), so a
+    // stale editingArticleId left over from a previous edit that was
+    // abandoned via a different nav click (not the in-form Cancel button)
+    // would otherwise make a "new" article silently overwrite that old one
+    // on save.
+    function newArticle() {
+      editingArticleId = null;
+      resetArticleForm();
+      showSection('new-article', document.getElementById('navNewArticle'));
     }
 
     function resetArticleForm() {
@@ -6163,7 +6177,7 @@
 
     function fmtDuration(seconds) {
       if (seconds == null) return '—';
-      const m = Math.floor(seconds / 60), s = seconds % 60;
+      const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
       return `${m}:${String(s).padStart(2, '0')}`;
     }
 

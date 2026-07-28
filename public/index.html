@@ -1189,6 +1189,10 @@
 
     // ── Mode ──────────────────────────────────────────────────────
     function setMode(mode) {
+      // A pending debounced search from the previous tab must not fire after
+      // switching away — it renders into the same #resultsList every view
+      // shares, so it would silently overwrite whatever tab is now active.
+      clearTimeout(searchTimer);
       currentMode = mode;
       const isAI = mode === 'ai';
       const isAnnouncements = mode === 'announcements';
@@ -1597,7 +1601,16 @@
     // full profile popup still shows the complete date.
     function birthdateNoYear(dateStr) {
       if (!dateStr) return '—';
-      return dateStr.replace(/,?\s*\d{4}\s*$/, '').trim() || dateStr;
+      // birthdate is free text (no enforced format), so this can't assume the
+      // year is a trailing ", YYYY" — it strips a 19xx/20xx year wherever it
+      // appears (start, middle, or end) so formats like "1985-09-13" or
+      // "13/09/1985" also get redacted, not just "Month DD, YYYY".
+      const stripped = dateStr
+        .replace(/\b(19|20)\d{2}\b/, '')
+        .replace(/^[\s,/-]+|[\s,/-]+$/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+      return stripped || dateStr;
     }
 
     function renderTeamTable(members) {

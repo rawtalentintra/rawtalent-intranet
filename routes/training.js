@@ -31,9 +31,9 @@ router.get('/courses', async (req, res) => {
 
 router.get('/courses/:id', async (req, res) => {
   try {
-    const course = await training.getCourseDetail(req.params.id);
+    const course = await training.getCourseDetail(req.params.id, req.user.email);
     if (!course) return res.status(404).json({ error: 'Course not found' });
-    if (course.status !== 'live' && !isStaff(req.user.role)) return res.status(404).json({ error: 'Course not found' });
+    if (course.status !== 'live' && !isStaff(req.user.role) && !course.my_assignment) return res.status(404).json({ error: 'Course not found' });
     res.json(course);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -161,9 +161,9 @@ router.delete('/questions/:questionId', requireSuperAdmin, async (req, res) => {
 // routes above ──
 router.post('/courses/:id/attempts', async (req, res) => {
   try {
-    const course = await training.getCourseDetail(req.params.id);
+    const course = await training.getCourseDetail(req.params.id, req.user.email);
     if (!course) return res.status(404).json({ error: 'Course not found' });
-    if (course.status !== 'live' && !isStaff(req.user.role)) return res.status(404).json({ error: 'Course not found' });
+    if (course.status !== 'live' && !isStaff(req.user.role) && !course.my_assignment) return res.status(404).json({ error: 'Course not found' });
     const attempt = await training.startAttempt(req.params.id, req.user.email);
     res.json(attempt);
   } catch (err) {

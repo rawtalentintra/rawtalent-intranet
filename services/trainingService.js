@@ -234,7 +234,11 @@ async function listCourses(forUserEmail) {
   }));
 }
 
-async function getCourseDetail(courseId) {
+// forUserEmail is optional — when given, the result carries that person's
+// own assignment (if any), mirroring listCourses, so routes can tell a
+// draft course that's been assigned to this specific person (visible on
+// their dashboard via listCourses) apart from a draft nobody can see yet.
+async function getCourseDetail(courseId, forUserEmail = null) {
   const db = getDb();
   const courseRes = await db.execute({ sql: 'SELECT * FROM training_courses WHERE id = ?', args: [courseId] });
   const course = courseRes.rows[0];
@@ -246,7 +250,15 @@ async function getCourseDetail(courseId) {
     questions: questionsRes.rows.filter(q => q.module_id === m.id)
   }));
   const finalAssessment = questionsRes.rows.filter(q => !q.module_id);
-  return { ...course, modules, finalAssessment };
+  let my_assignment = null;
+  if (forUserEmail) {
+    const assignRes = await db.execute({
+      sql: 'SELECT * FROM training_assignments WHERE course_id = ? AND user_email = ?',
+      args: [courseId, forUserEmail]
+    });
+    my_assignment = assignRes.rows[0] || null;
+  }
+  return { ...course, modules, finalAssessment, my_assignment };
 }
 
 async function updateCourse(courseId, { title, description, status, passThreshold }) {

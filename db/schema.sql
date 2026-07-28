@@ -436,6 +436,9 @@ CREATE INDEX IF NOT EXISTS idx_team_members_manager_id ON team_members(manager_i
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_article_id ON feedback(article_id);
 CREATE INDEX IF NOT EXISTS idx_article_logs_article_id ON article_logs(article_id);
+CREATE INDEX IF NOT EXISTS idx_articles_published_category ON articles(published, category);
+CREATE INDEX IF NOT EXISTS idx_article_files_article_id ON article_files(article_id);
+CREATE INDEX IF NOT EXISTS idx_announcement_files_announcement_id ON announcement_files(announcement_id);
 
 -- Single-row token store for the Webex Service App (Workforce Management).
 -- Access tokens last 14 days and refresh tokens rotate (a new one is issued)

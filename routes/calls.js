@@ -104,9 +104,9 @@ router.get('/local', async (req, res) => {
     const { repName, phone, recordingId, callType, dateFrom, dateTo, page = 1, pageSize = 25 } = req.query;
     const conditions = [];
     const args = [];
-    if (repName) { conditions.push('rep_name LIKE ?'); args.push(`%${repName}%`); }
-    if (phone) { conditions.push('(to_number LIKE ? OR from_number LIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
-    if (recordingId) { conditions.push('id LIKE ?'); args.push(`%${recordingId}%`); }
+    if (repName) { conditions.push('rep_name ILIKE ?'); args.push(`%${repName}%`); }
+    if (phone) { conditions.push('(to_number ILIKE ? OR from_number ILIKE ?)'); args.push(`%${phone}%`, `%${phone}%`); }
+    if (recordingId) { conditions.push('id ILIKE ?'); args.push(`%${recordingId}%`); }
     if (callType === 'inbound' || callType === 'outbound') { conditions.push('call_type = ?'); args.push(callType); }
     // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
     if (dateFrom) { conditions.push(`(start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }

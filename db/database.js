@@ -29,6 +29,11 @@ function getDb() {
       ssl: { rejectUnauthorized: false },
       max: 10
     });
+    // pg's Pool emits 'error' when an IDLE client hits a connection-level
+    // problem (network blip, Supabase restarting the connection, etc.) —
+    // with no listener, Node treats that as an unhandled error and crashes
+    // the entire process, not just the one in-flight request.
+    pool.on('error', err => console.error('Unexpected Postgres pool error:', err.message));
   }
   return {
     async execute(arg) {
