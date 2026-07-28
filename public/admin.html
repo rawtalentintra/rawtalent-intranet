@@ -134,19 +134,19 @@
     <!-- Sidebar -->
     <aside class="admin-sidebar" id="adminSidebar">
       <div class="admin-nav-section">
-        <div class="admin-nav-label">HR</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">HR</div>
         <div class="admin-nav-item" onclick="showSection('team', this)">
           <span class="admin-nav-icon">🧑‍🤝‍🧑</span> Our Team
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Projects</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Projects</div>
         <div class="admin-nav-item" onclick="showSection('projects-dashboard', this)">
           <span class="admin-nav-icon">🚀</span> Projects Dashboard
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Content</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
         <div class="admin-nav-item active" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
         </div>
@@ -155,7 +155,7 @@
         </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
-        <div class="admin-nav-label">Access</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Access</div>
         <div class="admin-nav-item" onclick="showSection('users', this)">
           <span class="admin-nav-icon">👥</span> Users
         </div>
@@ -164,13 +164,13 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Knowledge</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Knowledge</div>
         <div class="admin-nav-item" onclick="showSection('glossary', this)">
           <span class="admin-nav-icon">📖</span> Glossary
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">AI Knowledge</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">AI Knowledge</div>
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('sources', this)">
           <span class="admin-nav-icon">🧠</span> AI Sources
         </div>
@@ -179,7 +179,7 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Call Quality</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Call Quality</div>
         <div class="admin-nav-item" onclick="showSection('calls-dashboard', this)">
           <span class="admin-nav-icon">📊</span> Call Quality Dashboard
         </div>
@@ -191,13 +191,13 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Workforce Management</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Management</div>
         <div class="admin-nav-item" onclick="showSection('workforce-queue', this)">
           <span class="admin-nav-icon">🧑‍💻</span> Workforce Queue
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Training Hub</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Training Hub</div>
         <div class="admin-nav-item" onclick="showSection('training-dashboard', this)">
           <span class="admin-nav-icon">🎓</span> Training Dashboard
         </div>
@@ -206,7 +206,7 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label">Insights</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Insights</div>
         <div class="admin-nav-item" onclick="showSection('feedback', this)">
           <span class="admin-nav-icon">💬</span> Feedback
         </div>
@@ -215,7 +215,7 @@
         </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
-        <div class="admin-nav-label">Private</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Private</div>
         <div class="admin-nav-item" onclick="showSection('meetings', this)">
           <span class="admin-nav-icon">🗓️</span> Meetings
         </div>
@@ -2530,6 +2530,30 @@
       if (id === 'training-build') loadTrainingBuildList();
       closeMobileSidebar();
     }
+
+    // Collapsible sidebar groups — purely a display toggle via a CSS class
+    // on the section, so it never touches the per-item inline `display`
+    // styles applyRoleVisibility()/qa_view gating already set on individual
+    // nav items. Persisted by label text so it survives reloads/re-logins.
+    function toggleNavSection(labelEl) {
+      const section = labelEl.closest('.admin-nav-section');
+      if (!section) return;
+      section.classList.toggle('collapsed');
+      try {
+        const collapsed = [...document.querySelectorAll('.admin-nav-section.collapsed .admin-nav-label')].map(l => l.textContent.trim());
+        localStorage.setItem('adminCollapsedNavSections', JSON.stringify(collapsed));
+      } catch {}
+    }
+
+    function applyCollapsedNavSections() {
+      let collapsed = [];
+      try { collapsed = JSON.parse(localStorage.getItem('adminCollapsedNavSections') || '[]'); } catch {}
+      if (!collapsed.length) return;
+      document.querySelectorAll('.admin-nav-label').forEach(label => {
+        if (collapsed.includes(label.textContent.trim())) label.closest('.admin-nav-section').classList.add('collapsed');
+      });
+    }
+    applyCollapsedNavSections();
 
     function toggleMobileSidebar() {
       document.getElementById('adminSidebar').classList.toggle('open');
