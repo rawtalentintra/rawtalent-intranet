@@ -3958,7 +3958,7 @@
             <thead><tr><th>Agent</th><th>Email</th><th>Status</th><th>Duration</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
-          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration is tracked from when this app first saw the status change, so it resets after a deploy/restart.</div>`;
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration reflects the real transition time — this app polls Webex in the background every 20 seconds regardless of who has this page open, so it's accurate even if nobody's been watching. It only resets on an app deploy/restart.</div>`;
       } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
     }
 

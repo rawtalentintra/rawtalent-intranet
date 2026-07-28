@@ -8,6 +8,7 @@ const compression = require('compression');
 const { initDatabase, getDb } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
 const PgSessionStore = require('./services/sessionStore');
+const webexService = require('./services/webexService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,6 +92,17 @@ async function start() {
     getDb().execute({ sql: 'DELETE FROM sessions WHERE expires IS NOT NULL AND expires < ?', args: [Date.now()] })
       .catch(err => console.error('Session cleanup error:', err.message));
   }, 6 * 60 * 60 * 1000);
+  // Agent status "since" timestamps used to only update while someone had the
+  // Workforce Queue tab open and polling — with nobody watching for hours,
+  // "time in status" effectively just meant "since I opened this page,"
+  // which isn't a reliable duration. Polling here independently of any
+  // browser session means the DB always reflects the real transition time.
+  if (webexService.isConfigured()) {
+    webexService.getAgentStatuses().catch(err => console.error('Webex agent status poll error:', err.message));
+    setInterval(() => {
+      webexService.getAgentStatuses().catch(err => console.error('Webex agent status poll error:', err.message));
+    }, 20 * 1000);
+  }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
     console.log(`   Admin: ${process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au'}\n`);
