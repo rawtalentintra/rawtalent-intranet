@@ -214,6 +214,12 @@
           <span class="admin-nav-icon">📋</span> Change Logs
         </div>
       </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Documentation</div>
+        <div class="admin-nav-item" onclick="showSection('tech-docs', this)">
+          <span class="admin-nav-icon">📚</span> Technical Documentation
+        </div>
+      </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Private</div>
         <div class="admin-nav-item" onclick="showSection('meetings', this)">
@@ -554,6 +560,136 @@
 
         <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
           <strong>Note:</strong> QA View is a narrow role — Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only — no Slack/Fathom scanning, no candidate review, no delete), and Call Quality (Dashboard/Rubrics/Evaluator, same as Admin). Everything else in the admin panel is invisible to it, both in the nav and on every underlying route — hiding a nav item is a UX nicety here, the real enforcement is server-side on each API route.
+        </div>
+      </div>
+
+      <!-- Technical Documentation -->
+      <div class="admin-section" id="section-tech-docs">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">📚 Technical Documentation</div>
+            <div class="admin-page-sub">System architecture, integrations, and deployment reference for anyone supporting or maintaining this platform. Visible to admins and super admins.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Overview</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            RawTalent Knowledge Base is a single Node.js/Express application serving both the public-facing staff knowledge base (search, Ask AI, FAQ, glossary, announcements, team directory, training) and the internal admin panel (content management, call quality, workforce management, projects, user administration). It's a monolith by design — one server process, one Postgres database, no microservices or separate frontend build step.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Tech Stack</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
+            <strong style="color:var(--navy)">Backend:</strong> Node.js + Express 4. Sessions via <code>express-session</code> with a custom Postgres-backed session store (<code>services/sessionStore.js</code>), auth via Passport (local email/password + Google OAuth).<br>
+            <strong style="color:var(--navy)">Database:</strong> Postgres, hosted on Supabase (session pooler connection). Accessed through a small wrapper in <code>db/database.js</code> that exposes a single <code>getDb().execute({ sql, args })</code> call — <code>?</code> placeholders are translated to Postgres <code>$1, $2…</code> under the hood. This wrapper is a holdover from an earlier SQLite/Turso version of the app and is intentionally not meant to be extended further — new queries should move toward native <code>pg</code> usage over time.<br>
+            <strong style="color:var(--navy)">File storage:</strong> Supabase Storage (private buckets, signed URLs only — team photos, article attachments, call recording audio, project SOP files, announcement attachments).<br>
+            <strong style="color:var(--navy)">Frontend:</strong> No framework, no build step. Plain HTML/CSS/vanilla JS — <code>public/index.html</code> (public KB) and <code>public/admin.html</code> (admin panel) are each a single large file with inline <code>&lt;script&gt;</code>. Styling is one shared stylesheet, <code>public/css/style.css</code>.<br>
+            <strong style="color:var(--navy)">AI:</strong> Anthropic Claude API (<code>@anthropic-ai/sdk</code>) powers Ask AI, FAQ candidate classification, call grading, meeting Q&amp;A, and report generation.<br>
+            <strong style="color:var(--navy)">Deployment:</strong> Fly.io (see <code>fly.toml</code> / <code>Procfile</code> in the repo root) — a single always-on-or-scale-to-zero VM in the Sydney region, deployed straight from the GitHub repo.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Code Layout</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead><tr><th style="width:170px">Path</th><th>What's there</th></tr></thead>
+              <tbody>
+                <tr><td><code>server.js</code></td><td>App entry point — Express setup, session config, route mounting, static-file serving, the background Webex agent-status poller, and the session-cleanup interval.</td></tr>
+                <tr><td><code>routes/*.js</code></td><td>One file per API area (articles, admin, faq, calls, team, notifications, workforce, training, projects, meetings, auth). Each mounts under <code>/api/&lt;name&gt;</code> in <code>server.js</code> and applies its own auth middleware.</td></tr>
+                <tr><td><code>services/*.js</code></td><td>Business logic and third-party integrations, called by routes — e.g. <code>webexService.js</code>, <code>fathomService.js</code>, <code>dubberService.js</code>, <code>aiService.js</code>, <code>callGradingService.js</code>, <code>driveService.js</code>, <code>storageService.js</code>.</td></tr>
+                <tr><td><code>db/schema.sql</code></td><td>Full Postgres schema — applied automatically on every server boot (idempotent <code>CREATE TABLE IF NOT EXISTS</code> statements), so schema changes ship just by editing this file and redeploying.</td></tr>
+                <tr><td><code>db/database.js</code></td><td>Postgres connection pool + the <code>execute()</code> query wrapper described above.</td></tr>
+                <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, <code>requireSuperAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
+                <tr><td><code>public/index.html</code></td><td>The public knowledge base — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
+                <tr><td><code>public/admin.html</code></td><td>The admin panel — everything in this document lives inside this one file (nav, all sections, all client-side JS).</td></tr>
+                <tr><td><code>public/css/style.css</code></td><td>Single shared stylesheet for both pages.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Authentication &amp; Roles</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
+            Sessions are cookie-based (Passport + <code>express-session</code>), stored server-side in Postgres so they survive redeploys. Sign-in is email/password or Google OAuth. There are four roles, enforced on every API route server-side (client-side nav hiding is cosmetic only):
+          </div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
+            <strong style="color:var(--navy)">user</strong> — public knowledge base only, no admin panel access.<br>
+            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
+            <strong style="color:var(--navy)">admin</strong> — full admin panel access except user management, AI Sources, Meetings, and a handful of other super-admin-only areas.<br>
+            <strong style="color:var(--navy)">super_admin</strong> — everything, including user management and the private Meetings section. <strong>By design, there is exactly one super_admin account.</strong> Don't create a second one, including for testing — use a temporary <code>admin</code>-role account instead.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Database</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
+            Postgres on Supabase. The full schema lives in <code>db/schema.sql</code> and is re-applied on every boot, so it's always the source of truth — not a series of migration files. Roughly 40 tables, grouped by area:
+          </div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
+            <strong style="color:var(--navy)">Core content:</strong> users, articles, article_files, article_logs, glossary, knowledge_sources, feedback<br>
+            <strong style="color:var(--navy)">AI:</strong> ai_query_log, system_logs<br>
+            <strong style="color:var(--navy)">FAQ:</strong> faqs, faq_candidates, slack_scan_state, fathom_scan_state<br>
+            <strong style="color:var(--navy)">Call Quality:</strong> call_recordings, call_recording_audio, call_evaluations, call_evaluation_feedback, call_grading_calibration, call_rubric_customizations, dubber_sync_state<br>
+            <strong style="color:var(--navy)">Team &amp; HR:</strong> team_members, team_greetings<br>
+            <strong style="color:var(--navy)">Announcements:</strong> announcements, announcement_files, announcement_reads<br>
+            <strong style="color:var(--navy)">Workforce Management:</strong> webex_auth_state, webex_agent_status_state, webex_agent_status_history, webex_cdrs, webex_cdr_sync_state<br>
+            <strong style="color:var(--navy)">Training:</strong> training_courses, training_modules, training_questions, training_attempts, training_answers, training_assignments<br>
+            <strong style="color:var(--navy)">Projects:</strong> projects, project_files, project_milestones<br>
+            <strong style="color:var(--navy)">Meetings:</strong> fathom_meetings, fathom_transcript_sync_state<br>
+            <strong style="color:var(--navy)">Infrastructure:</strong> sessions, notification_dismissals
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Third-Party Integrations</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead><tr><th style="width:150px">Service</th><th>What it's used for</th><th style="width:220px">Env vars</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Anthropic Claude</strong></td><td>Ask AI, FAQ candidate classification, call grading, meeting Q&amp;A, report generation</td><td><code>ANTHROPIC_API_KEY</code></td></tr>
+                <tr><td><strong>Supabase</strong></td><td>Postgres database + file storage (private buckets, signed URLs)</td><td><code>SUPABASE_DB_HOST/PORT/NAME/USER/PASSWORD</code>, <code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code></td></tr>
+                <tr><td><strong>Webex</strong></td><td>Live agent presence status (Workforce Queue) and Detailed Call History (CDR-based call volume/answer-rate reporting) via a Service App</td><td><code>WEBEX_CLIENT_ID</code>, <code>WEBEX_CLIENT_SECRET</code>, <code>WEBEX_REFRESH_TOKEN</code></td></tr>
+                <tr><td><strong>Fathom</strong></td><td>Meeting transcript sync, powering the private Meetings Q&amp;A and feeding FAQ candidate scanning</td><td><code>FATHOM_API_KEY</code></td></tr>
+                <tr><td><strong>Dubber</strong></td><td>Call recording sync for the Call Quality Evaluator</td><td><code>DUBBER_ACCOUNT_ID</code>, <code>DUBBER_AUTH_ID</code>, <code>DUBBER_AUTH_TOKEN</code>, <code>DUBBER_CLIENT_ID</code>, <code>DUBBER_CLIENT_SECRET</code>, <code>DUBBER_LISTENER_EMAIL</code>, <code>DUBBER_REGION</code></td></tr>
+                <tr><td><strong>Slack</strong></td><td>Scanning team channels for FAQ candidate content</td><td><code>SLACK_BOT_TOKEN</code></td></tr>
+                <tr><td><strong>Groq</strong></td><td>Fast transcription fallback</td><td><code>GROQ_API_KEY</code></td></tr>
+                <tr><td><strong>Google Drive</strong></td><td>Optional cloud backup of articles, so content survives a redeploy</td><td><code>GOOGLE_SERVICE_ACCOUNT_KEY</code>, <code>DRIVE_FOLDER_ID</code></td></tr>
+                <tr><td><strong>Google OAuth</strong></td><td>"Sign in with Google" as an alternative to email/password</td><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Full variable list with setup notes is in <code>.env.example</code> at the repo root. None of the integrations above are required for the app to boot — each is optional and the relevant feature just shows as "not connected" if its env vars are missing.</div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Key Feature Areas</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
+            <strong style="color:var(--navy)">Knowledge Base:</strong> full-text article search (Postgres <code>tsvector</code>), Ask AI (Claude, grounded in articles + AI Sources), Glossary, Announcements, Team directory, Training.<br>
+            <strong style="color:var(--navy)">FAQ Review:</strong> scans Slack and Fathom for reusable Q&amp;A content, classifies candidates with Claude, holds them for human approval before they become live FAQs.<br>
+            <strong style="color:var(--navy)">Call Quality:</strong> syncs recordings from Dubber, grades them against a configurable rubric (AI or manual), calibration notes, and period reports.<br>
+            <strong style="color:var(--navy)">Workforce Management:</strong> live agent presence (Webex), background-polled every 20s independent of who has the page open; Detailed Call History dashboard (volume, answered/missed rate, average handle time) once the org has Webex Calling licensing.<br>
+            <strong style="color:var(--navy)">Training:</strong> course builder, assignment, attempts/scoring.<br>
+            <strong style="color:var(--navy)">Projects:</strong> internal project tracking with milestones and SOP file attachments.<br>
+            <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — private, super_admin only.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Deployment</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Hosted on <strong>Fly.io</strong> (Sydney region — see <code>fly.toml</code>), deployed straight from the GitHub repository (<code>joy265/rawtalent-knowledgebase</code>). There's no separate build step — it's plain Node.js, started via <code>node server.js</code> (see <code>Procfile</code>). The database schema in <code>db/schema.sql</code> applies automatically on boot. Environment variables (the ones listed above) are configured on the Fly.io side, not committed to the repo — <code>.env</code> is git-ignored and only used for local development.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Local Development</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Clone the repo, copy <code>.env.example</code> to <code>.env</code> and fill in at least the Supabase and admin-account variables (everything else is optional), then <code>npm install</code> and <code>npm start</code> (or <code>npm run dev</code> for auto-restart via nodemon). The app runs on <code>http://localhost:3000</code> by default.
+          </div>
         </div>
       </div>
 
