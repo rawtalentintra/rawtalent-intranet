@@ -587,7 +587,7 @@
             <strong style="color:var(--navy)">File storage:</strong> Supabase Storage (private buckets, signed URLs only — team photos, article attachments, call recording audio, project SOP files, announcement attachments).<br>
             <strong style="color:var(--navy)">Frontend:</strong> No framework, no build step. Plain HTML/CSS/vanilla JS — <code>public/index.html</code> (public KB) and <code>public/admin.html</code> (admin panel) are each a single large file with inline <code>&lt;script&gt;</code>. Styling is one shared stylesheet, <code>public/css/style.css</code>.<br>
             <strong style="color:var(--navy)">AI:</strong> Anthropic Claude API (<code>@anthropic-ai/sdk</code>) powers Ask AI, FAQ candidate classification, call grading, meeting Q&amp;A, and report generation.<br>
-            <strong style="color:var(--navy)">Deployment:</strong> Fly.io (see <code>fly.toml</code> / <code>Procfile</code> in the repo root) — a single always-on-or-scale-to-zero VM in the Sydney region, deployed straight from the GitHub repo.
+            <strong style="color:var(--navy)">Deployment:</strong> Railway — project <code>rawtalent-knowledgebase</code>, service <code>web</code>, <code>production</code> environment, deployed automatically from the GitHub repo on every push to <code>main</code>. Live at <code>rawtalent-internal.app</code>. (The <code>fly.toml</code>/<code>Procfile</code> in the repo root are unused leftovers from an earlier, abandoned Fly.io setup — Railway ignores them and auto-detects the Node app on its own. Safe to delete, just hasn't been cleaned up yet.)
           </div>
         </div>
 
@@ -681,7 +681,7 @@
         <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Deployment</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Hosted on <strong>Fly.io</strong> (Sydney region — see <code>fly.toml</code>), deployed straight from the GitHub repository (<code>joy265/rawtalent-knowledgebase</code>). There's no separate build step — it's plain Node.js, started via <code>node server.js</code> (see <code>Procfile</code>). The database schema in <code>db/schema.sql</code> applies automatically on boot. Environment variables (the ones listed above) are configured on the Fly.io side, not committed to the repo — <code>.env</code> is git-ignored and only used for local development.
+            Hosted on <strong>Railway</strong> — project <code>rawtalent-knowledgebase</code>, service <code>web</code>, <code>production</code> environment, live at <code>rawtalent-internal.app</code>. Deployed straight from the GitHub repository (<code>joy265/rawtalent-knowledgebase</code>) — every push to <code>main</code> triggers a new deployment automatically. There's no separate build step — it's plain Node.js, started via <code>node server.js</code>. The database schema in <code>db/schema.sql</code> applies automatically on boot. Environment variables (the ones listed above) are configured in the Railway service's Variables tab, not committed to the repo — <code>.env</code> is git-ignored and only used for local development.
           </div>
         </div>
 
