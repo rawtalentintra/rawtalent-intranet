@@ -36,4 +36,16 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole };
+// Build Training is granted per-person (e.g. Sophia), not per-role — an
+// admin flag rather than a role, since opening it to every admin isn't
+// what was asked for. super_admin still has it regardless, same as every
+// other admin-panel feature.
+function requireTrainingBuilder(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (req.user.role !== 'super_admin' && !req.user.can_build_training) {
+    return res.status(403).json({ error: 'You do not have access to this' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder };

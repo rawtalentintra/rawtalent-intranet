@@ -45,7 +45,7 @@ router.post('/logout', (req, res) => {
 
 router.get('/me', async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
-  const info = { email: req.user.email, name: req.user.name, role: req.user.role };
+  const info = { email: req.user.email, name: req.user.name, role: req.user.role, canBuildTraining: !!req.user.can_build_training };
   if (req.session.impersonatorId) {
     try {
       const origRes = await getDb().execute({ sql: 'SELECT name, email FROM users WHERE id = ?', args: [req.session.impersonatorId] });

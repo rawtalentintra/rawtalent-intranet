@@ -201,7 +201,7 @@
         <div class="admin-nav-item" onclick="showSection('training-dashboard', this)">
           <span class="admin-nav-icon">🎓</span> Training Dashboard
         </div>
-        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('training-build', this)">
+        <div class="admin-nav-item" id="navTrainingBuild" style="display:none" onclick="showSection('training-build', this)">
           <span class="admin-nav-icon">🛠️</span> Build Training
         </div>
       </div>
@@ -1471,6 +1471,10 @@
           <input type="checkbox" id="userActive" checked>
           <label for="userActive">Account active (user can sign in)</label>
         </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="userCanBuildTraining">
+          <label for="userCanBuildTraining">Can build training courses (grants Build Training access to this person specifically, regardless of role)</label>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeUserModal()">Cancel</button>
@@ -1956,6 +1960,7 @@
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
     let currentUserEmail = '';
+    let currentUserCanBuildTraining = false;
 
     async function init() {
       try {
@@ -1963,6 +1968,7 @@
         if (me.error || !['admin', 'super_admin', 'qa_view'].includes(me.role)) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
+        currentUserCanBuildTraining = !!me.canBuildTraining;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
@@ -2009,6 +2015,13 @@
     function applyRoleVisibility() {
       if (currentUserRole === 'super_admin') {
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
+      }
+      // Build Training is a per-user grant (e.g. Sophia), not a role — shown
+      // to super_admin plus whoever has can_build_training set, regardless
+      // of their actual role.
+      if (currentUserRole === 'super_admin' || currentUserCanBuildTraining) {
+        const navTrainingBuild = document.getElementById('navTrainingBuild');
+        if (navTrainingBuild) navTrainingBuild.style.display = '';
       }
       if (currentUserRole === 'qa_view') {
         document.querySelectorAll('.admin-nav-item').forEach(item => {
@@ -2619,7 +2632,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'training-build', 'role-permissions', 'meetings'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings'];
 
     function showSection(id, el) {
       // qa_view has its own small allowlist (which includes 'faq', normally
@@ -2629,6 +2642,12 @@
       if (currentUserRole === 'qa_view') {
         if (!QA_VIEW_ALLOWED_SECTIONS.includes(id)) {
           showSection('articles', document.querySelector(`[onclick*="showSection('articles'"]`));
+          return;
+        }
+      } else if (id === 'training-build') {
+        // Per-user grant, not role-gated — see applyRoleVisibility().
+        if (currentUserRole !== 'super_admin' && !currentUserCanBuildTraining) {
+          showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
       } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
@@ -3130,6 +3149,7 @@
           document.getElementById('userEmail').disabled = true;
           document.getElementById('userRole').value = u.role;
           document.getElementById('userActive').checked = !!u.active;
+          document.getElementById('userCanBuildTraining').checked = !!u.can_build_training;
         }
       } else {
         document.getElementById('userName').value = '';
@@ -3137,6 +3157,7 @@
         document.getElementById('userEmail').disabled = false;
         document.getElementById('userRole').value = 'user';
         document.getElementById('userActive').checked = true;
+        document.getElementById('userCanBuildTraining').checked = false;
       }
       document.getElementById('userPassword').value = '';
       document.getElementById('userModal').classList.add('open');
@@ -3154,6 +3175,7 @@
       const password = document.getElementById('userPassword').value;
       const role = document.getElementById('userRole').value;
       const active = document.getElementById('userActive').checked;
+      const canBuildTraining = document.getElementById('userCanBuildTraining').checked;
 
       if (!name) { toast('Name is required', 'error'); return; }
       if (!id && !email) { toast('Email is required', 'error'); return; }
@@ -3163,8 +3185,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, ...(password ? { password } : {}) }
-          : { email, name, password, role, active };
+          ? { name, role, active, canBuildTraining, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining };
 
         const res = await fetch(url, {
           method,
@@ -4249,7 +4271,7 @@
       try {
         trainingCourses = await fetch('/api/training/courses').then(r => r.json());
         if (!trainingCourses.length) {
-          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No courses yet${currentUserRole === 'super_admin' ? ' — head to Build Training to create one' : ' — ask a super admin to build one'}.</div>`;
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No courses yet${(currentUserRole === 'super_admin' || currentUserCanBuildTraining) ? ' — head to Build Training to create one' : ' — ask a super admin to build one'}.</div>`;
           return;
         }
         body.innerHTML = `

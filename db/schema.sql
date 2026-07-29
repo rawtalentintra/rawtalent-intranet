@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ DEFAULT now(),
   last_login TIMESTAMPTZ
 );
+-- Per-user grant, not a role — Build Training needs to be handed to one
+-- specific person (e.g. Sophia) without opening it to every admin.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_build_training BOOLEAN DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS articles (
   id TEXT PRIMARY KEY,

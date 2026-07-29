@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin, requireSuperAdmin, requireTrainingBuilder } = require('../middleware/authMiddleware');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const training = require('../services/trainingService');
 
@@ -12,7 +12,9 @@ function isStaff(role) { return role === 'admin' || role === 'super_admin'; }
 // Training Dashboard (read-only: course list, detail, results) and taking a
 // course are open to every signed-in user — assigning a course to someone
 // only helps if they can actually see and take it. Building/editing/
-// publishing/deleting a course, and assigning it, stays super_admin only,
+// publishing/deleting a course is gated to super_admin or whoever has the
+// per-user can_build_training flag (see requireTrainingBuilder) — assigning
+// a course stays super_admin only regardless,
 // gated per-route below.
 router.use(requireAuth);
 
@@ -75,7 +77,7 @@ router.patch('/courses/:id/assignments/:userEmail', requireSuperAdmin, async (re
 // documents (pdf/docx/txt) — uploaded files win over pasted text if both
 // are present. Each file's text is kept under a heading naming the source
 // file, so the model can tell where one document ends and the next begins.
-router.post('/courses/generate', requireSuperAdmin, upload.array('documents', 10), async (req, res) => {
+router.post('/courses/generate', requireTrainingBuilder, upload.array('documents', 10), async (req, res) => {
   try {
     const { title, description } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Course title is required' });
@@ -103,7 +105,7 @@ router.post('/courses/generate', requireSuperAdmin, upload.array('documents', 10
   }
 });
 
-router.put('/courses/:id', requireSuperAdmin, async (req, res) => {
+router.put('/courses/:id', requireTrainingBuilder, async (req, res) => {
   try {
     await training.updateCourse(req.params.id, req.body);
     res.json({ success: true });
@@ -112,7 +114,7 @@ router.put('/courses/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.delete('/courses/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/courses/:id', requireTrainingBuilder, async (req, res) => {
   try {
     await training.deleteCourse(req.params.id);
     res.json({ success: true });
@@ -121,7 +123,7 @@ router.delete('/courses/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.put('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
+router.put('/modules/:moduleId', requireTrainingBuilder, async (req, res) => {
   try {
     await training.updateModule(req.params.moduleId, req.body);
     res.json({ success: true });
@@ -130,7 +132,7 @@ router.put('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.delete('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
+router.delete('/modules/:moduleId', requireTrainingBuilder, async (req, res) => {
   try {
     await training.deleteModule(req.params.moduleId);
     res.json({ success: true });
@@ -139,7 +141,7 @@ router.delete('/modules/:moduleId', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.put('/questions/:questionId', requireSuperAdmin, async (req, res) => {
+router.put('/questions/:questionId', requireTrainingBuilder, async (req, res) => {
   try {
     await training.updateQuestion(req.params.questionId, req.body);
     res.json({ success: true });
@@ -148,7 +150,7 @@ router.put('/questions/:questionId', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.delete('/questions/:questionId', requireSuperAdmin, async (req, res) => {
+router.delete('/questions/:questionId', requireTrainingBuilder, async (req, res) => {
   try {
     await training.deleteQuestion(req.params.questionId);
     res.json({ success: true });
