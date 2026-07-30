@@ -837,6 +837,33 @@
     </div>
   </div>
 
+  <!-- Plot Leave Modal — Joy/Sophia only, always auto-approved -->
+  <div class="modal-overlay" id="plotLeaveModal" onclick="if(event.target===this)closePlotLeaveModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title">Plot Leave</div>
+        <button class="modal-close" onclick="closePlotLeaveModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">This is added straight to the calendar as approved — the 2-week notice rule doesn't apply here.</div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Who is this for?</label>
+          <select id="plotLeaveUserSelect" class="form-control"></select>
+        </div>
+        <div id="plotLeaveModalCalendar"></div>
+        <div id="plotLeaveModalRangeLabel" style="font-size:12.5px;font-weight:600;color:var(--navy);margin:10px 0"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Reason <span class="optional">(optional)</span></label>
+          <textarea id="plotLeaveReasonInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Optional note"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closePlotLeaveModal()">Cancel</button>
+        <button class="btn-add" onclick="submitPlotLeave()">Add to Calendar</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -2081,6 +2108,10 @@
     let leaveRangeEnd = null;
     let leaveTeamMonth = new Date();
     let leaveTeamData = [];
+    let plottableUsers = [];
+    let plotModalMonth = new Date();
+    let plotRangeStart = null;
+    let plotRangeEnd = null;
 
     function toDateStr(d) {
       return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -2141,7 +2172,10 @@
       const myHtml = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px">
           <div style="font-weight:700;color:var(--navy);font-size:14px">My Requests</div>
-          <button class="btn-add" onclick="openLeaveRequestModal()">+ Request Leave</button>
+          <div style="display:flex;gap:8px">
+            ${leavePolicy.canPlot ? `<button class="btn-secondary" onclick="openPlotLeaveModal()">+ Plot Leave</button>` : ''}
+            <button class="btn-add" onclick="openLeaveRequestModal()">+ Request Leave</button>
+          </div>
         </div>
         ${myLeaveRequests.length === 0 ? `
           <div class="empty-wrap"><div class="empty-icon">🏖️</div><div class="empty-title">No leave requests yet</div></div>
@@ -2301,6 +2335,85 @@
         closeLeaveRequestModal();
         loadLeaveRequestView();
         loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Plot Leave (Joy/Sophia only — always auto-approved) ─────────
+    async function openPlotLeaveModal() {
+      plotRangeStart = null;
+      plotRangeEnd = null;
+      plotModalMonth = new Date();
+      document.getElementById('plotLeaveReasonInput').value = '';
+      if (!plottableUsers.length) {
+        try { plottableUsers = await fetch('/api/leave-requests/plottable-users').then(r => r.json()); } catch { plottableUsers = []; }
+      }
+      const select = document.getElementById('plotLeaveUserSelect');
+      select.innerHTML = plottableUsers.map(u => `<option value="${escHtml(u.email)}" data-name="${escHtml(u.name || u.email)}">${escHtml(u.name || u.email)}</option>`).join('');
+      renderPlotModalCalendar();
+      document.getElementById('plotLeaveModal').classList.add('open');
+    }
+    function closePlotLeaveModal() {
+      document.getElementById('plotLeaveModal').classList.remove('open');
+    }
+    function changePlotModalMonth(delta) {
+      plotModalMonth.setMonth(plotModalMonth.getMonth() + delta);
+      renderPlotModalCalendar();
+    }
+    function selectPlotDate(dateStr) {
+      if (!plotRangeStart || plotRangeEnd) {
+        plotRangeStart = dateStr;
+        plotRangeEnd = null;
+      } else if (dateStr < plotRangeStart) {
+        plotRangeStart = dateStr;
+      } else {
+        plotRangeEnd = dateStr;
+      }
+      renderPlotModalCalendar();
+    }
+    function renderPlotModalCalendar() {
+      const year = plotModalMonth.getFullYear(), month = plotModalMonth.getMonth();
+      const cells = daysInMonthGrid(year, month);
+      const monthLabel = plotModalMonth.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+      const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+      const cellsHtml = cells.map(c => {
+        const inRange = plotRangeStart && plotRangeEnd && c.dateStr >= plotRangeStart && c.dateStr <= plotRangeEnd;
+        const isEdge = c.dateStr === plotRangeStart || c.dateStr === plotRangeEnd;
+        const bg = isEdge ? 'var(--orange)' : inRange ? '#ffe9d6' : 'transparent';
+        const color = isEdge ? 'white' : 'var(--text)';
+        return `<div onclick="selectPlotDate('${c.dateStr}')" style="text-align:center;padding:7px 0;border-radius:6px;font-size:12.5px;cursor:pointer;background:${bg};color:${color};opacity:${c.inMonth ? 1 : 0.35}">${c.date.getDate()}</div>`;
+      }).join('');
+      document.getElementById('plotLeaveModalCalendar').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <button onclick="changePlotModalMonth(-1)" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">‹</button>
+          <div style="font-weight:700;font-size:13px;color:var(--navy)">${monthLabel}</div>
+          <button onclick="changePlotModalMonth(1)" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">›</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:4px">
+          ${dayNames.map(d => `<div>${d}</div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${cellsHtml}</div>
+      `;
+      const label = document.getElementById('plotLeaveModalRangeLabel');
+      label.textContent = plotRangeStart ? `Selected: ${fmtDate(plotRangeStart)}${plotRangeEnd && plotRangeEnd !== plotRangeStart ? ' to ' + fmtDate(plotRangeEnd) : ''}` : 'Select the start date, then the end date';
+    }
+    async function submitPlotLeave() {
+      if (!plotRangeStart) { toast('Pick a start date', 'error'); return; }
+      const select = document.getElementById('plotLeaveUserSelect');
+      const forUserEmail = select.value;
+      if (!forUserEmail) { toast('Pick who this leave is for', 'error'); return; }
+      const forUserName = select.selectedOptions[0]?.dataset.name || forUserEmail;
+      const endDate = plotRangeEnd || plotRangeStart;
+      const reason = document.getElementById('plotLeaveReasonInput').value.trim();
+      try {
+        const res = await fetch('/api/leave-requests/plot', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ forUserEmail, forUserName, startDate: plotRangeStart, endDate, reason })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to add', 'error'); return; }
+        toast(`Leave added for ${forUserName}`, 'success');
+        closePlotLeaveModal();
+        loadLeaveRequestView();
       } catch { toast('Network error', 'error'); }
     }
 

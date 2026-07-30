@@ -71,6 +71,18 @@ async function createRequest({ id, userEmail, userName, startDate, endDate, reas
     throw new Error('End date must be on or after the start date');
   }
 
+  // A final approver's own leave doesn't need to go through themselves (or
+  // anyone else) — they can already approve any request, so routing their
+  // own through the chain would just be them approving it a moment later.
+  if (isFinalApprover(userEmail)) {
+    await db.execute({
+      sql: `INSERT INTO leave_requests (id, user_email, user_name, start_date, end_date, reason, status, level2_decided_by, level2_decided_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, now())`,
+      args: [id, userEmail, userName, startDate, endDate, reason, userEmail]
+    });
+    return getRequest(id);
+  }
+
   const level1 = await resolveLevel1Approver(db, userEmail);
   const status = level1 ? 'pending_manager' : 'pending_final';
 
@@ -80,6 +92,24 @@ async function createRequest({ id, userEmail, userName, startDate, endDate, reas
     args: [id, userEmail, userName, startDate, endDate, reason, status, level1?.email || null, level1?.name || null]
   });
 
+  return getRequest(id);
+}
+
+// Joy/Sophia plotting leave directly for anyone (including each other) —
+// always auto-approved, no chain at all. Distinct from the self-request
+// auto-approve above: this can be FOR someone else, and always records who
+// actually plotted it (actorEmail), not the plotted-for person, as the
+// decider. Callers must check isFinalApprover(actorEmail) before calling
+// this — it does not re-check, since the route already gates it.
+async function plotLeave({ id, actorEmail, forUserEmail, forUserName, startDate, endDate, reason }) {
+  if (new Date(endDate) < new Date(startDate)) {
+    throw new Error('End date must be on or after the start date');
+  }
+  await getDb().execute({
+    sql: `INSERT INTO leave_requests (id, user_email, user_name, start_date, end_date, reason, status, level2_decided_by, level2_decided_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, now())`,
+    args: [id, forUserEmail, forUserName, startDate, endDate, reason || 'Added directly by admin', actorEmail]
+  });
   return getRequest(id);
 }
 
@@ -156,4 +186,4 @@ async function deleteRequest(id) {
   await getDb().execute({ sql: 'DELETE FROM leave_requests WHERE id = ?', args: [id] });
 }
 
-module.exports = { MIN_NOTICE_DAYS, earliestSelectableDate, isFinalApprover, FINAL_APPROVERS, createRequest, getRequest, listMine, listPendingFor, decide, listApprovedInRange, listAll, deleteRequest };
+module.exports = { MIN_NOTICE_DAYS, earliestSelectableDate, isFinalApprover, FINAL_APPROVERS, createRequest, plotLeave, getRequest, listMine, listPendingFor, decide, listApprovedInRange, listAll, deleteRequest };
