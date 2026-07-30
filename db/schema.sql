@@ -740,3 +740,48 @@ CREATE TABLE IF NOT EXISTS webex_agent_status_history (
 );
 CREATE INDEX IF NOT EXISTS idx_webex_agent_status_history_email ON webex_agent_status_history(email);
 CREATE INDEX IF NOT EXISTS idx_webex_agent_status_history_open ON webex_agent_status_history(email) WHERE ended_at IS NULL;
+
+-- Two-stage leave approval: the requester's direct Team Manager (resolved
+-- from team_members.manager_id at submit time, cached here rather than
+-- re-resolved live so a later org-chart change never rewrites history)
+-- approves first, then either Operations Manager (Sophia or Joy — a fixed
+-- pool, not derived from the chart) gives final approval. A request whose
+-- resolved level-1 approver has no login, or IS already one of the level-2
+-- approvers (e.g. Lorie/Adzi's own leave), skips straight to 'pending_final'
+-- since a separate level-1 step would just be the same person/pool twice.
+CREATE TABLE IF NOT EXISTS leave_requests (
+  id TEXT PRIMARY KEY,
+  user_email CITEXT NOT NULL,
+  user_name TEXT,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_manager', -- 'pending_manager' | 'pending_final' | 'approved' | 'rejected'
+  level1_approver_email CITEXT,
+  level1_approver_name TEXT,
+  level1_decided_by CITEXT,
+  level1_decided_at TIMESTAMPTZ,
+  level2_decided_by CITEXT,
+  level2_decided_at TIMESTAMPTZ,
+  decision_note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_user_email ON leave_requests(user_email);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
+
+-- Seeded once so the policy is discoverable in the knowledge base the moment
+-- the Leave Request feature ships — DO NOTHING on conflict since an admin
+-- may have since edited it via the normal Articles UI.
+INSERT INTO articles (id, title, summary, content, category, tags, author_email, published)
+VALUES (
+  'policy-leave-request',
+  'Leave Request Policy & Procedure',
+  'How to request leave, the 2-week notice requirement, and the approval process.',
+  '<h2>1. Purpose</h2><p>This policy sets out how RawTalent team members request leave, how requests are approved, and what happens if leave isn''t requested properly. It applies to all staff.</p><h2>2. Advance Notice — 2 Weeks, No Exceptions</h2><p><strong>Leave must be requested at least two (2) weeks before the first day off.</strong> This gives the team enough time to plan around your absence — reassign calls, cover shifts, and keep things running smoothly for clients and educators.</p><p>The Leave Request calendar in the intranet enforces this automatically: any date within the next two weeks is greyed out and cannot be selected.</p><h2>3. Unapproved Absence Is Unpaid</h2><p>If you don''t come in and haven''t had leave approved in advance through the proper process, that day is treated as <strong>unpaid</strong>. Submitting a request doesn''t guarantee time off until it''s actually approved — check your request status before making other plans.</p><h2>4. How to Apply</h2><ol><li>Go to the intranet and click <strong>🏖️ Leave Request</strong> in the main menu.</li><li>Click <strong>+ Request Leave</strong>.</li><li>Select your dates on the calendar. Anything within the next two weeks is greyed out and can''t be picked.</li><li>Enter a reason for your leave.</li><li>Submit. You''ll be able to track its status on the same page.</li></ol><h2>5. Approval Process</h2><p>Every leave request goes through two levels of approval:</p><ol><li><strong>Level 1 — Your Team Manager.</strong> Lorie approves requests from her direct reports (AM Team); Adzi approves requests from her direct reports (PM Team). This is resolved automatically from the team structure — you don''t need to pick an approver yourself.</li><li><strong>Level 2 — Final Approval.</strong> Once your Team Manager approves, both Sophia and Joy are notified. Either one approving finalises the request.</li></ol><p>If either level rejects the request, it stops there and you''ll be notified with a reason.</p><h2>6. Notifications & the Team Calendar</h2><ul><li>Approvers are notified in-app the moment a request needs their decision.</li><li>Once fully approved, you''ll get a notification confirming your leave.</li><li>Your name is automatically added to the shared <strong>Team Leave Calendar</strong> on your approved dates (e.g. "Dona on Leave"), so everyone can see who''s out and when.</li></ul><h2>7. Questions</h2><p>If you''re unsure whether your leave qualifies, or you have an urgent/short-notice situation, speak to your Team Manager (Lorie or Adzi) directly before submitting.</p>',
+  'Policies',
+  '["leave", "policy", "HR", "SOP"]'::jsonb,
+  'joy@rawtalent.com.au',
+  true
+) ON CONFLICT (id) DO NOTHING;

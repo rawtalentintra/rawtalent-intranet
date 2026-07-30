@@ -673,6 +673,7 @@
         <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
         <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
         <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
+        <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -813,6 +814,29 @@
     </div>
   </div>
 
+  <!-- New Leave Request Modal -->
+  <div class="modal-overlay" id="leaveRequestModal" onclick="if(event.target===this)closeLeaveRequestModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title">Request Leave</div>
+        <button class="modal-close" onclick="closeLeaveRequestModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Leave needs at least 2 weeks' notice so the team has time to prepare — dates within that window are greyed out.</div>
+        <div id="leaveModalCalendar"></div>
+        <div id="leaveModalRangeLabel" style="font-size:12.5px;font-weight:600;color:var(--navy);margin:10px 0"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Reason</label>
+          <textarea id="leaveReasonInput" class="form-control" style="min-height:80px;resize:vertical" placeholder="Why are you requesting leave?"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeLeaveRequestModal()">Cancel</button>
+        <button class="btn-add" onclick="submitLeaveRequest()">Submit Request</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -862,7 +886,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -889,6 +913,28 @@
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
+      if (notifData.leaveApprovals?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Leave requests awaiting your approval</div>
+          ${notifData.leaveApprovals.map(l => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('leave')">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">🏖️ ${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml(l.reason)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      if (notifData.leaveDecisions?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
+          ${notifData.leaveDecisions.map(l => `
+            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('leave')">
+              <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
       if (notifData.trainingAssignments?.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Training assigned to you</div>
@@ -1200,6 +1246,7 @@
       const isFaq = mode === 'faq';
       const isTeam = mode === 'team';
       const isTraining = mode === 'training';
+      const isLeave = mode === 'leave';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
@@ -1207,7 +1254,8 @@
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
       document.getElementById('tabTeam').classList.toggle('active', isTeam);
       document.getElementById('tabTraining').classList.toggle('active', isTraining);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining);
+      document.getElementById('tabLeave').classList.toggle('active', isLeave);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1217,6 +1265,7 @@
         : isFaq ? 'Frequently asked questions'
         : isTeam ? 'Our Team'
         : isTraining ? 'Training'
+        : isLeave ? 'Leave Request'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Ask AI anything — searches across all articles, documents, and reference sites'
@@ -1225,6 +1274,7 @@
         : isFaq ? 'Real questions from the team, reviewed and approved'
         : isTeam ? 'Team hierarchy and HR profiles'
         : isTraining ? 'Courses assigned to you, and anything else you want to brush up on'
+        : isLeave ? 'Request leave, track approvals, and see who\'s off'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -1245,6 +1295,8 @@
         loadTeamView();
       } else if (isTraining) {
         loadTrainingView();
+      } else if (isLeave) {
+        loadLeaveRequestView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
@@ -2018,6 +2070,238 @@
       if (!iso) return '';
       try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
       catch { return ''; }
+    }
+
+    // ── Leave Request ────────────────────────────────────────────
+    let leavePolicy = { minNoticeDays: 14, earliestSelectableDate: null };
+    let myLeaveRequests = [];
+    let pendingLeaveApprovals = [];
+    let leaveModalMonth = new Date();
+    let leaveRangeStart = null;
+    let leaveRangeEnd = null;
+    let leaveTeamMonth = new Date();
+    let leaveTeamData = [];
+
+    function toDateStr(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function daysInMonthGrid(year, month) {
+      const firstOfMonth = new Date(year, month, 1);
+      const gridStart = new Date(year, month, 1 - firstOfMonth.getDay());
+      const cells = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + i);
+        cells.push({ date: d, dateStr: toDateStr(d), inMonth: d.getMonth() === month });
+      }
+      return cells;
+    }
+    function leaveStatusLabel(status) {
+      return { pending_manager: 'Pending Manager Approval', pending_final: 'Pending Final Approval', approved: 'Approved', rejected: 'Rejected' }[status] || status;
+    }
+    function leaveStatusColor(status) {
+      return { pending_manager: '#b45309', pending_final: '#b45309', approved: '#15803d', rejected: '#b91c1c' }[status] || 'var(--text-muted)';
+    }
+
+    async function loadLeaveRequestView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        const [policy, mine, pending] = await Promise.all([
+          fetch('/api/leave-requests/policy').then(r => r.json()),
+          fetch('/api/leave-requests/my').then(r => r.json()),
+          fetch('/api/leave-requests/pending').then(r => r.json())
+        ]);
+        leavePolicy = policy;
+        myLeaveRequests = mine;
+        pendingLeaveApprovals = pending;
+        renderLeaveRequestView();
+        leaveTeamMonth = new Date();
+        loadLeaveTeamCalendar();
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load leave requests.</div></div>';
+      }
+    }
+
+    function renderLeaveRequestView() {
+      const list = document.getElementById('resultsList');
+      const approvalsHtml = pendingLeaveApprovals.length ? `
+        <div style="font-weight:700;color:var(--navy);font-size:14px;margin:4px 0 10px">Pending Your Approval</div>
+        ${pendingLeaveApprovals.map(l => `
+          <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:10px">
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:4px">${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+            <div style="font-size:12.5px;color:var(--text);margin-bottom:10px">${escHtml(l.reason)}</div>
+            <div style="display:flex;gap:8px">
+              <button onclick="decideLeaveRequest('${l.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+              <button onclick="decideLeaveRequest('${l.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+            </div>
+          </div>
+        `).join('')}
+      ` : '';
+
+      const myHtml = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px">
+          <div style="font-weight:700;color:var(--navy);font-size:14px">My Requests</div>
+          <button class="btn-add" onclick="openLeaveRequestModal()">+ Request Leave</button>
+        </div>
+        ${myLeaveRequests.length === 0 ? `
+          <div class="empty-wrap"><div class="empty-icon">🏖️</div><div class="empty-title">No leave requests yet</div></div>
+        ` : myLeaveRequests.map(l => `
+          <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:14px 16px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+              <div style="font-size:11.5px;font-weight:700;color:${leaveStatusColor(l.status)};white-space:nowrap">${leaveStatusLabel(l.status)}</div>
+            </div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">${escHtml(l.reason)}</div>
+            ${l.status === 'rejected' && l.decision_note ? `<div style="font-size:12px;color:#b91c1c;margin-top:6px">Note: ${escHtml(l.decision_note)}</div>` : ''}
+          </div>
+        `).join('')}
+      `;
+
+      const calendarHtml = `
+        <div style="font-weight:700;color:var(--navy);font-size:14px;margin:24px 0 10px">Team Leave Calendar</div>
+        <div id="leaveTeamCalendarWrap"><div class="spinner-wrap"><div class="spinner"></div></div></div>
+      `;
+
+      list.innerHTML = approvalsHtml + myHtml + calendarHtml;
+    }
+
+    async function decideLeaveRequest(id, decision) {
+      let note = '';
+      if (decision === 'reject') note = prompt('Reason for rejecting (optional):') || '';
+      try {
+        const res = await fetch(`/api/leave-requests/${id}/${decision}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit decision', 'error'); return; }
+        toast(decision === 'approve' ? 'Leave approved' : 'Leave rejected', 'success');
+        loadLeaveRequestView();
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function loadLeaveTeamCalendar() {
+      const year = leaveTeamMonth.getFullYear(), month = leaveTeamMonth.getMonth();
+      const from = toDateStr(new Date(year, month, 1));
+      const to = toDateStr(new Date(year, month + 1, 0));
+      try {
+        leaveTeamData = await fetch(`/api/leave-requests/calendar?from=${from}&to=${to}`).then(r => r.json());
+      } catch { leaveTeamData = []; }
+      renderLeaveTeamCalendar();
+    }
+    function changeLeaveTeamMonth(delta) {
+      leaveTeamMonth.setMonth(leaveTeamMonth.getMonth() + delta);
+      loadLeaveTeamCalendar();
+    }
+    function renderLeaveTeamCalendar() {
+      const wrap = document.getElementById('leaveTeamCalendarWrap');
+      if (!wrap) return;
+      const year = leaveTeamMonth.getFullYear(), month = leaveTeamMonth.getMonth();
+      const cells = daysInMonthGrid(year, month);
+      const monthLabel = leaveTeamMonth.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const byDate = {};
+      leaveTeamData.forEach(l => {
+        const d = new Date(l.start_date + 'T00:00:00');
+        const end = new Date(l.end_date + 'T00:00:00');
+        while (d <= end) {
+          const ds = toDateStr(d);
+          (byDate[ds] = byDate[ds] || []).push((l.user_name || l.user_email).split(' ')[0]);
+          d.setDate(d.getDate() + 1);
+        }
+      });
+      const cellsHtml = cells.map(c => {
+        const names = byDate[c.dateStr] || [];
+        return `<div style="min-height:58px;border:1px solid var(--gray-100);border-radius:6px;padding:4px;opacity:${c.inMonth ? 1 : 0.35}">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">${c.date.getDate()}</div>
+          ${names.map(n => `<div style="font-size:10px;background:#eef2ff;color:var(--navy);border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(n)} on Leave</div>`).join('')}
+        </div>`;
+      }).join('');
+      wrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <button onclick="changeLeaveTeamMonth(-1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">‹</button>
+          <div style="font-weight:700;font-size:14px;color:var(--navy)">${monthLabel}</div>
+          <button onclick="changeLeaveTeamMonth(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:4px">
+          ${dayNames.map(d => `<div>${d}</div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cellsHtml}</div>
+      `;
+    }
+
+    function openLeaveRequestModal() {
+      leaveRangeStart = null;
+      leaveRangeEnd = null;
+      leaveModalMonth = leavePolicy.earliestSelectableDate ? new Date(leavePolicy.earliestSelectableDate + 'T00:00:00') : new Date();
+      document.getElementById('leaveReasonInput').value = '';
+      renderLeaveModalCalendar();
+      document.getElementById('leaveRequestModal').classList.add('open');
+    }
+    function closeLeaveRequestModal() {
+      document.getElementById('leaveRequestModal').classList.remove('open');
+    }
+    function changeLeaveModalMonth(delta) {
+      leaveModalMonth.setMonth(leaveModalMonth.getMonth() + delta);
+      renderLeaveModalCalendar();
+    }
+    function selectLeaveDate(dateStr) {
+      if (!leaveRangeStart || leaveRangeEnd) {
+        leaveRangeStart = dateStr;
+        leaveRangeEnd = null;
+      } else if (dateStr < leaveRangeStart) {
+        leaveRangeStart = dateStr;
+      } else {
+        leaveRangeEnd = dateStr;
+      }
+      renderLeaveModalCalendar();
+    }
+    function renderLeaveModalCalendar() {
+      const year = leaveModalMonth.getFullYear(), month = leaveModalMonth.getMonth();
+      const cells = daysInMonthGrid(year, month);
+      const minStr = leavePolicy.earliestSelectableDate || toDateStr(new Date());
+      const monthLabel = leaveModalMonth.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+      const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+      const cellsHtml = cells.map(c => {
+        const disabled = !c.inMonth || c.dateStr < minStr;
+        const inRange = leaveRangeStart && leaveRangeEnd && c.dateStr >= leaveRangeStart && c.dateStr <= leaveRangeEnd;
+        const isEdge = c.dateStr === leaveRangeStart || c.dateStr === leaveRangeEnd;
+        const bg = isEdge ? 'var(--orange)' : inRange ? '#ffe9d6' : 'transparent';
+        const color = isEdge ? 'white' : disabled ? 'var(--gray-300)' : 'var(--text)';
+        return `<div ${disabled ? '' : `onclick="selectLeaveDate('${c.dateStr}')"`} style="text-align:center;padding:7px 0;border-radius:6px;font-size:12.5px;cursor:${disabled ? 'default' : 'pointer'};background:${bg};color:${color};opacity:${c.inMonth ? 1 : 0.35}">${c.date.getDate()}</div>`;
+      }).join('');
+      document.getElementById('leaveModalCalendar').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <button onclick="changeLeaveModalMonth(-1)" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">‹</button>
+          <div style="font-weight:700;font-size:13px;color:var(--navy)">${monthLabel}</div>
+          <button onclick="changeLeaveModalMonth(1)" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">›</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:4px">
+          ${dayNames.map(d => `<div>${d}</div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${cellsHtml}</div>
+      `;
+      const label = document.getElementById('leaveModalRangeLabel');
+      label.textContent = leaveRangeStart ? `Selected: ${fmtDate(leaveRangeStart)}${leaveRangeEnd && leaveRangeEnd !== leaveRangeStart ? ' to ' + fmtDate(leaveRangeEnd) : ''}` : 'Select your start date, then your end date';
+    }
+    async function submitLeaveRequest() {
+      if (!leaveRangeStart) { toast('Pick a start date', 'error'); return; }
+      const endDate = leaveRangeEnd || leaveRangeStart;
+      const reason = document.getElementById('leaveReasonInput').value.trim();
+      if (!reason) { toast('Add a reason', 'error'); return; }
+      try {
+        const res = await fetch('/api/leave-requests', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate: leaveRangeStart, endDate, reason })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        toast('Leave request submitted', 'success');
+        closeLeaveRequestModal();
+        loadLeaveRequestView();
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
     }
 
     init();

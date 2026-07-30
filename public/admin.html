@@ -138,6 +138,9 @@
         <div class="admin-nav-item" onclick="showSection('team', this)">
           <span class="admin-nav-icon">🧑‍🤝‍🧑</span> Our Team
         </div>
+        <div class="admin-nav-item" onclick="showSection('leave-requests', this)">
+          <span class="admin-nav-icon">🏖️</span> Leave Requests
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Projects</div>
@@ -305,6 +308,36 @@
               </thead>
               <tbody id="projectsTableBody">
                 <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Leave Requests (oversight — approvals themselves happen in the main app) -->
+      <div class="admin-section" id="section-leave-requests">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Leave Requests</div>
+            <div class="admin-page-sub">Full history, for visibility — approve/reject happens in the main app, by the actual resolved approver</div>
+          </div>
+        </div>
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Dates</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Manager Approver</th>
+                  <th>Final Approver</th>
+                  <th>Submitted</th>
+                </tr>
+              </thead>
+              <tbody id="leaveRequestsTableBody">
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -2679,6 +2712,7 @@
       if (id === 'calls-dashboard') loadCallsDashboard();
       if (id === 'call-rubrics') loadRubricReference();
       if (id === 'team') loadOurTeam();
+      if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
       if (id === 'training-dashboard') loadTrainingDashboard();
@@ -3253,6 +3287,39 @@
       if (!iso) return '';
       try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
       catch { return iso; }
+    }
+
+    const LEAVE_STATUS_META = {
+      pending_manager: { label: 'Pending Manager Approval', color: '#b45309' },
+      pending_final: { label: 'Pending Final Approval', color: '#b45309' },
+      approved: { label: 'Approved', color: '#15803d' },
+      rejected: { label: 'Rejected', color: '#b91c1c' }
+    };
+    async function loadLeaveRequestsAdmin() {
+      const body = document.getElementById('leaveRequestsTableBody');
+      body.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        const rows = await fetch('/api/leave-requests/admin/all').then(r => r.json());
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">No leave requests yet</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => {
+          const meta = LEAVE_STATUS_META[r.status] || { label: r.status, color: 'var(--text-muted)' };
+          return `
+            <tr>
+              <td>${escHtml(r.user_name || r.user_email)}</td>
+              <td>${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}</td>
+              <td style="max-width:220px">${escHtml(r.reason)}</td>
+              <td><span style="font-weight:700;color:${meta.color};font-size:12px">${meta.label}</span></td>
+              <td>${escHtml(r.level1_approver_name || '—')}</td>
+              <td>${r.level2_decided_by ? escHtml(r.level2_decided_by) : '—'}</td>
+              <td>${fmtDate(r.created_at)}</td>
+            </tr>`;
+        }).join('');
+      } catch {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leave requests</td></tr>';
+      }
     }
 
     // Explicitly renders in Melbourne local time regardless of the viewing

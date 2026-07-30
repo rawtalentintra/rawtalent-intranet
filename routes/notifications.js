@@ -6,6 +6,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
 const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const leave = require('../services/leaveService');
 
 const announcementFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -187,11 +188,31 @@ router.get('/', async (req, res) => {
     });
     const trainingAssignments = assignRes.rows.filter(a => a.attempt_status !== 'completed');
 
+    // Leave requests awaiting MY decision (as level-1 manager or a final
+    // approver) — a required action, so this stays in the bell (like
+    // training assignments) until actually approved/rejected, never cleared
+    // by "Mark all read".
+    const leaveApprovals = await leave.listPendingFor(req.user.email);
+
+    // My own requests that were decided — informational, so these dismiss
+    // via notification_dismissals same as announcements.
+    const myDecidedRes = await db.execute({
+      sql: `SELECT lr.*, (d.user_email IS NOT NULL) AS is_read
+            FROM leave_requests lr
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'leave:' || lr.id AND d.user_email = ?
+            WHERE LOWER(lr.user_email) = LOWER(?) AND lr.status IN ('approved', 'rejected')
+            ORDER BY lr.updated_at DESC LIMIT 30`,
+      args: [req.user.email, req.user.email]
+    });
+    const leaveDecisions = myDecidedRes.rows;
+
     const unreadCount = receivedGreetings.filter(g => !g.is_read).length
       + upcomingEvents.filter(e => !e.alreadySent).length
       + announcements.filter(a => !a.is_read).length
-      + trainingAssignments.length;
-    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, unreadCount });
+      + trainingAssignments.length
+      + leaveApprovals.length
+      + leaveDecisions.filter(l => !l.is_read).length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -416,6 +437,20 @@ router.post('/read-all', async (req, res) => {
         sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
               ON CONFLICT (user_email, notification_key) DO NOTHING`,
         args: [req.user.email, `announcement:${row.id}`]
+      });
+    }
+
+    const unreadLeave = await db.execute({
+      sql: `SELECT lr.id FROM leave_requests lr
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'leave:' || lr.id AND d.user_email = ?
+            WHERE LOWER(lr.user_email) = LOWER(?) AND lr.status IN ('approved', 'rejected') AND d.user_email IS NULL`,
+      args: [req.user.email, req.user.email]
+    });
+    for (const row of unreadLeave.rows) {
+      await db.execute({
+        sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
+              ON CONFLICT (user_email, notification_key) DO NOTHING`,
+        args: [req.user.email, `leave:${row.id}`]
       });
     }
 
