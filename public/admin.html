@@ -334,6 +334,7 @@
                   <th>Manager Approver</th>
                   <th>Final Approver</th>
                   <th>Submitted</th>
+                  <th style="width:30px"></th>
                 </tr>
               </thead>
               <tbody id="leaveRequestsTableBody">
@@ -3297,13 +3298,14 @@
     };
     async function loadLeaveRequestsAdmin() {
       const body = document.getElementById('leaveRequestsTableBody');
-      body.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
         const rows = await fetch('/api/leave-requests/admin/all').then(r => r.json());
         if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">No leave requests yet</td></tr>';
+          body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">No leave requests yet</td></tr>';
           return;
         }
+        const canDelete = currentUserRole === 'super_admin';
         body.innerHTML = rows.map(r => {
           const meta = LEAVE_STATUS_META[r.status] || { label: r.status, color: 'var(--text-muted)' };
           return `
@@ -3315,11 +3317,24 @@
               <td>${escHtml(r.level1_approver_name || '—')}</td>
               <td>${r.level2_decided_by ? escHtml(r.level2_decided_by) : '—'}</td>
               <td>${fmtDate(r.created_at)}</td>
+              <td>${canDelete ? `<span title="Delete" style="cursor:pointer;color:var(--text-muted)" onclick="deleteLeaveRequestAdmin('${r.id}')">🗑️</span>` : ''}</td>
             </tr>`;
         }).join('');
       } catch {
-        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leave requests</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leave requests</td></tr>';
       }
+    }
+
+    // super_admin only (route-enforced too) — for testing/cleanup, bypasses
+    // the approve/reject flow entirely rather than recording a decision.
+    async function deleteLeaveRequestAdmin(id) {
+      if (!confirm('Delete this leave request? This cannot be undone.')) return;
+      try {
+        const res = await fetch(`/api/leave-requests/admin/${id}`, { method: 'DELETE' });
+        if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to delete', 'error'); return; }
+        toast('Leave request deleted', 'success');
+        loadLeaveRequestsAdmin();
+      } catch { toast('Network error', 'error'); }
     }
 
     // Explicitly renders in Melbourne local time regardless of the viewing

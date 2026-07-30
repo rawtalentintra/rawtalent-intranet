@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const leave = require('../services/leaveService');
 
 router.use(requireAuth);
@@ -11,6 +11,17 @@ router.use(requireAuth);
 router.get('/admin/all', requireAdmin, async (req, res) => {
   try {
     res.json(await leave.listAll());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Testing/cleanup only — super_admin can remove any leave request outright,
+// separate from the normal approve/reject decision flow.
+router.delete('/admin/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    await leave.deleteRequest(req.params.id);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -150,4 +150,10 @@ async function listAll() {
   return normalizeRows(res.rows);
 }
 
-module.exports = { MIN_NOTICE_DAYS, earliestSelectableDate, isFinalApprover, FINAL_APPROVERS, createRequest, getRequest, listMine, listPendingFor, decide, listApprovedInRange, listAll };
+// Outright removal — testing/cleanup, not a decision, so it bypasses the
+// approve/reject state machine entirely (super_admin only, gated at the route).
+async function deleteRequest(id) {
+  await getDb().execute({ sql: 'DELETE FROM leave_requests WHERE id = ?', args: [id] });
+}
+
+module.exports = { MIN_NOTICE_DAYS, earliestSelectableDate, isFinalApprover, FINAL_APPROVERS, createRequest, getRequest, listMine, listPendingFor, decide, listApprovedInRange, listAll, deleteRequest };
