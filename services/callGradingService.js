@@ -142,6 +142,10 @@ function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration
       }).join('\n')}\nFor each category named above, adjust its score and explain in its notes how the feedback changed your assessment. A "General" item may bear on any category — apply it wherever it's actually relevant. Every category NOT named above (directly or via General) must stay exactly as given in the current results above.`
     : '';
 
+  // Deliberately NOT part of the cached block below — repName differs on
+  // every single call, so folding it into the shared prefix would mean a
+  // different cache entry per rep instead of one shared across everyone
+  // being graded against the same rubric, defeating most of the point.
   const repIdentityBlock = repName
     ? `\n\nThe RawTalent consultant on this call is named "${repName}" — this is confirmed from the call record, not something to infer from the transcript. Always refer to the consultant being graded as "${repName}" in your notes and summary. The transcript may mention other people by name (the educator, a centre contact, a colleague) — never confuse one of them with the consultant, and never substitute a different name for the consultant even if the transcript's speaker labels are generic (e.g. "Rep:", "Agent:") or a different name is mentioned elsewhere in the call.`
     : '';
@@ -175,7 +179,15 @@ function buildSystemPrompt(rubric, repName, { knowledgeMatches = [], calibration
     ? `\n\nDubber's own AI analysis of this call's actual audio — genuine evidence of how the call sounded, not inferred from the transcript text. Weigh it across every category where delivery is part of the criteria, not only Opening & Rapport: a confident, steady tone supports a strong Active Listening or Critical Thinking score even on a tricky topic; a tentative or fearful moment right where compliance requirements are being explained is worth naming under Compliance Accuracy; the emotional arc across the call is relevant to Closing. If the transcript text and this audio signal genuinely conflict on a factual claim, the transcript wins — it's the words actually said. But for anything about HOW something was said (warmth, confidence, hesitation, frustration), this is the most reliable evidence available, and when it changes your read of a category, name it explicitly in that category's notes rather than only citing the words.\n\n${sentimentParts.join('\n\n')}`
     : '';
 
-  return `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}${repIdentityBlock}
+  // Everything in `cached` depends only on the rubric + standing calibration
+  // notes, never on any single call (no rep name, transcript content,
+  // feedback, or audio signal) — so it's identical across every call graded
+  // against this rubric until an admin adds/removes a calibration note. That
+  // makes it the cache_control breakpoint in gradeCall: repeat evaluations
+  // within the cache window reuse it at a steep discount instead of paying
+  // full price for the same ~1000+ tokens of instructions every time.
+  // `dynamic` is everything that genuinely differs per call.
+  const cached = `You are a senior Quality Assurance and Operations Manager for RawTalent, an Australian childcare staffing agency, with deep experience coaching consultants and managing compliance risk in a regulated industry. You are grading a real call transcript against a fixed quality rubric; this call is ${rubric.description}
 
 Your notes will be read by both the consultant being coached and their manager. Grade like the expert you are — weigh operational and compliance consequences, not just surface politeness — not like a generic transcript summariser.
 
@@ -201,9 +213,13 @@ For EVERY one of these ${rubric.categories.length} categories, without exception
 
 Do not write thin or generic notes for any category, including ones that scored well. A 4 or 5 still deserves the same substantive, specific reasoning as a low score — never let a strong category get less explanation than a weak one, and never leave any category's notes blank or shorter than the others. If a category genuinely cannot be judged from the transcript, still write 3-5 sentences explaining why, rather than leaving it empty.
 
-When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${knowledgeBlock}${calibrationBlock}${currentResultBlock}${feedbackBlock}${sentimentBlock}${glossaryBlock}
+When quoting the transcript, use plain text only — never HTML tags or markup of any kind, even if the transcript itself contains any (strip it out silently).${calibrationBlock}${glossaryBlock}`;
+
+  const dynamic = `${repIdentityBlock}${knowledgeBlock}${currentResultBlock}${feedbackBlock}${sentimentBlock}
 
 Call the submit_grading tool exactly once, with one scores entry for each of these exact keys: ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — no more, no fewer.`;
+
+  return { cached, dynamic };
 }
 
 // Grading is submitted as a tool call rather than free-text JSON — the API
@@ -657,7 +673,19 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
   }
   const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const system = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, documentEmotion, sentenceEmotion, glossaryBlock, currentResult });
+  const { cached, dynamic } = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, documentEmotion, sentenceEmotion, glossaryBlock, currentResult });
+  if (process.env.DEBUG_CACHE_USAGE) console.log('CACHED_BLOCK_CHARS', cached.length, '~tokens', Math.round(cached.length / 4));
+  // The rubric/calibration/glossary block is identical across every call
+  // graded against this rubric until a note is added or removed — marking
+  // it as an ephemeral cache breakpoint means repeat evaluations within the
+  // cache window (5 min) pay full price for it once, then ~10% of that on
+  // every subsequent call, instead of the whole block every single time.
+  // Below the model's minimum cacheable length it's simply not cached (no
+  // error) — this still costs nothing to leave in place either way.
+  const system = [
+    { type: 'text', text: cached, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: dynamic }
+  ];
   const tool = buildGradingTool(rubric);
 
   async function runOnce() {
@@ -666,7 +694,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
     // summary, plus any calibration/feedback context, needs real headroom —
     // too little was cutting the response off mid-way.
     const response = await client.messages.create({
-      model: 'claude-sonnet-5',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 6144,
       system,
       tools: [tool],
@@ -674,6 +702,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
       messages: [{ role: 'user', content: cleanTranscript.slice(0, 12000) }]
     });
 
+    if (process.env.DEBUG_CACHE_USAGE) console.log('USAGE_DEBUG', JSON.stringify(response.usage));
     if (response.stop_reason === 'max_tokens') {
       throw new Error('The AI response was cut off before it finished (ran out of output length) — please try again.');
     }
