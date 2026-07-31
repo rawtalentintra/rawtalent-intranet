@@ -241,6 +241,63 @@ function pickCdrTimestamp(row, ...candidates) {
   return value === '' ? null : value;
 }
 
+function normalizeTokens(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+// Webex's CDR "User" field is whatever name the phone system happens to
+// have on file for that extension — sometimes the nickname people actually
+// go by (team_members.name — "Sophia", "Marsha", "Vicky"), sometimes their
+// legal first name instead (Adzi's Webex name is "Adrianne"; Joy's is "Joy
+// Victoria", from her legal_name "Raquel Joy Victoria") — inconsistent
+// per-person, not a single pattern. A plain exact match against users.name
+// (often a role-styled display name like "Joy — Administrator", not
+// anyone's actual name) was missing the large majority of real people, not
+// just edge cases — 3,244 of 3,711 synced rows had no resolved email before
+// this. Strategy, first match wins: exact nickname match, then exact
+// users.name match, then "every token in the CDR name also appears in
+// their legal name" (catches "Adrianne" ⊆ "Adrianne Kaye Estrella" and
+// "Joy Victoria" ⊆ "Raquel Joy Victoria"), then the same token-subset
+// check against users.name as a last resort for anyone without a
+// team_members row at all.
+async function buildCdrNameMatcher(db) {
+  const usersRes = await db.execute("SELECT email, name FROM users WHERE active = true");
+  const teamRes = await db.execute("SELECT email, name, legal_name FROM team_members WHERE email IS NOT NULL");
+
+  const exactByNickname = new Map(); // team_members.name -> email
+  const exactByUserName = new Map(); // users.name -> email
+  const legalTokensByEmail = new Map(); // email -> token[]
+  const userNameTokensByEmail = new Map(); // email -> token[]
+
+  for (const t of teamRes.rows) {
+    if (t.name) exactByNickname.set(String(t.name).toLowerCase(), t.email);
+    if (t.legal_name) legalTokensByEmail.set(t.email, normalizeTokens(t.legal_name));
+  }
+  for (const u of usersRes.rows) {
+    if (u.name) {
+      exactByUserName.set(String(u.name).toLowerCase(), u.email);
+      userNameTokensByEmail.set(u.email, normalizeTokens(u.name));
+    }
+  }
+
+  return function resolveEmail(cdrUserName) {
+    if (!cdrUserName) return null;
+    const normalized = String(cdrUserName).toLowerCase().trim();
+    if (exactByNickname.has(normalized)) return exactByNickname.get(normalized);
+    if (exactByUserName.has(normalized)) return exactByUserName.get(normalized);
+
+    const cdrTokens = normalizeTokens(cdrUserName);
+    if (!cdrTokens.length) return null;
+    for (const [email, tokens] of legalTokensByEmail) {
+      if (cdrTokens.every(t => tokens.includes(t))) return email;
+    }
+    for (const [email, tokens] of userNameTokensByEmail) {
+      if (cdrTokens.every(t => tokens.includes(t))) return email;
+    }
+    return null;
+  };
+}
+
 async function syncCallHistory(triggeredBy) {
   const accessToken = await getAccessToken();
   if (!accessToken) throw new Error('Webex is not configured.');
@@ -252,8 +309,7 @@ async function syncCallHistory(triggeredBy) {
     : new Date(Date.now() - CDR_WINDOW_MS); // first sync: go back as far as Webex allows (~48h)
   const hardEnd = new Date(Date.now() - CDR_FRESHNESS_BUFFER_MS);
 
-  const usersRes = await db.execute("SELECT email, name FROM users WHERE active = true");
-  const byName = new Map(usersRes.rows.filter(u => u.name).map(u => [String(u.name).toLowerCase(), u.email]));
+  const resolveEmail = await buildCdrNameMatcher(db);
 
   let stored = 0;
   let scanned = 0;
@@ -272,7 +328,7 @@ async function syncCallHistory(triggeredBy) {
       for (const row of items) {
         try {
           const userName = pickCdrField(row, 'User', 'user');
-          const userEmail = userName ? (byName.get(String(userName).toLowerCase()) || null) : null;
+          const userEmail = resolveEmail(userName);
           await db.execute({
             sql: `INSERT INTO webex_cdrs
                   (start_time, answer_time, duration, ring_duration, calling_number, called_number, user_name, user_email, direction, call_type, answered, correlation_id, client_type, location, raw)
@@ -408,4 +464,4 @@ async function getWorkforceStats(rangeDays = 7) {
   return { reps, gaps: gapsRes.rows, rangeDays };
 }
 
-module.exports = { isConfigured, getAgentStatuses, syncCallHistory, getCdrSyncStatus, getWorkforceStats };
+module.exports = { isConfigured, getAgentStatuses, syncCallHistory, getCdrSyncStatus, getWorkforceStats, buildCdrNameMatcher };
