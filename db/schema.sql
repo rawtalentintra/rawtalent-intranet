@@ -771,6 +771,23 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_user_email ON leave_requests(user_
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
 
+-- Team suggestion box. Deliberately flat — one status field admins move
+-- along, one feedback field for their response — no voting/comments/
+-- attachments, kept simple on purpose.
+CREATE TABLE IF NOT EXISTS ideas (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  submitted_by_email CITEXT NOT NULL,
+  submitted_by_name TEXT,
+  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'in_review' | 'in_progress' | 'implemented' | 'not_planned'
+  admin_feedback TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);
+CREATE INDEX IF NOT EXISTS idx_ideas_submitted_by ON ideas(submitted_by_email);
+
 -- Seeded once so the policy is discoverable in the knowledge base the moment
 -- the Leave Request feature ships — DO NOTHING on conflict since an admin
 -- may have since edited it via the normal Articles UI.

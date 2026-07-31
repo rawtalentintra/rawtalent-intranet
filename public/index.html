@@ -674,6 +674,7 @@
         <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
         <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
         <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
+        <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
       </div>
 
       <div id="searchArea" class="hero-search-wrap">
@@ -860,6 +861,60 @@
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closePlotLeaveModal()">Cancel</button>
         <button class="btn-add" onclick="submitPlotLeave()">Add to Calendar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Submit Idea Modal -->
+  <div class="modal-overlay" id="ideaModal" onclick="if(event.target===this)closeIdeaModal()">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <div class="modal-title">Submit an Idea</div>
+        <button class="modal-close" onclick="closeIdeaModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Title</label>
+          <input type="text" id="ideaTitleInput" class="form-control" placeholder="Sum it up in a few words">
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Details <span class="optional">(optional)</span></label>
+          <textarea id="ideaDescriptionInput" class="form-control" style="min-height:100px;resize:vertical" placeholder="Tell us more about it"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeIdeaModal()">Cancel</button>
+        <button class="btn-add" onclick="submitIdea()">Submit Idea</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Idea Modal (admin only) -->
+  <div class="modal-overlay" id="ideaManageModal" onclick="if(event.target===this)closeIdeaManageModal()">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <div class="modal-title">Track Progress</div>
+        <button class="modal-close" onclick="closeIdeaManageModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Status</label>
+          <select id="ideaStatusInput" class="form-control">
+            <option value="new">New</option>
+            <option value="in_review">In Review</option>
+            <option value="in_progress">In Progress</option>
+            <option value="implemented">Implemented</option>
+            <option value="not_planned">Not Planned</option>
+          </select>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Feedback to the team <span class="optional">(optional)</span></label>
+          <textarea id="ideaFeedbackInput" class="form-control" style="min-height:80px;resize:vertical" placeholder="Let them know what's happening with it"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeIdeaManageModal()">Cancel</button>
+        <button class="btn-add" onclick="saveIdeaManage()">Save</button>
       </div>
     </div>
   </div>
@@ -1274,6 +1329,7 @@
       const isTeam = mode === 'team';
       const isTraining = mode === 'training';
       const isLeave = mode === 'leave';
+      const isIdeas = mode === 'ideas';
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
@@ -1282,7 +1338,8 @@
       document.getElementById('tabTeam').classList.toggle('active', isTeam);
       document.getElementById('tabTraining').classList.toggle('active', isTraining);
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave);
+      document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1293,6 +1350,7 @@
         : isTeam ? 'Our Team'
         : isTraining ? 'Training'
         : isLeave ? 'Leave Request'
+        : isIdeas ? 'Submit Ideas'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isAI
         ? 'Ask AI anything — searches across all articles, documents, and reference sites'
@@ -1302,6 +1360,7 @@
         : isTeam ? 'Team hierarchy and HR profiles'
         : isTraining ? 'Courses assigned to you, and anything else you want to brush up on'
         : isLeave ? 'Request leave, track approvals, and see who\'s off'
+        : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isAI) {
@@ -1324,6 +1383,8 @@
         loadTrainingView();
       } else if (isLeave) {
         loadLeaveRequestView();
+      } else if (isIdeas) {
+        loadIdeasView();
       } else {
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
@@ -2414,6 +2475,132 @@
         toast(`Leave added for ${forUserName}`, 'success');
         closePlotLeaveModal();
         loadLeaveRequestView();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Submit Ideas ──────────────────────────────────────────────
+    let allIdeas = [];
+    let managingIdeaId = null;
+
+    const IDEA_STATUS_META = {
+      new: { label: 'New', color: 'var(--text-muted)', bg: 'var(--gray-100)' },
+      in_review: { label: 'In Review', color: '#b45309', bg: '#fff7ed' },
+      in_progress: { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff' },
+      implemented: { label: 'Implemented', color: '#15803d', bg: '#f0fdf4' },
+      not_planned: { label: 'Not Planned', color: '#b91c1c', bg: '#fef2f2' }
+    };
+
+    async function loadIdeasView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        allIdeas = await fetch('/api/ideas').then(r => r.json());
+        renderIdeasView();
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load ideas.</div></div>';
+      }
+    }
+
+    function renderIdeasView() {
+      const list = document.getElementById('resultsList');
+      const isAdmin = currentUserRole === 'admin' || currentUserRole === 'super_admin';
+
+      // Recognition — top contributors by idea count, all time.
+      const counts = {};
+      allIdeas.forEach(i => {
+        const key = i.submitted_by_name || i.submitted_by_email;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const medals = ['🥇', '🥈', '🥉'];
+      const recognitionHtml = top.length ? `
+        <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+          <div style="font-weight:700;color:var(--navy);font-size:13px;white-space:nowrap">🏆 Most Ideas Submitted</div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap">
+            ${top.map((t, i) => `<div style="font-size:13px;color:var(--text)">${medals[i]} ${escHtml(t[0])} <span style="color:var(--text-muted)">(${t[1]})</span></div>`).join('')}
+          </div>
+        </div>
+      ` : '';
+
+      const headerHtml = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-weight:700;color:var(--navy);font-size:14px">All Ideas</div>
+          <button class="btn-add" onclick="openIdeaModal()">+ Submit Idea</button>
+        </div>
+      `;
+
+      const listHtml = allIdeas.length === 0 ? `
+        <div class="empty-wrap"><div class="empty-icon">💡</div><div class="empty-title">No ideas submitted yet — be the first!</div></div>
+      ` : allIdeas.map(i => {
+        const meta = IDEA_STATUS_META[i.status] || IDEA_STATUS_META.new;
+        return `
+          <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:14px 16px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(i.title)}</div>
+              <div style="display:flex;align-items:center;gap:8px;white-space:nowrap">
+                <span style="font-size:11px;font-weight:700;color:${meta.color};background:${meta.bg};padding:3px 8px;border-radius:20px">${meta.label}</span>
+                ${isAdmin ? `<span title="Track progress" style="cursor:pointer" onclick="openIdeaManageModal('${i.id}')">✏️</span>` : ''}
+              </div>
+            </div>
+            ${i.description ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">${escHtml(i.description)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:8px">💡 ${escHtml(i.submitted_by_name || i.submitted_by_email)} · ${fmtDate(i.created_at)}</div>
+            ${i.admin_feedback ? `<div style="font-size:12px;color:var(--navy);background:var(--gray-100);border-radius:8px;padding:8px 10px;margin-top:8px"><strong>Feedback:</strong> ${escHtml(i.admin_feedback)}</div>` : ''}
+          </div>`;
+      }).join('');
+
+      list.innerHTML = recognitionHtml + headerHtml + listHtml;
+    }
+
+    function openIdeaModal() {
+      document.getElementById('ideaTitleInput').value = '';
+      document.getElementById('ideaDescriptionInput').value = '';
+      document.getElementById('ideaModal').classList.add('open');
+    }
+    function closeIdeaModal() {
+      document.getElementById('ideaModal').classList.remove('open');
+    }
+    async function submitIdea() {
+      const title = document.getElementById('ideaTitleInput').value.trim();
+      if (!title) { toast('Give your idea a title', 'error'); return; }
+      const description = document.getElementById('ideaDescriptionInput').value.trim();
+      try {
+        const res = await fetch('/api/ideas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        toast('Idea submitted — thank you!', 'success');
+        closeIdeaModal();
+        loadIdeasView();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function openIdeaManageModal(id) {
+      const idea = allIdeas.find(i => i.id === id);
+      if (!idea) return;
+      managingIdeaId = id;
+      document.getElementById('ideaStatusInput').value = idea.status;
+      document.getElementById('ideaFeedbackInput').value = idea.admin_feedback || '';
+      document.getElementById('ideaManageModal').classList.add('open');
+    }
+    function closeIdeaManageModal() {
+      document.getElementById('ideaManageModal').classList.remove('open');
+      managingIdeaId = null;
+    }
+    async function saveIdeaManage() {
+      if (!managingIdeaId) return;
+      const status = document.getElementById('ideaStatusInput').value;
+      const adminFeedback = document.getElementById('ideaFeedbackInput').value.trim();
+      try {
+        const res = await fetch(`/api/ideas/${managingIdeaId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, adminFeedback })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        toast('Updated', 'success');
+        closeIdeaManageModal();
+        loadIdeasView();
       } catch { toast('Network error', 'error'); }
     }
 
