@@ -104,6 +104,17 @@ async function start() {
     setInterval(() => {
       webexService.getAgentStatuses().catch(err => console.error('Webex agent status poll error:', err.message));
     }, 20 * 1000);
+    // Call History (CDRs) used to only refresh when an admin clicked "Sync
+    // Calls Now" — fine for the Workforce Management Dashboard's own
+    // reporting, but the Workforce Queue's "last call" direction indicator
+    // needs this reasonably fresh on its own, not stale by however long
+    // since someone last opened that admin page. syncCallHistory is
+    // incremental (only pulls new records since last sync), so polling it
+    // every 5 minutes is cheap.
+    webexService.syncCallHistory('auto-sync').catch(err => console.error('Webex CDR auto-sync error:', err.message));
+    setInterval(() => {
+      webexService.syncCallHistory('auto-sync').catch(err => console.error('Webex CDR auto-sync error:', err.message));
+    }, 5 * 60 * 1000);
   }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);

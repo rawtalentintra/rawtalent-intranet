@@ -4212,6 +4212,20 @@
       return `${s}s`;
     }
 
+    // Webex presence has no direction — this is the direction of their most
+    // recently SYNCED call from Detailed Call History, which is a trailing
+    // indicator (auto-synced every 5 min server-side), not necessarily the
+    // exact call they're on right now if they're currently "On a call".
+    function formatLastCall(direction, at) {
+      if (!direction || !at) return '<span style="color:var(--gray-300)">—</span>';
+      const badge = direction === 'outbound'
+        ? '<span style="font-weight:700;color:#1d4ed8">↗ Outbound</span>'
+        : '<span style="font-weight:700;color:#15803d">↙ Inbound</span>';
+      const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 60000));
+      const ageLabel = ageMinutes < 1 ? 'just now' : ageMinutes < 60 ? `${ageMinutes}m ago` : ageMinutes < 1440 ? `${Math.floor(ageMinutes / 60)}h ago` : `${Math.floor(ageMinutes / 1440)}d ago`;
+      return `${badge} <span style="color:var(--text-muted);font-size:11.5px">· ${ageLabel}</span>`;
+    }
+
     function startWorkforceStatusPolling() {
       loadWorkforceAgentStatus();
       stopWorkforceStatusPolling();
@@ -4243,14 +4257,15 @@
               <td style="color:var(--text-muted);font-size:12.5px">${escHtml(a.email)}</td>
               <td><span class="badge" style="background:${s.bg};color:${s.color}">${s.label}</span></td>
               <td style="color:var(--text-muted);font-size:12.5px">${formatWorkforceDuration(a.statusSince)}</td>
+              <td style="font-size:12.5px">${formatLastCall(a.lastCallDirection, a.lastCallAt)}</td>
             </tr>`;
         }).join('');
         body.innerHTML = `
           <table class="data-table">
-            <thead><tr><th>Agent</th><th>Email</th><th>Status</th><th>Duration</th></tr></thead>
+            <thead><tr><th>Agent</th><th>Email</th><th>Status</th><th>Duration</th><th>Last Call</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
-          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration reflects the real transition time — this app polls Webex in the background every 20 seconds regardless of who has this page open, so it's accurate even if nobody's been watching. It only resets on an app deploy/restart.</div>`;
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration reflects the real transition time — this app polls Webex in the background every 20 seconds regardless of who has this page open, so it's accurate even if nobody's been watching. It only resets on an app deploy/restart. Last Call shows the direction of their most recently synced call (auto-synced every 5 minutes) — Webex's live presence has no direction field, so if someone's currently "On a call" this reflects their last completed call, not necessarily the one happening right now.</div>`;
       } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
     }
 

@@ -108,13 +108,47 @@ async function fetchAgentStatuses() {
 
   const matched = people.filter(p => p.email && byEmail.has(p.email.toLowerCase()));
   const sinceByEmail = await recordStatusSince(db, matched);
+  const lastCallByEmail = await getLatestCallDirections(db);
 
   const agents = matched.map(p => {
     const user = byEmail.get(p.email.toLowerCase());
-    return { email: p.email, name: user.name || p.displayName, role: user.role, status: p.status, statusSince: sinceByEmail.get(p.email.toLowerCase()) };
+    const lastCall = lastCallByEmail.get(p.email.toLowerCase());
+    return {
+      email: p.email, name: user.name || p.displayName, role: user.role, status: p.status,
+      statusSince: sinceByEmail.get(p.email.toLowerCase()),
+      lastCallDirection: lastCall?.direction || null, lastCallAt: lastCall?.startTime || null
+    };
   });
 
   return { configured: true, agents };
+}
+
+// Webex's presence API (above) has no concept of call direction — "on a
+// call" is all it tells you. This is the fallback: the direction of each
+// agent's most recently SYNCED call from Detailed Call History, not
+// necessarily the call they're on right now — CDRs only exist once a call
+// has ended and been synced, so this trails live reality by however long
+// it's been since the last sync (kept fresh by the periodic auto-sync in
+// server.js, not just the manual "Sync Calls Now" button). ORIGINATING
+// means this person placed the call (outbound); TERMINATING means it
+// arrived at them (inbound) — same mapping used everywhere else this data
+// is shown (see the call-history stats grouping below).
+async function getLatestCallDirections(db) {
+  const res = await db.execute(`
+    SELECT DISTINCT ON (user_email) user_email, direction, start_time
+    FROM webex_cdrs
+    WHERE user_email IS NOT NULL
+    ORDER BY user_email, start_time DESC
+  `);
+  const map = new Map();
+  for (const row of res.rows) {
+    if (row.direction !== 'ORIGINATING' && row.direction !== 'TERMINATING') continue;
+    map.set(String(row.user_email).toLowerCase(), {
+      direction: row.direction === 'ORIGINATING' ? 'outbound' : 'inbound',
+      startTime: row.start_time
+    });
+  }
+  return map;
 }
 
 // Duration isn't something Webex's API exposes — it's derived from our own
