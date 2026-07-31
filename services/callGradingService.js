@@ -278,6 +278,127 @@ async function detectRubricType(transcriptText) {
   return toolUse.input;
 }
 
+// A calibration note's created_by when it came from analyzeBenchmarkCalls
+// rather than a human reviewer — lets a re-run find and replace its own
+// prior notes without touching anything a reviewer added by hand, and
+// keeps the "this came from analyzing a specific person's calls" detail
+// out of anywhere a rep could ever see it (calibration notes only ever
+// reach the AI's grading prompt and the admin-only calibration list —
+// never the rubric reference table, and never phrased as "be like X" in
+// the note text itself, just as an objective standard).
+const BENCHMARK_SOURCE_LABEL = 'AI Benchmark Analysis';
+
+// Deliberately a single AI call per rubric type, analyzing several
+// transcripts together, rather than one call per transcript — this runs
+// once (or occasionally, on demand), and every regular per-call grading
+// afterward reuses the resulting notes for free (they're just a few extra
+// lines in a prompt that's already being sent), instead of re-analyzing
+// the benchmark calls on every single evaluation. That's what keeps this
+// cheap: the ongoing cost is ~zero, all the spend is this one-off setup.
+const BENCHMARK_MAX_CALLS_PER_RUBRIC = 8;
+const BENCHMARK_TRANSCRIPT_CHAR_CAP = 4000;
+
+async function analyzeBenchmarkCalls(repName) {
+  const db = getDb();
+  const client = getClient();
+  if (!client) throw new Error('AI is not configured. Please contact your administrator.');
+
+  const recRes = await db.execute({
+    sql: `SELECT id, transcript, detected_rubric_type FROM call_recordings
+          WHERE rep_name = ? AND transcript IS NOT NULL AND transcript != ''
+          ORDER BY synced_at DESC LIMIT 20`,
+    args: [repName]
+  });
+  if (!recRes.rows.length) throw new Error(`No calls with a transcript found for ${repName}`);
+
+  // Fill in rubric-type detection for any call that doesn't have it yet —
+  // cheap (Haiku) and cached back onto the row, same as the on-demand path
+  // in routes/calls.js, so this cost is also only ever paid once per call.
+  const byRubric = { educator: [], centre: [] };
+  for (const rec of recRes.rows) {
+    let rubricType = rec.detected_rubric_type;
+    if (!rubricType) {
+      try {
+        const detection = await detectRubricType(rec.transcript);
+        rubricType = detection.rubricType;
+        await db.execute({
+          sql: 'UPDATE call_recordings SET detected_rubric_type = ?, detected_rubric_reasoning = ? WHERE id = ?',
+          args: [detection.rubricType, detection.reasoning, rec.id]
+        });
+      } catch (err) {
+        console.error(`Benchmark analysis: couldn't classify call ${rec.id} (skipping):`, err.message);
+        continue;
+      }
+    }
+    if (byRubric[rubricType] && byRubric[rubricType].length < BENCHMARK_MAX_CALLS_PER_RUBRIC) {
+      byRubric[rubricType].push(rec);
+    }
+  }
+
+  const tool = {
+    name: 'extract_best_practices',
+    description: 'Extract concrete, observable best-practice standards from these benchmark calls, organized by rubric category.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        notes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              categoryKey: { type: 'string', enum: ['opening', 'listening', 'compliance', 'critical_thinking', 'cultural_fit', 'resolution', 'closing'] },
+              note: { type: 'string', description: 'One specific, actionable grading standard for this category — phrased as what "excellent" looks like in concrete, observable terms (tone, phrasing pattern, sequencing, specific behavior), never as a comparison to any individual person.' }
+            },
+            required: ['categoryKey', 'note']
+          }
+        }
+      },
+      required: ['notes']
+    }
+  };
+
+  const results = { rubricTypesAnalyzed: [], notesCreated: 0, callsUsed: 0 };
+
+  for (const [rubricType, calls] of Object.entries(byRubric)) {
+    if (!calls.length) continue;
+    const rubric = RUBRICS[rubricType];
+    const transcriptBlock = calls
+      .map((c, i) => `--- Call ${i + 1} ---\n${stripMarkup(c.transcript).slice(0, BENCHMARK_TRANSCRIPT_CHAR_CAP)}`)
+      .join('\n\n');
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 1500,
+      system: `You are defining the gold-standard for how RawTalent (an Australian childcare staffing agency) expects ${rubric.label.toLowerCase()} calls to be handled. You've been given ${calls.length} real call transcript(s), all handled exceptionally well — treat these collectively as "how it should be done." Your job is to reverse-engineer the concrete, teachable patterns that make them excellent, organized under this rubric's categories:\n\n${rubric.categories.map(c => `- **${c.label}** (${c.key}): ${c.criteria.join('; ')}`).join('\n')}\n\nWrite each note as an objective standard — what excellent looks like in concrete, observable, teachable terms (specific phrasing patterns, pacing, sequencing, tone under pressure) — never by naming or referring to whoever is on these calls, and never as "compare this rep to X." These notes get fed directly into an AI call grader as standing calibration instructions. One to three notes per category that actually has clear signal in the transcripts; skip a category if the calls don't show anything distinctive for it. Write in Australian English. Call extract_best_practices exactly once.`,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'extract_best_practices' },
+      messages: [{ role: 'user', content: transcriptBlock }]
+    });
+
+    const toolUse = response.content.find(b => b.type === 'tool_use' && b.name === 'extract_best_practices');
+    if (!toolUse?.input?.notes?.length) continue;
+
+    // Replace this rubric's prior benchmark notes rather than piling on —
+    // re-running after Liam handles more calls should refine the standard,
+    // not accumulate duplicates of it forever.
+    await db.execute({
+      sql: `DELETE FROM call_grading_calibration WHERE rubric_type = ? AND created_by = ?`,
+      args: [rubricType, BENCHMARK_SOURCE_LABEL]
+    });
+
+    for (const { categoryKey, note } of toolUse.input.notes) {
+      if (!rubric.categories.some(c => c.key === categoryKey) || !note?.trim()) continue;
+      await addCalibrationNote(note.trim(), BENCHMARK_SOURCE_LABEL, rubricType, categoryKey);
+      results.notesCreated++;
+    }
+    results.rubricTypesAnalyzed.push(rubricType);
+    results.callsUsed += calls.length;
+  }
+
+  if (!results.rubricTypesAnalyzed.length) throw new Error(`Found calls for ${repName}, but couldn't classify any of them by rubric type.`);
+  return results;
+}
+
 // Splits standing calibration notes into what applies everywhere (no
 // rubric_type) vs what applies only within one rubric (rubric_type set,
 // no category_key) vs what applies to one specific category — the general
@@ -674,5 +795,6 @@ module.exports = {
   RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
-  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
+  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
+  analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL
 };

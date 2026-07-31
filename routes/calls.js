@@ -8,7 +8,8 @@ const {
   RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
-  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription
+  getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
+  analyzeBenchmarkCalls
 } = require('../services/callGradingService');
 const { generateReport, answerQuestion } = require('../services/callReportService');
 const { extractFaqsFromCall } = require('../services/faqClassifier');
@@ -310,6 +311,20 @@ router.delete('/calibration/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Analyzes a benchmark rep's own calls (defaults to Liam) and turns what
+// makes them work into standing calibration notes, the same mechanism
+// above — so this is a one-off/occasional spend, not a per-evaluation one.
+// super_admin only: it rewrites calibration for the whole team at once.
+router.post('/benchmark/analyze', requireSuperAdmin, async (req, res) => {
+  try {
+    const repName = req.body.repName?.trim() || 'Liam Baxter';
+    const result = await analyzeBenchmarkCalls(repName);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

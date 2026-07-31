@@ -1067,6 +1067,20 @@
           </div>
         </div>
 
+        <div class="admin-table-card super-admin-only" style="display:none;margin-bottom:20px">
+          <div class="admin-table-header">
+            <span style="font-weight:600;font-size:14px;color:var(--navy)">🏆 Benchmark Standard</span>
+          </div>
+          <div style="padding:16px 20px">
+            <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">Analyzes a top performer's own calls and turns what makes them work into calibration notes the AI evaluator applies to everyone — a one-off analysis, not something re-run on every evaluation. Doesn't touch the rubric reference above or reveal whose calls it came from anywhere reps can see.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="benchmarkRepName" class="form-control" value="Liam Baxter" style="max-width:220px" placeholder="Rep name">
+              <button class="btn-add" id="benchmarkAnalyzeBtn" onclick="runBenchmarkAnalysis()">Analyze Benchmark Calls</button>
+            </div>
+            <div id="benchmarkStatus" style="margin-top:10px;font-size:12.5px"></div>
+          </div>
+        </div>
+
         <div class="admin-table-card">
           <div class="admin-table-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -5748,6 +5762,32 @@
 
     let allCalibrationNotes = [];
     let calibrationListLoaded = false;
+
+    async function runBenchmarkAnalysis() {
+      const repName = document.getElementById('benchmarkRepName').value.trim();
+      if (!repName) { toast('Enter a rep name', 'error'); return; }
+      const btn = document.getElementById('benchmarkAnalyzeBtn');
+      const status = document.getElementById('benchmarkStatus');
+      btn.disabled = true;
+      btn.textContent = 'Analyzing…';
+      status.innerHTML = '';
+      try {
+        const res = await fetch('/api/calls/benchmark/analyze', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repName })
+        });
+        const data = await res.json();
+        if (!res.ok) { status.innerHTML = `<span style="color:#b91c1c">${escHtml(data.error || 'Failed to analyze')}</span>`; return; }
+        status.innerHTML = `<span style="color:#15803d">✓ Analyzed ${data.callsUsed} call(s) across ${data.rubricTypesAnalyzed.join(' + ')} — ${data.notesCreated} calibration note(s) set.</span>`;
+        toast('Benchmark analysis complete', 'success');
+        if (calibrationListLoaded) loadCalibrationNotes();
+      } catch {
+        status.innerHTML = `<span style="color:#b91c1c">Network error</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Analyze Benchmark Calls';
+      }
+    }
 
     function toggleCalibrationList() {
       const list = document.getElementById('calibrationList');
