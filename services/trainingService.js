@@ -330,6 +330,21 @@ async function startAttempt(courseId, userEmail) {
   });
   if (existing.rows[0]) return existing.rows[0];
 
+  // A passed course reopened is a review, not a retake — "Review (Passed)"
+  // in the UI should show the real result, not silently spawn a fresh,
+  // empty attempt that shadows the completed one (this was masking real
+  // completions in the notification bell, and meant "Review" actually made
+  // someone redo the whole course from module 1 instead of showing what
+  // they already got). Only a FAILED completed attempt should start fresh
+  // — that's a genuine retake.
+  const mostRecent = await db.execute({
+    sql: `SELECT * FROM training_attempts WHERE course_id = ? AND user_email = ? ORDER BY started_at DESC LIMIT 1`,
+    args: [courseId, userEmail]
+  });
+  if (mostRecent.rows[0]?.status === 'completed' && mostRecent.rows[0]?.final_passed) {
+    return mostRecent.rows[0];
+  }
+
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO training_attempts (id, course_id, user_email) VALUES (?, ?, ?)`,

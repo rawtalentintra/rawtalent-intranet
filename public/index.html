@@ -1598,8 +1598,28 @@
         const attempt = await fetch(`/api/training/courses/${courseId}/attempts`, { method: 'POST' }).then(r => r.json());
         currentTakeCourse = { course, attempt, moduleIndex: attempt.current_module_index || 0 };
         document.getElementById('takeCourseTitle').textContent = course.title;
-        renderTakeCourseStep();
+        // A passed course now comes back as the SAME completed attempt
+        // (see startAttempt) rather than a fresh blank one — show the
+        // actual result, not a quiz form pretending it hasn't been done.
+        if (attempt.status === 'completed' && attempt.final_passed) {
+          renderCompletedReview();
+        } else {
+          renderTakeCourseStep();
+        }
       } catch { body.innerHTML = '<div style="padding:24px;text-align:center;color:#c0392b">Failed to start this course.</div>'; }
+    }
+
+    function renderCompletedReview() {
+      const { attempt } = currentTakeCourse;
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = `
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:40px">🎉</div>
+          <div style="font-weight:700;font-size:20px;color:var(--navy);margin-top:8px">${attempt.final_score}%</div>
+          <div style="margin-top:6px"><span class="badge badge-published">Passed</span></div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px">Completed ${fmtDate(attempt.completed_at)}</div>
+          <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+        </div>`;
     }
 
     function closeTakeCourse() {
