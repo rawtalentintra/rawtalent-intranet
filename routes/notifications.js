@@ -93,10 +93,11 @@ function nextOccurrence(dateStr) {
   return { daysUntil };
 }
 
-// Reminders only fire exactly 2 days before the date, and again on the day
-// itself — not a rolling window, so admins get a heads-up to plan something
-// and then a same-day nudge, without the panel being cluttered all week.
-const REMINDER_DAYS_BEFORE = [0, 2];
+// Reminders fire 2 days before, 1 day before, and on the day itself — not a
+// full rolling window (so the panel doesn't stay cluttered all week), but
+// enough that a 1-day gap doesn't leave everyone with nothing to act on the
+// day before something like a work anniversary.
+const REMINDER_DAYS_BEFORE = [0, 1, 2];
 
 router.get('/', async (req, res) => {
   try {
@@ -114,12 +115,15 @@ router.get('/', async (req, res) => {
       receivedGreetings = gRes.rows;
     }
 
-    // "Upcoming" reminders — admin/super_admin only.
+    // "Upcoming" reminders — every signed-in user, so anyone can send a
+    // birthday/anniversary greeting, not just admins. (Previously
+    // admin/super_admin only, which silently meant most of the team never
+    // saw these reminders at all and couldn't send greetings.)
     let upcomingEvents = [];
-    if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+    {
       // A reminder counts as "already handled" (and stops being unread) once
-      // *this* admin has personally sent that person a greeting of that type
-      // recently — recently, not ever, so it naturally resets for next
+      // *this* person has personally sent that person a greeting of that
+      // type recently — recently, not ever, so it naturally resets for next
       // year's occurrence instead of being permanently silenced.
       const recentRes = await db.execute({
         sql: `SELECT team_member_id, greeting_type FROM team_greetings
@@ -129,6 +133,9 @@ router.get('/', async (req, res) => {
       const recentlySent = new Set(recentRes.rows.map(r => `${r.team_member_id}:${r.greeting_type}`));
 
       for (const m of teamRes.rows) {
+        // Skip your own reminder — nobody needs to be prompted to send
+        // themselves a birthday greeting.
+        if (m.email && req.user.email && m.email.toLowerCase() === req.user.email.toLowerCase()) continue;
         const bday = nextOccurrence(m.birthdate);
         if (bday && REMINDER_DAYS_BEFORE.includes(bday.daysUntil)) {
           upcomingEvents.push({
