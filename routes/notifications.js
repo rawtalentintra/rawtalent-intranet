@@ -165,12 +165,17 @@ router.get('/', async (req, res) => {
     // announcement_reads, so the Announcements tab's compliance tracking
     // (who has actually ticked "I have read and understood this") is
     // unaffected by clearing the bell badge.
+    // Once someone actually ticks "I have read and understood" on the
+    // Announcements tab, it drops out of the bell entirely — not just
+    // greyed out. A bell-only "Mark all read" dismissal (no real ack) still
+    // leaves the row in this list, just no longer counted unread, so it
+    // stays discoverable until genuinely acknowledged.
     const annRes = await db.execute({
-      sql: `SELECT a.*, (r.user_email IS NOT NULL OR d.user_email IS NOT NULL) AS is_read
+      sql: `SELECT a.*, (d.user_email IS NOT NULL) AS is_read
             FROM announcements a
             LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_email = ?
             LEFT JOIN notification_dismissals d ON d.notification_key = 'announcement:' || a.id AND d.user_email = ?
-            WHERE a.send_at <= now()
+            WHERE a.send_at <= now() AND r.user_email IS NULL
             ORDER BY a.send_at DESC LIMIT 30`,
       args: [req.user.email, req.user.email]
     });
@@ -228,14 +233,15 @@ router.get('/', async (req, res) => {
 // Admins schedule (or immediately send, by omitting send_at) a broadcast
 // announcement to every signed-in user.
 router.post('/announcements', requireAdmin, async (req, res) => {
-  const { message, send_at } = req.body;
+  const { title, message, send_at } = req.body;
+  if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
   try {
     const id = uuidv4();
     await getDb().execute({
-      sql: `INSERT INTO announcements (id, message, send_at, created_by_email, created_by_name)
-            VALUES (?, ?, COALESCE(?, now()), ?, ?)`,
-      args: [id, message.trim(), send_at || null, req.user.email, req.user.name || req.user.email]
+      sql: `INSERT INTO announcements (id, title, message, send_at, created_by_email, created_by_name)
+            VALUES (?, ?, ?, COALESCE(?, now()), ?, ?)`,
+      args: [id, title.trim(), message.trim(), send_at || null, req.user.email, req.user.name || req.user.email]
     });
     res.json({ success: true, id });
   } catch (err) {

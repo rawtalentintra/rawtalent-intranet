@@ -802,3 +802,10 @@ VALUES (
   'joy@rawtalent.com.au',
   true
 ) ON CONFLICT (id) DO NOTHING;
+
+-- A short, distinct title separate from the message body — added so the
+-- notification bell can show a one-line summary instead of the entire
+-- announcement text. Nullable because existing announcements were written
+-- before this existed; the app falls back to the first line of the message
+-- for those.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS title TEXT;
