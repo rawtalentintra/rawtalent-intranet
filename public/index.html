@@ -1639,7 +1639,30 @@
           <div style="font-weight:700;font-size:20px;color:var(--navy);margin-top:8px">${attempt.final_score}%</div>
           <div style="margin-top:6px"><span class="badge badge-published">Passed</span></div>
           <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px">Completed ${fmtDate(attempt.completed_at)}</div>
-          <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:16px">
+            <button class="btn-secondary" onclick="closeTakeCourse()">Close</button>
+            <button class="btn-add" onclick="renderReviewModuleStep(0)">📖 Review Course Content</button>
+          </div>
+        </div>`;
+    }
+
+    // Read-only browse-back-through-the-material mode for a course someone's
+    // already passed — no quiz, just the module content, since the point is
+    // revisiting the concepts, not proving it again.
+    function renderReviewModuleStep(moduleIndex) {
+      const { course } = currentTakeCourse;
+      const body = document.getElementById('takeCourseBody');
+      const m = course.modules[moduleIndex];
+      const isLast = moduleIndex >= course.modules.length - 1;
+      body.innerHTML = `
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">Reviewing · Module ${moduleIndex + 1} of ${course.modules.length}</div>
+        <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">${escHtml(m.title)}</div>
+        <div class="article-content">${m.content}</div>
+        <div style="display:flex;gap:10px;justify-content:space-between;margin-top:16px">
+          <button class="btn-secondary" ${moduleIndex === 0 ? 'disabled style="opacity:.4"' : `onclick="renderReviewModuleStep(${moduleIndex - 1})"`}>← Previous</button>
+          ${isLast
+            ? `<button class="btn-add" onclick="renderCompletedReview()">Back to Results</button>`
+            : `<button class="btn-add" onclick="renderReviewModuleStep(${moduleIndex + 1})">Next Module →</button>`}
         </div>`;
     }
 
