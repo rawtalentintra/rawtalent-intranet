@@ -809,3 +809,34 @@ VALUES (
 -- before this existed; the app falls back to the first line of the message
 -- for those.
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS title TEXT;
+
+-- Leads gathered during educator vetting calls (see the Lead Extraction
+-- Process article) — replaces the ClickUp Lead Form. Suburb/state are kept
+-- as their own columns (not folded into the street address) so the admin
+-- table can filter/display them directly without parsing free text.
+-- assigned_workforce_partner is a plain label, not a foreign key — neither
+-- current Workforce Partner (Gwen, Justine) has a login in this app, so
+-- there's no user account to reference; it's just what the admin sets.
+CREATE TABLE IF NOT EXISTS leads (
+  id TEXT PRIMARY KEY,
+  centre_name TEXT NOT NULL,
+  street_address TEXT,
+  suburb TEXT,
+  state TEXT,
+  centre_phone TEXT,
+  educator_name TEXT,
+  agency_name TEXT,
+  number_of_shifts TEXT,
+  agency_usage TEXT, -- 'target_temp' | 'high_agency_user'
+  position TEXT,
+  contact_first_name TEXT,
+  contact_last_name TEXT,
+  contact_email TEXT,
+  submitted_by_email CITEXT NOT NULL,
+  submitted_by_name TEXT,
+  assigned_workforce_partner TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
+CREATE INDEX IF NOT EXISTS idx_leads_submitted_by ON leads(submitted_by_email);

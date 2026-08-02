@@ -45,20 +45,30 @@
       margin-bottom: 28px;
     }
 
-    /* Mode tabs */
-    .mode-tabs {
-      display: inline-flex;
-      background: rgba(255,255,255,.08);
-      border-radius: 999px;
-      padding: 4px;
-      gap: 2px;
-      margin-bottom: 20px;
-      position: relative;
-      z-index: 10;
+    /* Sidebar nav — vertical stack of the same tabs/icons/pill styling that
+       used to run horizontally across the hero. No collapse/expand; it's
+       always the full list, since this app is small enough that hiding
+       items would just add a click rather than reduce clutter. */
+    .app-shell {
+      display: flex;
+      align-items: stretch;
+    }
+    .sidebar-nav {
+      width: 216px;
+      flex-shrink: 0;
+      background: var(--navy);
+      padding: 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .app-main {
+      flex: 1;
+      min-width: 0;
     }
     .mode-tab {
-      padding: 8px 22px;
-      border-radius: 999px;
+      padding: 9px 16px;
+      border-radius: 10px;
       border: none;
       background: transparent;
       color: rgba(255,255,255,.55);
@@ -69,13 +79,19 @@
       transition: all .2s;
       position: relative;
       z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      text-align: left;
+      white-space: nowrap;
     }
     .mode-tab.active {
       background: white;
       color: var(--navy);
       box-shadow: 0 2px 8px rgba(0,0,0,.15);
     }
-    .mode-tab:not(.active):hover { color: white; }
+    .mode-tab:not(.active):hover { color: white; background: rgba(255,255,255,.08); }
 
     /* Search input */
     .hero-search-wrap {
@@ -659,58 +675,64 @@
     <span style="font-size:9.5px;font-weight:400;opacity:.75;margin-left:6px">— Users will never see the Admin button.</span>
   </div>
 
-  <!-- Hero -->
-  <div class="hero-wrap" id="heroWrap">
-    <div class="hero-content">
-      <h1 class="hero-title" id="heroTitle">How can we help you<span>?</span></h1>
-      <p class="hero-sub" id="heroSub">Search the RawTalent knowledge base for answers, guides, and resources</p>
+  <div class="app-shell">
+    <aside class="sidebar-nav">
+      <button class="mode-tab active" id="tabHome" onclick="setMode('home')">🏠 Home</button>
+      <button class="mode-tab" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
+      <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
+      <button class="mode-tab" id="tabAnnouncements" onclick="setMode('announcements')">📢 Announcements</button>
+      <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
+      <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
+      <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
+      <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
+      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
+      <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
+      <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
+    </aside>
 
-      <div class="mode-tabs">
-        <button class="mode-tab active" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
-        <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
-        <button class="mode-tab" id="tabAnnouncements" onclick="setMode('announcements')">📢 Announcements</button>
-        <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
-        <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
-        <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
-        <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
-        <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
-        <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
-      </div>
+    <div class="app-main">
+      <!-- Hero -->
+      <div class="hero-wrap" id="heroWrap">
+        <div class="hero-content">
+          <h1 class="hero-title" id="heroTitle">How can we help you<span>?</span></h1>
+          <p class="hero-sub" id="heroSub">Search the RawTalent knowledge base for answers, guides, and resources</p>
 
-      <div id="searchArea" class="hero-search-wrap">
-        <input type="text" id="searchInput" class="hero-input"
-          placeholder="Search articles, topics, or keywords…"
-          autocomplete="off" autofocus>
-        <span class="hero-input-icon">⌕</span>
-      </div>
+          <div id="searchArea" class="hero-search-wrap">
+            <input type="text" id="searchInput" class="hero-input"
+              placeholder="Search articles, topics, or keywords…"
+              autocomplete="off" autofocus>
+            <span class="hero-input-icon">⌕</span>
+          </div>
 
-      <div id="aiArea" style="display:none" class="hero-ask-row">
-        <div style="flex:1;position:relative">
-          <input type="text" id="aiInput" class="hero-input"
-            placeholder="e.g. What are Victoria's childcare compliance requirements?"
-            autocomplete="off">
-          <span class="hero-input-icon">✨</span>
+          <div id="aiArea" style="display:none" class="hero-ask-row">
+            <div style="flex:1;position:relative">
+              <input type="text" id="aiInput" class="hero-input"
+                placeholder="e.g. What are Victoria's childcare compliance requirements?"
+                autocomplete="off">
+              <span class="hero-input-icon">✨</span>
+            </div>
+            <button class="hero-ask-btn" id="aiBtn" onclick="askAI()">Ask AI</button>
+          </div>
         </div>
-        <button class="hero-ask-btn" id="aiBtn" onclick="askAI()">Ask AI</button>
+
+        <div class="ai-mode-banner" id="aiBanner">
+          ✨ AI answers are generated from your knowledge base — documents, articles, and reference websites
+        </div>
+
       </div>
-    </div>
 
-    <div class="ai-mode-banner" id="aiBanner">
-      ✨ AI answers are generated from your knowledge base — documents, articles, and reference websites
-    </div>
+      <!-- Category bar -->
+      <div class="cat-bar" id="catBar" style="display:none">
+        <button class="cat-pill active" data-cat="" onclick="selectCat('', this)">All Topics</button>
+      </div>
 
-  </div>
-
-  <!-- Category bar -->
-  <div class="cat-bar" id="catBar" style="display:none">
-    <button class="cat-pill active" data-cat="" onclick="selectCat('', this)">All Topics</button>
-  </div>
-
-  <!-- Results -->
-  <div class="results-wrap">
-    <div id="resultsLabel" class="results-label" style="display:none"></div>
-    <div id="resultsList">
-      <div class="spinner-wrap"><div class="spinner"></div></div>
+      <!-- Results -->
+      <div class="results-wrap">
+        <div id="resultsLabel" class="results-label" style="display:none"></div>
+        <div id="resultsList">
+          <div class="spinner-wrap"><div class="spinner"></div></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -964,10 +986,11 @@
       loadCategories();
       loadNotifications();
       setInterval(loadNotifications, 5 * 60 * 1000);
-      if (new URLSearchParams(location.search).get('tab') === 'announcements') {
-        setMode('announcements');
+      const tabParam = new URLSearchParams(location.search).get('tab');
+      if (tabParam) {
+        setMode(tabParam);
       } else {
-        loadResults();
+        setMode('home');
       }
     }
 
@@ -1351,6 +1374,9 @@
       const isTraining = mode === 'training';
       const isLeave = mode === 'leave';
       const isIdeas = mode === 'ideas';
+      const isHome = mode === 'home';
+      const isLeads = mode === 'leads';
+      document.getElementById('tabHome').classList.toggle('active', isHome);
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
@@ -1360,21 +1386,24 @@
       document.getElementById('tabTraining').classList.toggle('active', isTraining);
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas);
+      document.getElementById('tabLeads').classList.toggle('active', isLeads);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiBanner').classList.toggle('show', isAI);
-      document.getElementById('heroTitle').textContent = isAnnouncements ? 'Announcements'
+      document.getElementById('heroTitle').textContent = isHome ? 'Welcome to the RawTalent Intranet'
+        : isAnnouncements ? 'Announcements'
         : isGlossary ? 'Glossary of terms'
         : isFaq ? 'Frequently asked questions'
         : isTeam ? 'Our Team'
         : isTraining ? 'Training'
         : isLeave ? 'Leave Request'
         : isIdeas ? 'Submit Ideas'
+        : isLeads ? 'Submit a Lead'
         : 'How can we help you?';
-      document.getElementById('heroSub').textContent = isAI
-        ? 'Ask AI anything — searches across all articles, documents, and reference sites'
+      document.getElementById('heroSub').textContent = isHome ? 'Your one-stop shop for everything RawTalent'
+        : isAI ? 'Ask AI anything — searches across all articles, documents, and reference sites'
         : isAnnouncements ? 'Company updates and childcare industry news'
         : isGlossary ? 'Quick definitions for common RawTalent and ECEC industry terms'
         : isFaq ? 'Real questions from the team, reviewed and approved'
@@ -1382,9 +1411,14 @@
         : isTraining ? 'Courses assigned to you, and anything else you want to brush up on'
         : isLeave ? 'Request leave, track approvals, and see who\'s off'
         : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
+        : isLeads ? 'Log a potential client centre from an educator vetting call'
         : 'Search the RawTalent knowledge base for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
-      if (isAI) {
+      if (isHome) {
+        loadHomeView();
+      } else if (isLeads) {
+        loadLeadsView();
+      } else if (isAI) {
         document.getElementById('resultsList').innerHTML = `
           <div class="empty-wrap">
             <div class="empty-icon">✨</div>
@@ -2111,7 +2145,11 @@
       try {
         const cats = await fetch('/api/articles/categories').then(r => r.json());
         const bar = document.getElementById('catBar');
-        bar.style.display = '';
+        // Visibility is controlled entirely by setMode() based on the
+        // active tab — this used to force it visible unconditionally,
+        // which was harmless when Search was the default landing tab but
+        // now clobbers whatever tab (e.g. Home) actually set once this
+        // async fetch resolves.
         cats.forEach(c => {
           const btn = document.createElement('button');
           btn.className = 'cat-pill';
@@ -2547,6 +2585,177 @@
         toast(`Leave added for ${forUserName}`, 'success');
         closePlotLeaveModal();
         loadLeaveRequestView();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Home ──────────────────────────────────────────────────────
+    const HOME_TILES = [
+      { icon: '🔍', label: 'Search Articles', desc: 'Browse the knowledge base', mode: 'search' },
+      { icon: '✨', label: 'Ask AI', desc: 'Get an instant answer', mode: 'ai' },
+      { icon: '📢', label: 'Announcements', desc: 'Company updates', mode: 'announcements' },
+      { icon: '🏖️', label: 'Leave Request', desc: 'Request time off', mode: 'leave' },
+      { icon: '📋', label: 'Leads', desc: 'Log a lead from a vetting call', mode: 'leads' },
+      { icon: '🎓', label: 'Training', desc: 'Courses assigned to you', mode: 'training' },
+      { icon: '💡', label: 'Submit Ideas', desc: "Suggest an improvement", mode: 'ideas' },
+      { icon: '🧑‍🤝‍🧑', label: 'Our Team', desc: 'Team hierarchy & profiles', mode: 'team' }
+    ];
+    function loadHomeView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px">
+          ${HOME_TILES.map(t => `
+            <div class="article-card" style="cursor:pointer" onclick="setMode('${t.mode}')">
+              <div style="font-size:26px;margin-bottom:8px">${t.icon}</div>
+              <div class="card-title">${escHtml(t.label)}</div>
+              <div class="card-summary">${escHtml(t.desc)}</div>
+            </div>
+          `).join('')}
+        </div>`;
+    }
+
+    // ── Leads ─────────────────────────────────────────────────────
+    // Per the Lead Extraction Process policy, we never pursue these four
+    // groups — this is a heads-up warning, not a hard block (names on the
+    // ground don't always exactly match one of these strings), so a
+    // consultant can still submit if they're confident it's a genuine lead.
+    const EXCLUDED_CENTRE_GROUPS = ['goodstart', 'guardian', 'affinity', 'g8'];
+    const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
+    const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
+    let myLeads = [];
+
+    async function loadLeadsView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        myLeads = await fetch('/api/leads/mine').then(r => r.json());
+        renderLeadsView();
+      } catch {
+        list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load.</div></div>';
+      }
+    }
+
+    function renderLeadsView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = `
+        <div style="max-width:640px;margin:0 auto">
+          <div class="admin-table-card" style="padding:24px">
+            <div id="leadExcludedWarning" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:600;margin-bottom:16px">
+              ⚠️ This looks like it might be a Goodstart, Guardian, Affinity, or G8 centre — per policy we don't pursue these as leads. Double-check before submitting.
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Centre Name</label>
+              <input type="text" id="leadCentreName" class="form-control" placeholder="e.g. Little Explorers Early Learning" oninput="checkExcludedCentre()">
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Suburb</label>
+                <input type="text" id="leadSuburb" class="form-control" placeholder="e.g. Queenstown">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">State</label>
+                <select id="leadState" class="form-control">
+                  <option value="">Select…</option>
+                  ${AU_STATES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Street Address <span class="optional">(optional)</span></label>
+              <input type="text" id="leadStreetAddress" class="form-control" placeholder="e.g. 50 Webb St">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Centre Phone Number <span class="optional">(optional)</span></label>
+              <input type="text" id="leadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Educator Name <span class="optional">(optional)</span></label>
+              <input type="text" id="leadEducatorName" class="form-control" placeholder="Who mentioned this centre?">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Agency Name <span class="optional">(only if they've used one)</span></label>
+              <input type="text" id="leadAgencyName" class="form-control">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Number of Shifts <span class="optional">(optional)</span></label>
+              <input type="text" id="leadNumberOfShifts" class="form-control">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Agency Usage <span class="optional">(optional)</span></label>
+              <select id="leadAgencyUsage" class="form-control">
+                <option value="">Select…</option>
+                <option value="target_temp">Target Temp</option>
+                <option value="high_agency_user">High Agency User</option>
+              </select>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Contact Position <span class="optional">(optional)</span></label>
+              <select id="leadPosition" class="form-control">
+                <option value="">Select…</option>
+                ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Contact First Name <span class="optional">(optional)</span></label>
+                <input type="text" id="leadContactFirstName" class="form-control">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">Contact Last Name <span class="optional">(optional)</span></label>
+                <input type="text" id="leadContactLastName" class="form-control">
+              </div>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Contact Email <span class="optional">(optional)</span></label>
+              <input type="email" id="leadContactEmail" class="form-control">
+            </div>
+            <button class="btn-add" style="width:100%;margin-top:8px" onclick="submitLead()">Submit Lead</button>
+          </div>
+
+          <div style="font-weight:700;color:var(--navy);font-size:14px;margin:24px 0 10px">My Submitted Leads</div>
+          ${myLeads.length === 0 ? `
+            <div class="empty-wrap"><div class="empty-icon">📋</div><div class="empty-title">No leads submitted yet</div></div>
+          ` : myLeads.map(l => `
+            <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:12px 16px;margin-bottom:8px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(l.centre_name)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escHtml([l.suburb, l.state].filter(Boolean).join(', ') || 'No location given')} · ${fmtDate(l.created_at)}</div>
+            </div>
+          `).join('')}
+        </div>`;
+    }
+
+    function checkExcludedCentre() {
+      const value = document.getElementById('leadCentreName').value.toLowerCase();
+      const isExcluded = EXCLUDED_CENTRE_GROUPS.some(g => value.includes(g));
+      document.getElementById('leadExcludedWarning').style.display = isExcluded ? 'block' : 'none';
+    }
+
+    async function submitLead() {
+      const centreName = document.getElementById('leadCentreName').value.trim();
+      if (!centreName) { toast('Centre name is required', 'error'); return; }
+      const payload = {
+        centreName,
+        suburb: document.getElementById('leadSuburb').value,
+        state: document.getElementById('leadState').value,
+        streetAddress: document.getElementById('leadStreetAddress').value,
+        centrePhone: document.getElementById('leadCentrePhone').value,
+        educatorName: document.getElementById('leadEducatorName').value,
+        agencyName: document.getElementById('leadAgencyName').value,
+        numberOfShifts: document.getElementById('leadNumberOfShifts').value,
+        agencyUsage: document.getElementById('leadAgencyUsage').value,
+        position: document.getElementById('leadPosition').value,
+        contactFirstName: document.getElementById('leadContactFirstName').value,
+        contactLastName: document.getElementById('leadContactLastName').value,
+        contactEmail: document.getElementById('leadContactEmail').value
+      };
+      try {
+        const res = await fetch('/api/leads', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        toast('Lead submitted', 'success');
+        loadLeadsView();
       } catch { toast('Network error', 'error'); }
     }
 

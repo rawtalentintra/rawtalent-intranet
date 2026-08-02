@@ -149,6 +149,12 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Sales</div>
+        <div class="admin-nav-item" onclick="showSection('leads', this)">
+          <span class="admin-nav-icon">📋</span> Leads
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
         <div class="admin-nav-item active" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
@@ -341,6 +347,50 @@
                 <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Leads -->
+      <div class="admin-section" id="section-leads">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Leads</div>
+            <div class="admin-page-sub">Submitted from educator vetting calls — click a row for full details</div>
+          </div>
+        </div>
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Centre</th>
+                  <th>Suburb</th>
+                  <th>State</th>
+                  <th>Submitted by</th>
+                  <th>Assigned Workforce Partner</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTableBody">
+                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lead Detail Modal -->
+      <div class="modal-overlay" id="leadDetailModal" onclick="if(event.target===this)closeLeadDetailModal()">
+        <div class="modal" style="max-width:520px">
+          <div class="modal-header">
+            <div class="modal-title">Lead Details</div>
+            <button class="modal-close" onclick="closeLeadDetailModal()">×</button>
+          </div>
+          <div class="modal-body" id="leadDetailBody" style="max-height:65vh;overflow-y:auto"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
+            <button class="btn-add" onclick="saveLeadAssignment()">Save</button>
           </div>
         </div>
       </div>
@@ -2728,6 +2778,7 @@
       if (id === 'call-rubrics') loadRubricReference();
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
+      if (id === 'leads') loadLeadsTable();
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
       if (id === 'training-dashboard') loadTrainingDashboard();
@@ -3348,6 +3399,90 @@
         if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to delete', 'error'); return; }
         toast('Leave request deleted', 'success');
         loadLeaveRequestsAdmin();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Leads ─────────────────────────────────────────────────────
+    let allLeads = [];
+    const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
+    const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)'];
+
+    async function loadLeadsTable() {
+      const body = document.getElementById('leadsTableBody');
+      body.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        allLeads = await fetch('/api/leads').then(r => r.json());
+        if (!allLeads.length) {
+          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No leads submitted yet</td></tr>';
+          return;
+        }
+        body.innerHTML = allLeads.map(l => `
+          <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
+            <td>${fmtDate(l.created_at)}</td>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
+            <td>${escHtml(l.suburb || '—')}</td>
+            <td>${escHtml(l.state || '—')}</td>
+            <td>${escHtml(l.submitted_by_name || l.submitted_by_email)}</td>
+            <td>${escHtml(l.assigned_workforce_partner || '—')}</td>
+          </tr>`).join('');
+      } catch {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+      }
+    }
+
+    let currentLeadDetailId = null;
+
+    function openLeadDetail(id) {
+      const lead = allLeads.find(l => l.id === id);
+      if (!lead) return;
+      currentLeadDetailId = id;
+      const row = (label, value) => `
+        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
+          <span style="color:var(--text-muted)">${escHtml(label)}</span>
+          <span style="font-weight:600;color:var(--navy);text-align:right;max-width:60%">${escHtml(value || '—')}</span>
+        </div>`;
+      document.getElementById('leadDetailBody').innerHTML = `
+        ${row('Centre', lead.centre_name)}
+        ${row('Street Address', lead.street_address)}
+        ${row('Suburb', lead.suburb)}
+        ${row('State', lead.state)}
+        ${row('Centre Phone', lead.centre_phone)}
+        ${row('Educator Name', lead.educator_name)}
+        ${row('Agency Name', lead.agency_name)}
+        ${row('Number of Shifts', lead.number_of_shifts)}
+        ${row('Agency Usage', LEAD_AGENCY_USAGE_LABELS[lead.agency_usage] || lead.agency_usage)}
+        ${row('Contact Position', lead.position)}
+        ${row('Contact Name', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
+        ${row('Contact Email', lead.contact_email)}
+        ${row('Submitted By', lead.submitted_by_name || lead.submitted_by_email)}
+        ${row('Submitted', fmtDate(lead.created_at))}
+        <div class="form-group-modal" style="margin-top:14px">
+          <label class="form-label-modal">Assigned Workforce Partner</label>
+          <select id="leadAssigneeSelect" class="form-control">
+            <option value="">Unassigned</option>
+            ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+          </select>
+        </div>`;
+      document.getElementById('leadDetailModal').classList.add('open');
+    }
+
+    function closeLeadDetailModal() {
+      document.getElementById('leadDetailModal').classList.remove('open');
+      currentLeadDetailId = null;
+    }
+
+    async function saveLeadAssignment() {
+      if (!currentLeadDetailId) return;
+      const assignedWorkforcePartner = document.getElementById('leadAssigneeSelect').value;
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignedWorkforcePartner })
+        });
+        if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to save', 'error'); return; }
+        toast('Updated', 'success');
+        closeLeadDetailModal();
+        loadLeadsTable();
       } catch { toast('Network error', 'error'); }
     }
 
