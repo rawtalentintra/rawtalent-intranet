@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin — RawTalent Knowledge Base</title>
+  <title>Admin — RawTalent HeartBeat</title>
   <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16.png">
@@ -94,7 +94,7 @@
       <span class="nav-tag">Admin</span>
     </a>
     <div class="nav-actions">
-      <button class="nav-btn ghost" onclick="location.href='/'">← Knowledge Base</button>
+      <button class="nav-btn ghost" onclick="location.href='/'">← HeartBeat</button>
       <div class="notif-bell-wrap" style="position:relative">
         <button class="nav-btn ghost" onclick="toggleNotifPanel(event)" id="notifBellBtn" style="position:relative;font-size:15px;padding:8px 11px">
           🔔
@@ -670,14 +670,14 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">📚 Technical Documentation</div>
-            <div class="admin-page-sub">System architecture, integrations, and deployment reference for anyone supporting or maintaining this platform. Visible to admins and super admins.</div>
+            <div class="admin-page-sub">System architecture, integrations, and deployment reference for anyone supporting or maintaining this platform. Visible to admins.</div>
           </div>
         </div>
 
         <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Overview</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            RawTalent Knowledge Base is a single Node.js/Express application serving both the public-facing staff knowledge base (search, Ask AI, FAQ, glossary, announcements, team directory, training) and the internal admin panel (content management, call quality, workforce management, projects, user administration). It's a monolith by design — one server process, one Postgres database, no microservices or separate frontend build step.
+            RawTalent HeartBeat is a single Node.js/Express application serving both the public-facing staff site (search, Ask AI, FAQ, glossary, announcements, team directory, training) and the internal admin panel (content management, call quality, workforce management, projects, user administration). It's a monolith by design — one server process, one Postgres database, no microservices or separate frontend build step.
           </div>
         </div>
 
@@ -704,8 +704,8 @@
                 <tr><td><code>services/*.js</code></td><td>Business logic and third-party integrations, called by routes — e.g. <code>webexService.js</code>, <code>fathomService.js</code>, <code>dubberService.js</code>, <code>aiService.js</code>, <code>callGradingService.js</code>, <code>driveService.js</code>, <code>storageService.js</code>.</td></tr>
                 <tr><td><code>db/schema.sql</code></td><td>Full Postgres schema — applied automatically on every server boot (idempotent <code>CREATE TABLE IF NOT EXISTS</code> statements), so schema changes ship just by editing this file and redeploying.</td></tr>
                 <tr><td><code>db/database.js</code></td><td>Postgres connection pool + the <code>execute()</code> query wrapper described above.</td></tr>
-                <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, <code>requireSuperAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
-                <tr><td><code>public/index.html</code></td><td>The public knowledge base — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
+                <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
+                <tr><td><code>public/index.html</code></td><td>The public HeartBeat site — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
                 <tr><td><code>public/admin.html</code></td><td>The admin panel — everything in this document lives inside this one file (nav, all sections, all client-side JS).</td></tr>
                 <tr><td><code>public/css/style.css</code></td><td>Single shared stylesheet for both pages.</td></tr>
               </tbody>
@@ -716,13 +716,12 @@
         <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Authentication &amp; Roles</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
-            Sessions are cookie-based (Passport + <code>express-session</code>), stored server-side in Postgres so they survive redeploys. Sign-in is email/password or Google OAuth. There are four roles, enforced on every API route server-side (client-side nav hiding is cosmetic only):
+            Sessions are cookie-based (Passport + <code>express-session</code>), stored server-side in Postgres so they survive redeploys. Sign-in is email/password or Google OAuth. Roles are enforced on every API route server-side (client-side nav hiding is cosmetic only):
           </div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
-            <strong style="color:var(--navy)">user</strong> — public knowledge base only, no admin panel access.<br>
+            <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
             <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
-            <strong style="color:var(--navy)">admin</strong> — full admin panel access except user management, AI Sources, Meetings, and a handful of other super-admin-only areas.<br>
-            <strong style="color:var(--navy)">super_admin</strong> — everything, including user management and the private Meetings section. <strong>By design, there is exactly one super_admin account.</strong> Don't create a second one, including for testing — use a temporary <code>admin</code>-role account instead.
+            <strong style="color:var(--navy)">admin</strong> — full admin panel access except user management and a handful of other restricted areas.
           </div>
         </div>
 
@@ -770,13 +769,13 @@
         <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Key Feature Areas</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
-            <strong style="color:var(--navy)">Knowledge Base:</strong> full-text article search (Postgres <code>tsvector</code>), Ask AI (Claude, grounded in articles + AI Sources), Glossary, Announcements, Team directory, Training.<br>
+            <strong style="color:var(--navy)">Content &amp; Search:</strong> full-text article search (Postgres <code>tsvector</code>), Ask AI (Claude, grounded in articles + AI Sources), Glossary, Announcements, Team directory, Training.<br>
             <strong style="color:var(--navy)">FAQ Review:</strong> scans Slack and Fathom for reusable Q&amp;A content, classifies candidates with Claude, holds them for human approval before they become live FAQs.<br>
             <strong style="color:var(--navy)">Call Quality:</strong> syncs recordings from Dubber, grades them against a configurable rubric (AI or manual), calibration notes, and period reports.<br>
             <strong style="color:var(--navy)">Workforce Management:</strong> live agent presence (Webex), background-polled every 20s independent of who has the page open; Detailed Call History dashboard (volume, answered/missed rate, average handle time) once the org has Webex Calling licensing.<br>
             <strong style="color:var(--navy)">Training:</strong> course builder, assignment, attempts/scoring.<br>
             <strong style="color:var(--navy)">Projects:</strong> internal project tracking with milestones and SOP file attachments.<br>
-            <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — private, super_admin only.
+            <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — a private, restricted-access area.
           </div>
         </div>
 
@@ -3169,7 +3168,7 @@
     // config) so it reads as a simple reference — update it by hand
     // whenever access actually changes elsewhere in this file.
     const ROLE_PERMISSIONS = [
-      { area: 'Public Knowledge Base — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, admin: true, superAdmin: true },
+      { area: 'Public HeartBeat — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, admin: true, superAdmin: true },
       { area: 'Admin panel — access at all', user: false, qa: 'Limited', admin: true, superAdmin: true },
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, admin: true, superAdmin: true },
@@ -7421,7 +7420,7 @@
     <thead><tr><th style="width:60px">Weight</th><th style="width:170px">Category</th><th>Feedback Notes</th><th style="width:60px">Score</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
-  <div class="footer">RawTalent Knowledge Base — Call Quality Evaluation Report</div>
+  <div class="footer">RawTalent HeartBeat — Call Quality Evaluation Report</div>
   <script>window.onload = () => window.print();<\/script>
 </body></html>`;
       const win = window.open('', '_blank');

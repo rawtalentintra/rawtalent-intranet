@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Article — RawTalent Knowledge Base</title>
+  <title>Article — RawTalent HeartBeat</title>
   <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16.png">
@@ -121,7 +121,7 @@
   <nav class="navbar">
     <a class="nav-brand" href="/">
       <img src="/images/logo-dark-bg.png" alt="RawTalent" height="28" style="display:block">
-      <span class="nav-tag">Knowledge Base</span>
+      <span class="nav-tag">HeartBeat</span>
     </a>
     <div class="nav-actions">
       <div class="nav-user" style="cursor:pointer" onclick="openPasswordModal()" title="Change your password">
@@ -233,13 +233,13 @@
               <div class="error-code">404</div>
               <div class="error-title">Article not found</div>
               <p class="error-sub">This article may have been moved or deleted.</p>
-              <br><a href="/" style="color:var(--orange);font-weight:600">← Back to Knowledge Base</a>
+              <br><a href="/" style="color:var(--orange);font-weight:600">← Back to HeartBeat</a>
             </div>`;
           return;
         }
         const article = await res.json();
         currentArticleTitle = article.title;
-        document.title = `${article.title} — RawTalent Knowledge Base`;
+        document.title = `${article.title} — RawTalent HeartBeat`;
 
         const files = await fetch(`/api/articles/${articleId}/files`).then(r => r.json()).catch(() => []);
         renderArticle(article, files);
