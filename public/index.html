@@ -56,10 +56,10 @@
     .sidebar-nav {
       width: 216px;
       flex-shrink: 0;
-      /* Deliberately a distinct royal blue, not a subtle navy variant —
-         --navy-light was too close to the hero-wrap's --navy behind it
-         to read as a separate panel. */
-      background: #1e3a8a;
+      /* Same light blue as the "User View" banner, with the header's dark
+         navy for text/icons — a distinct panel without going full-dark. */
+      background: #eef2ff;
+      border-right: 1px solid #c7d2fe;
       padding: 20px 12px;
       display: flex;
       flex-direction: column;
@@ -75,7 +75,8 @@
       border-radius: 10px;
       border: none;
       background: transparent;
-      color: rgba(255,255,255,.55);
+      color: var(--navy);
+      opacity: .65;
       font-family: inherit;
       font-size: 13px;
       font-weight: 600;
@@ -93,9 +94,10 @@
     .mode-tab.active {
       background: white;
       color: var(--navy);
-      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+      opacity: 1;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
     }
-    .mode-tab:not(.active):hover { color: white; background: rgba(255,255,255,.08); }
+    .mode-tab:not(.active):hover { opacity: 1; background: rgba(11,29,62,.08); }
 
     /* Search input */
     .hero-search-wrap {
