@@ -56,11 +56,15 @@
     .sidebar-nav {
       width: 216px;
       flex-shrink: 0;
-      background: var(--navy-light);
+      /* Deliberately a distinct royal blue, not a subtle navy variant —
+         --navy-light was too close to the hero-wrap's --navy behind it
+         to read as a separate panel. */
+      background: #1e3a8a;
       padding: 20px 12px;
       display: flex;
       flex-direction: column;
       gap: 3px;
+      min-height: 100vh;
     }
     .app-main {
       flex: 1;
