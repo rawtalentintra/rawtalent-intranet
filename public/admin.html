@@ -358,7 +358,23 @@
             <div class="admin-page-title">Leads</div>
             <div class="admin-page-sub">Submitted from educator vetting calls — click a row for full details</div>
           </div>
+          <select id="leadsChartRange" class="form-control" style="max-width:170px" onchange="loadLeadsStats()">
+            <option value="week">This Week</option>
+            <option value="month" selected>This Month</option>
+          </select>
         </div>
+
+        <div style="display:flex;gap:14px;margin-bottom:16px" id="leadsChartsRow">
+          <div class="lead-chart-card" data-state="VIC">
+            <div class="lead-chart-head"><span>📍 VIC — Justine</span><span class="lead-chart-total" id="leadsChartTotal-VIC">–</span></div>
+            <div class="lead-chart-bars" id="leadsChartBars-VIC"></div>
+          </div>
+          <div class="lead-chart-card" data-state="SA">
+            <div class="lead-chart-head"><span>📍 SA — Gwen</span><span class="lead-chart-total" id="leadsChartTotal-SA">–</span></div>
+            <div class="lead-chart-bars" id="leadsChartBars-SA"></div>
+          </div>
+        </div>
+
         <div class="admin-table-card">
           <div style="overflow-x:auto">
             <table class="data-table">
@@ -368,12 +384,14 @@
                   <th>Centre</th>
                   <th>Suburb</th>
                   <th>State</th>
-                  <th>Submitted by</th>
-                  <th>Assigned Workforce Partner</th>
+                  <th>Lead Called</th>
+                  <th>Centre Visited</th>
+                  <th>Signed Centre</th>
+                  <th>Workforce Partner</th>
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
-                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -382,12 +400,12 @@
 
       <!-- Lead Detail Modal -->
       <div class="modal-overlay" id="leadDetailModal" onclick="if(event.target===this)closeLeadDetailModal()">
-        <div class="modal" style="max-width:520px">
+        <div class="modal" style="max-width:560px">
           <div class="modal-header">
-            <div class="modal-title">Lead Details</div>
+            <div class="modal-title" id="leadDetailTitle">Lead Details</div>
             <button class="modal-close" onclick="closeLeadDetailModal()">×</button>
           </div>
-          <div class="modal-body" id="leadDetailBody" style="max-height:65vh;overflow-y:auto"></div>
+          <div class="modal-body" id="leadDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
             <button class="btn-add" onclick="saveLeadAssignment()">Save</button>
@@ -2778,7 +2796,7 @@
       if (id === 'call-rubrics') loadRubricReference();
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
-      if (id === 'leads') loadLeadsTable();
+      if (id === 'leads') { loadLeadsTable(); loadLeadsStats(); }
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
       if (id === 'training-dashboard') loadTrainingDashboard();
@@ -3405,15 +3423,38 @@
     // ── Leads ─────────────────────────────────────────────────────
     let allLeads = [];
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
-    const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)'];
+    const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)', 'Liam Baxter'];
+
+    const LEAD_CALLED_META = {
+      done: { label: 'Called', cls: 'lead-badge-done' },
+      scheduled: { label: 'Scheduled', cls: 'lead-badge-sched' },
+      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' }
+    };
+    const CENTRE_VISITED_META = {
+      done: { label: 'Visited', cls: 'lead-badge-done' },
+      scheduled: { label: 'Scheduled', cls: 'lead-badge-sched' },
+      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' }
+    };
+    const SIGNED_META = {
+      signed: { label: 'Signed', cls: 'lead-badge-done' },
+      pending: { label: 'Pending', cls: 'lead-badge-todo' },
+      not_interested: { label: 'Not Interested', cls: 'lead-badge-not' }
+    };
+
+    function leadStatusBadge(status, at, metaMap) {
+      const meta = metaMap[status] || metaMap[Object.keys(metaMap)[0]];
+      const showsDate = status === 'done' || status === 'scheduled' || status === 'signed';
+      const text = showsDate && at ? `${meta.label} ${fmtDate(at)}` : meta.label;
+      return `<span class="lead-badge ${meta.cls}">${escHtml(text)}</span>`;
+    }
 
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
-      body.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
         allLeads = await fetch('/api/leads').then(r => r.json());
         if (!allLeads.length) {
-          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No leads submitted yet</td></tr>';
+          body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">No leads submitted yet</td></tr>';
           return;
         }
         body.innerHTML = allLeads.map(l => `
@@ -3422,42 +3463,128 @@
             <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
             <td>${escHtml(l.suburb || '—')}</td>
             <td>${escHtml(l.state || '—')}</td>
-            <td>${escHtml(l.submitted_by_name || l.submitted_by_email)}</td>
+            <td>${leadStatusBadge(l.lead_called_status, l.lead_called_at, LEAD_CALLED_META)}</td>
+            <td>${leadStatusBadge(l.centre_visited_status, l.centre_visited_at, CENTRE_VISITED_META)}</td>
+            <td>${leadStatusBadge(l.signed_status, l.signed_at, SIGNED_META)}</td>
             <td>${escHtml(l.assigned_workforce_partner || '—')}</td>
           </tr>`).join('');
       } catch {
-        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
     }
 
+    // ── Leads: compact VIC/SA performance charts ────────────────────
+    function leadsStatsRange(rangeKey) {
+      const now = new Date();
+      if (rangeKey === 'week') {
+        const day = now.getDay(); // 0 = Sunday
+        const diffToMonday = (day + 6) % 7;
+        const from = new Date(now); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - diffToMonday);
+        const to = new Date(from); to.setDate(to.getDate() + 7);
+        return { from, to };
+      }
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      const to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      return { from, to };
+    }
+
+    async function loadLeadsStats() {
+      const rangeKey = document.getElementById('leadsChartRange').value;
+      const { from, to } = leadsStatsRange(rangeKey);
+      try {
+        const rows = await fetch(`/api/leads/stats?from=${from.toISOString()}&to=${to.toISOString()}`).then(r => r.json());
+        renderLeadsChart('VIC', rows.find(r => r.state === 'VIC'));
+        renderLeadsChart('SA', rows.find(r => r.state === 'SA'));
+      } catch { /* charts just stay at previous state on failure */ }
+    }
+
+    function renderLeadsChart(state, row) {
+      const total = row ? Number(row.total) : 0;
+      const stages = [
+        { label: 'Leads', value: total },
+        { label: 'Called', value: row ? Number(row.called) : 0 },
+        { label: 'Visited', value: row ? Number(row.visited) : 0 },
+        { label: 'Signed', value: row ? Number(row.signed) : 0 }
+      ];
+      const max = Math.max(1, ...stages.map(s => s.value));
+      document.getElementById(`leadsChartTotal-${state}`).textContent = `${total} lead${total === 1 ? '' : 's'}`;
+      document.getElementById(`leadsChartBars-${state}`).innerHTML = stages.map(s => `
+        <div class="lead-chart-bar-col">
+          <div class="lead-chart-bar-value">${s.value}</div>
+          <div class="lead-chart-bar" style="height:${Math.round((s.value / max) * 100)}%"></div>
+          <div class="lead-chart-bar-label">${s.label}</div>
+        </div>`).join('');
+    }
+
     let currentLeadDetailId = null;
+
+    // Renders a UTC ISO timestamp into the value a <input type=datetime-local>
+    // needs (local time, no timezone suffix, minute precision).
+    function toDatetimeLocalValue(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt) {
+      const showsDate = currentStatus === Object.keys(statusOptions)[0] || currentStatus === 'scheduled';
+      return `
+        <div class="lead-status-row">
+          <span class="lead-status-label">${escHtml(label)}</span>
+          <div class="lead-status-controls">
+            <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}"
+              style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
+            <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')">
+              ${Object.entries(statusOptions).map(([val, meta]) => `<option value="${val}" ${currentStatus === val ? 'selected' : ''}>${escHtml(meta.label)}</option>`).join('')}
+            </select>
+          </div>
+        </div>`;
+    }
+
+    // Date/time input is only meaningful for "done" (called/visited/signed)
+    // and "scheduled" states — hide it for to_schedule/pending/not_interested
+    // so there's nothing to fill in for a stage that hasn't started.
+    function onLeadStatusChange(fieldKey) {
+      const status = document.getElementById(`lead_${fieldKey}_status`).value;
+      const dateInput = document.getElementById(`lead_${fieldKey}_at`);
+      const needsDate = status === 'done' || status === 'scheduled' || status === 'signed';
+      dateInput.style.display = needsDate ? '' : 'none';
+    }
 
     function openLeadDetail(id) {
       const lead = allLeads.find(l => l.id === id);
       if (!lead) return;
       currentLeadDetailId = id;
+      document.getElementById('leadDetailTitle').textContent = lead.centre_name;
       const row = (label, value) => `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
           <span style="color:var(--text-muted)">${escHtml(label)}</span>
           <span style="font-weight:600;color:var(--navy);text-align:right;max-width:60%">${escHtml(value || '—')}</span>
         </div>`;
       document.getElementById('leadDetailBody').innerHTML = `
-        ${row('Centre', lead.centre_name)}
-        ${row('Street Address', lead.street_address)}
-        ${row('Suburb', lead.suburb)}
-        ${row('State', lead.state)}
-        ${row('Centre Phone', lead.centre_phone)}
-        ${row('Educator Name', lead.educator_name)}
-        ${row('Agency Name', lead.agency_name)}
-        ${row('Number of Shifts', lead.number_of_shifts)}
-        ${row('Agency Usage', LEAD_AGENCY_USAGE_LABELS[lead.agency_usage] || lead.agency_usage)}
-        ${row('Contact Position', lead.position)}
-        ${row('Contact Name', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
+        <div class="lead-group-label">Centre</div>
+        ${row('Address', [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', '))}
+        ${row('Phone', lead.centre_phone)}
+        ${row('Contact', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
+        ${row('Position', lead.position)}
         ${row('Contact Email', lead.contact_email)}
-        ${row('Submitted By', lead.submitted_by_name || lead.submitted_by_email)}
+
+        <div class="lead-group-label">Lead source</div>
+        ${row('Submitted by', lead.submitted_by_name || lead.submitted_by_email)}
         ${row('Submitted', fmtDate(lead.created_at))}
+        ${row('Educator', lead.educator_name)}
+        ${row('Shifts worked', lead.number_of_shifts)}
+        ${row('Agency name', lead.agency_name)}
+        ${row('Agency usage', LEAD_AGENCY_USAGE_LABELS[lead.agency_usage] || lead.agency_usage)}
+
+        <div class="lead-group-label">Follow-up</div>
+        ${leadStatusEditorRow('lead_called', 'Lead Called', LEAD_CALLED_META, lead.lead_called_status || 'to_schedule', lead.lead_called_at)}
+        ${leadStatusEditorRow('centre_visited', 'Centre Visited', CENTRE_VISITED_META, lead.centre_visited_status || 'to_schedule', lead.centre_visited_at)}
+        ${leadStatusEditorRow('signed', 'Signed Centre', SIGNED_META, lead.signed_status || 'pending', lead.signed_at)}
+
         <div class="form-group-modal" style="margin-top:14px">
-          <label class="form-label-modal">Assigned Workforce Partner</label>
+          <label class="form-label-modal">Workforce Partner</label>
           <select id="leadAssigneeSelect" class="form-control">
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
@@ -3474,15 +3601,29 @@
     async function saveLeadAssignment() {
       if (!currentLeadDetailId) return;
       const assignedWorkforcePartner = document.getElementById('leadAssigneeSelect').value;
+      const readStatusField = fieldKey => {
+        const status = document.getElementById(`lead_${fieldKey}_status`).value;
+        const dateVal = document.getElementById(`lead_${fieldKey}_at`).value;
+        return { status, at: dateVal ? new Date(dateVal).toISOString() : null };
+      };
+      const called = readStatusField('lead_called');
+      const visited = readStatusField('centre_visited');
+      const signed = readStatusField('signed');
       try {
         const res = await fetch(`/api/leads/${currentLeadDetailId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assignedWorkforcePartner })
+          body: JSON.stringify({
+            assignedWorkforcePartner,
+            leadCalledStatus: called.status, leadCalledAt: called.at,
+            centreVisitedStatus: visited.status, centreVisitedAt: visited.at,
+            signedStatus: signed.status, signedAt: signed.at
+          })
         });
         if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to save', 'error'); return; }
         toast('Updated', 'success');
         closeLeadDetailModal();
         loadLeadsTable();
+        loadLeadsStats();
       } catch { toast('Network error', 'error'); }
     }
 

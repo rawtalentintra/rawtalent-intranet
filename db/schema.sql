@@ -840,3 +840,13 @@ CREATE TABLE IF NOT EXISTS leads (
 );
 CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
 CREATE INDEX IF NOT EXISTS idx_leads_submitted_by ON leads(submitted_by_email);
+
+-- Follow-up tracking, admin-editable. Each stage has a status plus an
+-- optional date/time — 'scheduled' uses that date/time as the scheduled
+-- moment, 'done' uses it as when it actually happened.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_called_status TEXT DEFAULT 'to_schedule';
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_called_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS centre_visited_status TEXT DEFAULT 'to_schedule';
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS centre_visited_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_status TEXT DEFAULT 'pending';
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ;
