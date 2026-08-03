@@ -319,6 +319,20 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
+    /* Home grid tiles — same .article-card base as the Articles list and
+       Training cards, but forced to a 1:1 square (via aspect-ratio) so all
+       8 tiles line up evenly regardless of how long each description is. */
+    .home-tile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .article-card.home-tile {
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
     .card-footer {
       display: flex;
       align-items: center;
@@ -687,13 +701,13 @@
       <button class="mode-tab" id="tabSearch" onclick="setMode('search')">🔍 Search Articles</button>
       <button class="mode-tab" id="tabAI" onclick="setMode('ai')">✨ Ask AI</button>
       <button class="mode-tab" id="tabAnnouncements" onclick="setMode('announcements')">📢 Announcements</button>
+      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
       <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
       <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
-      <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
-      <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
-      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
-      <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
+      <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
+      <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
+      <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
     </aside>
 
     <div class="app-main">
@@ -2608,9 +2622,9 @@
     function loadHomeView() {
       const list = document.getElementById('resultsList');
       list.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px">
+        <div class="home-tile-grid">
           ${HOME_TILES.map(t => `
-            <div class="article-card" style="cursor:pointer" onclick="setMode('${t.mode}')">
+            <div class="article-card home-tile" style="cursor:pointer" onclick="setMode('${t.mode}')">
               <div style="font-size:26px;margin-bottom:8px">${t.icon}</div>
               <div class="card-title">${escHtml(t.label)}</div>
               <div class="card-summary">${escHtml(t.desc)}</div>

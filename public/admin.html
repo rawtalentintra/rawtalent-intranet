@@ -557,7 +557,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title" id="articleFormTitle">New Article</div>
-            <div class="admin-page-sub">Create a new knowledge base article</div>
+            <div class="admin-page-sub" id="articleFormSub">Create a new knowledge base article</div>
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn-secondary" id="viewLogsBtn" style="display:none" onclick="openLogsModal()">📋 Logs</button>
@@ -2988,6 +2988,7 @@
         const a = await fetch(`/api/admin/articles/${id}`).then(r => r.json());
         editingArticleId = id;
         document.getElementById('articleFormTitle').textContent = 'Edit Article';
+        document.getElementById('articleFormSub').textContent = 'Update this knowledge base article';
         document.getElementById('editingArticleId').value = id;
         document.getElementById('articleTitle').value = a.title || '';
         document.getElementById('articleSummary').value = a.summary || '';
@@ -3041,6 +3042,7 @@
     function resetArticleForm() {
       editingArticleId = null;
       document.getElementById('articleFormTitle').textContent = 'New Article';
+      document.getElementById('articleFormSub').textContent = 'Create a new knowledge base article';
       document.getElementById('editingArticleId').value = '';
       document.getElementById('articleTitle').value = '';
       document.getElementById('articleSummary').value = '';
