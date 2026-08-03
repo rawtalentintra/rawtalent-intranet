@@ -65,7 +65,7 @@
       display: flex; gap: 6px; flex-wrap: wrap;
       padding: 10px 14px; border-bottom: 1px solid var(--gray-200);
     }
-    .leads-filter-bar select {
+    .leads-filter-bar select, .leads-filter-bar input {
       padding: 3px 6px; font-size: 11px; border-radius: var(--radius);
       border: 1px solid var(--gray-200); font-family: inherit; color: var(--text);
       background: white; width: auto;
@@ -459,6 +459,7 @@
 
         <div class="admin-table-card">
           <div class="leads-filter-bar">
+            <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()" style="width:160px">
             <select id="leadsFilterPeriod" onchange="filterLeadsTable()">
               <option value="all" selected>All time</option>
               <option value="week">This week</option>
@@ -470,6 +471,11 @@
             </select>
             <select id="leadsFilterState" onchange="filterLeadsTable()">
               <option value="">State: any</option>
+            </select>
+            <select id="leadsFilterAgencyUsage" onchange="filterLeadsTable()">
+              <option value="">Agency Usage: any</option>
+              <option value="target_temp">Target Temp</option>
+              <option value="high_agency_user">High Agency User</option>
             </select>
             <select id="leadsFilterLeadCalled" onchange="filterLeadsTable()">
               <option value="">Called: any</option>
@@ -3713,20 +3719,24 @@
     // than one combined list — easier to scan and combine (e.g. "Called"
     // + "To Schedule" visit) than a single grouped dropdown.
     function filterLeadsTable() {
+      const centreSearch = document.getElementById('leadsFilterCentre').value.trim().toLowerCase();
       const periodKey = document.getElementById('leadsFilterPeriod').value;
       const partner = document.getElementById('leadsFilterPartner').value;
       const state = document.getElementById('leadsFilterState').value;
+      const agencyUsage = document.getElementById('leadsFilterAgencyUsage').value;
       const leadCalled = document.getElementById('leadsFilterLeadCalled').value;
       const centreVisited = document.getElementById('leadsFilterCentreVisited').value;
       const profileCreated = document.getElementById('leadsFilterProfileCreated').value;
 
       let filtered = allLeads;
+      if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
       if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
         filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
       }
       if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
       if (state) filtered = filtered.filter(l => l.state === state);
+      if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
       if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
       if (centreVisited) filtered = filtered.filter(l => l.centre_visited_status === centreVisited);
       if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
@@ -3744,14 +3754,12 @@
       const called = filtered.filter(l => l.lead_called_status === 'done').length;
       const visited = filtered.filter(l => l.centre_visited_status === 'done').length;
       const signed = filtered.filter(l => l.signed_status === 'signed').length;
-      const notInterested = filtered.filter(l => l.signed_status === 'not_interested').length;
       const totalLabel = filtered.length === allLeads.length ? 'Leads' : `Leads (of ${allLeads.length})`;
       bar.innerHTML = `
         <div class="leads-stat"><span class="leads-stat-num">${filtered.length}</span><span class="leads-stat-label">${totalLabel}</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#15803d">${called}</span><span class="leads-stat-label">Called</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#2563eb">${visited}</span><span class="leads-stat-label">Visited</span></div>
-        <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>
-        <div class="leads-stat"><span class="leads-stat-num" style="color:#c0392b">${notInterested}</span><span class="leads-stat-label">Not Interested</span></div>`;
+        <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>`;
     }
 
     function renderLeadsTableRows(list) {
