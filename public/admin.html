@@ -7941,7 +7941,8 @@
             <div style="font-size:12.5px;color:var(--text-muted)">Average overall score</div>
           </div>
           <div style="background:white;border-radius:var(--radius-lg);padding:20px;border:1px solid var(--gray-200);box-shadow:var(--shadow-sm)">
-            <div style="display:flex;gap:10px;font-size:13px">
+            <div style="display:flex;gap:10px;font-size:13px;flex-wrap:wrap">
+              <span style="color:#7c3aed;font-weight:700">${stats.outcomeBreakdown.exceptional || 0} exceptional</span>
               <span style="color:#1a8a4a;font-weight:700">${stats.outcomeBreakdown.pass || 0} pass</span>
               <span style="color:#b8860b;font-weight:700">${stats.outcomeBreakdown.coaching || 0} coaching</span>
               <span style="color:#c0392b;font-weight:700">${stats.outcomeBreakdown.escalate || 0} escalate</span>
@@ -8233,6 +8234,7 @@
     function closeTranscriptModal() { document.getElementById('transcriptModal').classList.remove('open'); }
 
     const outcomeMeta = {
+      exceptional: { label: '🌟 Exceptional', badge: 'badge-super' },
       pass: { label: '✅ Pass', badge: 'badge-published' },
       coaching: { label: '🎓 Coaching Recommended', badge: 'badge-user' },
       escalate: { label: '🚩 Escalate', badge: 'badge-draft' },

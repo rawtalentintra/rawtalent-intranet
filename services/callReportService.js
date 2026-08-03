@@ -10,7 +10,7 @@ function getClient() {
 // always works even if ANTHROPIC_API_KEY isn't set.
 function computeStats(evaluations, categoryKey) {
   const total = evaluations.length;
-  const outcomeBreakdown = { pass: 0, coaching: 0, escalate: 0 };
+  const outcomeBreakdown = { exceptional: 0, pass: 0, coaching: 0, escalate: 0 };
   const categoryTotals = {}; // key -> { label, sum, count }
   const repMap = {}; // repName -> { repName, count, scoreSum, focusSum, focusCount }
   let overallSum = 0;
@@ -113,7 +113,7 @@ This report's focus: ${focusLabel}.
 Aggregate data for the period:
 - Calls evaluated: ${stats.total}
 - Average overall score: ${stats.avgOverallScore}%
-- Outcomes: ${stats.outcomeBreakdown.pass || 0} pass, ${stats.outcomeBreakdown.coaching || 0} coaching recommended, ${stats.outcomeBreakdown.escalate || 0} escalate
+- Outcomes: ${stats.outcomeBreakdown.exceptional || 0} exceptional, ${stats.outcomeBreakdown.pass || 0} pass, ${stats.outcomeBreakdown.coaching || 0} coaching recommended, ${stats.outcomeBreakdown.escalate || 0} escalate
 
 Category averages (out of 5):
 ${categoryAvgLines}
@@ -190,7 +190,7 @@ Write in formal Australian English throughout (e.g. "organise", "recognise", "be
 Aggregate data for the period:
 - Calls evaluated: ${stats.total}
 - Average overall score: ${stats.avgOverallScore}%
-- Outcomes: ${stats.outcomeBreakdown.pass || 0} pass, ${stats.outcomeBreakdown.coaching || 0} coaching recommended, ${stats.outcomeBreakdown.escalate || 0} escalate
+- Outcomes: ${stats.outcomeBreakdown.exceptional || 0} exceptional, ${stats.outcomeBreakdown.pass || 0} pass, ${stats.outcomeBreakdown.coaching || 0} coaching recommended, ${stats.outcomeBreakdown.escalate || 0} escalate
 
 Category averages (out of 5):
 ${categoryAvgLines}
