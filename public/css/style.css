@@ -803,7 +803,9 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 11.5px;
   font-weight: 700;
   white-space: nowrap;
+  cursor: pointer;
 }
+.lead-badge:hover { filter: brightness(0.95); }
 .lead-badge-done { background: #dcfce7; color: #15803d; }
 .lead-badge-sched { background: #fef3c7; color: #b45309; }
 .lead-badge-todo { background: var(--gray-100); color: var(--text-muted); }
@@ -907,6 +909,33 @@ button { cursor: pointer; font-family: inherit; }
 @media (max-width: 1100px) {
   .kpi-row { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* Denser variant for tables with many short-content rows (Leads, etc.) —
+   same structure as .data-table, just tighter padding and smaller type. */
+.data-table-compact th { padding: 6px 14px; font-size: 10px; }
+.data-table-compact td { padding: 4px 14px; font-size: 12.5px; }
+.td-truncate {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Single-field status editor popover, opened by clicking a lead-badge
+   directly rather than the full detail modal. */
+.status-popover {
+  position: absolute;
+  z-index: 500;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  width: 200px;
+}
+.status-popover-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 6px; }
+.status-popover select, .status-popover input { width: 100%; font-size: 12.5px; }
+.status-popover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 
 /* ─── Admin Table ─────────────────────────────────────────────── */
 .admin-table-card {

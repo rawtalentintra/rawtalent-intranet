@@ -411,7 +411,7 @@
 
         <div class="admin-table-card">
           <div style="overflow-x:auto">
-            <table class="data-table">
+            <table class="data-table data-table-compact">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -429,6 +429,19 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- Lead Status Popover — lightweight single-field editor triggered by
+           clicking a status badge in the table, instead of opening the full
+           detail modal just to flip one status. -->
+      <div id="leadStatusPopover" class="status-popover" style="display:none">
+        <div class="status-popover-label" id="leadPopoverLabel"></div>
+        <select id="leadPopoverStatus" class="form-control" onchange="onLeadPopoverStatusChange()"></select>
+        <input type="datetime-local" id="leadPopoverAt" class="form-control" style="margin-top:6px">
+        <div class="status-popover-actions">
+          <button class="btn-secondary" style="padding:5px 12px;font-size:12px" onclick="closeLeadStatusPopover()">Cancel</button>
+          <button class="btn-add" style="padding:5px 12px;font-size:12px" onclick="saveLeadStatusPopover()">Save</button>
         </div>
       </div>
 
@@ -3475,11 +3488,24 @@
       not_interested: { label: 'Not Interested', cls: 'lead-badge-not' }
     };
 
-    function leadStatusBadge(status, at, metaMap) {
-      const meta = metaMap[status] || metaMap[Object.keys(metaMap)[0]];
+    // Maps a status field to everything the popover editor needs: which
+    // meta/labels to show, which lead properties hold the current value, and
+    // which camelCase keys the PUT /api/leads/:id body expects.
+    const LEAD_STATUS_FIELDS = {
+      lead_called: { label: 'Lead Called', meta: LEAD_CALLED_META, statusKey: 'lead_called_status', atKey: 'lead_called_at', statusBody: 'leadCalledStatus', atBody: 'leadCalledAt' },
+      centre_visited: { label: 'Centre Visited', meta: CENTRE_VISITED_META, statusKey: 'centre_visited_status', atKey: 'centre_visited_at', statusBody: 'centreVisitedStatus', atBody: 'centreVisitedAt' },
+      signed: { label: 'Signed Centre', meta: SIGNED_META, statusKey: 'signed_status', atKey: 'signed_at', statusBody: 'signedStatus', atBody: 'signedAt' }
+    };
+
+    function leadStatusBadge(leadId, field) {
+      const info = LEAD_STATUS_FIELDS[field];
+      const lead = allLeads.find(l => l.id === leadId);
+      const status = lead[info.statusKey];
+      const at = lead[info.atKey];
+      const meta = info.meta[status] || info.meta[Object.keys(info.meta)[0]];
       const showsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       const text = showsDate && at ? `${meta.label} ${fmtDate(at)}` : meta.label;
-      return `<span class="lead-badge ${meta.cls}">${escHtml(text)}</span>`;
+      return `<span class="lead-badge ${meta.cls}" onclick="openLeadStatusPopover(event,'${leadId}','${field}')">${escHtml(text)}</span>`;
     }
 
     async function loadLeadsTable() {
@@ -3494,18 +3520,99 @@
         body.innerHTML = allLeads.map(l => `
           <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
             <td>${fmtDate(l.created_at)}</td>
-            <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
+            <td style="font-weight:600;color:var(--navy)" class="td-truncate" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
             <td>${escHtml(l.suburb || '—')}</td>
             <td>${escHtml(l.state || '—')}</td>
-            <td>${leadStatusBadge(l.lead_called_status, l.lead_called_at, LEAD_CALLED_META)}</td>
-            <td>${leadStatusBadge(l.centre_visited_status, l.centre_visited_at, CENTRE_VISITED_META)}</td>
-            <td>${leadStatusBadge(l.signed_status, l.signed_at, SIGNED_META)}</td>
-            <td>${escHtml(l.assigned_workforce_partner || '—')}</td>
+            <td>${leadStatusBadge(l.id, 'lead_called')}</td>
+            <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
+            <td>${leadStatusBadge(l.id, 'signed')}</td>
+            <td class="td-truncate" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
           </tr>`).join('');
       } catch {
         body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
     }
+
+    // ── Lead status popover — single-field editor ───────────────────
+    // Clicking a badge in the table edits just that one status inline,
+    // instead of opening the full detail modal to change one field.
+    let leadPopoverLeadId = null;
+    let leadPopoverField = null;
+
+    function openLeadStatusPopover(evt, leadId, field) {
+      evt.stopPropagation();
+      const info = LEAD_STATUS_FIELDS[field];
+      const lead = allLeads.find(l => l.id === leadId);
+      if (!lead) return;
+      leadPopoverLeadId = leadId;
+      leadPopoverField = field;
+
+      document.getElementById('leadPopoverLabel').textContent = info.label;
+      const sel = document.getElementById('leadPopoverStatus');
+      sel.innerHTML = Object.entries(info.meta).map(([val, m]) =>
+        `<option value="${val}" ${lead[info.statusKey] === val ? 'selected' : ''}>${escHtml(m.label)}</option>`).join('');
+      document.getElementById('leadPopoverAt').value = toDatetimeLocalValue(lead[info.atKey]);
+      onLeadPopoverStatusChange();
+
+      const pop = document.getElementById('leadStatusPopover');
+      pop.style.display = 'block';
+      const rect = evt.currentTarget.getBoundingClientRect();
+      const top = rect.bottom + window.scrollY + 6;
+      let left = rect.left + window.scrollX;
+      // Keep the popover on-screen when the badge sits near the right edge.
+      const maxLeft = window.scrollX + document.documentElement.clientWidth - 220;
+      if (left > maxLeft) left = maxLeft;
+      pop.style.top = top + 'px';
+      pop.style.left = left + 'px';
+    }
+
+    // Only "done"/"scheduled"/"signed" states carry a date — hide the
+    // date/time input for the states that don't need one.
+    function onLeadPopoverStatusChange() {
+      const status = document.getElementById('leadPopoverStatus').value;
+      const needsDate = status === 'done' || status === 'scheduled' || status === 'signed';
+      document.getElementById('leadPopoverAt').style.display = needsDate ? '' : 'none';
+    }
+
+    function closeLeadStatusPopover() {
+      document.getElementById('leadStatusPopover').style.display = 'none';
+      leadPopoverLeadId = null;
+      leadPopoverField = null;
+    }
+
+    async function saveLeadStatusPopover() {
+      if (!leadPopoverLeadId) return;
+      const info = LEAD_STATUS_FIELDS[leadPopoverField];
+      const status = document.getElementById('leadPopoverStatus').value;
+      const dateVal = document.getElementById('leadPopoverAt').value;
+      const at = dateVal ? new Date(dateVal).toISOString() : null;
+      const body = {};
+      body[info.statusBody] = status;
+      body[info.atBody] = at;
+      try {
+        const res = await fetch(`/api/leads/${leadPopoverLeadId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to save', 'error'); return; }
+        const updated = await res.json();
+        const idx = allLeads.findIndex(l => l.id === leadPopoverLeadId);
+        if (idx !== -1) allLeads[idx] = updated;
+        closeLeadStatusPopover();
+        loadLeadsTable();
+        loadSalesDashboard();
+        toast('Updated', 'success');
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // Click-away closes the popover, but not clicks on the popover itself
+    // or on the badge that opened it (that badge's own onclick handles it).
+    document.addEventListener('click', (evt) => {
+      const pop = document.getElementById('leadStatusPopover');
+      if (pop && pop.style.display === 'block' && !pop.contains(evt.target) && !evt.target.classList.contains('lead-badge')) {
+        closeLeadStatusPopover();
+      }
+    });
 
     // ── Sales Dashboard ───────────────────────────────────────────
     // Computed client-side from the same `allLeads` array the Leads table
