@@ -2419,6 +2419,28 @@
       leaveTeamMonth.setMonth(leaveTeamMonth.getMonth() + delta);
       loadLeaveTeamCalendar();
     }
+    // A fixed, visually-distinct set of chip colors for the Team Leave
+    // Calendar — each person is hashed to the same slot every time (by
+    // full name/email, not just first name, so two "Sam"s don't collide),
+    // so Gelliane is always the same color whether you're looking at this
+    // month or next month.
+    const LEAVE_PERSON_COLORS = [
+      { bg: '#eef2ff', text: '#4338ca' }, // indigo
+      { bg: '#fce7f3', text: '#be185d' }, // pink
+      { bg: '#dcfce7', text: '#15803d' }, // green
+      { bg: '#fef3c7', text: '#b45309' }, // amber
+      { bg: '#e0f2fe', text: '#0369a1' }, // sky
+      { bg: '#f3e8ff', text: '#7e22ce' }, // purple
+      { bg: '#ffe4e6', text: '#be123c' }, // rose
+      { bg: '#ccfbf1', text: '#0f766e' }, // teal
+      { bg: '#fff7ed', text: '#c2410c' }  // orange
+    ];
+    function leavePersonColor(key) {
+      let hash = 0;
+      for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+      return LEAVE_PERSON_COLORS[hash % LEAVE_PERSON_COLORS.length];
+    }
+
     function renderLeaveTeamCalendar() {
       const wrap = document.getElementById('leaveTeamCalendarWrap');
       if (!wrap) return;
@@ -2428,19 +2450,23 @@
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const byDate = {};
       leaveTeamData.forEach(l => {
+        const fullName = l.user_name || l.user_email;
         const d = new Date(l.start_date + 'T00:00:00');
         const end = new Date(l.end_date + 'T00:00:00');
         while (d <= end) {
           const ds = toDateStr(d);
-          (byDate[ds] = byDate[ds] || []).push((l.user_name || l.user_email).split(' ')[0]);
+          (byDate[ds] = byDate[ds] || []).push({ name: fullName.split(' ')[0], key: fullName });
           d.setDate(d.getDate() + 1);
         }
       });
       const cellsHtml = cells.map(c => {
-        const names = byDate[c.dateStr] || [];
+        const people = byDate[c.dateStr] || [];
         return `<div style="min-height:58px;border:1px solid var(--gray-100);border-radius:6px;padding:4px;opacity:${c.inMonth ? 1 : 0.35}">
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">${c.date.getDate()}</div>
-          ${names.map(n => `<div style="font-size:10px;background:#eef2ff;color:var(--navy);border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(n)} on Leave</div>`).join('')}
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:3px">${c.date.getDate()}</div>
+          ${people.map(p => {
+            const col = leavePersonColor(p.key);
+            return `<div style="font-size:10px;font-weight:600;background:${col.bg};color:${col.text};border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(p.name)} on Leave</div>`;
+          }).join('')}
         </div>`;
       }).join('');
       wrap.innerHTML = `
@@ -2449,8 +2475,8 @@
           <div style="font-weight:700;font-size:14px;color:var(--navy)">${monthLabel}</div>
           <button onclick="changeLeaveTeamMonth(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:4px">
-          ${dayNames.map(d => `<div>${d}</div>`).join('')}
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;font-weight:700;color:var(--navy);text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:.02em">
+          ${dayNames.map(d => `<div style="background:#eef2ff;border-radius:5px;padding:4px 0">${d}</div>`).join('')}
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cellsHtml}</div>
       `;
