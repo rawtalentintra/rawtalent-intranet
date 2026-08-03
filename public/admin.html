@@ -466,7 +466,7 @@
               <option value="quarter">This quarter</option>
             </select>
             <select id="leadsFilterPartner" onchange="filterLeadsTable()">
-              <option value="">Partner: any</option>
+              <option value="">WF Partner: any</option>
             </select>
             <select id="leadsFilterState" onchange="filterLeadsTable()">
               <option value="">State: any</option>
@@ -486,8 +486,7 @@
             <select id="leadsFilterProfileCreated" onchange="filterLeadsTable()">
               <option value="">Profile: any</option>
               <option value="pending">Pending</option>
-              <option value="signed">Signed</option>
-              <option value="not_interested">Not interested</option>
+              <option value="signed">Profile Created</option>
             </select>
           </div>
           <div style="overflow-x:auto">
@@ -502,9 +501,9 @@
                   <th>Lead Called</th>
                   <th>Centre Visited</th>
                   <th>Profile Created</th>
-                  <th>Workforce Partner</th>
-                  <th>Last Called</th>
-                  <th>Last Visited</th>
+                  <th>WF Partner</th>
+                  <th style="white-space:normal;max-width:56px">Last Called</th>
+                  <th style="white-space:normal;max-width:56px">Last Visited</th>
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
@@ -529,10 +528,10 @@
       <div id="leadStatusPopover" class="status-popover" style="display:none">
         <div class="status-popover-label" id="leadPopoverLabel"></div>
         <select id="leadPopoverStatus" class="form-control" onchange="onLeadPopoverStatusChange()"></select>
-        <input type="datetime-local" id="leadPopoverAt" class="form-control" style="margin-top:6px">
+        <input type="datetime-local" id="leadPopoverAt" class="form-control" style="margin-top:5px">
         <div class="status-popover-actions">
-          <button class="btn-secondary" style="padding:5px 12px;font-size:12px" onclick="closeLeadStatusPopover()">Cancel</button>
-          <button class="btn-add" style="padding:5px 12px;font-size:12px" onclick="saveLeadStatusPopover()">Save</button>
+          <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="closeLeadStatusPopover()">Cancel</button>
+          <button class="btn-add" style="padding:3px 9px;font-size:10.5px" onclick="saveLeadStatusPopover()">Save</button>
         </div>
       </div>
 
@@ -3641,19 +3640,27 @@
       scheduled: { label: 'Scheduled', cls: 'lead-badge-sched' },
       to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' }
     };
+    // "not_interested" is kept here (not deleted) purely so any lead that
+    // already carries that value still renders a sensible badge — it's no
+    // longer offered as a choice anywhere leads are edited (see `options`
+    // below and the Profile filter), since Profile Created is now a
+    // two-state field.
     const SIGNED_META = {
-      signed: { label: 'Signed', cls: 'lead-badge-done' },
+      signed: { label: 'Profile Created', cls: 'lead-badge-done' },
       pending: { label: 'Pending', cls: 'lead-badge-todo' },
       not_interested: { label: 'Not Interested', cls: 'lead-badge-not' }
     };
 
     // Maps a status field to everything the popover editor needs: which
     // meta/labels to show, which lead properties hold the current value, and
-    // which camelCase keys the PUT /api/leads/:id body expects.
+    // which camelCase keys the PUT /api/leads/:id body expects. `options`
+    // (when present) restricts which of `meta`'s keys are offered as
+    // choices in the edit popover — narrower than `meta` itself, which
+    // still needs every key so old values keep rendering correctly.
     const LEAD_STATUS_FIELDS = {
       lead_called: { label: 'Lead Called', meta: LEAD_CALLED_META, statusKey: 'lead_called_status', atKey: 'lead_called_at', statusBody: 'leadCalledStatus', atBody: 'leadCalledAt' },
       centre_visited: { label: 'Centre Visited', meta: CENTRE_VISITED_META, statusKey: 'centre_visited_status', atKey: 'centre_visited_at', statusBody: 'centreVisitedStatus', atBody: 'centreVisitedAt' },
-      signed: { label: 'Profile Created', meta: SIGNED_META, statusKey: 'signed_status', atKey: 'signed_at', statusBody: 'signedStatus', atBody: 'signedAt' }
+      signed: { label: 'Profile Created', meta: SIGNED_META, options: ['pending', 'signed'], statusKey: 'signed_status', atKey: 'signed_at', statusBody: 'signedStatus', atBody: 'signedAt' }
     };
 
     function leadStatusBadge(leadId, field) {
@@ -3746,16 +3753,16 @@
       body.innerHTML = list.map(l => `
         <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
-          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:145px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
-          <td class="td-truncate" style="max-width:85px" title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
+          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:320px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
+          <td class="td-truncate" style="max-width:62px" title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
-          <td class="td-truncate" style="max-width:95px" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '')}">${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '—')}</td>
+          <td class="td-truncate" style="max-width:72px" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '')}">${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '—')}</td>
           <td>${leadStatusBadge(l.id, 'lead_called')}</td>
           <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
           <td>${leadStatusBadge(l.id, 'signed')}</td>
-          <td class="td-truncate" style="max-width:110px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
-          <td>${fmtDateShort(l.lead_called_at)}</td>
-          <td>${fmtDateShort(l.centre_visited_at)}</td>
+          <td class="td-truncate" style="max-width:64px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
+          <td style="white-space:nowrap">${fmtDateShort(l.lead_called_at)}</td>
+          <td style="white-space:nowrap">${fmtDateShort(l.centre_visited_at)}</td>
         </tr>`).join('');
     }
 
@@ -3775,18 +3782,19 @@
 
       document.getElementById('leadPopoverLabel').textContent = info.label;
       const sel = document.getElementById('leadPopoverStatus');
-      sel.innerHTML = Object.entries(info.meta).map(([val, m]) =>
-        `<option value="${val}" ${lead[info.statusKey] === val ? 'selected' : ''}>${escHtml(m.label)}</option>`).join('');
+      const keys = info.options || Object.keys(info.meta);
+      sel.innerHTML = keys.map(val =>
+        `<option value="${val}" ${lead[info.statusKey] === val ? 'selected' : ''}>${escHtml(info.meta[val].label)}</option>`).join('');
       document.getElementById('leadPopoverAt').value = toDatetimeLocalValue(lead[info.atKey]);
       onLeadPopoverStatusChange();
 
       const pop = document.getElementById('leadStatusPopover');
       pop.style.display = 'block';
       const rect = evt.currentTarget.getBoundingClientRect();
-      const top = rect.bottom + window.scrollY + 6;
+      const top = rect.bottom + window.scrollY + 4;
       let left = rect.left + window.scrollX;
       // Keep the popover on-screen when the badge sits near the right edge.
-      const maxLeft = window.scrollX + document.documentElement.clientWidth - 220;
+      const maxLeft = window.scrollX + document.documentElement.clientWidth - 184;
       if (left > maxLeft) left = maxLeft;
       pop.style.top = top + 'px';
       pop.style.left = left + 'px';
@@ -4733,8 +4741,11 @@
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
-    function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt) {
-      const showsDate = currentStatus === Object.keys(statusOptions)[0] || currentStatus === 'scheduled';
+    function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt, optionKeys) {
+      const keys = optionKeys || Object.keys(statusOptions);
+      // "done"/"signed" (the completed state) and "scheduled" carry a date;
+      // to_schedule/pending/not_interested don't.
+      const showsDate = currentStatus === 'done' || currentStatus === 'signed' || currentStatus === 'scheduled';
       // qa_view and workforce_partner both get a read-only view of these
       // controls — editing status/assignment is admin/super_admin only
       // server-side (PUT /api/leads/:id).
@@ -4746,7 +4757,7 @@
             <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}" ${readOnly ? 'disabled' : ''}
               style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
             <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''}>
-              ${Object.entries(statusOptions).map(([val, meta]) => `<option value="${val}" ${currentStatus === val ? 'selected' : ''}>${escHtml(meta.label)}</option>`).join('')}
+              ${keys.map(val => `<option value="${val}" ${currentStatus === val ? 'selected' : ''}>${escHtml(statusOptions[val].label)}</option>`).join('')}
             </select>
           </div>
         </div>`;
@@ -4824,7 +4835,7 @@
         <div class="lead-group-label">Follow-up</div>
         ${leadStatusEditorRow('lead_called', 'Lead Called', LEAD_CALLED_META, lead.lead_called_status || 'to_schedule', lead.lead_called_at)}
         ${leadStatusEditorRow('centre_visited', 'Centre Visited', CENTRE_VISITED_META, lead.centre_visited_status || 'to_schedule', lead.centre_visited_at)}
-        ${leadStatusEditorRow('signed', 'Profile Created', SIGNED_META, lead.signed_status || 'pending', lead.signed_at)}
+        ${leadStatusEditorRow('signed', 'Profile Created', SIGNED_META, lead.signed_status || 'pending', lead.signed_at, ['pending', 'signed'])}
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>

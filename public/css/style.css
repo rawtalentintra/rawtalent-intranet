@@ -969,12 +969,12 @@ button { cursor: pointer; font-family: inherit; }
   border: 1px solid var(--gray-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
-  padding: 10px;
-  width: 200px;
+  padding: 8px;
+  width: 168px;
 }
-.status-popover-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 6px; }
-.status-popover select, .status-popover input { width: 100%; font-size: 12.5px; }
-.status-popover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.status-popover-label { font-size: 9.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 4px; }
+.status-popover select, .status-popover input { width: 100%; font-size: 11px; padding: 4px 6px; }
+.status-popover-actions { display: flex; justify-content: flex-end; gap: 5px; margin-top: 6px; }
 
 /* ─── Admin Table ─────────────────────────────────────────────── */
 .admin-table-card {
