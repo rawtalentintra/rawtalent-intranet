@@ -651,7 +651,13 @@ button { cursor: pointer; font-family: inherit; }
   display: grid;
   grid-template-columns: 244px 1fr;
   min-height: calc(100vh - 64px);
+  transition: grid-template-columns .22s ease;
+  position: relative;
 }
+.admin-layout.sidebar-collapsed { grid-template-columns: 0 1fr; }
+.admin-layout.sidebar-collapsed .admin-sidebar { padding-left: 0; padding-right: 0; }
+.admin-layout.sidebar-collapsed .admin-sidebar-items { display: none; }
+.admin-layout.sidebar-collapsed .sidebar-collapse-toggle { left: -13px; transform: rotate(180deg); }
 
 .admin-sidebar {
   background: var(--navy);
@@ -661,6 +667,35 @@ button { cursor: pointer; font-family: inherit; }
   top: 64px;
   height: calc(100vh - 64px);
   overflow-y: auto;
+}
+
+/* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
+   so it's never subject to the sidebar's own overflow clipping and can
+   straddle the sidebar's right edge in both collapsed and expanded states.
+   Positioned with `left` (not `right`) so it tracks the sidebar's actual
+   width instead of the layout's, and animates smoothly between the two. */
+.sidebar-collapse-toggle {
+  position: absolute;
+  top: 76px;
+  left: 231px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: white;
+  border: 1px solid var(--gray-200);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 30;
+  font-size: 13px;
+  color: var(--navy);
+  transition: left .22s ease, transform .22s ease;
+}
+.sidebar-collapse-toggle:hover { background: var(--gray-100); }
+@media (max-width: 900px) {
+  .sidebar-collapse-toggle { display: none; }
 }
 
 .admin-nav-section {

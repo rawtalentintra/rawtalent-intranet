@@ -131,8 +131,10 @@
   <div class="mobile-sidebar-overlay" id="mobileSidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
   <div class="admin-layout">
+    <button class="sidebar-collapse-toggle" id="sidebarCollapseToggle" onclick="toggleDesktopSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
     <!-- Sidebar -->
     <aside class="admin-sidebar" id="adminSidebar">
+      <div class="admin-sidebar-items" id="adminSidebarItems">
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">HR</div>
         <div class="admin-nav-item" onclick="showSection('team', this)">
@@ -250,7 +252,16 @@
           <span class="admin-nav-icon">🗓️</span> Meetings
         </div>
       </div>
+      </div>
     </aside>
+    <script>
+      // Applied synchronously (before the rest of the page renders) so a
+      // returning user who collapsed the sidebar doesn't see it flash open
+      // for a frame before JS catches up.
+      if (localStorage.getItem('hbSidebarCollapsed') === '1') {
+        document.querySelector('.admin-layout').classList.add('sidebar-collapsed');
+      }
+    </script>
 
     <!-- Main Content -->
     <main class="admin-content">
@@ -2974,6 +2985,14 @@
     function closeMobileSidebar() {
       document.getElementById('adminSidebar').classList.remove('open');
       document.getElementById('mobileSidebarOverlay').classList.remove('open');
+    }
+
+    // Desktop sidebar collapse — separate from the mobile drawer above.
+    // Shared localStorage key with the public site sidebar, so a user's
+    // choice carries over between HeartBeat and the admin panel.
+    function toggleDesktopSidebar() {
+      const collapsed = document.querySelector('.admin-layout').classList.toggle('sidebar-collapsed');
+      localStorage.setItem('hbSidebarCollapsed', collapsed ? '1' : '0');
     }
 
     // ── Articles ──────────────────────────────────────────────────
