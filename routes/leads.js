@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 
 router.use(requireAuth);
+
+// qa_view gets read-only access to the admin Leads list/detail (not the
+// Sales Dashboard, which reuses this same data client-side but is kept
+// off qa_view's nav for now) — editing (PUT below) stays admin-only.
+const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view');
 
 // State -> Workforce Partner auto-assignment. Still overridable afterwards
 // via PUT — this just sets a sensible default so nothing sits unassigned.
@@ -61,7 +66,7 @@ router.get('/mine', async (req, res) => {
   }
 });
 
-router.get('/', requireAdmin, async (req, res) => {
+router.get('/', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
     res.json(result.rows);
@@ -137,7 +142,7 @@ router.get('/check-duplicate', async (req, res) => {
   }
 });
 
-router.get('/:id', requireAdmin, async (req, res) => {
+router.get('/:id', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     if (!result.rows[0]) return res.status(404).json({ error: 'Lead not found' });

@@ -23,6 +23,51 @@ const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize:
 // ── in this router (users, glossary, feedback, logs, drive sync, etc). ──
 const articleAccess = requireRole('admin', 'super_admin', 'qa_view');
 
+// ── Glossary (view/add/edit) — same qa_view access as Articles, delete ──
+// ── stays admin/super_admin only (registered further down, after the ──
+// ── blanket requireAdmin). Plain users get read-only terms elsewhere ──
+// ── via /api/articles/glossary. ──
+const glossaryAccess = requireRole('admin', 'super_admin', 'qa_view');
+
+router.get('/glossary', glossaryAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute('SELECT * FROM glossary ORDER BY term ASC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/glossary', glossaryAccess, async (req, res) => {
+  const { term, definition } = req.body;
+  if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
+  try {
+    await getDb().execute({ sql: 'INSERT INTO glossary (term, definition) VALUES (?, ?)', args: [term.trim(), definition.trim()] });
+    await logActivity('glossary', term.trim(), 'created', `Term "${term.trim()}" added`, req.user.email);
+    res.json({ success: true });
+  } catch {
+    res.status(409).json({ error: 'That term already exists' });
+  }
+});
+
+router.put('/glossary/:id', glossaryAccess, async (req, res) => {
+  const { term, definition } = req.body;
+  if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT id, term FROM glossary WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Term not found' });
+    await db.execute({
+      sql: "UPDATE glossary SET term=?, definition=?, updated_at=now() WHERE id=?",
+      args: [term.trim(), definition.trim(), req.params.id]
+    });
+    await logActivity('glossary', term.trim(), 'updated', `Term "${existing.rows[0].term}" updated`, req.user.email);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/articles', articleAccess, async (req, res) => {
   try {
     const result = await getDb().execute(
@@ -382,46 +427,10 @@ router.get('/drive-status', async (req, res) => {
   }
 });
 
-// ── Glossary (admin can view + edit; plain users get read-only via /api/articles/glossary) ──
-router.get('/glossary', async (req, res) => {
-  try {
-    const result = await getDb().execute('SELECT * FROM glossary ORDER BY term ASC');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/glossary', async (req, res) => {
-  const { term, definition } = req.body;
-  if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
-  try {
-    await getDb().execute({ sql: 'INSERT INTO glossary (term, definition) VALUES (?, ?)', args: [term.trim(), definition.trim()] });
-    await logActivity('glossary', term.trim(), 'created', `Term "${term.trim()}" added`, req.user.email);
-    res.json({ success: true });
-  } catch {
-    res.status(409).json({ error: 'That term already exists' });
-  }
-});
-
-router.put('/glossary/:id', async (req, res) => {
-  const { term, definition } = req.body;
-  if (!term || !definition) return res.status(400).json({ error: 'Term and definition are required' });
-  try {
-    const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT id, term FROM glossary WHERE id = ?', args: [req.params.id] });
-    if (!existing.rows[0]) return res.status(404).json({ error: 'Term not found' });
-    await db.execute({
-      sql: "UPDATE glossary SET term=?, definition=?, updated_at=now() WHERE id=?",
-      args: [term.trim(), definition.trim(), req.params.id]
-    });
-    await logActivity('glossary', term.trim(), 'updated', `Term "${existing.rows[0].term}" updated`, req.user.email);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Glossary delete stays admin/super_admin only (qa_view gets view/add/edit
+// above, near the top of this file, ahead of the blanket requireAdmin —
+// same view/add/edit-no-delete split as Articles). Plain users get
+// read-only glossary terms via /api/articles/glossary.
 router.delete('/glossary/:id', async (req, res) => {
   try {
     const db = getDb();

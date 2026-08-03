@@ -165,6 +165,9 @@
         <div class="admin-nav-item" id="navNewArticle" onclick="newArticle()">
           <span class="admin-nav-icon">✏️</span> New Article
         </div>
+        <div class="admin-nav-item" onclick="showSection('glossary', this)">
+          <span class="admin-nav-icon">📖</span> Glossary
+        </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Access</div>
@@ -173,12 +176,6 @@
         </div>
         <div class="admin-nav-item" onclick="showSection('role-permissions', this)">
           <span class="admin-nav-icon">🔑</span> Role Permissions
-        </div>
-      </div>
-      <div class="admin-nav-section">
-        <div class="admin-nav-label" onclick="toggleNavSection(this)">Knowledge</div>
-        <div class="admin-nav-item" onclick="showSection('glossary', this)">
-          <span class="admin-nav-icon">📖</span> Glossary
         </div>
       </div>
       <div class="admin-nav-section">
@@ -405,7 +402,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Leads</div>
-            <div class="admin-page-sub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the Sales Dashboard.</div>
+            <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the Sales Dashboard.</div>
           </div>
         </div>
 
@@ -485,7 +482,7 @@
           <div class="modal-body" id="leadDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
-            <button class="btn-add" onclick="saveLeadAssignment()">Save</button>
+            <button class="btn-add" id="leadDetailSaveBtn" onclick="saveLeadAssignment()">Save</button>
           </div>
         </div>
       </div>
@@ -797,7 +794,7 @@
           </div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
-            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
+            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads (view-only, not the Sales Dashboard), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
             <strong style="color:var(--navy)">admin</strong> — full admin panel access.
           </div>
         </div>
@@ -1645,7 +1642,7 @@
             <select id="userRole" class="form-control">
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
-              <option value="qa_view">QA View (articles, FAQ, call quality only)</option>
+              <option value="qa_view">QA View (articles, glossary, leads view-only, FAQ, call quality)</option>
             </select>
           </div>
         </div>
@@ -2196,13 +2193,16 @@
     }
 
     // The small set of admin-panel sections the 'qa_view' role can reach —
-    // articles (view/add/edit), FAQ management (add/edit only — the scan
-    // and candidate-review parts of that page are further hidden below),
-    // and call quality (dashboard/rubrics/evaluator). Enforced here for
-    // nav visibility AND in showSection() so a saved/typed section id
+    // articles (view/add/edit), glossary (view/add/edit), FAQ management
+    // (add/edit only — the scan and candidate-review parts of that page are
+    // further hidden below), call quality (dashboard/rubrics/evaluator),
+    // and leads (view-only — see leadStatusBadge()/openLeadDetail() below;
+    // editing a lead still requires admin/super_admin server-side). Sales
+    // Dashboard is deliberately left off this list for now. Enforced here
+    // for nav visibility AND in showSection() so a saved/typed section id
     // outside this list can't be reached by editing localStorage or the URL
     // — the real enforcement is server-side per route regardless.
-    const QA_VIEW_ALLOWED_SECTIONS = ['articles', 'new-article', 'faq', 'calls-dashboard', 'call-rubrics', 'calls'];
+    const QA_VIEW_ALLOWED_SECTIONS = ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads'];
 
     function applyRoleVisibility() {
       if (currentUserRole === 'super_admin') {
@@ -2237,6 +2237,16 @@
         if (scannedCard) scannedCard.style.display = 'none';
         const faqSub = document.getElementById('faqPageSub');
         if (faqSub) faqSub.textContent = 'Add new FAQs and edit existing ones. Scanning Slack/Fathom and reviewing candidates is restricted to super admins.';
+      }
+      if (currentUserRole === 'qa_view') {
+        // Leads is view-only for qa_view — editing (PUT /api/leads/:id)
+        // is admin/super_admin only server-side, so hide the Save action
+        // rather than let it fail. The status/assignee controls themselves
+        // are disabled per-lead in openLeadDetail()/leadStatusEditorRow().
+        const leadSaveBtn = document.getElementById('leadDetailSaveBtn');
+        if (leadSaveBtn) leadSaveBtn.style.display = 'none';
+        const leadsSub = document.getElementById('leadsPageSub');
+        if (leadsSub) leadsSub.textContent = 'Submitted from educator vetting calls — click a row for full details. View-only.';
       }
     }
 
@@ -3255,7 +3265,11 @@
       { area: 'Projects Dashboard', user: false, qa: false, admin: true, superAdmin: true },
       { area: 'Articles — view, add, edit', user: false, qa: true, admin: true, superAdmin: true },
       { area: 'Articles — delete', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Glossary — manage terms', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Glossary — view, add, edit', user: false, qa: true, admin: true, superAdmin: true },
+      { area: 'Glossary — delete', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Sales Dashboard', user: false, qa: false, admin: true, superAdmin: true },
+      { area: 'Leads — view list/detail', user: false, qa: true, admin: true, superAdmin: true },
+      { area: 'Leads — edit status/assignment', user: false, qa: false, admin: true, superAdmin: true },
       { area: 'Users — create/edit/deactivate', user: false, qa: false, admin: false, superAdmin: true },
       { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, admin: false, superAdmin: true },
       { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, admin: true, superAdmin: true },
@@ -3537,7 +3551,10 @@
       const meta = info.meta[status] || info.meta[Object.keys(info.meta)[0]];
       const showsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       const text = showsDate && at ? `${meta.label} ${fmtDate(at)}` : meta.label;
-      return `<span class="lead-badge ${meta.cls}" onclick="openLeadStatusPopover(event,'${leadId}','${field}')">${escHtml(text)}</span>`;
+      // qa_view can see lead status but not edit it (PUT /api/leads/:id is
+      // admin/super_admin only server-side) — skip the click-to-edit popover.
+      const editAttr = currentUserRole === 'qa_view' ? '' : `onclick="openLeadStatusPopover(event,'${leadId}','${field}')"`;
+      return `<span class="lead-badge ${meta.cls}" ${editAttr}>${escHtml(text)}</span>`;
     }
 
     async function loadLeadsTable() {
@@ -3919,13 +3936,16 @@
 
     function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt) {
       const showsDate = currentStatus === Object.keys(statusOptions)[0] || currentStatus === 'scheduled';
+      // qa_view gets a read-only view of these controls — editing is
+      // admin/super_admin only server-side (PUT /api/leads/:id).
+      const readOnly = currentUserRole === 'qa_view';
       return `
         <div class="lead-status-row">
           <span class="lead-status-label">${escHtml(label)}</span>
           <div class="lead-status-controls">
-            <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}"
+            <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}" ${readOnly ? 'disabled' : ''}
               style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
-            <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')">
+            <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''}>
               ${Object.entries(statusOptions).map(([val, meta]) => `<option value="${val}" ${currentStatus === val ? 'selected' : ''}>${escHtml(meta.label)}</option>`).join('')}
             </select>
           </div>
@@ -3975,7 +3995,7 @@
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>
-          <select id="leadAssigneeSelect" class="form-control">
+          <select id="leadAssigneeSelect" class="form-control" ${currentUserRole === 'qa_view' ? 'disabled' : ''}>
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
@@ -4063,7 +4083,7 @@
           <td>
             <div style="display:flex;gap:6px">
               <button class="action-btn edit" onclick="openGlossaryModal(${t.id})">Edit</button>
-              <button class="action-btn delete" onclick="deleteGlossaryConfirm(${t.id},'${escHtml(t.term)}')">Delete</button>
+              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteGlossaryConfirm(${t.id},'${escHtml(t.term)}')">Delete</button>` : ''}
             </div>
           </td>
         </tr>
