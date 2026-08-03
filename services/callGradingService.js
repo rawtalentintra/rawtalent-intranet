@@ -473,6 +473,10 @@ async function addCalibrationNote(note, createdBy, rubricType = null, categoryKe
   return id;
 }
 
+async function updateCalibrationNote(id, note) {
+  await getDb().execute({ sql: 'UPDATE call_grading_calibration SET note = ? WHERE id = ?', args: [note, id] });
+}
+
 async function listCalibrationNotes() {
   const db = getDb();
   const result = await db.execute('SELECT * FROM call_grading_calibration ORDER BY created_at DESC');
@@ -824,7 +828,7 @@ async function listEvaluationFeedback(evaluationId) {
 module.exports = {
   RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
-  addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
+  addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
   analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL
 };

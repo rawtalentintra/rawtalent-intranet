@@ -7,7 +7,7 @@ const groqTranscription = require('../services/groqTranscriptionService');
 const {
   RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
-  addCalibrationNote, listCalibrationNotes, deleteCalibrationNote,
+  addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
   analyzeBenchmarkCalls
 } = require('../services/callGradingService');
@@ -300,6 +300,17 @@ router.post('/calibration', async (req, res) => {
   try {
     const id = await addCalibrationNote(note.trim(), req.user.email, rubricType || null, categoryKey || null);
     res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/calibration/:id', async (req, res) => {
+  const { note } = req.body;
+  if (!note?.trim()) return res.status(400).json({ error: 'A note is required' });
+  try {
+    await updateCalibrationNote(req.params.id, note.trim());
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
