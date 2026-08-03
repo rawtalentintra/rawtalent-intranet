@@ -65,7 +65,7 @@ app.use('/api/leads', require('./routes/leads'));
 // on every underlying API route.
 function guardRoute(req, res, file, adminOnly = false) {
   if (!req.isAuthenticated()) return res.redirect('/login.html');
-  if (adminOnly && !['admin', 'super_admin', 'qa_view'].includes(req.user.role)) {
+  if (adminOnly && !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role)) {
     return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
   }
   res.sendFile(path.join(__dirname, 'public', file));

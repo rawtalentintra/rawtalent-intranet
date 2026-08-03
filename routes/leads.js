@@ -8,8 +8,9 @@ router.use(requireAuth);
 
 // qa_view gets read-only access to the admin Leads list/detail (not the
 // Sales Dashboard, which reuses this same data client-side but is kept
-// off qa_view's nav for now) — editing (PUT below) stays admin-only.
-const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view');
+// off qa_view's nav for now). workforce_partner gets both Leads and Sales
+// Dashboard, plus limited edit rights — see PUT /:id below.
+const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforce_partner');
 
 // State -> Workforce Partner auto-assignment. Still overridable afterwards
 // via PUT — this just sets a sensible default so nothing sits unassigned.
@@ -29,6 +30,9 @@ router.post('/', async (req, res) => {
       contactFirstName, contactLastName, contactEmail
     } = req.body;
     if (!centreName?.trim()) return res.status(400).json({ error: 'Centre name is required' });
+    if (!streetAddress?.trim()) return res.status(400).json({ error: 'Street address is required' });
+    if (!centrePhone?.trim()) return res.status(400).json({ error: 'Centre phone number is required' });
+    if (!agencyUsage) return res.status(400).json({ error: 'Agency usage is required' });
 
     const id = uuidv4();
     const assignedWorkforcePartner = STATE_WORKFORCE_PARTNER[state] || null;
@@ -152,22 +156,31 @@ router.get('/:id', leadsViewAccess, async (req, res) => {
   }
 });
 
-// Admin-only edit — in practice just setting who's following it up, but
-// allows correcting any field in case something was mistyped at submission.
-router.put('/:id', requireAdmin, async (req, res) => {
+// Contact fields are deliberately left blank on submission now — the
+// Workforce Partner fills them in themselves after they've spoken to the
+// centre, from the Leads list in their own view. workforce_partner is
+// restricted to exactly these 4 columns; admin/super_admin can edit
+// everything (status, assignment, and the original submission fields too,
+// in case something was mistyped).
+const WORKFORCE_PARTNER_FIELDS = {
+  position: 'position', contact_first_name: 'contactFirstName', contact_last_name: 'contactLastName', contact_email: 'contactEmail'
+};
+const ADMIN_FIELDS = {
+  centre_name: 'centreName', street_address: 'streetAddress', suburb: 'suburb', state: 'state', centre_phone: 'centrePhone',
+  educator_name: 'educatorName', agency_name: 'agencyName', number_of_shifts: 'numberOfShifts', agency_usage: 'agencyUsage',
+  ...WORKFORCE_PARTNER_FIELDS,
+  assigned_workforce_partner: 'assignedWorkforcePartner',
+  lead_called_status: 'leadCalledStatus', lead_called_at: 'leadCalledAt',
+  centre_visited_status: 'centreVisitedStatus', centre_visited_at: 'centreVisitedAt',
+  signed_status: 'signedStatus', signed_at: 'signedAt'
+};
+
+router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
   try {
     const existing = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
 
-    const fields = {
-      centre_name: 'centreName', street_address: 'streetAddress', suburb: 'suburb', state: 'state', centre_phone: 'centrePhone',
-      educator_name: 'educatorName', agency_name: 'agencyName', number_of_shifts: 'numberOfShifts', agency_usage: 'agencyUsage', position: 'position',
-      contact_first_name: 'contactFirstName', contact_last_name: 'contactLastName', contact_email: 'contactEmail',
-      assigned_workforce_partner: 'assignedWorkforcePartner',
-      lead_called_status: 'leadCalledStatus', lead_called_at: 'leadCalledAt',
-      centre_visited_status: 'centreVisitedStatus', centre_visited_at: 'centreVisitedAt',
-      signed_status: 'signedStatus', signed_at: 'signedAt'
-    };
+    const fields = req.user.role === 'workforce_partner' ? WORKFORCE_PARTNER_FIELDS : ADMIN_FIELDS;
     const sets = [];
     const args = [];
     for (const [column, bodyKey] of Object.entries(fields)) {
@@ -188,10 +201,11 @@ router.put('/:id', requireAdmin, async (req, res) => {
 });
 
 // Notes thread on a lead — readable by anyone with leads view access
-// (admin/super_admin/qa_view), postable by admin/super_admin only for now.
-// Workforce Partners (Gwen, Justine, Liam) don't have login accounts in
-// this app yet, so they can't post here until that's resolved — see the
-// Role Permissions comment in public/admin.html for context.
+// (admin/super_admin/qa_view/workforce_partner). Postable by any
+// authenticated user (router-level requireAuth is the only gate) since
+// both the submitting consultant (context for the Workforce Partner) and
+// the Workforce Partner themselves (their own visit notes) need to write
+// here — deleting stays admin/super_admin only, below.
 router.get('/:id/notes', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute({
@@ -204,7 +218,7 @@ router.get('/:id/notes', leadsViewAccess, async (req, res) => {
   }
 });
 
-router.post('/:id/notes', requireAdmin, async (req, res) => {
+router.post('/:id/notes', async (req, res) => {
   try {
     const note = (req.body.note || '').trim();
     if (!note) return res.status(400).json({ error: 'Note text is required' });

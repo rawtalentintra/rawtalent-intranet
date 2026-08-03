@@ -725,6 +725,7 @@
                   <th style="min-width:200px">Area</th>
                   <th style="text-align:center">User</th>
                   <th style="text-align:center">QA View</th>
+                  <th style="text-align:center">Workforce Partner</th>
                   <th style="text-align:center">Admin</th>
                   <th style="text-align:center">Super Admin</th>
                 </tr>
@@ -795,6 +796,7 @@
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
             <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads (view-only, not the Sales Dashboard), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
+            <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): Leads (view all, edit only Position/Contact Name/Email, add their own notes) and the Sales Dashboard. No other admin panel access; status/assignment editing stays admin/super_admin only.<br>
             <strong style="color:var(--navy)">admin</strong> — full admin panel access.
           </div>
         </div>
@@ -1643,6 +1645,7 @@
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
               <option value="qa_view">QA View (articles, glossary, leads view-only, FAQ, call quality)</option>
+              <option value="workforce_partner">Workforce Partner (leads + Sales Dashboard, own contact fields/notes)</option>
             </select>
           </div>
         </div>
@@ -2154,7 +2157,7 @@
     async function init() {
       try {
         const me = await fetch('/auth/me').then(r => r.json());
-        if (me.error || !['admin', 'super_admin', 'qa_view'].includes(me.role)) { location.href = '/'; return; }
+        if (me.error || !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(me.role)) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
@@ -2179,12 +2182,14 @@
 
       // Land back on whichever section was open before the refresh, instead
       // of always resetting to Articles — showSection() keeps this in sync
-      // (and re-checks role access) on every navigation. qa_view always
-      // lands on Articles unless the saved section is one it's allowed into.
+      // (and re-checks role access) on every navigation. Restricted roles
+      // always land on their list's first entry unless the saved section
+      // is one they're allowed into.
       let savedSection = null;
       try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
-      if (currentUserRole === 'qa_view') {
-        const target = (savedSection && QA_VIEW_ALLOWED_SECTIONS.includes(savedSection)) ? savedSection : 'articles';
+      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
+      if (allowedSections) {
+        const target = (savedSection && allowedSections.includes(savedSection)) ? savedSection : allowedSections[0];
         showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
       } else if (savedSection && document.getElementById(`section-${savedSection}`)) {
         const navEl = document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
@@ -2192,17 +2197,21 @@
       }
     }
 
-    // The small set of admin-panel sections the 'qa_view' role can reach —
-    // articles (view/add/edit), glossary (view/add/edit), FAQ management
-    // (add/edit only — the scan and candidate-review parts of that page are
-    // further hidden below), call quality (dashboard/rubrics/evaluator),
-    // and leads (view-only — see leadStatusBadge()/openLeadDetail() below;
-    // editing a lead still requires admin/super_admin server-side). Sales
-    // Dashboard is deliberately left off this list for now. Enforced here
-    // for nav visibility AND in showSection() so a saved/typed section id
-    // outside this list can't be reached by editing localStorage or the URL
-    // — the real enforcement is server-side per route regardless.
-    const QA_VIEW_ALLOWED_SECTIONS = ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads'];
+    // The small set of admin-panel sections each restricted role can
+    // reach. qa_view: articles (view/add/edit), glossary (view/add/edit),
+    // FAQ management (add/edit only — the scan and candidate-review parts
+    // of that page are further hidden below), call quality
+    // (dashboard/rubrics/evaluator), and leads (view-only — see
+    // leadStatusBadge()/openLeadDetail() below). workforce_partner: leads
+    // (view + edit their own contact fields/notes — see openLeadDetail())
+    // and Sales Dashboard. Enforced here for nav visibility AND in
+    // showSection() so a saved/typed section id outside the list can't be
+    // reached by editing localStorage or the URL — the real enforcement is
+    // server-side per route regardless.
+    const RESTRICTED_ROLE_SECTIONS = {
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads'],
+      workforce_partner: ['leads', 'sales-dashboard']
+    };
 
     function applyRoleVisibility() {
       if (currentUserRole === 'super_admin') {
@@ -2215,10 +2224,11 @@
         const navTrainingBuild = document.getElementById('navTrainingBuild');
         if (navTrainingBuild) navTrainingBuild.style.display = '';
       }
-      if (currentUserRole === 'qa_view') {
+      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
+      if (allowedSections) {
         document.querySelectorAll('.admin-nav-item').forEach(item => {
           const match = item.getAttribute('onclick')?.match(/showSection\('([^']+)'/);
-          item.style.display = (match && QA_VIEW_ALLOWED_SECTIONS.includes(match[1])) ? '' : 'none';
+          item.style.display = (match && allowedSections.includes(match[1])) ? '' : 'none';
         });
         document.querySelectorAll('.admin-nav-section').forEach(section => {
           const anyVisible = [...section.querySelectorAll('.admin-nav-item')].some(i => i.style.display !== 'none');
@@ -2240,13 +2250,21 @@
       }
       if (currentUserRole === 'qa_view') {
         // Leads is view-only for qa_view — editing (PUT /api/leads/:id)
-        // is admin/super_admin only server-side, so hide the Save action
-        // rather than let it fail. The status/assignee controls themselves
-        // are disabled per-lead in openLeadDetail()/leadStatusEditorRow().
+        // is admin/super_admin/workforce_partner only server-side, so hide
+        // the Save action rather than let it fail. The status/assignee/
+        // contact controls themselves are disabled per-lead in
+        // openLeadDetail()/leadStatusEditorRow().
         const leadSaveBtn = document.getElementById('leadDetailSaveBtn');
         if (leadSaveBtn) leadSaveBtn.style.display = 'none';
         const leadsSub = document.getElementById('leadsPageSub');
         if (leadsSub) leadsSub.textContent = 'Submitted from educator vetting calls — click a row for full details. View-only.';
+      }
+      if (currentUserRole === 'workforce_partner') {
+        // Workforce Partners can fill in contact details and add their own
+        // notes, but status/assignment stay admin/super_admin only — those
+        // controls are disabled per-lead in openLeadDetail()/leadStatusEditorRow().
+        const leadsSub = document.getElementById('leadsPageSub');
+        if (leadsSub) leadsSub.textContent = 'Click a row to view details, fill in the contact you spoke to, and add your own visit notes.';
       }
     }
 
@@ -2837,13 +2855,16 @@
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings'];
 
     function showSection(id, el) {
-      // qa_view has its own small allowlist (which includes 'faq', normally
-      // super_admin-only per superAdminSections below — the FAQ page itself
-      // hides the super-admin-only parts once loaded) instead of the
-      // superAdminSections check every other role uses.
-      if (currentUserRole === 'qa_view') {
-        if (!QA_VIEW_ALLOWED_SECTIONS.includes(id)) {
-          showSection('articles', document.querySelector(`[onclick*="showSection('articles'"]`));
+      // Restricted roles (qa_view, workforce_partner) each have their own
+      // small allowlist (qa_view's includes 'faq', normally super_admin-only
+      // per superAdminSections below — the FAQ page itself hides the
+      // super-admin-only parts once loaded) instead of the superAdminSections
+      // check every other role uses.
+      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
+      if (allowedSections) {
+        if (!allowedSections.includes(id)) {
+          const fallback = allowedSections[0];
+          showSection(fallback, document.querySelector(`[onclick*="showSection('${fallback}'"]`));
           return;
         }
       } else if (id === 'training-build') {
@@ -3258,32 +3279,35 @@
     // config) so it reads as a simple reference — update it by hand
     // whenever access actually changes elsewhere in this file.
     const ROLE_PERMISSIONS = [
-      { area: 'Public HeartBeat — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, admin: true, superAdmin: true },
-      { area: 'Admin panel — access at all', user: false, qa: 'Limited', admin: true, superAdmin: true },
-      { area: 'Dashboard (site-wide stats)', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Projects Dashboard', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Articles — view, add, edit', user: false, qa: true, admin: true, superAdmin: true },
-      { area: 'Articles — delete', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Glossary — view, add, edit', user: false, qa: true, admin: true, superAdmin: true },
-      { area: 'Glossary — delete', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Sales Dashboard', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Leads — view list/detail', user: false, qa: true, admin: true, superAdmin: true },
-      { area: 'Leads — edit status/assignment', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Users — create/edit/deactivate', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, admin: true, superAdmin: true },
-      { area: 'FAQ Review — scan Slack/Fathom/docs, review candidates, delete', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, admin: true, superAdmin: true },
-      { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Workforce Queue (live agent status)', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Workforce Call History Dashboard', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Training Dashboard — view courses/results', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Training — build courses, assign, reset attempts', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Feedback queue', user: false, qa: false, admin: true, superAdmin: true },
-      { area: 'Change Logs', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Meetings — Fathom transcript Q&A', user: false, qa: false, admin: false, superAdmin: true },
-      { area: 'Create/edit other users’ roles, incl. Super Admin', user: false, qa: false, admin: false, superAdmin: true }
+      { area: 'Public HeartBeat — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, wfp: true, admin: true, superAdmin: true },
+      { area: 'Admin panel — access at all', user: false, qa: 'Limited', wfp: 'Limited', admin: true, superAdmin: true },
+      { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Articles — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Glossary — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Glossary — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Sales Dashboard', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
+      { area: 'Leads — view list/detail', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
+      { area: 'Leads — edit status/assignment', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Leads — edit contact fields (position/name/email)', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
+      { area: 'Leads — add a note', user: 'At submission', qa: false, wfp: true, admin: true, superAdmin: true },
+      { area: 'Leads — delete a note', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Users — create/edit/deactivate', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'FAQ Review — scan Slack/Fathom/docs, review candidates, delete', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Workforce Queue (live agent status)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Workforce Call History Dashboard', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Training Dashboard — view courses/results', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Training — build courses, assign, reset attempts', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Feedback queue', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Change Logs', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Meetings — Fathom transcript Q&A', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
+      { area: 'Create/edit other users’ roles, incl. Super Admin', user: false, qa: false, wfp: false, admin: false, superAdmin: true }
     ];
 
     function permCell(v) {
@@ -3300,6 +3324,7 @@
           <td style="font-weight:600;color:var(--navy)">${escHtml(r.area)}</td>
           <td style="text-align:center">${permCell(r.user)}</td>
           <td style="text-align:center">${permCell(r.qa)}</td>
+          <td style="text-align:center">${permCell(r.wfp)}</td>
           <td style="text-align:center">${permCell(r.admin)}</td>
           <td style="text-align:center">${permCell(r.superAdmin)}</td>
         </tr>`).join('');
@@ -3453,6 +3478,7 @@
       super_admin: { cls: 'badge-super', label: 'Super Admin' },
       admin: { cls: 'badge-admin', label: 'Admin' },
       qa_view: { cls: 'badge-qa', label: 'QA View' },
+      workforce_partner: { cls: 'badge-workforce', label: 'Workforce Partner' },
       user: { cls: 'badge-user', label: 'User' }
     };
     function roleBadge(role) {
@@ -3517,6 +3543,7 @@
     let allLeads = [];
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)', 'Liam Baxter'];
+    const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
 
     const LEAD_CALLED_META = {
       done: { label: 'Called', cls: 'lead-badge-done' },
@@ -3551,9 +3578,10 @@
       const meta = info.meta[status] || info.meta[Object.keys(info.meta)[0]];
       const showsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       const text = showsDate && at ? `${meta.label} ${fmtDate(at)}` : meta.label;
-      // qa_view can see lead status but not edit it (PUT /api/leads/:id is
-      // admin/super_admin only server-side) — skip the click-to-edit popover.
-      const editAttr = currentUserRole === 'qa_view' ? '' : `onclick="openLeadStatusPopover(event,'${leadId}','${field}')"`;
+      // qa_view and workforce_partner can see lead status but not edit it
+      // (PUT /api/leads/:id status/assignment fields are admin/super_admin
+      // only server-side) — skip the click-to-edit popover for both.
+      const editAttr = (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `onclick="openLeadStatusPopover(event,'${leadId}','${field}')"` : '';
       return `<span class="lead-badge ${meta.cls}" ${editAttr}>${escHtml(text)}</span>`;
     }
 
@@ -3936,9 +3964,10 @@
 
     function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt) {
       const showsDate = currentStatus === Object.keys(statusOptions)[0] || currentStatus === 'scheduled';
-      // qa_view gets a read-only view of these controls — editing is
-      // admin/super_admin only server-side (PUT /api/leads/:id).
-      const readOnly = currentUserRole === 'qa_view';
+      // qa_view and workforce_partner both get a read-only view of these
+      // controls — editing status/assignment is admin/super_admin only
+      // server-side (PUT /api/leads/:id).
+      const readOnly = currentUserRole !== 'admin' && currentUserRole !== 'super_admin';
       return `
         <div class="lead-status-row">
           <span class="lead-status-label">${escHtml(label)}</span>
@@ -3972,13 +4001,46 @@
           <span style="color:var(--text-muted)">${escHtml(label)}</span>
           <span style="font-weight:600;color:var(--navy);text-align:right;max-width:60%">${escHtml(value || '—')}</span>
         </div>`;
+      // qa_view sees everything read-only. Contact fields (who the Workforce
+      // Partner actually spoke to) are editable by admin/super_admin/
+      // workforce_partner — they're deliberately blank at submission time
+      // now, filled in here once someone's spoken to the centre. Status/
+      // assignment stay admin/super_admin only regardless.
+      const canEditContact = currentUserRole !== 'qa_view';
+      const canEditStatus = currentUserRole === 'admin' || currentUserRole === 'super_admin';
       document.getElementById('leadDetailBody').innerHTML = `
         <div class="lead-group-label">Centre</div>
         ${row('Address', [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', '))}
         ${row('Phone', lead.centre_phone)}
-        ${row('Contact', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
-        ${row('Position', lead.position)}
-        ${row('Contact Email', lead.contact_email)}
+
+        <div class="lead-group-label">Contact</div>
+        ${canEditContact ? `
+          <div class="form-group-modal">
+            <label class="form-label-modal">Position</label>
+            <select id="leadContactPosition" class="form-control">
+              <option value="">Select…</option>
+              ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}" ${lead.position === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group-modal">
+              <label class="form-label-modal">First Name</label>
+              <input type="text" id="leadContactFirstName" class="form-control" value="${escHtml(lead.contact_first_name || '')}">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Last Name</label>
+              <input type="text" id="leadContactLastName" class="form-control" value="${escHtml(lead.contact_last_name || '')}">
+            </div>
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Email</label>
+            <input type="email" id="leadContactEmail" class="form-control" value="${escHtml(lead.contact_email || '')}">
+          </div>
+        ` : `
+          ${row('Contact', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
+          ${row('Position', lead.position)}
+          ${row('Contact Email', lead.contact_email)}
+        `}
 
         <div class="lead-group-label">Lead source</div>
         ${row('Submitted by', lead.submitted_by_name || lead.submitted_by_email)}
@@ -3995,7 +4057,7 @@
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>
-          <select id="leadAssigneeSelect" class="form-control" ${currentUserRole === 'qa_view' ? 'disabled' : ''}>
+          <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'}>
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
@@ -4007,7 +4069,7 @@
         </div>
         ${currentUserRole === 'qa_view' ? '' : `
           <div class="form-group-modal">
-            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="Add a note for the team or the Workforce Partner…"></textarea>
+            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add a note for the team or the Workforce Partner…'}"></textarea>
             <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
           </div>
         `}`;
@@ -4033,7 +4095,7 @@
             <div style="white-space:pre-wrap">${escHtml(n.note)}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;justify-content:space-between;align-items:center">
               <span>${escHtml(n.author_name || n.author_email || 'Unknown')} · ${fmtDate(n.created_at)}</span>
-              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" style="padding:2px 8px;font-size:10.5px" onclick="deleteLeadNote('${n.id}')">Remove</button>` : ''}
+              ${(currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `<button class="action-btn delete" style="padding:2px 8px;font-size:10.5px" onclick="deleteLeadNote('${n.id}')">Remove</button>` : ''}
             </div>
           </div>`).join('');
       } catch {
@@ -4082,6 +4144,13 @@
       const called = readStatusField('lead_called');
       const visited = readStatusField('centre_visited');
       const signed = readStatusField('signed');
+      // Contact fields only exist in the DOM for roles that can see them
+      // (everyone except qa_view, who never reaches this function since
+      // their Save button is hidden) — read defensively either way.
+      const position = document.getElementById('leadContactPosition')?.value;
+      const contactFirstName = document.getElementById('leadContactFirstName')?.value;
+      const contactLastName = document.getElementById('leadContactLastName')?.value;
+      const contactEmail = document.getElementById('leadContactEmail')?.value;
       try {
         const res = await fetch(`/api/leads/${currentLeadDetailId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -4089,7 +4158,8 @@
             assignedWorkforcePartner,
             leadCalledStatus: called.status, leadCalledAt: called.at,
             centreVisitedStatus: visited.status, centreVisitedAt: visited.at,
-            signedStatus: signed.status, signedAt: signed.at
+            signedStatus: signed.status, signedAt: signed.at,
+            position, contactFirstName, contactLastName, contactEmail
           })
         });
         if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to save', 'error'); return; }

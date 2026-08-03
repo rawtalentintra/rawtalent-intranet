@@ -2640,7 +2640,6 @@
     // consultant can still submit if they're confident it's a genuine lead.
     const EXCLUDED_CENTRE_GROUPS = ['goodstart', 'guardian', 'affinity', 'g8'];
     const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
-    const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
     let myLeads = [];
 
     async function loadLeadsView() {
@@ -2681,12 +2680,12 @@
               </div>
             </div>
             <div class="form-group-modal">
-              <label class="form-label-modal">Street Address <span class="optional">(optional)</span></label>
+              <label class="form-label-modal">Street Address</label>
               <input type="text" id="leadStreetAddress" class="form-control" placeholder="e.g. 50 Webb St" oninput="scheduleLeadDupCheck()">
             </div>
             <div id="leadAddressDupWarning" class="lead-dup-warning" style="display:none"></div>
             <div class="form-group-modal">
-              <label class="form-label-modal">Centre Phone Number <span class="optional">(optional)</span></label>
+              <label class="form-label-modal">Centre Phone Number</label>
               <input type="text" id="leadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
             </div>
             <div class="form-group-modal">
@@ -2702,7 +2701,7 @@
               <input type="text" id="leadNumberOfShifts" class="form-control">
             </div>
             <div class="form-group-modal">
-              <label class="form-label-modal">Agency Usage <span class="optional">(optional)</span></label>
+              <label class="form-label-modal">Agency Usage</label>
               <select id="leadAgencyUsage" class="form-control">
                 <option value="">Select…</option>
                 <option value="target_temp">Target Temp</option>
@@ -2710,25 +2709,9 @@
               </select>
             </div>
             <div class="form-group-modal">
-              <label class="form-label-modal">Contact Position <span class="optional">(optional)</span></label>
-              <select id="leadPosition" class="form-control">
-                <option value="">Select…</option>
-                ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join('')}
-              </select>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div class="form-group-modal">
-                <label class="form-label-modal">Contact First Name <span class="optional">(optional)</span></label>
-                <input type="text" id="leadContactFirstName" class="form-control">
-              </div>
-              <div class="form-group-modal">
-                <label class="form-label-modal">Contact Last Name <span class="optional">(optional)</span></label>
-                <input type="text" id="leadContactLastName" class="form-control">
-              </div>
-            </div>
-            <div class="form-group-modal">
-              <label class="form-label-modal">Contact Email <span class="optional">(optional)</span></label>
-              <input type="email" id="leadContactEmail" class="form-control">
+              <label class="form-label-modal">Notes for Workforce Partner <span class="optional">(optional)</span></label>
+              <textarea id="leadNotesForPartner" class="form-control" rows="3" placeholder="Anything that might help them when they follow up — best time to call, who to ask for, anything the educator mentioned…"></textarea>
+              <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Important notes for our Workforce Partners — add anything you think may be helpful for them.</div>
             </div>
             <button class="btn-add" style="width:100%;margin-top:8px" onclick="submitLead()">Submit Lead</button>
           </div>
@@ -2842,21 +2825,24 @@
 
     async function submitLead() {
       const centreName = document.getElementById('leadCentreName').value.trim();
+      const streetAddress = document.getElementById('leadStreetAddress').value.trim();
+      const centrePhone = document.getElementById('leadCentrePhone').value.trim();
+      const agencyUsage = document.getElementById('leadAgencyUsage').value;
       if (!centreName) { toast('Centre name is required', 'error'); return; }
+      if (!streetAddress) { toast('Street address is required', 'error'); return; }
+      if (!centrePhone) { toast('Centre phone number is required', 'error'); return; }
+      if (!agencyUsage) { toast('Agency usage is required', 'error'); return; }
+      const notesForPartner = document.getElementById('leadNotesForPartner').value.trim();
       const payload = {
         centreName,
         suburb: document.getElementById('leadSuburb').value,
         state: document.getElementById('leadState').value,
-        streetAddress: document.getElementById('leadStreetAddress').value,
-        centrePhone: document.getElementById('leadCentrePhone').value,
+        streetAddress,
+        centrePhone,
         educatorName: document.getElementById('leadEducatorName').value,
         agencyName: document.getElementById('leadAgencyName').value,
         numberOfShifts: document.getElementById('leadNumberOfShifts').value,
-        agencyUsage: document.getElementById('leadAgencyUsage').value,
-        position: document.getElementById('leadPosition').value,
-        contactFirstName: document.getElementById('leadContactFirstName').value,
-        contactLastName: document.getElementById('leadContactLastName').value,
-        contactEmail: document.getElementById('leadContactEmail').value
+        agencyUsage
       };
       try {
         const res = await fetch('/api/leads', {
@@ -2865,6 +2851,18 @@
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        // Contact details (position/name/email) are filled in later by the
+        // Workforce Partner once they've spoken to the centre — this form
+        // no longer collects them. This note, though, goes straight into
+        // the lead's notes thread so the Workforce Partner sees it first.
+        if (notesForPartner) {
+          try {
+            await fetch(`/api/leads/${data.id}/notes`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ note: notesForPartner })
+            });
+          } catch {}
+        }
         toast('Lead submitted', 'success');
         loadLeadsView();
       } catch { toast('Network error', 'error'); }
