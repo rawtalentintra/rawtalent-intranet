@@ -3787,6 +3787,9 @@
         const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
         return { from: new Date(now.getFullYear(), qStartMonth, 1), to: new Date(now.getFullYear(), qStartMonth + 3, 1) };
       }
+      if (rangeKey === 'year') {
+        return { from: new Date(now.getFullYear(), 0, 1), to: new Date(now.getFullYear() + 1, 0, 1) };
+      }
       if (rangeKey === 'all') {
         return { from: new Date(2000, 0, 1), to: new Date(now.getFullYear() + 1, 0, 1) };
       }
@@ -4122,7 +4125,9 @@
         label: 'Bookings', icon: '📅',
         sub: 'Every shift booking logged in the RawTalent app.',
         dateField: 'bookingDate', dateFieldLabel: 'booking date',
+        trendLabel: 'Bookings',
         needsLookups: true,
+        extendedPeriod: true,
         searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
         extraFilters: [
           { id: 'status', label: 'Status', type: 'select', field: 'statusId' }
@@ -4131,17 +4136,31 @@
           const hours = r => (new Date(r.endTime) - new Date(r.startTime)) / 3600000;
           const validDurations = rows.map(hours).filter(h => isFinite(h) && h > 0 && h < 24);
           const avgHours = validDurations.length ? (validDurations.reduce((a, b) => a + b, 0) / validDurations.length) : 0;
+          const unfilled = rows.filter(r => !r.assignedUserId).length;
+          const now = new Date();
+          const upcoming = rows.filter(r => r.bookingDate && new Date(r.bookingDate) >= now).length;
+          const leadTimes = rows
+            .map(r => (new Date(r.bookingDate) - new Date(r.createdDate)) / 86400000)
+            .filter(d => isFinite(d) && d >= 0 && d < 365);
+          const avgLeadDays = leadTimes.length ? (leadTimes.reduce((a, b) => a + b, 0) / leadTimes.length) : 0;
           return [
             { label: 'Total Bookings', value: rows.length, hint: 'Matching current filters' },
-            { label: 'Active', value: rows.filter(r => r.isActive).length, hint: `${pct(rows.filter(r => r.isActive).length, rows.length)}% of total` },
+            { label: 'Fill Rate', value: pct(rows.length - unfilled, rows.length) + '%', hint: `${unfilled} unfilled booking${unfilled === 1 ? '' : 's'}` },
+            { label: 'Upcoming', value: upcoming, hint: `${rows.length - upcoming} in the past` },
             { label: 'Unique Clients', value: new Set(rows.map(r => r.clientId)).size, hint: 'Distinct client centres booked' },
             { label: 'Unique Candidates', value: new Set(rows.map(r => r.assignedUserId)).size, hint: 'Distinct educators assigned' },
+            { label: 'Avg Lead Time', value: avgLeadDays.toFixed(0) + 'd', hint: 'Booking made → shift date' },
             { label: 'Avg Shift Length', value: avgHours.toFixed(1) + 'h', hint: 'Across bookings with valid times' }
           ];
         },
         breakdowns: [
-          { title: 'By Status', sub: 'Raw status codes', field: 'statusId', labelPrefix: 'Status' },
-          { title: 'By Location', sub: 'Raw location codes, top 8', field: 'locationId', labelPrefix: 'Location', topN: 8 }
+          { title: 'By Status', sub: 'Raw status codes', compute: rows => computeCodeBreakdown(rows, 'statusId', 'Status') },
+          { title: 'By Location', sub: 'Raw location codes, top 8', compute: rows => computeCodeBreakdown(rows, 'locationId', 'Location', 8) },
+          { title: 'By Day of Week', sub: 'When shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'bookingDate') }
+        ],
+        leaderboards: [
+          { title: 'Top Clients by Bookings', sub: 'Busiest centres in this set', compute: rows => computeTopByField(rows, 'clientId', clientName, null, 8) },
+          { title: 'Top Candidates by Bookings', sub: 'Most-booked educators in this set', compute: rows => computeTopByField(rows, 'assignedUserId', candidateName, null, 8) }
         ],
         columns: [
           { header: 'Date', render: r => fmtDate(r.bookingDate) },
@@ -4161,7 +4180,9 @@
         label: 'Timesheets', icon: '🕒',
         sub: 'Logged hours against bookings in the RawTalent app.',
         dateField: 'startTime', dateFieldLabel: 'shift start time',
+        trendLabel: 'Hours', trendValueField: 'duration',
         needsLookups: true,
+        extendedPeriod: true,
         searchTest: (r, q) => candidateName(r.userId).toLowerCase().includes(q),
         extraFilters: [
           { id: 'status', label: 'Status', type: 'select', field: 'status' },
@@ -4170,16 +4191,24 @@
         ],
         kpis: rows => {
           const totalHours = rows.reduce((sum, r) => sum + (r.duration || 0), 0);
+          const unpaidHours = rows.filter(r => !r.isPaid).reduce((sum, r) => sum + (r.duration || 0), 0);
           return [
             { label: 'Total Timesheets', value: rows.length, hint: 'Matching current filters' },
             { label: 'Total Hours', value: totalHours.toFixed(1), hint: 'Sum of logged duration' },
-            { label: 'Invoiced', value: rows.filter(r => r.isInvoiced).length, hint: `${pct(rows.filter(r => r.isInvoiced).length, rows.length)}% of total` },
-            { label: 'Paid', value: rows.filter(r => r.isPaid).length, hint: `${pct(rows.filter(r => r.isPaid).length, rows.length)}% of total` }
+            { label: 'Avg Hours / Timesheet', value: rows.length ? (totalHours / rows.length).toFixed(1) : '0.0', hint: 'Average shift length logged' },
+            { label: 'Invoiced', value: pct(rows.filter(r => r.isInvoiced).length, rows.length) + '%', hint: `${rows.filter(r => r.isInvoiced).length} of ${rows.length} timesheets` },
+            { label: 'Paid', value: pct(rows.filter(r => r.isPaid).length, rows.length) + '%', hint: `${rows.filter(r => r.isPaid).length} of ${rows.length} timesheets` },
+            { label: 'Unpaid Hours', value: unpaidHours.toFixed(1), hint: 'Hours logged but not yet paid out' }
           ];
         },
         breakdowns: [
-          { title: 'By Status', sub: 'Raw status codes', field: 'status', labelPrefix: 'Status' },
-          { title: 'Top Candidates by Hours', sub: 'Highest logged hours in this set', custom: 'topCandidateHours' }
+          { title: 'By Status', sub: 'Raw status codes', compute: rows => computeCodeBreakdown(rows, 'status', 'Status') },
+          { title: 'Invoiced / Paid', sub: 'Billing reconciliation at a glance', compute: computeInvoicePaidBreakdown },
+          { title: 'Hours by Day of Week', sub: 'When logged shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'startTime', r => r.duration) }
+        ],
+        leaderboards: [
+          { title: 'Top Candidates by Hours', sub: 'Highest logged hours in this set', compute: rows => computeTopByField(rows, 'userId', candidateName, r => r.duration, 8) },
+          { title: 'Top Candidates by Unpaid Hours', sub: 'Owed the most in this set', compute: rows => computeTopByField(rows.filter(r => !r.isPaid), 'userId', candidateName, r => r.duration, 8) }
         ],
         columns: [
           { header: 'Candidate', render: r => escHtml(candidateName(r.userId)) },
@@ -4209,12 +4238,21 @@
 
           <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <select id="report_${type}_period" class="form-control" style="width:130px" onchange="loadReportData('${type}')">
+              <select id="report_${type}_period" class="form-control" style="width:135px" onchange="onReportPeriodChange('${type}')">
                 <option value="all" selected>All Time</option>
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
                 <option value="quarter">This Quarter</option>
+                ${cfg.extendedPeriod ? `
+                  <option value="year">This Year</option>
+                  <option value="custom">Custom Range…</option>
+                ` : ''}
               </select>
+              ${cfg.extendedPeriod ? `
+                <input type="date" id="report_${type}_customFrom" class="form-control" style="width:140px;display:none" onchange="loadReportData('${type}')">
+                <span id="report_${type}_customTo_sep" style="display:none;color:var(--text-muted);font-size:12.5px">to</span>
+                <input type="date" id="report_${type}_customTo" class="form-control" style="width:140px;display:none" onchange="loadReportData('${type}')">
+              ` : ''}
               <select id="report_${type}_active" class="form-control" style="width:150px" onchange="loadReportData('${type}')">
                 <option value="">Active + Inactive</option>
                 <option value="true">Active Only</option>
@@ -4236,6 +4274,12 @@
 
           <div class="kpi-row" id="report_${type}_kpis"></div>
 
+          <div class="admin-table-card" style="padding:20px 24px;margin:16px 0">
+            <div class="sd-card-title">${escHtml(cfg.trendLabel || 'Trend')} over time</div>
+            <div class="sd-card-sub" id="report_${type}_trend_sub">Based on ${escHtml(cfg.dateFieldLabel)} — granularity adapts to the filtered range</div>
+            <div id="report_${type}_trend" style="margin-top:14px"></div>
+          </div>
+
           <div style="display:flex;gap:16px;margin:16px 0;flex-wrap:wrap">
             ${cfg.breakdowns.map((b, i) => `
               <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
@@ -4245,11 +4289,16 @@
               </div>`).join('')}
           </div>
 
-          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-            <div class="sd-card-title">Trend — by month</div>
-            <div class="sd-card-sub">Based on ${escHtml(cfg.dateFieldLabel)}</div>
-            <div id="report_${type}_trend" style="margin-top:14px"></div>
-          </div>
+          ${(cfg.leaderboards || []).length ? `
+            <div style="display:flex;gap:16px;margin:16px 0;flex-wrap:wrap">
+              ${cfg.leaderboards.map((b, i) => `
+                <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+                  <div class="sd-card-title">${escHtml(b.title)}</div>
+                  <div class="sd-card-sub">${escHtml(b.sub)}</div>
+                  <div id="report_${type}_leaderboard_${i}" style="margin-top:14px"></div>
+                </div>`).join('')}
+            </div>
+          ` : ''}
 
           <div class="admin-table-card">
             <div style="overflow-x:auto">
@@ -4265,6 +4314,21 @@
         </div>`).join('');
     }
 
+    // Toggles the custom-range date inputs and reloads — a custom range
+    // waits for the date inputs' own onchange rather than loading on every
+    // keystroke/incomplete selection.
+    function onReportPeriodChange(type) {
+      const period = document.getElementById(`report_${type}_period`).value;
+      const fromEl = document.getElementById(`report_${type}_customFrom`);
+      const toEl = document.getElementById(`report_${type}_customTo`);
+      const sepEl = document.getElementById(`report_${type}_customTo_sep`);
+      const showCustom = period === 'custom';
+      if (fromEl) fromEl.style.display = showCustom ? '' : 'none';
+      if (toEl) toEl.style.display = showCustom ? '' : 'none';
+      if (sepEl) sepEl.style.display = showCustom ? '' : 'none';
+      if (!showCustom) loadReportData(type);
+    }
+
     async function loadReportData(type) {
       const cfg = REPORT_CONFIG[type];
       const tbody = document.getElementById(`report_${type}_table`);
@@ -4273,7 +4337,17 @@
       const periodKey = document.getElementById(`report_${type}_period`).value;
       const activeVal = document.getElementById(`report_${type}_active`).value;
       const params = new URLSearchParams();
-      if (periodKey !== 'all') {
+      if (periodKey === 'custom') {
+        const fromVal = document.getElementById(`report_${type}_customFrom`)?.value;
+        const toVal = document.getElementById(`report_${type}_customTo`)?.value;
+        if (fromVal) params.set('startDate', new Date(fromVal).toISOString());
+        if (toVal) {
+          // End date is inclusive of the whole day the user picked.
+          const to = new Date(toVal);
+          to.setDate(to.getDate() + 1);
+          params.set('endDate', to.toISOString());
+        }
+      } else if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
         params.set('startDate', from.toISOString());
         params.set('endDate', to.toISOString());
@@ -4342,12 +4416,20 @@
     function renderReportDashboard(type, rows) {
       const cfg = REPORT_CONFIG[type];
       renderKpiRow(`report_${type}_kpis`, cfg.kpis(rows));
+
       cfg.breakdowns.forEach((b, i) => {
-        const elId = `report_${type}_breakdown_${i}`;
-        if (b.custom === 'topCandidateHours') renderTopCandidateHours(elId, rows);
-        else renderBreakdownBars(elId, computeCodeBreakdown(rows, b.field, b.labelPrefix, b.topN));
+        const data = b.compute ? b.compute(rows) : computeCodeBreakdown(rows, b.field, b.labelPrefix, b.topN);
+        renderBreakdownBars(`report_${type}_breakdown_${i}`, data);
       });
-      renderTrendChart(`report_${type}_trend`, computeMonthlyTrend(rows, cfg.dateField));
+      (cfg.leaderboards || []).forEach((b, i) => {
+        renderBreakdownBars(`report_${type}_leaderboard_${i}`, b.compute(rows));
+      });
+
+      const buckets = computeTrendBuckets(rows, cfg.dateField, cfg.trendValueField);
+      const trendSub = document.getElementById(`report_${type}_trend_sub`);
+      if (trendSub) trendSub.textContent = `Based on ${cfg.dateFieldLabel}${buckets.granularity ? ` — by ${buckets.granularity}` : ''}`;
+      renderLineChart(`report_${type}_trend`, buckets, { formatValue: v => cfg.trendValueField ? (Math.round(v * 10) / 10).toString() : String(v) });
+
       renderReportTable(type, rows);
     }
 
@@ -4384,40 +4466,164 @@
         </div>`).join('');
     }
 
-    function renderTopCandidateHours(elId, rows) {
-      const hoursByCandidate = {};
-      rows.forEach(r => { hoursByCandidate[r.userId] = (hoursByCandidate[r.userId] || 0) + (r.duration || 0); });
-      const top = Object.entries(hoursByCandidate).sort((a, b) => b[1] - a[1]).slice(0, 8)
-        .map(([userId, hours]) => ({ label: candidateName(Number(userId)), count: Math.round(hours * 10) / 10 }));
-      renderBreakdownBars(elId, top);
-    }
-
-    function computeMonthlyTrend(rows, dateField) {
-      const counts = {};
+    // ── Generic categorical breakdowns used by Bookings/Timesheets ──
+    // (Clients/Candidates still use the simpler field+labelPrefix form in
+    // computeCodeBreakdown above — these three are for the richer views.)
+    function computeDayOfWeekBreakdown(rows, dateField, valueFn) {
+      const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const sums = [0, 0, 0, 0, 0, 0, 0];
       rows.forEach(r => {
         if (!r[dateField]) return;
         const d = new Date(r[dateField]);
         if (isNaN(d)) return;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        counts[key] = (counts[key] || 0) + 1;
+        sums[(d.getDay() + 6) % 7] += valueFn ? (valueFn(r) || 0) : 1;
       });
-      return Object.keys(counts).sort().map(k => ({ key: k, count: counts[k] }));
+      return dayNames.map((label, i) => ({ label, count: Math.round(sums[i] * 10) / 10 }));
     }
 
-    function renderTrendChart(elId, buckets) {
+    function computeInvoicePaidBreakdown(rows) {
+      const groups = [
+        { label: 'Invoiced & Paid', test: r => r.isInvoiced && r.isPaid },
+        { label: 'Invoiced, Not Paid', test: r => r.isInvoiced && !r.isPaid },
+        { label: 'Not Invoiced, Paid', test: r => !r.isInvoiced && r.isPaid },
+        { label: 'Not Invoiced, Not Paid', test: r => !r.isInvoiced && !r.isPaid }
+      ];
+      return groups.map(g => ({ label: g.label, count: rows.filter(g.test).length }));
+    }
+
+    // Leaderboard-style breakdown: totals per distinct value of idField
+    // (optionally summing valueFn instead of counting), top N by that total,
+    // labeled via nameFn (e.g. clientName/candidateName) rather than the
+    // raw ID.
+    function computeTopByField(rows, idField, nameFn, valueFn, topN) {
+      const sums = {};
+      rows.forEach(r => {
+        const id = r[idField];
+        if (id === null || id === undefined) return;
+        sums[id] = (sums[id] || 0) + (valueFn ? (valueFn(r) || 0) : 1);
+      });
+      return Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, topN || 8)
+        .map(([id, val]) => ({ label: nameFn(Number(id)), count: Math.round(val * 10) / 10 }));
+    }
+
+    // ── Trend: adaptive granularity + line chart ─────────────────
+    // Buckets by day when the filtered data spans ≤35 days, by week up to
+    // ~6 months, else by month — so "This Week" doesn't render one lonely
+    // monthly bar, and "All Time" doesn't render hundreds of daily ones.
+    // valueField sums that field per bucket (e.g. timesheet duration);
+    // omitted, it counts records (e.g. bookings).
+    function computeTrendBuckets(rows, dateField, valueField) {
+      const dated = rows
+        .map(r => ({ d: new Date(r[dateField]), v: valueField ? (r[valueField] || 0) : 1 }))
+        .filter(x => !isNaN(x.d));
+      if (!dated.length) return [];
+
+      const times = dated.map(x => x.d.getTime());
+      const spanDays = (Math.max(...times) - Math.min(...times)) / 86400000;
+      const granularity = spanDays <= 35 ? 'day' : spanDays <= 180 ? 'week' : 'month';
+
+      const buckets = {};
+      dated.forEach(({ d, v }) => {
+        let key, label;
+        if (granularity === 'day') {
+          key = d.toISOString().slice(0, 10);
+          label = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+        } else if (granularity === 'week') {
+          const monday = new Date(d);
+          monday.setHours(0, 0, 0, 0);
+          monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+          key = monday.toISOString().slice(0, 10);
+          label = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+        } else {
+          key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          label = d.toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
+        }
+        if (!buckets[key]) buckets[key] = { key, label, value: 0 };
+        buckets[key].value += v;
+      });
+      const points = Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key));
+      points.granularity = granularity; // stashed for the subtitle — arrays can carry extra props
+      return points;
+    }
+
+    // Rounds up to a "nice" axis max (1/2/5 x 10^n) so gridline values read
+    // as 0 / 25 / 50 rather than 0 / 23 / 47.
+    function niceCeil(v) {
+      if (v <= 0) return 1;
+      const exp = Math.floor(Math.log10(v));
+      const base = Math.pow(10, exp);
+      const frac = v / base;
+      const niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+      return niceFrac * base;
+    }
+
+    // A small single-series SVG line chart: 2px line, ~10% opacity area
+    // wash, end-value direct label, hairline gridlines at nice round
+    // numbers, and a hover crosshair + tooltip (values are also always
+    // visible via the endpoint label and the table below, so hover only
+    // adds — it never gates).
+    function renderLineChart(elId, points, opts = {}) {
       const box = document.getElementById(elId);
-      if (!buckets.length) { box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted)">No dated records for this filter.</div>`; return; }
-      const max = Math.max(1, ...buckets.map(b => b.count));
-      const monthLabel = k => new Date(k + '-01').toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
+      if (!points.length) { box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted)">No dated records for this filter.</div>`; return; }
+
+      const W = 700, H = 190, padL = 40, padR = 12, padT = 14, padB = 26;
+      const plotW = W - padL - padR, plotH = H - padT - padB;
+      const niceMax = niceCeil(Math.max(1, ...points.map(p => p.value)));
+      const xStep = points.length > 1 ? plotW / (points.length - 1) : 0;
+      const xy = points.map((p, i) => ({
+        x: padL + (points.length > 1 ? i * xStep : plotW / 2),
+        y: padT + plotH - (p.value / niceMax) * plotH,
+        ...p
+      }));
+
+      const fmt = opts.formatValue || (v => String(v));
+      const linePath = xy.map((pt, i) => `${i === 0 ? 'M' : 'L'}${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(' ');
+      const areaPath = `${linePath} L${xy[xy.length - 1].x.toFixed(1)},${padT + plotH} L${xy[0].x.toFixed(1)},${padT + plotH} Z`;
+
+      const gridLines = [0, 0.5, 1].map(f => {
+        const y = padT + plotH * (1 - f);
+        return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--gray-100)" stroke-width="1"/>
+                <text x="${padL - 6}" y="${y + 3}" font-size="9.5" fill="var(--text-muted)" text-anchor="end">${Math.round(niceMax * f)}</text>`;
+      }).join('');
+
+      const labelEvery = Math.max(1, Math.ceil(points.length / 8));
+      const xLabels = xy.filter((_, i) => i % labelEvery === 0 || i === xy.length - 1)
+        .map(pt => `<text x="${pt.x}" y="${H - 8}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle">${escHtml(pt.label)}</text>`).join('');
+
+      const dots = xy.map((pt, i) => `<circle data-i="${i}" cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3" fill="var(--orange)" stroke="white" stroke-width="1.5"/>`).join('');
+      const last = xy[xy.length - 1];
+
       box.innerHTML = `
-        <div class="lead-chart-bars" style="height:90px">
-          ${buckets.map(b => `
-            <div class="lead-chart-bar-col">
-              <div class="lead-chart-bar-value">${b.count}</div>
-              <div class="lead-chart-bar" style="height:${Math.round((b.count / max) * 100)}%"></div>
-              <div class="lead-chart-bar-label">${monthLabel(b.key)}</div>
-            </div>`).join('')}
+        <div style="position:relative">
+          <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" id="${elId}_svg">
+            ${gridLines}
+            <path d="${areaPath}" fill="var(--orange)" opacity="0.1"/>
+            <path d="${linePath}" fill="none" stroke="var(--orange)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            ${dots}
+            <line id="${elId}_crosshair" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="var(--gray-300)" stroke-width="1" style="display:none"/>
+            ${xLabels}
+            <text x="${last.x}" y="${Math.max(10, last.y - 8)}" font-size="11" font-weight="700" fill="var(--navy)" text-anchor="${points.length > 1 ? 'end' : 'middle'}">${escHtml(fmt(last.value))}</text>
+          </svg>
+          <div id="${elId}_tooltip" style="position:absolute;pointer-events:none;display:none;background:var(--navy);color:white;font-size:11px;padding:5px 9px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-120%);z-index:5"></div>
         </div>`;
+
+      const svg = document.getElementById(`${elId}_svg`);
+      const tooltip = document.getElementById(`${elId}_tooltip`);
+      const crosshair = document.getElementById(`${elId}_crosshair`);
+      const showAt = clientX => {
+        const rect = svg.getBoundingClientRect();
+        const mouseX = (clientX - rect.left) * (W / rect.width);
+        let nearest = 0, minDist = Infinity;
+        xy.forEach((pt, i) => { const d = Math.abs(pt.x - mouseX); if (d < minDist) { minDist = d; nearest = i; } });
+        const pt = xy[nearest];
+        crosshair.setAttribute('x1', pt.x); crosshair.setAttribute('x2', pt.x); crosshair.style.display = '';
+        tooltip.style.display = '';
+        tooltip.style.left = `${(pt.x / W) * 100}%`;
+        tooltip.style.top = `${(pt.y / H) * 100}%`;
+        tooltip.innerHTML = `<strong>${escHtml(fmt(pt.value))}</strong> &nbsp;${escHtml(pt.label)}`;
+      };
+      svg.addEventListener('mousemove', e => showAt(e.clientX));
+      svg.addEventListener('mouseleave', () => { crosshair.style.display = 'none'; tooltip.style.display = 'none'; });
     }
 
     function renderReportTable(type, rows) {
