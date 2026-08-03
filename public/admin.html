@@ -543,9 +543,12 @@
             <button class="modal-close" onclick="closeLeadDetailModal()">×</button>
           </div>
           <div class="modal-body" id="leadDetailBody" style="max-height:70vh;overflow-y:auto"></div>
-          <div class="modal-footer">
-            <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
-            <button class="btn-add" id="leadDetailSaveBtn" onclick="saveLeadAssignment()">Save</button>
+          <div class="modal-footer" style="justify-content:space-between">
+            <button class="action-btn delete" id="leadDetailDeleteBtn" style="display:none" onclick="deleteLeadConfirm()">Delete Lead</button>
+            <div style="display:flex;gap:8px;margin-left:auto">
+              <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
+              <button class="btn-add" id="leadDetailSaveBtn" onclick="saveLeadAssignment()">Save</button>
+            </div>
           </div>
         </div>
       </div>
@@ -4778,6 +4781,7 @@
       if (!lead) return;
       currentLeadDetailId = id;
       document.getElementById('leadDetailTitle').textContent = lead.centre_name;
+      document.getElementById('leadDetailDeleteBtn').style.display = currentUserRole === 'super_admin' ? '' : 'none';
       const row = (label, value) => `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
           <span style="color:var(--text-muted)">${escHtml(label)}</span>
@@ -4913,6 +4917,33 @@
     function closeLeadDetailModal() {
       document.getElementById('leadDetailModal').classList.remove('open');
       currentLeadDetailId = null;
+    }
+
+    // Outright deletion (as opposed to a status change) is kept to the
+    // single super_admin account — see routes/leads.js DELETE /:id.
+    function deleteLeadConfirm() {
+      if (!currentLeadDetailId) return;
+      const lead = allLeads.find(l => l.id === currentLeadDetailId);
+      document.getElementById('confirmTitle').textContent = 'Delete Lead';
+      document.getElementById('confirmMsg').textContent = `Are you sure you want to delete "${lead ? lead.centre_name : 'this lead'}"? This cannot be undone.`;
+      confirmCallback = () => doDeleteLead(currentLeadDetailId);
+      document.getElementById('confirmOkBtn').onclick = () => { confirmCallback(); closeConfirm(); };
+      document.getElementById('confirmModal').classList.add('open');
+    }
+
+    async function doDeleteLead(id) {
+      try {
+        const res = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          toast('Lead deleted', 'success');
+          closeLeadDetailModal();
+          allLeads = allLeads.filter(l => l.id !== id);
+          filterLeadsTable();
+        } else {
+          const d = await res.json();
+          toast(d.error || 'Delete failed', 'error');
+        }
+      } catch { toast('Network error', 'error'); }
     }
 
     async function saveLeadAssignment() {

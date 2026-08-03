@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { requireAuth, requireAdmin, requireRole } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 
 router.use(requireAuth);
@@ -195,6 +195,21 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
 
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Deleting a lead outright (not just marking a status) is destructive and
+// affects Sales Dashboard/WFP Dashboard totals, so it's kept to the single
+// super_admin account rather than opened to all admins.
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    const existing = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+    await getDb().execute({ sql: 'DELETE FROM lead_notes WHERE lead_id = ?', args: [req.params.id] });
+    await getDb().execute({ sql: 'DELETE FROM leads WHERE id = ?', args: [req.params.id] });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
