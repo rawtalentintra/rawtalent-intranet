@@ -2650,8 +2650,9 @@
             </div>
             <div class="form-group-modal">
               <label class="form-label-modal">Centre Name</label>
-              <input type="text" id="leadCentreName" class="form-control" placeholder="e.g. Little Explorers Early Learning" oninput="checkExcludedCentre()">
+              <input type="text" id="leadCentreName" class="form-control" placeholder="e.g. Little Explorers Early Learning" oninput="checkExcludedCentre();scheduleLeadDupCheck()">
             </div>
+            <div id="leadCentreDupWarning" class="lead-dup-warning" style="display:none"></div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Suburb</label>
@@ -2667,8 +2668,9 @@
             </div>
             <div class="form-group-modal">
               <label class="form-label-modal">Street Address <span class="optional">(optional)</span></label>
-              <input type="text" id="leadStreetAddress" class="form-control" placeholder="e.g. 50 Webb St">
+              <input type="text" id="leadStreetAddress" class="form-control" placeholder="e.g. 50 Webb St" oninput="scheduleLeadDupCheck()">
             </div>
+            <div id="leadAddressDupWarning" class="lead-dup-warning" style="display:none"></div>
             <div class="form-group-modal">
               <label class="form-label-modal">Centre Phone Number <span class="optional">(optional)</span></label>
               <input type="text" id="leadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
@@ -2775,6 +2777,53 @@
       const value = document.getElementById('leadCentreName').value.toLowerCase();
       const isExcluded = EXCLUDED_CENTRE_GROUPS.some(g => value.includes(g));
       document.getElementById('leadExcludedWarning').style.display = isExcluded ? 'block' : 'none';
+    }
+
+    // ── Duplicate lead check ─────────────────────────────────────
+    // Fuzzy-matches the Centre Name and Street Address fields against
+    // existing leads as the rep types, so they find out a centre's already
+    // been submitted before filling out the rest of the form.
+    let leadDupTimer;
+    function scheduleLeadDupCheck() {
+      clearTimeout(leadDupTimer);
+      leadDupTimer = setTimeout(checkLeadDuplicates, 400);
+    }
+
+    async function checkLeadDuplicates() {
+      const centreName = document.getElementById('leadCentreName').value.trim();
+      const streetAddress = document.getElementById('leadStreetAddress').value.trim();
+      if (centreName.length < 3 && streetAddress.length < 5) {
+        hideLeadDupWarning('centre');
+        hideLeadDupWarning('address');
+        return;
+      }
+      try {
+        const params = new URLSearchParams({ centreName, streetAddress });
+        const { centreMatches, addressMatches } = await fetch(`/api/leads/check-duplicate?${params}`).then(r => r.json());
+        renderLeadDupWarning('centre', centreMatches);
+        renderLeadDupWarning('address', addressMatches);
+      } catch { /* soft nicety — a network hiccup here shouldn't block the rep from submitting */ }
+    }
+
+    function hideLeadDupWarning(kind) {
+      document.getElementById(kind === 'centre' ? 'leadCentreDupWarning' : 'leadAddressDupWarning').style.display = 'none';
+    }
+
+    function renderLeadDupWarning(kind, matches) {
+      const box = document.getElementById(kind === 'centre' ? 'leadCentreDupWarning' : 'leadAddressDupWarning');
+      if (!matches.length) { box.style.display = 'none'; return; }
+      const top = matches[0];
+      const strongMatch = top.score >= 0.6;
+      const where = [top.suburb, top.state].filter(Boolean).join(', ');
+      const alreadyNote = top.signed_status === 'signed' ? ' — already signed'
+        : top.signed_status === 'not_interested' ? ' — marked not interested' : '';
+      box.className = `lead-dup-warning${strongMatch ? ' lead-dup-strong' : ''}`;
+      box.innerHTML = `
+        <div style="font-weight:700;margin-bottom:3px">${strongMatch ? '⚠️ This centre may already be a lead' : `🔎 Did you mean “${escHtml(top.centre_name)}”?`}</div>
+        <div>${escHtml(top.centre_name)}${where ? `, ${escHtml(where)}` : ''}${alreadyNote} — submitted by ${escHtml(top.submitted_by_name || 'a teammate')} ${fmtDate(top.created_at)}</div>
+        <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:11px;margin-top:6px" onclick="hideLeadDupWarning('${kind}')">Dismiss</button>
+      `;
+      box.style.display = 'block';
     }
 
     async function submitLead() {

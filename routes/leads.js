@@ -99,6 +99,44 @@ router.get('/stats', requireAdmin, async (req, res) => {
   }
 });
 
+// Fuzzy duplicate check for the submission form — reps type centre names
+// and addresses inconsistently ("Goodstart Caulfield" vs "Goodstart Early
+// Learning Caulfield"), so an exact-match lookup would miss most repeats.
+// Open to any authed user (not just admins), since it's the rep filling out
+// the form who needs the warning before wasting time on the rest of it.
+router.get('/check-duplicate', async (req, res) => {
+  try {
+    const centreName = (req.query.centreName || '').trim();
+    const streetAddress = (req.query.streetAddress || '').trim();
+
+    const centreMatches = centreName.length >= 3
+      ? await getDb().execute({
+          sql: `SELECT id, centre_name, street_address, suburb, state, submitted_by_name, created_at, signed_status,
+                       similarity(lower(centre_name), lower(?)) AS score
+                FROM leads
+                WHERE similarity(lower(centre_name), lower(?)) > 0.3
+                ORDER BY score DESC LIMIT 3`,
+          args: [centreName, centreName]
+        }).then(r => r.rows)
+      : [];
+
+    const addressMatches = streetAddress.length >= 5
+      ? await getDb().execute({
+          sql: `SELECT id, centre_name, street_address, suburb, state, submitted_by_name, created_at, signed_status,
+                       similarity(lower(street_address), lower(?)) AS score
+                FROM leads
+                WHERE street_address IS NOT NULL AND similarity(lower(street_address), lower(?)) > 0.35
+                ORDER BY score DESC LIMIT 3`,
+          args: [streetAddress, streetAddress]
+        }).then(r => r.rows)
+      : [];
+
+    res.json({ centreMatches, addressMatches });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', requireAdmin, async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });

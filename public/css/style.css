@@ -1135,6 +1135,24 @@ button { cursor: pointer; font-family: inherit; }
   gap: 10px;
 }
 
+/* Fuzzy duplicate-lead warning on the submission form — amber for a soft
+   "did you mean" suggestion, deeper/red-tinted (.lead-dup-strong) when the
+   match score is high enough to likely be the same centre. */
+.lead-dup-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  margin: -8px 0 16px;
+}
+.lead-dup-warning.lead-dup-strong {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
 .form-group-modal { margin-bottom: 16px; }
 .form-label-modal {
   display: block;

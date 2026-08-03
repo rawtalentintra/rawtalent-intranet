@@ -410,6 +410,36 @@
         </div>
 
         <div class="admin-table-card">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--gray-200)">
+            <select id="leadsFilterPeriod" class="form-control" style="width:130px" onchange="filterLeadsTable()">
+              <option value="all" selected>All Time</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="quarter">This Quarter</option>
+            </select>
+            <select id="leadsFilterPartner" class="form-control" style="width:170px" onchange="filterLeadsTable()">
+              <option value="">All Partners</option>
+            </select>
+            <select id="leadsFilterStatus" class="form-control" style="width:170px" onchange="filterLeadsTable()">
+              <option value="">All Statuses</option>
+              <optgroup label="Lead Called">
+                <option value="lead_called:to_schedule">To Schedule</option>
+                <option value="lead_called:scheduled">Scheduled</option>
+                <option value="lead_called:done">Called</option>
+              </optgroup>
+              <optgroup label="Centre Visited">
+                <option value="centre_visited:to_schedule">To Schedule</option>
+                <option value="centre_visited:scheduled">Scheduled</option>
+                <option value="centre_visited:done">Visited</option>
+              </optgroup>
+              <optgroup label="Signed Centre">
+                <option value="signed:pending">Pending</option>
+                <option value="signed:signed">Signed</option>
+                <option value="signed:not_interested">Not Interested</option>
+              </optgroup>
+            </select>
+            <span id="leadsFilterCount" style="margin-left:auto;align-self:center;font-size:12.5px;color:var(--text-muted)"></span>
+          </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
               <thead>
@@ -3511,26 +3541,56 @@
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
       body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      const partnerSelect = document.getElementById('leadsFilterPartner');
+      if (partnerSelect.options.length === 1) {
+        partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+      }
       try {
         allLeads = await fetch('/api/leads').then(r => r.json());
-        if (!allLeads.length) {
-          body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">No leads submitted yet</td></tr>';
-          return;
-        }
-        body.innerHTML = allLeads.map(l => `
-          <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
-            <td>${fmtDate(l.created_at)}</td>
-            <td style="font-weight:600;color:var(--navy)" class="td-truncate" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
-            <td>${escHtml(l.suburb || '—')}</td>
-            <td>${escHtml(l.state || '—')}</td>
-            <td>${leadStatusBadge(l.id, 'lead_called')}</td>
-            <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
-            <td>${leadStatusBadge(l.id, 'signed')}</td>
-            <td class="td-truncate" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
-          </tr>`).join('');
+        filterLeadsTable();
       } catch {
         body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
+    }
+
+    // Period/Partner/Status filters, applied client-side over `allLeads`
+    // (same small dataset the Sales Dashboard already filters in-browser).
+    function filterLeadsTable() {
+      const periodKey = document.getElementById('leadsFilterPeriod').value;
+      const partner = document.getElementById('leadsFilterPartner').value;
+      const statusVal = document.getElementById('leadsFilterStatus').value;
+      const [statusField, statusValue] = statusVal ? statusVal.split(':') : [null, null];
+
+      let filtered = allLeads;
+      if (periodKey !== 'all') {
+        const { from, to } = salesDashRange(periodKey);
+        filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
+      }
+      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
+      if (statusField) filtered = filtered.filter(l => l[LEAD_STATUS_FIELDS[statusField].statusKey] === statusValue);
+
+      document.getElementById('leadsFilterCount').textContent =
+        allLeads.length ? `${filtered.length} of ${allLeads.length}` : '';
+      renderLeadsTableRows(filtered);
+    }
+
+    function renderLeadsTableRows(list) {
+      const body = document.getElementById('leadsTableBody');
+      if (!list.length) {
+        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        return;
+      }
+      body.innerHTML = list.map(l => `
+        <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
+          <td>${fmtDate(l.created_at)}</td>
+          <td style="font-weight:600;color:var(--navy)" class="td-truncate" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
+          <td>${escHtml(l.suburb || '—')}</td>
+          <td>${escHtml(l.state || '—')}</td>
+          <td>${leadStatusBadge(l.id, 'lead_called')}</td>
+          <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
+          <td>${leadStatusBadge(l.id, 'signed')}</td>
+          <td class="td-truncate" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
+        </tr>`).join('');
     }
 
     // ── Lead status popover — single-field editor ───────────────────

@@ -17,6 +17,7 @@
 -- be layered in later once the CRM data model work begins.
 
 CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -840,6 +841,12 @@ CREATE TABLE IF NOT EXISTS leads (
 );
 CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
 CREATE INDEX IF NOT EXISTS idx_leads_submitted_by ON leads(submitted_by_email);
+
+-- Trigram indexes back the fuzzy duplicate-check on the lead submission
+-- form (GET /api/leads/check-duplicate) — reps type centre names and
+-- addresses inconsistently, so exact matches would miss most duplicates.
+CREATE INDEX IF NOT EXISTS idx_leads_centre_name_trgm ON leads USING gin (centre_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_leads_street_address_trgm ON leads USING gin (street_address gin_trgm_ops);
 
 -- Follow-up tracking, admin-editable. Each stage has a status plus an
 -- optional date/time — 'scheduled' uses that date/time as the scheduled
