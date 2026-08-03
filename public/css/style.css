@@ -911,9 +911,13 @@ button { cursor: pointer; font-family: inherit; }
 }
 
 /* Denser variant for tables with many short-content rows (Leads, etc.) —
-   same structure as .data-table, just tighter padding and smaller type. */
-.data-table-compact th { padding: 6px 14px; font-size: 10px; }
-.data-table-compact td { padding: 4px 14px; font-size: 12.5px; }
+   same structure as .data-table, just tighter padding and smaller type.
+   Cells never wrap, so row height stays constant regardless of column
+   count — .data-table's width:100% is a starting point, not a cap, so
+   auto table layout grows past it (rather than squeezing/wrapping cells)
+   and the wrapping div's overflow-x:auto picks up the rest as a scroll. */
+.data-table-compact th { padding: 6px 14px; font-size: 10px; white-space: nowrap; }
+.data-table-compact td { padding: 4px 14px; font-size: 12.5px; white-space: nowrap; }
 .td-truncate {
   max-width: 200px;
   overflow: hidden;

@@ -151,7 +151,7 @@
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
-          <span class="admin-nav-icon">📈</span> Sales Dashboard
+          <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
@@ -352,11 +352,11 @@
       </div>
 
       <!-- Leads -->
-      <!-- Sales Dashboard -->
+      <!-- WFP Dashboard -->
       <div class="admin-section" id="section-sales-dashboard">
         <div class="admin-header">
           <div>
-            <div class="admin-page-title">📈 Sales Dashboard</div>
+            <div class="admin-page-title">📈 WFP Dashboard</div>
             <div class="admin-page-sub">Lead pipeline health, Workforce Partner performance and what needs attention today</div>
           </div>
           <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="loadSalesDashboard()">
@@ -402,38 +402,41 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Leads</div>
-            <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the Sales Dashboard.</div>
+            <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the WFP Dashboard.</div>
           </div>
         </div>
 
         <div class="admin-table-card">
           <div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--gray-200)">
-            <select id="leadsFilterPeriod" class="form-control" style="width:130px" onchange="filterLeadsTable()">
+            <select id="leadsFilterPeriod" class="form-control" style="width:120px" onchange="filterLeadsTable()">
               <option value="all" selected>All Time</option>
               <option value="week">This Week</option>
               <option value="month">This Month</option>
               <option value="quarter">This Quarter</option>
             </select>
-            <select id="leadsFilterPartner" class="form-control" style="width:170px" onchange="filterLeadsTable()">
+            <select id="leadsFilterPartner" class="form-control" style="width:150px" onchange="filterLeadsTable()">
               <option value="">All Partners</option>
             </select>
-            <select id="leadsFilterStatus" class="form-control" style="width:170px" onchange="filterLeadsTable()">
-              <option value="">All Statuses</option>
-              <optgroup label="Lead Called">
-                <option value="lead_called:to_schedule">To Schedule</option>
-                <option value="lead_called:scheduled">Scheduled</option>
-                <option value="lead_called:done">Called</option>
-              </optgroup>
-              <optgroup label="Centre Visited">
-                <option value="centre_visited:to_schedule">To Schedule</option>
-                <option value="centre_visited:scheduled">Scheduled</option>
-                <option value="centre_visited:done">Visited</option>
-              </optgroup>
-              <optgroup label="Signed Centre">
-                <option value="signed:pending">Pending</option>
-                <option value="signed:signed">Signed</option>
-                <option value="signed:not_interested">Not Interested</option>
-              </optgroup>
+            <select id="leadsFilterState" class="form-control" style="width:110px" onchange="filterLeadsTable()">
+              <option value="">All States</option>
+            </select>
+            <select id="leadsFilterLeadCalled" class="form-control" style="width:135px" onchange="filterLeadsTable()">
+              <option value="">Lead Called: Any</option>
+              <option value="to_schedule">To Schedule</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="done">Called</option>
+            </select>
+            <select id="leadsFilterCentreVisited" class="form-control" style="width:145px" onchange="filterLeadsTable()">
+              <option value="">Centre Visited: Any</option>
+              <option value="to_schedule">To Schedule</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="done">Visited</option>
+            </select>
+            <select id="leadsFilterProfileCreated" class="form-control" style="width:155px" onchange="filterLeadsTable()">
+              <option value="">Profile Created: Any</option>
+              <option value="pending">Pending</option>
+              <option value="signed">Signed</option>
+              <option value="not_interested">Not Interested</option>
             </select>
             <span id="leadsFilterCount" style="margin-left:auto;align-self:center;font-size:12.5px;color:var(--text-muted)"></span>
           </div>
@@ -445,14 +448,17 @@
                   <th>Centre</th>
                   <th>Suburb</th>
                   <th>State</th>
+                  <th>Agency Usage</th>
                   <th>Lead Called</th>
                   <th>Centre Visited</th>
-                  <th>Signed Centre</th>
+                  <th>Profile Created</th>
                   <th>Workforce Partner</th>
+                  <th>Last Called</th>
+                  <th>Last Visited</th>
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
-                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -795,8 +801,8 @@
           </div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
-            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads (view-only, not the Sales Dashboard), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
-            <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): Leads (view all, edit only Position/Contact Name/Email, add their own notes) and the Sales Dashboard. No other admin panel access; status/assignment editing stays admin/super_admin only.<br>
+            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads (view-only, not the WFP Dashboard), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
+            <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): Leads (view all, edit only Position/Contact Name/Email, add their own notes) and the WFP Dashboard. No other admin panel access; status/assignment editing stays admin/super_admin only.<br>
             <strong style="color:var(--navy)">admin</strong> — full admin panel access.
           </div>
         </div>
@@ -1645,7 +1651,7 @@
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
               <option value="qa_view">QA View (articles, glossary, leads view-only, FAQ, call quality)</option>
-              <option value="workforce_partner">Workforce Partner (leads + Sales Dashboard, own contact fields/notes)</option>
+              <option value="workforce_partner">Workforce Partner (leads + WFP Dashboard, own contact fields/notes)</option>
             </select>
           </div>
         </div>
@@ -3288,7 +3294,7 @@
       { area: 'Articles — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Glossary — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
       { area: 'Glossary — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Sales Dashboard', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
+      { area: 'WFP Dashboard', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
       { area: 'Leads — view list/detail', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Leads — edit status/assignment', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Leads — edit contact fields (position/name/email)', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
@@ -3544,6 +3550,7 @@
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)', 'Liam Baxter'];
     const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
+    const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
 
     const LEAD_CALLED_META = {
       done: { label: 'Called', cls: 'lead-badge-done' },
@@ -3567,7 +3574,7 @@
     const LEAD_STATUS_FIELDS = {
       lead_called: { label: 'Lead Called', meta: LEAD_CALLED_META, statusKey: 'lead_called_status', atKey: 'lead_called_at', statusBody: 'leadCalledStatus', atBody: 'leadCalledAt' },
       centre_visited: { label: 'Centre Visited', meta: CENTRE_VISITED_META, statusKey: 'centre_visited_status', atKey: 'centre_visited_at', statusBody: 'centreVisitedStatus', atBody: 'centreVisitedAt' },
-      signed: { label: 'Signed Centre', meta: SIGNED_META, statusKey: 'signed_status', atKey: 'signed_at', statusBody: 'signedStatus', atBody: 'signedAt' }
+      signed: { label: 'Profile Created', meta: SIGNED_META, statusKey: 'signed_status', atKey: 'signed_at', statusBody: 'signedStatus', atBody: 'signedAt' }
     };
 
     function leadStatusBadge(leadId, field) {
@@ -3587,26 +3594,35 @@
 
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
-      body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      body.innerHTML = '<tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
         partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+      }
+      const stateSelect = document.getElementById('leadsFilterState');
+      if (stateSelect.options.length === 1) {
+        stateSelect.insertAdjacentHTML('beforeend', AU_STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
       }
       try {
         allLeads = await fetch('/api/leads').then(r => r.json());
         filterLeadsTable();
       } catch {
-        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
     }
 
-    // Period/Partner/Status filters, applied client-side over `allLeads`
-    // (same small dataset the Sales Dashboard already filters in-browser).
+    // Period/Partner/State/stage filters, applied client-side over
+    // `allLeads` (same small dataset the WFP Dashboard already filters
+    // in-browser). The three stage filters are separate dropdowns rather
+    // than one combined list — easier to scan and combine (e.g. "Called"
+    // + "To Schedule" visit) than a single grouped dropdown.
     function filterLeadsTable() {
       const periodKey = document.getElementById('leadsFilterPeriod').value;
       const partner = document.getElementById('leadsFilterPartner').value;
-      const statusVal = document.getElementById('leadsFilterStatus').value;
-      const [statusField, statusValue] = statusVal ? statusVal.split(':') : [null, null];
+      const state = document.getElementById('leadsFilterState').value;
+      const leadCalled = document.getElementById('leadsFilterLeadCalled').value;
+      const centreVisited = document.getElementById('leadsFilterCentreVisited').value;
+      const profileCreated = document.getElementById('leadsFilterProfileCreated').value;
 
       let filtered = allLeads;
       if (periodKey !== 'all') {
@@ -3614,7 +3630,10 @@
         filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
       }
       if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
-      if (statusField) filtered = filtered.filter(l => l[LEAD_STATUS_FIELDS[statusField].statusKey] === statusValue);
+      if (state) filtered = filtered.filter(l => l.state === state);
+      if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
+      if (centreVisited) filtered = filtered.filter(l => l.centre_visited_status === centreVisited);
+      if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
 
       document.getElementById('leadsFilterCount').textContent =
         allLeads.length ? `${filtered.length} of ${allLeads.length}` : '';
@@ -3624,19 +3643,22 @@
     function renderLeadsTableRows(list) {
       const body = document.getElementById('leadsTableBody');
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
         return;
       }
       body.innerHTML = list.map(l => `
         <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDate(l.created_at)}</td>
-          <td style="font-weight:600;color:var(--navy)" class="td-truncate" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
+          <td>${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '—')}</td>
           <td>${leadStatusBadge(l.id, 'lead_called')}</td>
           <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
           <td>${leadStatusBadge(l.id, 'signed')}</td>
-          <td class="td-truncate" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
+          <td>${escHtml(l.assigned_workforce_partner || '—')}</td>
+          <td>${fmtDate(l.lead_called_at) || '—'}</td>
+          <td>${fmtDate(l.centre_visited_at) || '—'}</td>
         </tr>`).join('');
     }
 
@@ -4053,7 +4075,7 @@
         <div class="lead-group-label">Follow-up</div>
         ${leadStatusEditorRow('lead_called', 'Lead Called', LEAD_CALLED_META, lead.lead_called_status || 'to_schedule', lead.lead_called_at)}
         ${leadStatusEditorRow('centre_visited', 'Centre Visited', CENTRE_VISITED_META, lead.centre_visited_status || 'to_schedule', lead.centre_visited_at)}
-        ${leadStatusEditorRow('signed', 'Signed Centre', SIGNED_META, lead.signed_status || 'pending', lead.signed_at)}
+        ${leadStatusEditorRow('signed', 'Profile Created', SIGNED_META, lead.signed_status || 'pending', lead.signed_at)}
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>
@@ -4069,7 +4091,7 @@
         </div>
         ${currentUserRole === 'qa_view' ? '' : `
           <div class="form-group-modal">
-            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add a note for the team or the Workforce Partner…'}"></textarea>
+            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add notes for the Workforce Partner — anything helpful for their visit or follow-up…'}"></textarea>
             <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
           </div>
         `}`;
