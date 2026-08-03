@@ -149,7 +149,7 @@
         </div>
       </div>
       <div class="admin-nav-section">
-        <div class="admin-nav-label" onclick="toggleNavSection(this)">Sales</div>
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> Sales Dashboard
         </div>
@@ -3999,8 +3999,71 @@
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
-        </div>`;
+        </div>
+
+        <div class="lead-group-label" style="margin-top:14px">Notes</div>
+        <div id="leadNotesList" style="margin-bottom:10px">
+          <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading notes…</div>
+        </div>
+        ${currentUserRole === 'qa_view' ? '' : `
+          <div class="form-group-modal">
+            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="Add a note for the team or the Workforce Partner…"></textarea>
+            <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
+          </div>
+        `}`;
       document.getElementById('leadDetailModal').classList.add('open');
+      loadLeadNotes(id);
+    }
+
+    // ── Lead notes thread ────────────────────────────────────────
+    // A running thread (not a single field) since more than one person —
+    // a consultant, an admin, eventually a Workforce Partner — may add
+    // notes on the same lead over time.
+    async function loadLeadNotes(leadId) {
+      const list = document.getElementById('leadNotesList');
+      try {
+        const notes = await fetch(`/api/leads/${leadId}/notes`).then(r => r.json());
+        if (currentLeadDetailId !== leadId) return; // modal moved on while this was in flight
+        if (!notes.length) {
+          list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">No notes yet.</div>`;
+          return;
+        }
+        list.innerHTML = notes.map(n => `
+          <div style="padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
+            <div style="white-space:pre-wrap">${escHtml(n.note)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;justify-content:space-between;align-items:center">
+              <span>${escHtml(n.author_name || n.author_email || 'Unknown')} · ${fmtDate(n.created_at)}</span>
+              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" style="padding:2px 8px;font-size:10.5px" onclick="deleteLeadNote('${n.id}')">Remove</button>` : ''}
+            </div>
+          </div>`).join('');
+      } catch {
+        list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Failed to load notes.</div>`;
+      }
+    }
+
+    async function addLeadNote() {
+      if (!currentLeadDetailId) return;
+      const input = document.getElementById('leadNoteInput');
+      const note = input.value.trim();
+      if (!note) return;
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
+        input.value = '';
+        loadLeadNotes(currentLeadDetailId);
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function deleteLeadNote(noteId) {
+      if (!currentLeadDetailId) return;
+      try {
+        await fetch(`/api/leads/${currentLeadDetailId}/notes/${noteId}`, { method: 'DELETE' });
+        loadLeadNotes(currentLeadDetailId);
+      } catch { toast('Network error', 'error'); }
     }
 
     function closeLeadDetailModal() {

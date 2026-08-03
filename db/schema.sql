@@ -857,3 +857,18 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS centre_visited_status TEXT DEFAULT 't
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS centre_visited_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_status TEXT DEFAULT 'pending';
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ;
+
+-- A running thread rather than a single overwritable field, since more
+-- than one person (a consultant, an admin, eventually a Workforce Partner)
+-- may add notes on the same lead over time — a single field would let one
+-- author silently clobber another's note. No FK to leads, matching this
+-- table's existing (lack of) referential integrity.
+CREATE TABLE IF NOT EXISTS lead_notes (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT NOT NULL,
+  note TEXT NOT NULL,
+  author_name TEXT,
+  author_email TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_notes_lead_id ON lead_notes(lead_id);

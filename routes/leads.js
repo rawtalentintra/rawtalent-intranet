@@ -187,4 +187,50 @@ router.put('/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// Notes thread on a lead — readable by anyone with leads view access
+// (admin/super_admin/qa_view), postable by admin/super_admin only for now.
+// Workforce Partners (Gwen, Justine, Liam) don't have login accounts in
+// this app yet, so they can't post here until that's resolved — see the
+// Role Permissions comment in public/admin.html for context.
+router.get('/:id/notes', leadsViewAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: 'SELECT * FROM lead_notes WHERE lead_id = ? ORDER BY created_at ASC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/notes', requireAdmin, async (req, res) => {
+  try {
+    const note = (req.body.note || '').trim();
+    if (!note) return res.status(400).json({ error: 'Note text is required' });
+
+    const lead = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+
+    const id = uuidv4();
+    await getDb().execute({
+      sql: 'INSERT INTO lead_notes (id, lead_id, note, author_name, author_email) VALUES (?, ?, ?, ?, ?)',
+      args: [id, req.params.id, note, req.user.name || req.user.email, req.user.email]
+    });
+    const result = await getDb().execute({ sql: 'SELECT * FROM lead_notes WHERE id = ?', args: [id] });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/notes/:noteId', requireAdmin, async (req, res) => {
+  try {
+    await getDb().execute({ sql: 'DELETE FROM lead_notes WHERE id = ? AND lead_id = ?', args: [req.params.noteId, req.params.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
