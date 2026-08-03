@@ -149,6 +149,21 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Reports</div>
+        <div class="admin-nav-item" onclick="showSection('report-clients', this)">
+          <span class="admin-nav-icon">🏢</span> Clients
+        </div>
+        <div class="admin-nav-item" onclick="showSection('report-candidates', this)">
+          <span class="admin-nav-icon">🧑‍🎓</span> Candidates
+        </div>
+        <div class="admin-nav-item" onclick="showSection('report-bookings', this)">
+          <span class="admin-nav-icon">📅</span> Bookings
+        </div>
+        <div class="admin-nav-item" onclick="showSection('report-timesheets', this)">
+          <span class="admin-nav-icon">🕒</span> Timesheets
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
@@ -464,6 +479,14 @@
           </div>
         </div>
       </div>
+
+      <!-- Reports (Clients/Candidates/Bookings/Timesheets) — the four
+           sections here are generated from REPORT_CONFIG at init() time
+           (see renderReportSectionsHtml()) rather than hand-written,
+           since they're structurally identical and more reports are
+           coming — adding a 5th type later is a config entry, not a
+           block of markup. -->
+      <div id="reportsSectionsContainer"></div>
 
       <!-- Lead Status Popover — lightweight single-field editor triggered by
            clicking a status badge in the table, instead of opening the full
@@ -2161,6 +2184,7 @@
     let currentUserCanBuildTraining = false;
 
     async function init() {
+      renderReportSectionsHtml();
       try {
         const me = await fetch('/auth/me').then(r => r.json());
         if (me.error || !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(me.role)) { location.href = '/'; return; }
@@ -2911,6 +2935,7 @@
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
       if (id === 'sales-dashboard') loadSalesDashboard();
+      if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
       if (id === 'training-dashboard') loadTrainingDashboard();
@@ -3288,6 +3313,7 @@
       { area: 'Public HeartBeat — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Admin panel — access at all', user: false, qa: 'Limited', wfp: 'Limited', admin: true, superAdmin: true },
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Reports — Clients/Candidates/Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
@@ -3971,6 +3997,452 @@
               <div class="lead-chart-bar-label">${monthLabel(k)}</div>
             </div>`).join('')}
         </div>`;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // Reports (Clients / Candidates / Bookings / Timesheets)
+    // ══════════════════════════════════════════════════════════════
+    // Pulled from the external RtApiReport API (routes/reports.js proxies
+    // it server-side so the API key never reaches the browser). Several
+    // fields on these records (statusId, userTypeId, userRoleId, gradeId,
+    // certificateId, locationId, clientAssignmentTypeId, clientPreferenceId)
+    // are raw numeric codes with no documented meaning — the source app
+    // has no API docs; this schema was read off its Swagger UI — so
+    // breakdowns by those fields show as "Code N" until someone supplies
+    // the lookup labels.
+    //
+    // The four sections are config-driven (REPORT_CONFIG + generated HTML
+    // via renderReportSectionsHtml()) rather than hand-written per type,
+    // since they're structurally identical and more report types are
+    // planned — adding one later means adding a config entry, not a block
+    // of markup and a duplicated set of render functions.
+
+    let reportDataCache = {};      // type -> raw array from the API for the current period/active filter
+    let reportFilteredCache = {};  // type -> that array after client-side filters (search, status, etc.)
+    let reportPage = {};           // type -> current table page (1-based)
+    const REPORT_PAGE_SIZE = 50;
+    let reportLookupsLoaded = false;
+    let clientNameById = {};
+    let candidateNameById = {};
+
+    function candidateName(userId) {
+      return candidateNameById[userId] || (userId ? `Candidate #${userId}` : '—');
+    }
+    function clientName(clientId) {
+      return clientNameById[clientId] || (clientId ? `Client #${clientId}` : '—');
+    }
+
+    // Loads Clients + Candidates once (cached for the session) purely to
+    // resolve IDs to names for the Bookings/Timesheets tables and
+    // breakdowns — those two report types only carry clientId/
+    // assignedUserId/userId, not names.
+    async function ensureReportLookups() {
+      if (reportLookupsLoaded) return;
+      try {
+        const [clients, candidates] = await Promise.all([
+          fetch('/api/reports/clients').then(r => r.json()),
+          fetch('/api/reports/candidates').then(r => r.json())
+        ]);
+        (Array.isArray(clients) ? clients : []).forEach(c => { clientNameById[c.clientId] = c.name || c.nickName || `Client #${c.clientId}`; });
+        (Array.isArray(candidates) ? candidates : []).forEach(c => { candidateNameById[c.userId] = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.userName || `Candidate #${c.userId}`; });
+        reportLookupsLoaded = true;
+      } catch { /* Bookings/Timesheets tables just fall back to "#id" labels */ }
+    }
+
+    const REPORT_CONFIG = {
+      clients: {
+        label: 'Clients', icon: '🏢',
+        sub: 'All client centres from the RawTalent app.',
+        dateField: 'createdDate', dateFieldLabel: 'created date',
+        searchFields: ['name', 'nickName', 'email', 'emailAddress'],
+        extraFilters: [
+          { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
+        ],
+        kpis: rows => {
+          const active = rows.filter(r => r.isActive).length;
+          const trial = rows.filter(r => r.isTrialClient).length;
+          return [
+            { label: 'Total Clients', value: rows.length, hint: 'Matching current filters' },
+            { label: 'Active', value: active, hint: `${pct(active, rows.length)}% of total` },
+            { label: 'Trial Clients', value: trial, hint: `${pct(trial, rows.length)}% of total` },
+            { label: 'Invoice by Location', value: rows.filter(r => r.isInvoiceByLocation).length, hint: 'Billed per site, not per client' }
+          ];
+        },
+        breakdowns: [
+          { title: 'By Assignment Type', sub: 'Raw type codes', field: 'clientAssignmentTypeId', labelPrefix: 'Type' },
+          { title: 'By Preference', sub: 'Raw preference codes', field: 'clientPreferenceId', labelPrefix: 'Preference' }
+        ],
+        columns: [
+          { header: 'Name', render: r => escHtml(r.name || '—') },
+          { header: 'Nickname', render: r => escHtml(r.nickName || '—') },
+          { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
+          { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+          { header: 'Assignment Type', render: r => escHtml(r.clientAssignmentTypeId ?? '—') },
+          { header: 'Preference', render: r => escHtml(r.clientPreferenceId ?? '—') },
+          { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
+          { header: 'Active', render: r => r.isActive ? '✅' : '—' },
+          { header: 'Created', render: r => fmtDate(r.createdDate) }
+        ]
+      },
+      candidates: {
+        label: 'Candidates', icon: '🧑‍🎓',
+        sub: 'Educators and other candidates registered in the RawTalent app.',
+        dateField: 'createdDate', dateFieldLabel: 'created date',
+        searchFields: ['firstName', 'lastName', 'userName', 'email'],
+        extraFilters: [
+          { id: 'status', label: 'Status', type: 'select', field: 'status' }
+        ],
+        kpis: rows => {
+          const active = rows.filter(r => r.isActive).length;
+          const missingContact = rows.filter(r => !r.email && !r.contactNo).length;
+          return [
+            { label: 'Total Candidates', value: rows.length, hint: 'Matching current filters' },
+            { label: 'Active', value: active, hint: `${pct(active, rows.length)}% of total` },
+            { label: 'Missing Contact Info', value: missingContact, hint: 'No email or phone on file' },
+            { label: 'Distinct Roles', value: new Set(rows.map(r => r.userRoleId)).size, hint: 'Raw role codes in this set' }
+          ];
+        },
+        breakdowns: [
+          { title: 'By Status', sub: 'Raw status codes', field: 'status', labelPrefix: 'Status' },
+          { title: 'By User Type', sub: 'Raw type codes', field: 'userTypeId', labelPrefix: 'Type' }
+        ],
+        columns: [
+          { header: 'Name', render: r => escHtml([r.firstName, r.lastName].filter(Boolean).join(' ') || '—') },
+          { header: 'Username', render: r => escHtml(r.userName || '—') },
+          { header: 'Email', render: r => escHtml(r.email || '—') },
+          { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+          { header: 'User Type', render: r => escHtml(r.userTypeId ?? '—') },
+          { header: 'Role', render: r => escHtml(r.userRoleId ?? '—') },
+          { header: 'Status', render: r => escHtml(r.status ?? '—') },
+          { header: 'Active', render: r => r.isActive ? '✅' : '—' },
+          { header: 'Created', render: r => fmtDate(r.createdDate) }
+        ]
+      },
+      bookings: {
+        label: 'Bookings', icon: '📅',
+        sub: 'Every shift booking logged in the RawTalent app.',
+        dateField: 'bookingDate', dateFieldLabel: 'booking date',
+        needsLookups: true,
+        searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
+        extraFilters: [
+          { id: 'status', label: 'Status', type: 'select', field: 'statusId' }
+        ],
+        kpis: rows => {
+          const hours = r => (new Date(r.endTime) - new Date(r.startTime)) / 3600000;
+          const validDurations = rows.map(hours).filter(h => isFinite(h) && h > 0 && h < 24);
+          const avgHours = validDurations.length ? (validDurations.reduce((a, b) => a + b, 0) / validDurations.length) : 0;
+          return [
+            { label: 'Total Bookings', value: rows.length, hint: 'Matching current filters' },
+            { label: 'Active', value: rows.filter(r => r.isActive).length, hint: `${pct(rows.filter(r => r.isActive).length, rows.length)}% of total` },
+            { label: 'Unique Clients', value: new Set(rows.map(r => r.clientId)).size, hint: 'Distinct client centres booked' },
+            { label: 'Unique Candidates', value: new Set(rows.map(r => r.assignedUserId)).size, hint: 'Distinct educators assigned' },
+            { label: 'Avg Shift Length', value: avgHours.toFixed(1) + 'h', hint: 'Across bookings with valid times' }
+          ];
+        },
+        breakdowns: [
+          { title: 'By Status', sub: 'Raw status codes', field: 'statusId', labelPrefix: 'Status' },
+          { title: 'By Location', sub: 'Raw location codes, top 8', field: 'locationId', labelPrefix: 'Location', topN: 8 }
+        ],
+        columns: [
+          { header: 'Date', render: r => fmtDate(r.bookingDate) },
+          { header: 'Client', render: r => escHtml(clientName(r.clientId)) },
+          { header: 'Candidate', render: r => escHtml(candidateName(r.assignedUserId)) },
+          { header: 'Start', render: r => r.startTime ? new Date(r.startTime).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—' },
+          { header: 'End', render: r => r.endTime ? new Date(r.endTime).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—' },
+          { header: 'Location', render: r => escHtml(r.locationId ?? '—') },
+          { header: 'Grade', render: r => escHtml(r.gradeId ?? '—') },
+          { header: 'Certificate', render: r => escHtml(r.certificateId ?? '—') },
+          { header: 'Status', render: r => escHtml(r.statusId ?? '—') },
+          { header: 'Notes', render: r => escHtml(r.notes || '—') },
+          { header: 'Active', render: r => r.isActive ? '✅' : '—' }
+        ]
+      },
+      timesheets: {
+        label: 'Timesheets', icon: '🕒',
+        sub: 'Logged hours against bookings in the RawTalent app.',
+        dateField: 'startTime', dateFieldLabel: 'shift start time',
+        needsLookups: true,
+        searchTest: (r, q) => candidateName(r.userId).toLowerCase().includes(q),
+        extraFilters: [
+          { id: 'status', label: 'Status', type: 'select', field: 'status' },
+          { id: 'invoiced', label: 'Invoiced only', type: 'checkbox', test: r => r.isInvoiced },
+          { id: 'paid', label: 'Paid only', type: 'checkbox', test: r => r.isPaid }
+        ],
+        kpis: rows => {
+          const totalHours = rows.reduce((sum, r) => sum + (r.duration || 0), 0);
+          return [
+            { label: 'Total Timesheets', value: rows.length, hint: 'Matching current filters' },
+            { label: 'Total Hours', value: totalHours.toFixed(1), hint: 'Sum of logged duration' },
+            { label: 'Invoiced', value: rows.filter(r => r.isInvoiced).length, hint: `${pct(rows.filter(r => r.isInvoiced).length, rows.length)}% of total` },
+            { label: 'Paid', value: rows.filter(r => r.isPaid).length, hint: `${pct(rows.filter(r => r.isPaid).length, rows.length)}% of total` }
+          ];
+        },
+        breakdowns: [
+          { title: 'By Status', sub: 'Raw status codes', field: 'status', labelPrefix: 'Status' },
+          { title: 'Top Candidates by Hours', sub: 'Highest logged hours in this set', custom: 'topCandidateHours' }
+        ],
+        columns: [
+          { header: 'Candidate', render: r => escHtml(candidateName(r.userId)) },
+          { header: 'Booking ID', render: r => escHtml(r.bookingId ?? '—') },
+          { header: 'Start', render: r => fmtDate(r.startTime) },
+          { header: 'End', render: r => fmtDate(r.endTime) },
+          { header: 'Duration', render: r => (r.duration ?? 0) + 'h' },
+          { header: 'Lunch Break', render: r => (r.lunchBreak ?? 0) + 'm' },
+          { header: 'Status', render: r => escHtml(r.status ?? '—') },
+          { header: 'Invoiced', render: r => r.isInvoiced ? '✅' : '—' },
+          { header: 'Paid', render: r => r.isPaid ? '✅' : '—' },
+          { header: 'Comment', render: r => escHtml(r.comment || '—') }
+        ]
+      }
+    };
+
+    function renderReportSectionsHtml() {
+      const container = document.getElementById('reportsSectionsContainer');
+      container.innerHTML = Object.entries(REPORT_CONFIG).map(([type, cfg]) => `
+        <div class="admin-section" id="section-report-${type}">
+          <div class="admin-header">
+            <div>
+              <div class="admin-page-title">${cfg.icon} ${escHtml(cfg.label)}</div>
+              <div class="admin-page-sub">${escHtml(cfg.sub)}</div>
+            </div>
+          </div>
+
+          <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <select id="report_${type}_period" class="form-control" style="width:130px" onchange="loadReportData('${type}')">
+                <option value="all" selected>All Time</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="quarter">This Quarter</option>
+              </select>
+              <select id="report_${type}_active" class="form-control" style="width:150px" onchange="loadReportData('${type}')">
+                <option value="">Active + Inactive</option>
+                <option value="true">Active Only</option>
+                <option value="false">Inactive Only</option>
+              </select>
+              ${(cfg.extraFilters || []).map(f => f.type === 'select' ? `
+                <select id="report_${type}_${f.id}" class="form-control" style="width:150px" onchange="applyReportFilters('${type}')">
+                  <option value="">${escHtml(f.label)}: Any</option>
+                </select>
+              ` : `
+                <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
+                  <input type="checkbox" id="report_${type}_${f.id}" onchange="applyReportFilters('${type}')"> ${escHtml(f.label)}
+                </label>
+              `).join('')}
+              <input type="text" id="report_${type}_search" class="form-control" placeholder="Search…" style="width:190px;flex:1;min-width:150px" oninput="applyReportFilters('${type}')">
+              <span id="report_${type}_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
+            </div>
+          </div>
+
+          <div class="kpi-row" id="report_${type}_kpis"></div>
+
+          <div style="display:flex;gap:16px;margin:16px 0;flex-wrap:wrap">
+            ${cfg.breakdowns.map((b, i) => `
+              <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+                <div class="sd-card-title">${escHtml(b.title)}</div>
+                <div class="sd-card-sub">${escHtml(b.sub)}</div>
+                <div id="report_${type}_breakdown_${i}" style="margin-top:14px"></div>
+              </div>`).join('')}
+          </div>
+
+          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+            <div class="sd-card-title">Trend — by month</div>
+            <div class="sd-card-sub">Based on ${escHtml(cfg.dateFieldLabel)}</div>
+            <div id="report_${type}_trend" style="margin-top:14px"></div>
+          </div>
+
+          <div class="admin-table-card">
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact">
+                <thead><tr>${cfg.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                <tbody id="report_${type}_table">
+                  <tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="report_${type}_pagination" style="display:flex;justify-content:center;gap:12px;padding:14px;align-items:center;font-size:12.5px;color:var(--text-muted)"></div>
+          </div>
+        </div>`).join('');
+    }
+
+    async function loadReportData(type) {
+      const cfg = REPORT_CONFIG[type];
+      const tbody = document.getElementById(`report_${type}_table`);
+      tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+
+      const periodKey = document.getElementById(`report_${type}_period`).value;
+      const activeVal = document.getElementById(`report_${type}_active`).value;
+      const params = new URLSearchParams();
+      if (periodKey !== 'all') {
+        const { from, to } = salesDashRange(periodKey);
+        params.set('startDate', from.toISOString());
+        params.set('endDate', to.toISOString());
+      }
+      if (activeVal) params.set('isActive', activeVal);
+
+      try {
+        const [rows] = await Promise.all([
+          fetch(`/api/reports/${type}?${params}`).then(r => r.json()),
+          cfg.needsLookups ? ensureReportLookups() : Promise.resolve()
+        ]);
+        if (!Array.isArray(rows)) throw new Error(rows.error || 'Unexpected response');
+        reportDataCache[type] = rows;
+        populateReportExtraFilterOptions(type, rows);
+        reportPage[type] = 1;
+        applyReportFilters(type);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
+      }
+    }
+
+    // Populates the dynamic dropdown filters (e.g. Status) from whatever
+    // raw values actually appear in the fetched dataset — there's no
+    // canonical list of these codes to hardcode against.
+    function populateReportExtraFilterOptions(type, rows) {
+      const cfg = REPORT_CONFIG[type];
+      (cfg.extraFilters || []).filter(f => f.type === 'select').forEach(f => {
+        const sel = document.getElementById(`report_${type}_${f.id}`);
+        const current = sel.value;
+        const values = [...new Set(rows.map(r => r[f.field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+        sel.innerHTML = `<option value="">${escHtml(f.label)}: Any</option>` + values.map(v => `<option value="${v}">${escHtml(f.label)} ${v}</option>`).join('');
+        if (values.map(String).includes(current)) sel.value = current;
+      });
+    }
+
+    function applyReportFilters(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportDataCache[type] || [];
+      const search = (document.getElementById(`report_${type}_search`)?.value || '').trim().toLowerCase();
+
+      let filtered = rows.filter(r => {
+        for (const f of (cfg.extraFilters || [])) {
+          if (f.type === 'checkbox') {
+            if (document.getElementById(`report_${type}_${f.id}`).checked && !f.test(r)) return false;
+          } else if (f.type === 'select') {
+            const val = document.getElementById(`report_${type}_${f.id}`).value;
+            if (val !== '' && String(r[f.field]) !== val) return false;
+          }
+        }
+        return true;
+      });
+
+      if (search) {
+        filtered = filtered.filter(r => {
+          if (cfg.searchTest) return cfg.searchTest(r, search);
+          return (cfg.searchFields || []).some(field => (r[field] || '').toString().toLowerCase().includes(search));
+        });
+      }
+
+      reportFilteredCache[type] = filtered;
+      document.getElementById(`report_${type}_count`).textContent = rows.length ? `${filtered.length} of ${rows.length}` : '';
+      reportPage[type] = 1;
+      renderReportDashboard(type, filtered);
+    }
+
+    function renderReportDashboard(type, rows) {
+      const cfg = REPORT_CONFIG[type];
+      renderKpiRow(`report_${type}_kpis`, cfg.kpis(rows));
+      cfg.breakdowns.forEach((b, i) => {
+        const elId = `report_${type}_breakdown_${i}`;
+        if (b.custom === 'topCandidateHours') renderTopCandidateHours(elId, rows);
+        else renderBreakdownBars(elId, computeCodeBreakdown(rows, b.field, b.labelPrefix, b.topN));
+      });
+      renderTrendChart(`report_${type}_trend`, computeMonthlyTrend(rows, cfg.dateField));
+      renderReportTable(type, rows);
+    }
+
+    // ── Shared render primitives (used by all 4 report types) ────
+    function renderKpiRow(elId, cards) {
+      document.getElementById(elId).innerHTML = cards.map(k => `
+        <div class="kpi-card">
+          <div class="kpi-label">${escHtml(k.label)}</div>
+          <div class="kpi-value">${k.value}</div>
+          <div class="kpi-hint">${escHtml(k.hint || '')}</div>
+        </div>`).join('');
+    }
+
+    function computeCodeBreakdown(rows, field, labelPrefix, topN) {
+      const counts = {};
+      rows.forEach(r => {
+        const v = r[field];
+        const key = (v === null || v === undefined) ? '—' : v;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      let entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      if (topN) entries = entries.slice(0, topN);
+      return entries.map(([key, count]) => ({ label: key === '—' ? 'Unspecified' : `${labelPrefix} ${key}`, count }));
+    }
+
+    function renderBreakdownBars(elId, rows) {
+      const box = document.getElementById(elId);
+      if (!rows.length) { box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted)">No data for this filter.</div>`; return; }
+      const max = Math.max(1, ...rows.map(r => r.count));
+      box.innerHTML = rows.map(r => `
+        <div class="source-row">
+          <div class="source-row-head"><span>${escHtml(String(r.label))}</span><span>${r.count}</span></div>
+          <div class="source-row-track"><div class="source-row-fill" style="width:${Math.round((r.count / max) * 100)}%"></div></div>
+        </div>`).join('');
+    }
+
+    function renderTopCandidateHours(elId, rows) {
+      const hoursByCandidate = {};
+      rows.forEach(r => { hoursByCandidate[r.userId] = (hoursByCandidate[r.userId] || 0) + (r.duration || 0); });
+      const top = Object.entries(hoursByCandidate).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        .map(([userId, hours]) => ({ label: candidateName(Number(userId)), count: Math.round(hours * 10) / 10 }));
+      renderBreakdownBars(elId, top);
+    }
+
+    function computeMonthlyTrend(rows, dateField) {
+      const counts = {};
+      rows.forEach(r => {
+        if (!r[dateField]) return;
+        const d = new Date(r[dateField]);
+        if (isNaN(d)) return;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      return Object.keys(counts).sort().map(k => ({ key: k, count: counts[k] }));
+    }
+
+    function renderTrendChart(elId, buckets) {
+      const box = document.getElementById(elId);
+      if (!buckets.length) { box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted)">No dated records for this filter.</div>`; return; }
+      const max = Math.max(1, ...buckets.map(b => b.count));
+      const monthLabel = k => new Date(k + '-01').toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
+      box.innerHTML = `
+        <div class="lead-chart-bars" style="height:90px">
+          ${buckets.map(b => `
+            <div class="lead-chart-bar-col">
+              <div class="lead-chart-bar-value">${b.count}</div>
+              <div class="lead-chart-bar" style="height:${Math.round((b.count / max) * 100)}%"></div>
+              <div class="lead-chart-bar-label">${monthLabel(b.key)}</div>
+            </div>`).join('')}
+        </div>`;
+    }
+
+    function renderReportTable(type, rows) {
+      const cfg = REPORT_CONFIG[type];
+      const tbody = document.getElementById(`report_${type}_table`);
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">No records match these filters</td></tr>`;
+        document.getElementById(`report_${type}_pagination`).innerHTML = '';
+        return;
+      }
+      const page = reportPage[type] || 1;
+      const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
+      const slice = rows.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE);
+      tbody.innerHTML = slice.map(r => `<tr>${cfg.columns.map(c => `<td>${c.render(r)}</td>`).join('')}</tr>`).join('');
+      document.getElementById(`report_${type}_pagination`).innerHTML = `
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeReportPage('${type}',-1)" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
+        <span>Page ${page} of ${totalPages} (${rows.length} total)</span>
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeReportPage('${type}',1)" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`;
+    }
+
+    function changeReportPage(type, delta) {
+      const rows = reportFilteredCache[type] || [];
+      const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
+      reportPage[type] = Math.min(totalPages, Math.max(1, (reportPage[type] || 1) + delta));
+      renderReportTable(type, rows);
     }
 
     let currentLeadDetailId = null;
