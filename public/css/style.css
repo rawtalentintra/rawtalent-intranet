@@ -846,6 +846,12 @@ button { cursor: pointer; font-family: inherit; }
 .lead-badge-todo { background: var(--gray-100); color: var(--text-muted); }
 .lead-badge-not { background: #fef2f2; color: #c0392b; }
 
+/* Agency Usage badges — not editable/clickable, purely a visual flag, so no
+   cursor/hover treatment unlike the status badges above. */
+.agency-badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.agency-badge-target { background: #fef3c7; color: #b45309; }
+.agency-badge-high { background: #dcfce7; color: #15803d; }
+
 .lead-status-row {
   display: flex;
   align-items: center;

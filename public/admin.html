@@ -60,7 +60,7 @@
        screen. */
     #leadsTable th { padding: 6px 7px; font-size: 9.5px; }
     #leadsTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; }
-    #leadsTable .lead-badge { padding: 2px 7px; font-size: 10.5px; }
+    #leadsTable .lead-badge, #leadsTable .agency-badge { padding: 2px 7px; font-size: 10.5px; }
     .leads-filter-bar {
       display: flex; gap: 6px; flex-wrap: wrap;
       padding: 10px 14px; border-bottom: 1px solid var(--gray-200);
@@ -3629,7 +3629,14 @@
     // ── Leads ─────────────────────────────────────────────────────
     let allLeads = [];
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
+    const LEAD_AGENCY_USAGE_BADGE_CLASS = { target_temp: 'agency-badge-target', high_agency_user: 'agency-badge-high' };
+    // Shortened for the dense Leads table badge only — filters and the lead
+    // detail modal keep the full LEAD_AGENCY_USAGE_LABELS wording.
+    const LEAD_AGENCY_USAGE_SHORT = { target_temp: 'Target Temp', high_agency_user: 'High Usage' };
     const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)', 'Liam Baxter'];
+    // First-name-only, for the dense Leads table column — full names stay
+    // everywhere else (filters, lead detail modal) where space isn't tight.
+    const WORKFORCE_PARTNER_SHORT = { 'Gwen Stocks (SA)': 'Gwen', 'Justine Hardware (VIC)': 'Justine', 'Liam Baxter': 'Liam' };
     const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
     const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
 
@@ -3756,14 +3763,14 @@
       body.innerHTML = list.map(l => `
         <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
-          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:320px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
+          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
           <td class="td-truncate" style="max-width:62px" title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
-          <td class="td-truncate" style="max-width:72px" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '')}">${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage || '—')}</td>
+          <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
           <td>${leadStatusBadge(l.id, 'lead_called')}</td>
           <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
           <td>${leadStatusBadge(l.id, 'signed')}</td>
-          <td class="td-truncate" style="max-width:64px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(l.assigned_workforce_partner || '—')}</td>
+          <td class="td-truncate" style="max-width:44px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.lead_called_at)}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.centre_visited_at)}</td>
         </tr>`).join('');
