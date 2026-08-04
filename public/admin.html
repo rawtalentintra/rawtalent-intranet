@@ -880,7 +880,7 @@
           </div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
-            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads (view-only, not the WFP Dashboard), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
+            <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads and the WFP Dashboard (both view-only), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
             <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): Leads (view all, edit only Position/Contact Name/Email, add their own notes) and the WFP Dashboard. No other admin panel access; status/assignment editing stays admin/super_admin only.<br>
             <strong style="color:var(--navy)">admin</strong> — full admin panel access.
           </div>
@@ -1729,7 +1729,7 @@
             <select id="userRole" class="form-control">
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
-              <option value="qa_view">QA View (articles, glossary, leads view-only, FAQ, call quality)</option>
+              <option value="qa_view">QA View (articles, glossary, leads + WFP Dashboard view-only, FAQ, call quality)</option>
               <option value="workforce_partner">Workforce Partner (leads + WFP Dashboard, own contact fields/notes)</option>
             </select>
           </div>
@@ -2288,15 +2288,17 @@
     // reach. qa_view: articles (view/add/edit), glossary (view/add/edit),
     // FAQ management (add/edit only — the scan and candidate-review parts
     // of that page are further hidden below), call quality
-    // (dashboard/rubrics/evaluator), and leads (view-only — see
-    // leadStatusBadge()/openLeadDetail() below). workforce_partner: leads
-    // (view + edit their own contact fields/notes — see openLeadDetail())
-    // and Sales Dashboard. Enforced here for nav visibility AND in
-    // showSection() so a saved/typed section id outside the list can't be
-    // reached by editing localStorage or the URL — the real enforcement is
-    // server-side per route regardless.
+    // (dashboard/rubrics/evaluator), leads (view-only — see
+    // leadStatusBadge()/openLeadDetail() below), and WFP Dashboard
+    // (view-only — computed client-side from /api/leads, already readable
+    // by qa_view, so no backend change was needed). workforce_partner:
+    // leads (view + edit their own contact fields/notes — see
+    // openLeadDetail()) and Sales Dashboard. Enforced here for nav
+    // visibility AND in showSection() so a saved/typed section id outside
+    // the list can't be reached by editing localStorage or the URL — the
+    // real enforcement is server-side per route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
-      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads'],
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
       workforce_partner: ['leads', 'sales-dashboard']
     };
 
@@ -3506,7 +3508,7 @@
       { area: 'Articles — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Glossary — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
       { area: 'Glossary — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'WFP Dashboard', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
+      { area: 'WFP Dashboard', user: false, qa: 'View-only', wfp: true, admin: true, superAdmin: true },
       { area: 'Leads — view list/detail', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Leads — edit status/assignment', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Leads — edit contact fields (position/name/email)', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
