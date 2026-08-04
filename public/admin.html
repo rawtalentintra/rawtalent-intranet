@@ -196,9 +196,6 @@
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
-        <div class="admin-nav-item" onclick="showSection('calendar-sync', this)">
-          <span class="admin-nav-icon">🗓️</span> Calendar Sync
-        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
@@ -510,6 +507,7 @@
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
             </select>
+            <button class="btn-secondary" style="padding:3px 9px;font-size:11px;margin-left:auto" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact" id="leadsTable">
@@ -536,46 +534,51 @@
         </div>
       </div>
 
-      <div class="admin-section" id="section-calendar-sync">
-        <div class="admin-header">
-          <div>
-            <div class="admin-page-title">Calendar Sync</div>
-            <div class="admin-page-sub">Two-way sync between Leads and each Workforce Partner's Google Calendar — scheduling a call/visit on a lead creates the calendar event, and events they create by hand sync back onto the lead.</div>
+      <!-- Calendar Sync — not its own destination, just occasional admin
+           housekeeping for the sync engine (register channels, manual
+           catch-up, resolve ambiguous matches). Triggered from a button in
+           the Leads filter bar rather than a nav section, since scheduling
+           itself needs no UI at all — it happens automatically off the
+           Lead Called/Centre Visited status change. -->
+      <div class="modal-overlay" id="calendarSyncModal" onclick="if(event.target===this)closeCalendarSyncModal()">
+        <div class="modal" style="max-width:760px">
+          <div class="modal-header">
+            <div class="modal-title">Calendar Sync</div>
+            <button class="modal-close" onclick="closeCalendarSyncModal()">×</button>
           </div>
-        </div>
+          <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Scheduling a call/visit on a lead already creates the event on that partner's calendar automatically. This is just setup and cleanup: registering the push-notification channels, a manual catch-up sync, and linking anything it couldn't auto-match.</div>
 
-        <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
-          <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Register push-notification channels once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — this also renews automatically every 12h. "Sync Now" is a manual catch-up and doubles as a connection test per partner.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn-add" id="calSyncRegisterBtn" onclick="registerCalendarWatches()" style="padding:6px 12px;font-size:12px">Register Watch Channels</button>
-            <button class="btn-add" id="calSyncNowBtn" onclick="syncCalendarNow()" style="padding:6px 12px;font-size:12px">Sync Now</button>
-          </div>
-          <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
-        </div>
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Register once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — renews automatically every 12h after that. "Sync Now" is a manual catch-up and doubles as a per-partner connection test.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-add" id="calSyncRegisterBtn" onclick="registerCalendarWatches()" style="padding:6px 12px;font-size:12px">Register Watch Channels</button>
+              <button class="btn-add" id="calSyncNowBtn" onclick="syncCalendarNow()" style="padding:6px 12px;font-size:12px">Sync Now</button>
+            </div>
+            <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
 
-        <div class="admin-table-card">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px 0">
-            <div style="font-size:13px;font-weight:700">Needs Review</div>
-            <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="loadCalendarSyncSection()">🔄 Refresh</button>
-          </div>
-          <div style="font-size:12px;color:var(--text-muted);padding:2px 18px 12px">Calendar events that couldn't be confidently matched to a lead — either no Call/Visit tag was found in the title, or two leads scored too close to guess safely. Link to the right lead, or dismiss.</div>
-          <div style="overflow-x:auto">
-            <table class="data-table data-table-compact">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Type</th>
-                  <th>Calendar</th>
-                  <th>Reason</th>
-                  <th style="min-width:220px">Link to lead</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="calSyncReviewBody">
-                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-              </tbody>
-            </table>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+              <div style="font-size:13px;font-weight:700">Needs Review</div>
+              <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="loadCalendarSyncSection()">🔄 Refresh</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Calendar events that couldn't be confidently matched to a lead — either no Call/Visit tag was found in the title, or two leads scored too close to guess safely.</div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Type</th>
+                    <th>Calendar</th>
+                    <th>Reason</th>
+                    <th style="min-width:200px">Link to lead</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="calSyncReviewBody">
+                  <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -3161,7 +3164,6 @@
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
-      if (id === 'calendar-sync') loadCalendarSyncSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
@@ -3550,7 +3552,7 @@
       { area: 'Admin panel — access at all', user: false, qa: 'Limited', wfp: 'Limited', admin: true, superAdmin: true },
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Reports — Clients/Candidates/Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Calendar Sync — Workforce Partner calendar sync + review queue', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Leads — Calendar Sync (register channels, sync now, review queue)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
@@ -4141,10 +4143,18 @@
       const pop = document.getElementById('leadStatusPopover');
       pop.style.display = 'block';
       const rect = evt.currentTarget.getBoundingClientRect();
-      const top = rect.bottom + window.scrollY + 4;
-      let left = rect.left + window.scrollX;
+      // .status-popover is position:absolute inside .admin-layout, which is
+      // itself position:relative (for the sidebar-collapse toggle) — so its
+      // top/left are relative to .admin-layout's own box, not the document.
+      // Using window.scrollX/Y here (document-relative) used to double-count
+      // .admin-layout's own offset from the viewport top (the header, plus
+      // the "You are currently on X View" banner when shown), pushing the
+      // popover well below the badge that opened it.
+      const containerRect = document.querySelector('.admin-layout').getBoundingClientRect();
+      const top = rect.bottom - containerRect.top + 4;
+      let left = rect.left - containerRect.left;
       // Keep the popover on-screen when the badge sits near the right edge.
-      const maxLeft = window.scrollX + document.documentElement.clientWidth - 184;
+      const maxLeft = containerRect.width - 184;
       if (left > maxLeft) left = maxLeft;
       pop.style.top = top + 'px';
       pop.style.left = left + 'px';
@@ -4434,6 +4444,14 @@
     // ══════════════════════════════════════════════════════════════
     // Calendar Sync (Workforce Partner Google Calendar two-way sync)
     // ══════════════════════════════════════════════════════════════
+    function openCalendarSyncModal() {
+      document.getElementById('calendarSyncModal').classList.add('open');
+      loadCalendarSyncSection();
+    }
+    function closeCalendarSyncModal() {
+      document.getElementById('calendarSyncModal').classList.remove('open');
+    }
+
     function renderCalSyncResults(results) {
       const rows = Object.entries(results).map(([email, status]) => {
         const ok = status === 'ok';
