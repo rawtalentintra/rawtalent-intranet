@@ -482,6 +482,9 @@
             <select id="leadsFilterState" onchange="filterLeadsTable()">
               <option value="">State: any</option>
             </select>
+            <select id="leadsFilterSuburb" onchange="filterLeadsTable()">
+              <option value="">Suburb: any</option>
+            </select>
             <select id="leadsFilterSubmittedBy" onchange="filterLeadsTable()">
               <option value="">Submitted by: any</option>
             </select>
@@ -4039,6 +4042,17 @@
         const sorted = Array.from(submitters.entries()).sort((a, b) => a[1].localeCompare(b[1]));
         submitterSelect.innerHTML = '<option value="">Submitted by: any</option>' +
           sorted.map(([email, name]) => `<option value="${escHtml(email)}">${escHtml(name)}</option>`).join('');
+
+        // Suburb options come from the data itself (no fixed list like
+        // states/partners) — rebuilt on every load same as Submitted By,
+        // so a newly-submitted suburb shows up without a page reload.
+        const suburbSelect = document.getElementById('leadsFilterSuburb');
+        const previousSuburb = suburbSelect.value;
+        const suburbs = Array.from(new Set(allLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        suburbSelect.innerHTML = '<option value="">Suburb: any</option>' +
+          suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+        if (suburbs.includes(previousSuburb)) suburbSelect.value = previousSuburb;
+
         filterLeadsTable();
       } catch {
         body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
@@ -4055,6 +4069,7 @@
       const periodKey = document.getElementById('leadsFilterPeriod').value;
       const partner = document.getElementById('leadsFilterPartner').value;
       const state = document.getElementById('leadsFilterState').value;
+      const suburb = document.getElementById('leadsFilterSuburb').value;
       const submittedBy = document.getElementById('leadsFilterSubmittedBy').value;
       const agencyUsage = document.getElementById('leadsFilterAgencyUsage').value;
       const leadCalled = document.getElementById('leadsFilterLeadCalled').value;
@@ -4069,6 +4084,7 @@
       }
       if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
       if (state) filtered = filtered.filter(l => l.state === state);
+      if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
       if (submittedBy) filtered = filtered.filter(l => l.submitted_by_email === submittedBy);
       if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
       if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
@@ -4106,7 +4122,7 @@
         <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
           <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
-          <td class="td-truncate" style="max-width:62px" title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
+          <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
           <td>${leadStatusBadge(l.id, 'lead_called')}</td>
