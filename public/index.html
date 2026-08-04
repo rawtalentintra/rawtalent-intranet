@@ -2466,6 +2466,7 @@
       try {
         leaveTeamData = await fetch(`/api/leave-requests/calendar?from=${from}&to=${to}`).then(r => r.json());
       } catch { leaveTeamData = []; }
+      await ensureLeaveColorMap();
       renderLeaveTeamCalendar();
     }
     function changeLeaveTeamMonth(delta) {
@@ -2473,10 +2474,12 @@
       loadLeaveTeamCalendar();
     }
     // A fixed, visually-distinct set of chip colors for the Team Leave
-    // Calendar — each person is hashed to the same slot every time (by
-    // full name/email, not just first name, so two "Sam"s don't collide),
-    // so Gelliane is always the same color whether you're looking at this
-    // month or next month.
+    // Calendar. One slot per active team member, assigned by alphabetical
+    // rank (see ensureLeaveColorMap) rather than a hash of their name —
+    // hashing a ~17-person roster into 9 buckets guaranteed collisions
+    // (Gelliane and Dona landed on the same green), and a bigger hash space
+    // still can't *guarantee* uniqueness the way a fixed per-person slot
+    // can. 24 colors covers the roster with headroom to grow.
     const LEAVE_PERSON_COLORS = [
       { bg: '#eef2ff', text: '#4338ca' }, // indigo
       { bg: '#fce7f3', text: '#be185d' }, // pink
@@ -2486,12 +2489,53 @@
       { bg: '#f3e8ff', text: '#7e22ce' }, // purple
       { bg: '#ffe4e6', text: '#be123c' }, // rose
       { bg: '#ccfbf1', text: '#0f766e' }, // teal
-      { bg: '#fff7ed', text: '#c2410c' }  // orange
+      { bg: '#fff7ed', text: '#c2410c' }, // orange
+      { bg: '#f0fdf4', text: '#166534' }, // emerald
+      { bg: '#faf5ff', text: '#6b21a8' }, // violet
+      { bg: '#fef9c3', text: '#854d0e' }, // yellow
+      { bg: '#ecfeff', text: '#155e75' }, // cyan
+      { bg: '#fdf2f8', text: '#9d174d' }, // fuchsia
+      { bg: '#f1f5f9', text: '#334155' }, // slate
+      { bg: '#fff1f2', text: '#9f1239' }, // crimson
+      { bg: '#ecfccb', text: '#3f6212' }, // lime
+      { bg: '#eff6ff', text: '#1d4ed8' }, // blue
+      { bg: '#fdf4ff', text: '#86198f' }, // magenta
+      { bg: '#f7fee7', text: '#4d7c0f' }, // olive
+      { bg: '#fef2f2', text: '#b91c1c' }, // red
+      { bg: '#f0f9ff', text: '#0c4a6e' }, // ocean
+      { bg: '#fffbeb', text: '#92400e' }, // gold
+      { bg: '#f5f3ff', text: '#5b21b6' }  // indigo-deep
     ];
-    function leavePersonColor(key) {
+    // Built once from the full team roster and cached — every active
+    // person gets a distinct slot by alphabetical rank, so there are zero
+    // collisions as long as the active roster fits the palette (grow the
+    // list above if the team ever exceeds it). Keyed by first name, since
+    // that's both what team_members.name already stores and what the
+    // calendar chip displays (leave_requests.user_name's first word).
+    // Falls back to a hash for any name that isn't a recognised team
+    // member (e.g. a typo'd or since-removed name) so nothing breaks.
+    let leaveColorMap = null;
+    async function ensureLeaveColorMap() {
+      if (leaveColorMap) return leaveColorMap;
+      leaveColorMap = {};
+      try {
+        const members = await fetch('/api/team').then(r => r.json());
+        const names = members
+          .filter(m => m.status !== 'to_hire' && m.name)
+          .map(m => m.name)
+          .sort((a, b) => a.localeCompare(b));
+        names.forEach((name, i) => { leaveColorMap[name] = LEAVE_PERSON_COLORS[i % LEAVE_PERSON_COLORS.length]; });
+      } catch { /* falls back to hashPersonColor below for everyone */ }
+      return leaveColorMap;
+    }
+    function hashPersonColor(key) {
       let hash = 0;
       for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
       return LEAVE_PERSON_COLORS[hash % LEAVE_PERSON_COLORS.length];
+    }
+    function leavePersonColor(key) {
+      const firstName = key.split(' ')[0];
+      return (leaveColorMap && leaveColorMap[firstName]) || hashPersonColor(key);
     }
 
     function renderLeaveTeamCalendar() {
