@@ -1102,7 +1102,7 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
           ${notifData.leaveDecisions.map(l => `
-            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('leave')">
+            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
               <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
             </div>
@@ -1210,6 +1210,21 @@
         closeGreetingPreviewModal();
         loadNotifications();
       } catch { toast('Network error', 'error'); }
+    }
+
+    // Approved leave gets the same celebratory treatment as a birthday/
+    // anniversary greeting (confetti + modal) — a rejected one just takes
+    // you to the Leave Request tab, same as before, since there's nothing
+    // to celebrate there.
+    function openLeaveDecision(id) {
+      const l = notifData.leaveDecisions.find(x => x.id === id);
+      if (!l) return;
+      if (l.status !== 'approved') { toggleNotifPanel(); setMode('leave'); return; }
+      document.getElementById('celebrationEmoji').textContent = '🏖️';
+      document.getElementById('celebrationTitle').textContent = 'Your leave is approved!';
+      document.getElementById('celebrationMessage').textContent = `Enjoy your time off from ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}! 🎉`;
+      document.getElementById('celebrationModal').classList.add('open');
+      spawnConfetti(document.getElementById('confettiLayer'));
     }
 
     function openGreetingCelebration(id) {
@@ -1645,6 +1660,7 @@
       list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
       try {
         allTeamMembers = await fetch('/api/team').then(r => r.json());
+        await ensureLeaveColorMap();
         list.innerHTML = `
           <div id="teamChartContainer">${renderOrgCanvas(allTeamMembers)}</div>
           <div style="overflow-x:auto">${renderTeamTable(allTeamMembers)}</div>
@@ -1896,9 +1912,14 @@
         const isFounder = /founder/i.test(m.position || '');
         const isToHire = m.status === 'to_hire';
         const tierClass = isFounder ? 'org-node-founder' : isToHire ? 'org-node-tohire' : '';
+        // Founder/to-hire keep their own fixed styling (navy / dashed grey)
+        // rather than a person color — the tint is for identifying an
+        // individual among peers, which doesn't apply to either.
+        const col = (!isFounder && !isToHire) ? leavePersonColor(m.name) : null;
+        const colStyle = col ? `background:${col.bg};border-color:${col.text}33` : '';
         return `
-          <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px">
-            <div class="org-node-name">${escHtml(m.name)}</div>
+          <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px;${colStyle}">
+            <div class="org-node-name" style="${col ? `color:${col.text}` : ''}">${escHtml(m.name)}</div>
             ${m.position ? `<div class="org-node-position">${escHtml(m.position)}</div>` : ''}
             ${m.team ? `<div class="org-node-team">${escHtml(m.team.toUpperCase())}</div>` : ''}
           </div>`;
@@ -1926,9 +1947,11 @@
 
     function renderTeamTable(members) {
       if (members.length === 0) return '';
-      const rows = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
+      const rows = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => {
+        const col = leavePersonColor(m.name);
+        return `
         <tr>
-          <td style="font-weight:700;color:var(--navy)">${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
@@ -1936,7 +1959,8 @@
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(birthdateNoYear(m.birthdate))}</td>
           <td><button onclick="openTeamProfile('${m.id}')" style="background:none;border:1px solid var(--gray-200);padding:4px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--orange)">View</button></td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
       return `
         <table class="team-table">
           <thead><tr><th>Nickname</th><th>Title</th><th>Phone / WhatsApp</th><th>Employment Date</th><th>Email</th><th>DOB</th><th></th></tr></thead>
@@ -2515,18 +2539,29 @@
     // Falls back to a hash for any name that isn't a recognised team
     // member (e.g. a typo'd or since-removed name) so nothing breaks.
     let leaveColorMap = null;
-    async function ensureLeaveColorMap() {
-      if (leaveColorMap) return leaveColorMap;
-      leaveColorMap = {};
-      try {
-        const members = await fetch('/api/team').then(r => r.json());
-        const names = members
-          .filter(m => m.status !== 'to_hire' && m.name)
-          .map(m => m.name)
-          .sort((a, b) => a.localeCompare(b));
-        names.forEach((name, i) => { leaveColorMap[name] = LEAVE_PERSON_COLORS[i % LEAVE_PERSON_COLORS.length]; });
-      } catch { /* falls back to hashPersonColor below for everyone */ }
-      return leaveColorMap;
+    let leaveColorMapPromise = null;
+    // Caches the in-flight fetch itself, not just the eventual result — two
+    // concurrent callers (e.g. showSection's own loadOurTeam() call landing
+    // while another caller is still awaiting /api/team) must await the same
+    // build rather than one of them grabbing the map mid-population and
+    // silently falling back to per-call hash colors for everyone.
+    function ensureLeaveColorMap() {
+      if (leaveColorMap) return Promise.resolve(leaveColorMap);
+      if (leaveColorMapPromise) return leaveColorMapPromise;
+      leaveColorMapPromise = (async () => {
+        const map = {};
+        try {
+          const members = await fetch('/api/team').then(r => r.json());
+          const names = members
+            .filter(m => m.status !== 'to_hire' && m.name)
+            .map(m => m.name)
+            .sort((a, b) => a.localeCompare(b));
+          names.forEach((name, i) => { map[name] = LEAVE_PERSON_COLORS[i % LEAVE_PERSON_COLORS.length]; });
+        } catch { /* falls back to hashPersonColor below for everyone */ }
+        leaveColorMap = map;
+        return map;
+      })();
+      return leaveColorMapPromise;
     }
     function hashPersonColor(key) {
       let hash = 0;

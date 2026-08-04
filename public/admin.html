@@ -2388,7 +2388,7 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
           ${notifData.leaveDecisions.map(l => `
-            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();showSection('leave-requests', document.querySelector('[onclick*=\\'leave-requests\\']'))">
+            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
               <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
             </div>
@@ -2498,6 +2498,25 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // Approved leave gets the same celebratory treatment as a birthday/
+    // anniversary greeting (confetti + modal) — a rejected one just takes
+    // you to the Leave Requests section, same as before, since there's
+    // nothing to celebrate there.
+    function openLeaveDecision(id) {
+      const l = notifData.leaveDecisions.find(x => x.id === id);
+      if (!l) return;
+      if (l.status !== 'approved') {
+        toggleNotifPanel();
+        showSection('leave-requests', document.querySelector('[onclick*=\'leave-requests\']'));
+        return;
+      }
+      document.getElementById('celebrationEmoji').textContent = '🏖️';
+      document.getElementById('celebrationTitle').textContent = 'Your leave is approved!';
+      document.getElementById('celebrationMessage').textContent = `Enjoy your time off from ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}! 🎉`;
+      document.getElementById('celebrationModal').classList.add('open');
+      spawnConfetti(document.getElementById('confettiLayer'));
+    }
+
     function openGreetingCelebration(id) {
       const g = notifData.receivedGreetings.find(x => x.id === id);
       if (!g) return;
@@ -2581,10 +2600,78 @@
     let currentProfileId = null;
     let teamMemberPhotoDataUri = null;
 
+    // A fixed, visually-distinct set of person colors, shared identity
+    // across the org chart, team table, and (on the main app) the Leave
+    // Calendar — each active team member gets one fixed slot by
+    // alphabetical rank (built once from the full roster and cached), so
+    // there are zero collisions as long as the roster fits the palette.
+    // Keyed by first name, matching team_members.name.
+    const LEAVE_PERSON_COLORS = [
+      { bg: '#eef2ff', text: '#4338ca' }, // indigo
+      { bg: '#fce7f3', text: '#be185d' }, // pink
+      { bg: '#dcfce7', text: '#15803d' }, // green
+      { bg: '#fef3c7', text: '#b45309' }, // amber
+      { bg: '#e0f2fe', text: '#0369a1' }, // sky
+      { bg: '#f3e8ff', text: '#7e22ce' }, // purple
+      { bg: '#ffe4e6', text: '#be123c' }, // rose
+      { bg: '#ccfbf1', text: '#0f766e' }, // teal
+      { bg: '#fff7ed', text: '#c2410c' }, // orange
+      { bg: '#f0fdf4', text: '#166534' }, // emerald
+      { bg: '#faf5ff', text: '#6b21a8' }, // violet
+      { bg: '#fef9c3', text: '#854d0e' }, // yellow
+      { bg: '#ecfeff', text: '#155e75' }, // cyan
+      { bg: '#fdf2f8', text: '#9d174d' }, // fuchsia
+      { bg: '#f1f5f9', text: '#334155' }, // slate
+      { bg: '#fff1f2', text: '#9f1239' }, // crimson
+      { bg: '#ecfccb', text: '#3f6212' }, // lime
+      { bg: '#eff6ff', text: '#1d4ed8' }, // blue
+      { bg: '#fdf4ff', text: '#86198f' }, // magenta
+      { bg: '#f7fee7', text: '#4d7c0f' }, // olive
+      { bg: '#fef2f2', text: '#b91c1c' }, // red
+      { bg: '#f0f9ff', text: '#0c4a6e' }, // ocean
+      { bg: '#fffbeb', text: '#92400e' }, // gold
+      { bg: '#f5f3ff', text: '#5b21b6' }  // indigo-deep
+    ];
+    let leaveColorMap = null;
+    let leaveColorMapPromise = null;
+    // Caches the in-flight fetch itself, not just the eventual result — two
+    // concurrent callers (e.g. showSection's own loadOurTeam() call landing
+    // while another caller is still awaiting /api/team) must await the same
+    // build rather than one of them grabbing the map mid-population and
+    // silently falling back to per-call hash colors for everyone.
+    function ensureLeaveColorMap() {
+      if (leaveColorMap) return Promise.resolve(leaveColorMap);
+      if (leaveColorMapPromise) return leaveColorMapPromise;
+      leaveColorMapPromise = (async () => {
+        const map = {};
+        try {
+          const members = await fetch('/api/team').then(r => r.json());
+          const names = members
+            .filter(m => m.status !== 'to_hire' && m.name)
+            .map(m => m.name)
+            .sort((a, b) => a.localeCompare(b));
+          names.forEach((name, i) => { map[name] = LEAVE_PERSON_COLORS[i % LEAVE_PERSON_COLORS.length]; });
+        } catch { /* falls back to hashPersonColor below for everyone */ }
+        leaveColorMap = map;
+        return map;
+      })();
+      return leaveColorMapPromise;
+    }
+    function hashPersonColor(key) {
+      let hash = 0;
+      for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+      return LEAVE_PERSON_COLORS[hash % LEAVE_PERSON_COLORS.length];
+    }
+    function leavePersonColor(key) {
+      const firstName = key.split(' ')[0];
+      return (leaveColorMap && leaveColorMap[firstName]) || hashPersonColor(key);
+    }
+
     async function loadOurTeam() {
       const chartEl = document.getElementById('orgChartContainer');
       try {
         allTeamMembers = await fetch('/api/team').then(r => r.json());
+        await ensureLeaveColorMap();
         chartEl.innerHTML = renderOrgCanvas(allTeamMembers);
         renderTeamTable(allTeamMembers);
         wireOrgDrag(chartEl);
@@ -2619,9 +2706,14 @@
         const isFounder = /founder/i.test(m.position || '');
         const isToHire = m.status === 'to_hire';
         const tierClass = isFounder ? 'org-node-founder' : isToHire ? 'org-node-tohire' : '';
+        // Founder/to-hire keep their own fixed styling (navy / dashed grey)
+        // rather than a person color — the tint is for identifying an
+        // individual among peers, which doesn't apply to either.
+        const col = (!isFounder && !isToHire) ? leavePersonColor(m.name) : null;
+        const colStyle = col ? `background:${col.bg};border-color:${col.text}33` : '';
         return `
-          <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px">
-            <div class="org-node-name">${escHtml(m.name)}</div>
+          <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px;${colStyle}">
+            <div class="org-node-name" style="${col ? `color:${col.text}` : ''}">${escHtml(m.name)}</div>
             ${m.position ? `<div class="org-node-position">${escHtml(m.position)}</div>` : ''}
             ${m.team ? `<div class="org-node-team">${escHtml(m.team.toUpperCase())}</div>` : ''}
           </div>`;
@@ -2688,9 +2780,11 @@
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)">No team members yet.</td></tr>';
         return;
       }
-      tbody.innerHTML = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => `
+      tbody.innerHTML = members.slice().sort((a, b) => a.name.localeCompare(b.name)).map(m => {
+        const col = leavePersonColor(m.name);
+        return `
         <tr>
-          <td style="font-weight:700;color:var(--navy)">${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
@@ -2698,7 +2792,8 @@
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.birthdate || '—')}</td>
           <td><button class="action-btn edit" onclick="openTeamProfile('${m.id}')">View</button></td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function openTeamProfile(id) {
