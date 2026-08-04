@@ -41,7 +41,7 @@ function getDb() {
       const args = typeof arg === 'string' ? undefined : arg.args;
       const { text, values } = toPgQuery(sql, args);
       const result = await pool.query(text, values);
-      return { rows: result.rows };
+      return { rows: result.rows, rowsAffected: result.rowCount };
     }
   };
 }
