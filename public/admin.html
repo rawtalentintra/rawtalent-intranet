@@ -624,6 +624,9 @@
               <option value="scheduled">Scheduled</option>
               <option value="done">Visited</option>
             </select>
+            <select id="routeFilterPartner" onchange="filterRoutePlannerLeads()">
+              <option value="">WF Partner: any</option>
+            </select>
             <span id="routeSelectedCount" style="margin-left:auto;font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
@@ -4679,6 +4682,11 @@
         const suburbs = Array.from(new Set(routePlannerLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
         suburbSelect.innerHTML = '<option value="">Suburb: any</option>' + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
 
+        const partnerSelect = document.getElementById('routeFilterPartner');
+        if (partnerSelect.options.length === 1) {
+          partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+        }
+
         filterRoutePlannerLeads();
 
         const startInput = document.getElementById('routeStartAddress');
@@ -4695,9 +4703,11 @@
       const state = document.getElementById('routeFilterState').value;
       const suburb = document.getElementById('routeFilterSuburb').value;
       const visited = document.getElementById('routeFilterVisited').value;
+      const partner = document.getElementById('routeFilterPartner').value;
       let filtered = routePlannerLeads;
       if (state) filtered = filtered.filter(l => l.state === state);
       if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
+      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
       if (visited) filtered = filtered.filter(l => l.centre_visited_status === visited);
       renderRoutePlannerLeadsTable(filtered);
     }
