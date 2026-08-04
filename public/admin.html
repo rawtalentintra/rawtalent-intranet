@@ -205,6 +205,9 @@
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
+        <div class="admin-nav-item" onclick="showSection('route-planner', this)">
+          <span class="admin-nav-icon">🧭</span> Smart Routing
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
@@ -590,6 +593,78 @@
                   <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="admin-section" id="section-route-planner">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Smart Routing</div>
+            <div class="admin-page-sub">Plan a day's centre visits — pick up to 10 stops, get an optimized order, and export the itinerary to Google Maps or your calendar.</div>
+          </div>
+        </div>
+
+        <div id="routePlannerMapboxNotice" style="display:none;padding:10px 14px;border-radius:var(--radius);background:#fff7ed;color:#9a3412;font-size:12.5px;margin-bottom:14px">
+          Mapbox isn't configured yet, so stops will stay in the order you pick them and drive times won't show — the itinerary, Google Maps export, and calendar sync all still work. Ask an admin to add <code>MAPBOX_ACCESS_TOKEN</code> to enable real route optimization and the map view.
+        </div>
+
+        <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
+          <div class="leads-filter-bar" style="padding:0 0 12px;border-bottom:none">
+            <select id="routeFilterState" onchange="filterRoutePlannerLeads()">
+              <option value="">State: any</option>
+            </select>
+            <select id="routeFilterSuburb" onchange="filterRoutePlannerLeads()">
+              <option value="">Suburb: any</option>
+            </select>
+            <select id="routeFilterVisited" onchange="filterRoutePlannerLeads()">
+              <option value="">Visit status: any</option>
+              <option value="to_schedule">To Schedule</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="done">Visited</option>
+            </select>
+            <span id="routeSelectedCount" style="margin-left:auto;font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
+          </div>
+          <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
+            <table class="data-table data-table-compact">
+              <thead>
+                <tr><th style="width:28px"></th><th>Centre</th><th>Suburb</th><th>State</th><th>Visit Status</th><th>WF Partner</th></tr>
+              </thead>
+              <tbody id="routePlannerLeadsBody">
+                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
+            <div>
+              <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Start Location</label>
+              <input type="text" id="routeStartAddress" class="form-control" placeholder="e.g. your home or office address" style="width:260px">
+            </div>
+            <div>
+              <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Departure Time</label>
+              <input type="time" id="routeDepartureTime" class="form-control" value="09:00">
+            </div>
+            <button class="btn-add" id="routeGenerateBtn" onclick="generateRoute()">🧭 Generate Route</button>
+          </div>
+        </div>
+
+        <div id="routePlannerResults" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+            <div class="admin-table-card" style="padding:16px 18px">
+              <div id="routeTotals" style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px"></div>
+              <div id="routeTimeline"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+                <button class="btn-secondary" onclick="openRouteInGoogleMaps()">📍 Open in Google Maps</button>
+                <button class="btn-add" id="routeSyncCalBtn" onclick="syncRouteToCalendarUI()">🗓️ Sync Route to Google Calendar</button>
+              </div>
+              <div id="routeSyncStatus" style="display:none;margin-top:10px"></div>
+            </div>
+            <div class="admin-table-card" style="padding:0;overflow:hidden">
+              <div id="routeMap" style="height:460px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px">
+                Map view needs Mapbox configured — the itinerary and exports above still work without it.
+              </div>
             </div>
           </div>
         </div>
@@ -2361,7 +2436,7 @@
     // real enforcement is server-side per route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
-      workforce_partner: ['leads', 'sales-dashboard']
+      workforce_partner: ['leads', 'sales-dashboard', 'route-planner']
     };
 
     function applyRoleVisibility() {
@@ -3176,6 +3251,7 @@
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
+      if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
@@ -3565,6 +3641,7 @@
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Reports — Clients/Candidates/Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Leads — Calendar Sync (register channels, sync now, review queue)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Smart Routing — plan/optimize centre visit routes, export to Maps/Calendar', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
@@ -4575,6 +4652,262 @@
     }
 
     // ══════════════════════════════════════════════════════════════
+    // Smart Routing (centre visit route planner)
+    // ══════════════════════════════════════════════════════════════
+    let routePlannerLeads = [];
+    let routeSelectedOrder = []; // lead ids, in the order they were checked
+    let currentRouteResult = null; // last /optimize response
+    let mapboxTokenCache = null; // { configured, token } — fetched once per session
+    let routeMapInstance = null;
+
+    const ROUTE_MAX_STOPS = 10;
+
+    function fmtTime(d) {
+      return new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+
+    async function loadRoutePlannerSection() {
+      const body = document.getElementById('routePlannerLeadsBody');
+      try {
+        if (!routePlannerLeads.length) routePlannerLeads = await fetch('/api/leads').then(r => r.json());
+
+        const stateSelect = document.getElementById('routeFilterState');
+        if (stateSelect.options.length === 1) {
+          stateSelect.insertAdjacentHTML('beforeend', AU_STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
+        }
+        const suburbSelect = document.getElementById('routeFilterSuburb');
+        const suburbs = Array.from(new Set(routePlannerLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        suburbSelect.innerHTML = '<option value="">Suburb: any</option>' + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+
+        filterRoutePlannerLeads();
+
+        const startInput = document.getElementById('routeStartAddress');
+        if (!startInput.value) startInput.value = localStorage.getItem('routePlannerStartAddress') || '';
+
+        if (!mapboxTokenCache) mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json());
+        document.getElementById('routePlannerMapboxNotice').style.display = mapboxTokenCache.configured ? 'none' : 'block';
+      } catch {
+        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Failed to load centres</td></tr>`;
+      }
+    }
+
+    function filterRoutePlannerLeads() {
+      const state = document.getElementById('routeFilterState').value;
+      const suburb = document.getElementById('routeFilterSuburb').value;
+      const visited = document.getElementById('routeFilterVisited').value;
+      let filtered = routePlannerLeads;
+      if (state) filtered = filtered.filter(l => l.state === state);
+      if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
+      if (visited) filtered = filtered.filter(l => l.centre_visited_status === visited);
+      renderRoutePlannerLeadsTable(filtered);
+    }
+
+    function renderRoutePlannerLeadsTable(list) {
+      const body = document.getElementById('routePlannerLeadsBody');
+      if (!list.length) {
+        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
+        return;
+      }
+      body.innerHTML = list.map(l => {
+        const checked = routeSelectedOrder.includes(l.id);
+        const meta = CENTRE_VISITED_META[l.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
+        return `<tr>
+          <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${l.id}', this)"></td>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
+          <td>${escHtml(l.suburb || '—')}</td>
+          <td>${escHtml(l.state || '—')}</td>
+          <td><span class="lead-badge ${meta.cls}">${escHtml(meta.label)}</span></td>
+          <td>${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
+        </tr>`;
+      }).join('');
+      updateRouteSelectedCount();
+    }
+
+    function toggleRouteStop(leadId, checkbox) {
+      if (checkbox.checked) {
+        if (routeSelectedOrder.length >= ROUTE_MAX_STOPS) {
+          checkbox.checked = false;
+          toast(`Smart Routing supports up to ${ROUTE_MAX_STOPS} stops per run`, 'error');
+          return;
+        }
+        routeSelectedOrder.push(leadId);
+      } else {
+        routeSelectedOrder = routeSelectedOrder.filter(id => id !== leadId);
+      }
+      updateRouteSelectedCount();
+    }
+
+    function updateRouteSelectedCount() {
+      document.getElementById('routeSelectedCount').textContent = `${routeSelectedOrder.length} / ${ROUTE_MAX_STOPS} selected`;
+    }
+
+    async function generateRoute() {
+      if (!routeSelectedOrder.length) { toast('Select at least one centre', 'error'); return; }
+      const startAddress = document.getElementById('routeStartAddress').value.trim();
+      if (!startAddress) { toast('Enter a start location', 'error'); return; }
+      const timeVal = document.getElementById('routeDepartureTime').value || '09:00';
+      const [hh, mm] = timeVal.split(':').map(Number);
+      const departure = new Date();
+      departure.setHours(hh, mm, 0, 0);
+
+      localStorage.setItem('routePlannerStartAddress', startAddress);
+
+      const btn = document.getElementById('routeGenerateBtn');
+      btn.disabled = true; btn.textContent = 'Generating…';
+      try {
+        const res = await fetch('/api/route-planner/optimize', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadIds: routeSelectedOrder, startAddress, departureTime: departure.toISOString() })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to generate route', 'error'); return; }
+        currentRouteResult = data;
+        renderRouteResults(data);
+      } catch { toast('Network error', 'error'); }
+      finally { btn.disabled = false; btn.textContent = '🧭 Generate Route'; }
+    }
+
+    function renderRouteResults(data) {
+      document.getElementById('routePlannerResults').style.display = 'block';
+      const it = data.itinerary;
+
+      const totalsParts = [];
+      totalsParts.push(`${data.stops.length} stop${data.stops.length === 1 ? '' : 's'}`);
+      totalsParts.push(it.driveDataComplete ? `${Math.round(it.totalDriveMinutes)} min driving (${it.totalDriveKm.toFixed(1)} km)` : 'drive times unavailable');
+      totalsParts.push(`${it.totalVisitMinutes} min visiting${it.lunchInserted ? ' incl. lunch' : ''}`);
+      document.getElementById('routeTotals').textContent = totalsParts.join(' · ');
+
+      const iconFor = { drive: '🚗', visit: '📍', lunch: '☕' };
+      document.getElementById('routeTimeline').innerHTML = it.blocks.map(b => {
+        if (b.type === 'drive') {
+          const durationText = b.minutes != null ? `${Math.round(b.minutes)} min${b.km != null ? `, ${b.km.toFixed(1)} km` : ''}` : 'drive time unavailable';
+          return `<div style="display:flex;gap:10px;padding:6px 0;font-size:12px;color:var(--text-muted)">
+            <span>${iconFor.drive}</span>
+            <span>${fmtTime(b.start)}–${fmtTime(b.end)}: Drive to <strong style="color:var(--text)">${escHtml(b.to)}</strong> (${durationText})</span>
+          </div>`;
+        }
+        if (b.type === 'lunch') {
+          return `<div style="display:flex;gap:10px;padding:8px 0;font-size:13px;background:#fffbeb;border-radius:var(--radius);padding-left:8px;margin:4px 0">
+            <span>${iconFor.lunch}</span>
+            <span>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong>${escHtml(b.label)}</strong></span>
+          </div>`;
+        }
+        return `<div style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0">
+          <span>${iconFor.visit}</span>
+          <span>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong> <span style="color:var(--text-muted)">(${escHtml(b.stop.suburb || '')})</span></span>
+        </div>`;
+      }).join('');
+
+      document.getElementById('routeSyncStatus').style.display = 'none';
+      renderRouteMap(data);
+    }
+
+    // No API key needed — Google Maps' own directions URL scheme accepts
+    // plain address text for origin/destination/waypoints and lets the
+    // partner's phone do the actual turn-by-turn navigation.
+    function openRouteInGoogleMaps() {
+      if (!currentRouteResult) return;
+      const addr = l => encodeURIComponent([l.street_address, l.suburb, l.state].filter(Boolean).join(', ') || l.centre_name);
+      const stops = currentRouteResult.stops;
+      const origin = encodeURIComponent(document.getElementById('routeStartAddress').value.trim());
+      const destination = addr(stops[stops.length - 1]);
+      const waypoints = stops.slice(0, -1).map(addr).join('|');
+      let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
+      if (waypoints) url += `&waypoints=${waypoints}`;
+      window.open(url, '_blank');
+    }
+
+    async function syncRouteToCalendarUI() {
+      if (!currentRouteResult) return;
+      const btn = document.getElementById('routeSyncCalBtn');
+      const statusEl = document.getElementById('routeSyncStatus');
+      btn.disabled = true; btn.textContent = 'Syncing…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Creating calendar events…';
+      try {
+        const res = await fetch('/api/route-planner/sync-calendar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blocks: currentRouteResult.itinerary.blocks })
+        });
+        const data = await res.json();
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
+        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:12.5px">✓ Synced ${data.created.length} event${data.created.length === 1 ? '' : 's'} to ${escHtml(data.partnerEmail)}'s calendar</div>`;
+        routePlannerLeads = []; // force a refresh — visited statuses just changed
+      } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">Network error.</div>'; }
+      finally { btn.disabled = false; btn.textContent = '🗓️ Sync Route to Google Calendar'; }
+    }
+
+    let mapboxGlLoadPromise = null;
+    function ensureMapboxGlLoaded() {
+      if (mapboxGlLoadPromise) return mapboxGlLoadPromise;
+      mapboxGlLoadPromise = new Promise((resolve, reject) => {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = 'https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css';
+        document.head.appendChild(css);
+        const script = document.createElement('script');
+        script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      return mapboxGlLoadPromise;
+    }
+
+    async function renderRouteMap(data) {
+      const mapEl = document.getElementById('routeMap');
+      if (!data.mapboxConfigured || !mapboxTokenCache?.token) {
+        mapEl.innerHTML = 'Map view needs Mapbox configured — the itinerary and exports above still work without it.';
+        return;
+      }
+      try {
+        await ensureMapboxGlLoaded();
+      } catch {
+        mapEl.textContent = 'Could not load the map.';
+        return;
+      }
+      mapEl.innerHTML = '';
+      mapboxgl.accessToken = mapboxTokenCache.token;
+
+      const coords = [data.startCoord, ...data.stops.map(s => ({ lat: s.latitude, lng: s.longitude }))];
+      if (routeMapInstance) { routeMapInstance.remove(); routeMapInstance = null; }
+      routeMapInstance = new mapboxgl.Map({
+        container: 'routeMap',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [coords[0].lng, coords[0].lat],
+        zoom: 10
+      });
+
+      routeMapInstance.on('load', () => {
+        const bounds = new mapboxgl.LngLatBounds();
+        coords.forEach((c, i) => {
+          const el = document.createElement('div');
+          el.style.cssText = `width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;background:${i === 0 ? 'var(--navy)' : 'var(--orange)'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3)`;
+          el.textContent = i === 0 ? '🏁' : String(i);
+          new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat])
+            .setPopup(new mapboxgl.Popup({ offset: 16 }).setText(i === 0 ? 'Start' : data.stops[i - 1].centre_name))
+            .addTo(routeMapInstance);
+          bounds.extend([c.lng, c.lat]);
+        });
+
+        // Straight connecting lines in stop order — a visual guide, not the
+        // actual road-following path (that would need a second Directions
+        // API call per render; the Matrix API above already drove the real
+        // stop ordering and drive-time numbers).
+        routeMapInstance.addSource('route-line', {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords.map(c => [c.lng, c.lat]) } }
+        });
+        routeMapInstance.addLayer({
+          id: 'route-line', type: 'line', source: 'route-line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#3d6fff', 'line-width': 3, 'line-dasharray': [2, 1] }
+        });
+
+        routeMapInstance.fitBounds(bounds, { padding: 50 });
+      });
+    }
+
     // Reports (Clients / Candidates / Bookings / Timesheets)
     // ══════════════════════════════════════════════════════════════
     // Pulled from the external RtApiReport API (routes/reports.js proxies

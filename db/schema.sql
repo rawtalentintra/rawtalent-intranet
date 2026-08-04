@@ -858,6 +858,12 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS centre_visited_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_status TEXT DEFAULT 'pending';
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ;
 
+-- Geocoding cache for Smart Routing (route-planner service) — populated
+-- lazily the first time a lead is included in a route, not eagerly for
+-- every lead on submission, since most leads are never routed.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+
 -- A running thread rather than a single overwritable field, since more
 -- than one person (a consultant, an admin, eventually a Workforce Partner)
 -- may add notes on the same lead over time — a single field would let one

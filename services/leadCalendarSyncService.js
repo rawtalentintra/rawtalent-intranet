@@ -173,6 +173,11 @@ async function processInboundEvent(event, ownerEmail) {
   }
 
   const rawProps = event.extendedProperties?.private || {};
+  // Smart Routing's lunch break isn't tied to any lead — just skip it
+  // rather than sending it through fuzzy-matching (it has no bracket tag
+  // for classifyAndStripTitle to key off, so it'd otherwise land in the
+  // review queue every time it's echoed back).
+  if (rawProps.rawtalentEventType === 'lunch') return;
   if (rawProps.rawtalentLeadId) {
     // Our own app-created event echoed back — nothing to infer, just make
     // sure the bookkeeping row exists (covers events created before this
@@ -319,6 +324,57 @@ async function renewWatchesNearingExpiry() {
   }
 }
 
+// Pushes a Smart Routing itinerary (see services/routeOptimizerService.js)
+// onto one partner's calendar: one [Centre Visit] event per stop (also
+// flips that lead's centre-visited status to 'scheduled', same as the
+// single-lead outbound sync) plus one plain event for the lunch break.
+// `blocks` are the itinerary blocks from buildItinerary() — 'visit' blocks
+// carry the full lead row as `stop`, 'lunch' blocks don't touch any lead.
+async function syncRouteToCalendar(ownerEmail, blocks) {
+  if (!calendarConfigured()) throw new Error('Google Calendar is not configured');
+  const calendar = getCalendarClientFor(ownerEmail);
+  if (!calendar) throw new Error(`Could not build a calendar client for ${ownerEmail}`);
+
+  const db = getDb();
+  const created = [];
+
+  for (const block of blocks) {
+    if (block.type === 'visit') {
+      const lead = block.stop;
+      const requestBody = {
+        summary: buildEventTitle('visit', lead.centre_name),
+        location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', '),
+        description: `Smart Routing visit — HeartBeat lead: ${process.env.APP_URL || ''}/admin?lead=${lead.id}`,
+        start: { dateTime: new Date(block.start).toISOString() },
+        end: { dateTime: new Date(block.end).toISOString() },
+        extendedProperties: { private: { rawtalentLeadId: lead.id, rawtalentEventType: 'visit' } }
+      };
+      const res = await calendar.events.insert({ calendarId: 'primary', requestBody });
+      await db.execute({
+        sql: `INSERT INTO lead_calendar_events (id, lead_id, event_type, google_event_id, calendar_owner_email, source)
+              VALUES (?, ?, 'visit', ?, ?, 'app')`,
+        args: [uuidv4(), lead.id, res.data.id, ownerEmail]
+      });
+      await db.execute({
+        sql: `UPDATE leads SET centre_visited_status = 'scheduled', centre_visited_at = ?, updated_at = now() WHERE id = ?`,
+        args: [new Date(block.start).toISOString(), lead.id]
+      });
+      created.push({ leadId: lead.id, eventId: res.data.id, type: 'visit' });
+    } else if (block.type === 'lunch') {
+      const requestBody = {
+        summary: block.label || 'Lunch & Admin Break',
+        start: { dateTime: new Date(block.start).toISOString() },
+        end: { dateTime: new Date(block.end).toISOString() },
+        extendedProperties: { private: { rawtalentEventType: 'lunch' } }
+      };
+      const res = await calendar.events.insert({ calendarId: 'primary', requestBody });
+      created.push({ eventId: res.data.id, type: 'lunch' });
+    }
+  }
+
+  return created;
+}
+
 module.exports = {
   getPartnerCalendarMap,
   emailForPartner,
@@ -326,6 +382,7 @@ module.exports = {
   buildEventTitle,
   classifyAndStripTitle,
   syncLeadEventOutbound,
+  syncRouteToCalendar,
   processInboundEvent,
   listAndApplyChanges,
   registerOrRenewWatch,

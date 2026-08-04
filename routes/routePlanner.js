@@ -1,0 +1,104 @@
+const express = require('express');
+const router = express.Router();
+const { requireRole } = require('../middleware/authMiddleware');
+const { getDb } = require('../db/database');
+const mapboxService = require('../services/mapboxService');
+const { optimizeRoute, buildItinerary } = require('../services/routeOptimizerService');
+const { emailForPartner, syncRouteToCalendar } = require('../services/leadCalendarSyncService');
+
+router.use(requireRole('admin', 'super_admin', 'workforce_partner'));
+
+const MAX_STOPS = 10;
+
+// Mapbox tokens meant for browser use (public "pk." tokens, restricted by
+// URL in the Mapbox dashboard) are designed to be handed to the client —
+// this just gates that behind login rather than hardcoding it into a
+// static JS file, consistent with the rest of this app's auth model.
+router.get('/map-token', (req, res) => {
+  res.json({ configured: mapboxService.isConfigured(), token: process.env.MAPBOX_ACCESS_TOKEN || null });
+});
+
+router.post('/optimize', async (req, res) => {
+  try {
+    const { leadIds, startAddress, departureTime } = req.body;
+    if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ error: 'Select at least one centre' });
+    if (leadIds.length > MAX_STOPS) return res.status(400).json({ error: `Smart Routing supports up to ${MAX_STOPS} stops per run` });
+    if (!startAddress?.trim()) return res.status(400).json({ error: 'Start location is required' });
+    if (!departureTime) return res.status(400).json({ error: 'Departure time is required' });
+
+    const db = getDb();
+    const placeholders = leadIds.map(() => '?').join(',');
+    const leadsRes = await db.execute({ sql: `SELECT * FROM leads WHERE id IN (${placeholders})`, args: leadIds });
+    // Preserve the order the caller selected them in (not whatever order
+    // the DB happens to return) — that's the fallback "manual" order used
+    // when Mapbox isn't configured.
+    const stops = leadIds.map(id => leadsRes.rows.find(l => l.id === id)).filter(Boolean);
+    if (stops.length !== leadIds.length) return res.status(404).json({ error: 'One or more selected leads no longer exist' });
+
+    if (!mapboxService.isConfigured()) {
+      const itinerary = buildItinerary({
+        stops, legMinutes: stops.map(() => null), legDistancesKm: null,
+        departureTime, startLabel: startAddress
+      });
+      return res.json({ mapboxConfigured: false, order: stops.map(s => s.id), stops, itinerary });
+    }
+
+    const startCoord = await mapboxService.geocodeAddress(startAddress);
+    if (!startCoord) return res.status(422).json({ error: `Could not locate "${startAddress}" — try a more specific address` });
+
+    // Geocode is cached on the lead (latitude/longitude columns) — most
+    // repeat routes won't need to re-geocode centres they've routed before.
+    const geocodeFailures = [];
+    for (const stop of stops) {
+      if (stop.latitude != null && stop.longitude != null) continue;
+      const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ') || stop.centre_name;
+      const coord = await mapboxService.geocodeAddress(address);
+      if (!coord) { geocodeFailures.push(stop.centre_name); continue; }
+      stop.latitude = coord.lat;
+      stop.longitude = coord.lng;
+      await db.execute({ sql: 'UPDATE leads SET latitude = ?, longitude = ? WHERE id = ?', args: [coord.lat, coord.lng, stop.id] });
+    }
+    if (geocodeFailures.length) {
+      return res.status(422).json({ error: `Couldn't locate: ${geocodeFailures.join(', ')} — check their address on file` });
+    }
+
+    const coords = [startCoord, ...stops.map(s => ({ lat: s.latitude, lng: s.longitude }))];
+    const { durationsMinutes, distancesKm } = await mapboxService.getDistanceMatrix(coords);
+    const stopIndices = stops.map((_, i) => i + 1);
+    const order = optimizeRoute(durationsMinutes, 0, stopIndices);
+    const orderedStops = order.map(idx => stops[idx - 1]);
+
+    const legMinutes = [];
+    const legDistancesKm = [];
+    let prev = 0;
+    for (const idx of order) {
+      legMinutes.push(durationsMinutes[prev][idx]);
+      legDistancesKm.push(distancesKm[prev][idx]);
+      prev = idx;
+    }
+
+    const itinerary = buildItinerary({ stops: orderedStops, legMinutes, legDistancesKm, departureTime, startLabel: startAddress });
+    res.json({ mapboxConfigured: true, order: orderedStops.map(s => s.id), stops: orderedStops, startCoord, itinerary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/sync-calendar', async (req, res) => {
+  try {
+    const { blocks } = req.body;
+    if (!Array.isArray(blocks) || !blocks.length) return res.status(400).json({ error: 'No itinerary blocks to sync' });
+    const firstVisit = blocks.find(b => b.type === 'visit');
+    if (!firstVisit) return res.status(400).json({ error: 'Itinerary has no centre visits to sync' });
+    const partnerEmail = emailForPartner(firstVisit.stop.assigned_workforce_partner);
+    if (!partnerEmail) {
+      return res.status(422).json({ error: `No calendar mapped for ${firstVisit.stop.assigned_workforce_partner || 'this partner'} — check CALENDAR_PARTNER_MAP` });
+    }
+    const created = await syncRouteToCalendar(partnerEmail, blocks);
+    res.json({ success: true, created, partnerEmail });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
