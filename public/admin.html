@@ -70,6 +70,15 @@
       border: 1px solid var(--gray-200); font-family: inherit; color: var(--text);
       background: white; width: auto;
     }
+    /* Nine filters + search is a lot of horizontal real estate — cap each
+       select so the row still fits on a standard laptop width instead of
+       wrapping. A constrained closed select truncates its own label with
+       an ellipsis (native browser behaviour) but every option is shown in
+       full once opened, so this only affects the collapsed state, never
+       the data itself (unlike the earlier Suburb table-column fix, where
+       truncating the actual data was the bug). */
+    .leads-filter-bar select { max-width: 132px; text-overflow: ellipsis; }
+    .leads-filter-bar input#leadsFilterCentre { flex: 0 1 150px; min-width: 110px; width: auto; }
     .leads-stats-bar {
       display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline;
       background: white; border: 1px solid var(--gray-200); border-radius: var(--radius-lg);
@@ -463,13 +472,14 @@
             <div class="admin-page-title">Leads</div>
             <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the WFP Dashboard.</div>
           </div>
+          <button class="btn-secondary" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
         </div>
 
         <div class="leads-stats-bar" id="leadsStatsBar"></div>
 
         <div class="admin-table-card">
           <div class="leads-filter-bar">
-            <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()" style="width:160px">
+            <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
             <select id="leadsFilterPeriod" onchange="filterLeadsTable()">
               <option value="all" selected>All time</option>
               <option value="week">This week</option>
@@ -510,7 +520,6 @@
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
             </select>
-            <button class="btn-secondary" style="padding:3px 9px;font-size:11px;margin-left:auto" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact" id="leadsTable">
