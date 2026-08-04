@@ -77,6 +77,16 @@ function minutesOfDay(date) {
   return date.getHours() * 60 + date.getMinutes();
 }
 
+// A visit landing at 9:22am isn't realistic — nobody's actually booked for
+// an off-the-clock minute like that. Round arrival up to the next clean
+// quarter hour (never down — arriving "early" for a slot you haven't
+// rounded to yet just means a short wait, not an early start).
+const ROUND_TO_MINUTES = 15;
+function ceilToQuarterHour(date) {
+  const ms = ROUND_TO_MINUTES * 60000;
+  return new Date(Math.ceil(date.getTime() / ms) * ms);
+}
+
 // Pure schedule builder — takes an already-ordered stop list plus the
 // per-leg drive times between them (legMinutes[i] = drive time from the
 // previous location to stops[i]; legMinutes[0] is start → first stop) and
@@ -117,11 +127,23 @@ function buildItinerary({ stops, legMinutes, legDistancesKm, departureTime, star
       lunchInserted = true;
     }
 
-    const visitStart = clock;
-    const visitEnd = addMinutes(clock, VISIT_DURATION_MINUTES);
-    blocks.push({ type: 'visit', stop, start: visitStart, end: visitEnd });
+    const rawArrival = clock;
+    const visitStart = ceilToQuarterHour(rawArrival);
+    const waitMinutes = Math.round((visitStart - rawArrival) / 60000);
+    const visitEnd = addMinutes(visitStart, VISIT_DURATION_MINUTES);
+    blocks.push({ type: 'visit', stop, start: visitStart, end: visitEnd, waitMinutes });
     clock = visitEnd;
   });
+
+  // Only the very first stop's wait is actionable — it's the one thing a
+  // later departure time would actually fix, since every other wait is
+  // downstream of drive-time estimates the partner doesn't control minute
+  // by minute. Shifting departure later by exactly that wait means the
+  // first visit starts right on its rounded slot instead of sitting idle.
+  const firstVisit = blocks.find(b => b.type === 'visit');
+  const suggestedDepartureTime = firstVisit && firstVisit.waitMinutes > 1
+    ? addMinutes(new Date(departureTime), firstVisit.waitMinutes)
+    : null;
 
   return {
     blocks,
@@ -129,7 +151,8 @@ function buildItinerary({ stops, legMinutes, legDistancesKm, departureTime, star
     totalDriveKm: driveDataComplete ? totalDriveKm : null,
     totalVisitMinutes: stops.length * VISIT_DURATION_MINUTES + (lunchInserted ? LUNCH_DURATION_MINUTES : 0),
     driveDataComplete,
-    lunchInserted
+    lunchInserted,
+    suggestedDepartureTime
   };
 }
 

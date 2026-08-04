@@ -673,7 +673,22 @@
             </div>
             <div>
               <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Departure Time</label>
-              <input type="time" id="routeDepartureTime" class="form-control" value="09:00">
+              <div style="display:flex;gap:4px">
+                <select id="routeDepartureHour" class="form-control" style="width:60px;padding:9px 6px;text-align:center">
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                  <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                  <option value="7">7</option><option value="8">8</option><option value="9" selected>9</option>
+                  <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                </select>
+                <select id="routeDepartureMinute" class="form-control" style="width:60px;padding:9px 6px;text-align:center">
+                  <option value="0" selected>00</option><option value="15">15</option>
+                  <option value="30">30</option><option value="45">45</option>
+                </select>
+                <select id="routeDepartureAmPm" class="form-control" style="width:64px;padding:9px 6px">
+                  <option value="AM" selected>AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
             </div>
             <button class="btn-add" id="routeGenerateBtn" onclick="generateRoute()">🧭 Generate Route</button>
           </div>
@@ -682,7 +697,8 @@
         <div id="routePlannerResults" style="display:none">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
             <div class="admin-table-card" style="padding:16px 18px">
-              <div id="routeTotals" style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px"></div>
+              <div id="routeTotals" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
+              <div id="routeDepartureSuggestion" style="display:none;font-size:12px;color:#9a3412;background:#fff7ed;border-radius:var(--radius);padding:8px 10px;margin-bottom:12px"></div>
               <div id="routeTimeline"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
                 <button class="btn-secondary" onclick="openRouteInGoogleMaps()">📍 Open in Google Maps</button>
@@ -4825,10 +4841,12 @@
       if (!routeSelectedOrder.length) { toast('Select at least one centre', 'error'); return; }
       const startAddress = document.getElementById('routeStartAddress').value.trim();
       if (!startAddress) { toast('Enter a start location', 'error'); return; }
-      const timeVal = document.getElementById('routeDepartureTime').value || '09:00';
-      const [hh, mm] = timeVal.split(':').map(Number);
+      const hour12 = Number(document.getElementById('routeDepartureHour').value);
+      const minute = Number(document.getElementById('routeDepartureMinute').value);
+      const isPm = document.getElementById('routeDepartureAmPm').value === 'PM';
+      const hour24 = (hour12 % 12) + (isPm ? 12 : 0);
       const departure = new Date();
-      departure.setHours(hh, mm, 0, 0);
+      departure.setHours(hour24, minute, 0, 0);
 
       localStorage.setItem('routePlannerStartAddress', startAddress);
 
@@ -4857,6 +4875,14 @@
       totalsParts.push(`${fmtRouteDuration(it.totalVisitMinutes)} visiting${it.lunchInserted ? ' incl. lunch' : ''}`);
       document.getElementById('routeTotals').textContent = totalsParts.join(' · ');
 
+      const suggestEl = document.getElementById('routeDepartureSuggestion');
+      if (it.suggestedDepartureTime) {
+        suggestEl.style.display = 'block';
+        suggestEl.innerHTML = `💡 The first stop lands ${it.blocks.find(b => b.type === 'visit').waitMinutes} min before its rounded start time — depart at <strong>${fmtTime(it.suggestedDepartureTime)}</strong> instead to arrive right on time with no wait.`;
+      } else {
+        suggestEl.style.display = 'none';
+      }
+
       const iconFor = { drive: '🚗', visit: '📍', lunch: '☕' };
       document.getElementById('routeTimeline').innerHTML = it.blocks.map(b => {
         if (b.type === 'drive') {
@@ -4876,7 +4902,7 @@
         return `<div style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0">
           <span>${iconFor.visit}</span>
           <div>
-            <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong></div>
+            <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong>${b.waitMinutes > 1 ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400">(rounded to a clean start — ${b.waitMinutes} min wait)</span>` : ''}</div>
             ${fullAddress ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escHtml(fullAddress)}</div>` : ''}
           </div>
         </div>`;
