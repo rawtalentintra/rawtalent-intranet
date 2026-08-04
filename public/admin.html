@@ -4695,6 +4695,17 @@
       return new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
     }
 
+    // "626 min" doesn't read as "over 10 hours" at a glance — switch to
+    // hr/min past the 60-minute mark, same as Google's own duration format.
+    function fmtRouteDuration(minutes) {
+      const total = Math.round(minutes);
+      const h = Math.floor(total / 60);
+      const m = total % 60;
+      if (h === 0) return `${m} min`;
+      if (m === 0) return `${h} hr`;
+      return `${h} hr ${m} min`;
+    }
+
     // Some leads have the suburb/state already baked into street_address
     // (data entry inconsistency, not a bug in this app) — naively
     // concatenating [street_address, suburb, state] on those produces a
@@ -4842,14 +4853,14 @@
 
       const totalsParts = [];
       totalsParts.push(`${data.stops.length} stop${data.stops.length === 1 ? '' : 's'}`);
-      totalsParts.push(it.driveDataComplete ? `${Math.round(it.totalDriveMinutes)} min driving (${it.totalDriveKm.toFixed(1)} km)` : 'drive times unavailable');
-      totalsParts.push(`${it.totalVisitMinutes} min visiting${it.lunchInserted ? ' incl. lunch' : ''}`);
+      totalsParts.push(it.driveDataComplete ? `${fmtRouteDuration(it.totalDriveMinutes)} driving (${it.totalDriveKm.toFixed(1)} km)` : 'drive times unavailable');
+      totalsParts.push(`${fmtRouteDuration(it.totalVisitMinutes)} visiting${it.lunchInserted ? ' incl. lunch' : ''}`);
       document.getElementById('routeTotals').textContent = totalsParts.join(' · ');
 
       const iconFor = { drive: '🚗', visit: '📍', lunch: '☕' };
       document.getElementById('routeTimeline').innerHTML = it.blocks.map(b => {
         if (b.type === 'drive') {
-          const durationText = b.minutes != null ? `${Math.round(b.minutes)} min${b.km != null ? `, ${b.km.toFixed(1)} km` : ''}` : 'drive time unavailable';
+          const durationText = b.minutes != null ? `${fmtRouteDuration(b.minutes)}${b.km != null ? `, ${b.km.toFixed(1)} km` : ''}` : 'drive time unavailable';
           return `<div style="display:flex;gap:10px;padding:6px 0;font-size:12px;color:var(--text-muted)">
             <span>${iconFor.drive}</span>
             <span>${fmtTime(b.start)}–${fmtTime(b.end)}: Drive to <strong style="color:var(--text)">${escHtml(b.to)}</strong> (${durationText})</span>
