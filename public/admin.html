@@ -196,6 +196,9 @@
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
+        <div class="admin-nav-item" onclick="showSection('calendar-sync', this)">
+          <span class="admin-nav-icon">🗓️</span> Calendar Sync
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
@@ -527,6 +530,50 @@
               </thead>
               <tbody id="leadsTableBody">
                 <tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="admin-section" id="section-calendar-sync">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Calendar Sync</div>
+            <div class="admin-page-sub">Two-way sync between Leads and each Workforce Partner's Google Calendar — scheduling a call/visit on a lead creates the calendar event, and events they create by hand sync back onto the lead.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Register push-notification channels once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — this also renews automatically every 12h. "Sync Now" is a manual catch-up and doubles as a connection test per partner.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-add" id="calSyncRegisterBtn" onclick="registerCalendarWatches()" style="padding:6px 12px;font-size:12px">Register Watch Channels</button>
+            <button class="btn-add" id="calSyncNowBtn" onclick="syncCalendarNow()" style="padding:6px 12px;font-size:12px">Sync Now</button>
+          </div>
+          <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
+        </div>
+
+        <div class="admin-table-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px 0">
+            <div style="font-size:13px;font-weight:700">Needs Review</div>
+            <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="loadCalendarSyncSection()">🔄 Refresh</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);padding:2px 18px 12px">Calendar events that couldn't be confidently matched to a lead — either no Call/Visit tag was found in the title, or two leads scored too close to guess safely. Link to the right lead, or dismiss.</div>
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Type</th>
+                  <th>Calendar</th>
+                  <th>Reason</th>
+                  <th style="min-width:220px">Link to lead</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="calSyncReviewBody">
+                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -3114,6 +3161,7 @@
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
+      if (id === 'calendar-sync') loadCalendarSyncSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
@@ -3502,6 +3550,7 @@
       { area: 'Admin panel — access at all', user: false, qa: 'Limited', wfp: 'Limited', admin: true, superAdmin: true },
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Reports — Clients/Candidates/Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Calendar Sync — Workforce Partner calendar sync + review queue', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
@@ -4380,6 +4429,106 @@
               <div class="lead-chart-bar-label">${monthLabel(k)}</div>
             </div>`).join('')}
         </div>`;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // Calendar Sync (Workforce Partner Google Calendar two-way sync)
+    // ══════════════════════════════════════════════════════════════
+    function renderCalSyncResults(results) {
+      const rows = Object.entries(results).map(([email, status]) => {
+        const ok = status === 'ok';
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12px">
+          <span>${escHtml(email)}</span>
+          <span style="color:${ok ? '#1a8a4a' : '#c0392b'};font-weight:600">${ok ? '✓ OK' : escHtml(status)}</span>
+        </div>`;
+      }).join('');
+      return `<div style="padding:12px 14px;border-radius:var(--radius);background:var(--gray-100)">${rows || 'No partners configured in CALENDAR_PARTNER_MAP.'}</div>`;
+    }
+
+    async function registerCalendarWatches() {
+      const btn = document.getElementById('calSyncRegisterBtn');
+      const statusEl = document.getElementById('calSyncStatus');
+      btn.disabled = true; btn.textContent = 'Registering…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Registering watch channels…';
+      try {
+        const res = await fetch('/api/calendar-sync/watch/register', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Failed to register')}</div>`; return; }
+        statusEl.innerHTML = renderCalSyncResults(data.results);
+      } catch { statusEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Request failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Register Watch Channels'; }
+    }
+
+    async function syncCalendarNow() {
+      const btn = document.getElementById('calSyncNowBtn');
+      const statusEl = document.getElementById('calSyncStatus');
+      btn.disabled = true; btn.textContent = 'Syncing…';
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Fetching calendar changes…';
+      try {
+        const res = await fetch('/api/calendar-sync/sync-now', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
+        statusEl.innerHTML = renderCalSyncResults(data.results);
+        loadCalendarSyncSection();
+      } catch { statusEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Request failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = 'Sync Now'; }
+    }
+
+    async function loadCalendarSyncSection() {
+      const tbody = document.getElementById('calSyncReviewBody');
+      try {
+        if (!allLeads.length) allLeads = await fetch('/api/leads').then(r => r.json());
+        const items = await fetch('/api/calendar-sync/review-queue').then(r => r.json());
+        if (!items.length) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Nothing needs review right now.</td></tr>`; return; }
+
+        const leadOptions = allLeads
+          .slice()
+          .sort((a, b) => (a.centre_name || '').localeCompare(b.centre_name || ''))
+          .map(l => `<option value="${l.id}">${escHtml(l.centre_name)}${l.suburb ? ' — ' + escHtml(l.suburb) : ''}</option>`).join('');
+
+        tbody.innerHTML = items.map(item => `
+          <tr>
+            <td class="td-truncate" style="max-width:180px">${escHtml(item.event_title || '(untitled)')}</td>
+            <td>${item.event_type ? escHtml(item.event_type) : '<span style="color:var(--text-muted)">unknown</span>'}</td>
+            <td class="td-truncate" style="max-width:140px">${escHtml(item.calendar_owner_email)}</td>
+            <td class="td-truncate" style="max-width:220px" title="${escHtml(item.reason || '')}">${escHtml(item.reason || '')}</td>
+            <td>
+              <select id="calSyncLead_${item.id}" class="form-control" style="font-size:11px;padding:3px 6px">
+                <option value="">Select lead…</option>
+                ${leadOptions}
+              </select>
+            </td>
+            <td style="white-space:nowrap">
+              <button class="btn-add" style="padding:3px 9px;font-size:10.5px" onclick="resolveCalSyncItem('${item.id}', '${item.event_type || 'call'}')">Link</button>
+              <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="resolveCalSyncItem('${item.id}', '${item.event_type || 'call'}', true)">Dismiss</button>
+            </td>
+          </tr>`).join('');
+
+        items.forEach(item => {
+          if (!item.candidate_lead_id) return;
+          const sel = document.getElementById(`calSyncLead_${item.id}`);
+          if (sel) sel.value = item.candidate_lead_id;
+        });
+      } catch {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c0392b;padding:20px">Failed to load review queue.</td></tr>`;
+      }
+    }
+
+    async function resolveCalSyncItem(id, eventType, dismiss = false) {
+      const leadId = dismiss ? null : document.getElementById(`calSyncLead_${id}`)?.value;
+      if (!dismiss && !leadId) { toast('Pick a lead to link first', 'error'); return; }
+      try {
+        const res = await fetch(`/api/calendar-sync/review-queue/${id}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadId: leadId || null, eventType })
+        });
+        if (!res.ok) { toast('Failed to resolve', 'error'); return; }
+        toast(dismiss ? 'Dismissed' : 'Linked to lead');
+        loadCalendarSyncSection();
+      } catch { toast('Request failed', 'error'); }
     }
 
     // ══════════════════════════════════════════════════════════════
