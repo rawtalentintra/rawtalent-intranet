@@ -3763,6 +3763,9 @@
     // First-name-only, for the dense Leads table column — full names stay
     // everywhere else (filters, lead detail modal) where space isn't tight.
     const WORKFORCE_PARTNER_SHORT = { 'Gwen Stocks (SA)': 'Gwen', 'Justine Hardware (VIC)': 'Justine', 'Liam Baxter': 'Liam' };
+    // Former reps with no active account — their historical leads stay put,
+    // just excluded from the "Submitted by" filter's option list.
+    const LEADS_SUBMITTER_HIDDEN = new Set(['allyssa@rawtalent.com.au', 'jane@rawtalent.com.au']);
     const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
     const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
 
@@ -3830,10 +3833,15 @@
         // No fixed list of reps (unlike states/partners) — build the option
         // list from whoever's actually submitted a lead, name shown but
         // filtered by email since that's the stable/unique identifier.
+        // LEADS_SUBMITTER_HIDDEN excludes former reps from the dropdown —
+        // their existing leads stay exactly as submitted, only their name
+        // stops appearing as a filter choice going forward.
         const submitterSelect = document.getElementById('leadsFilterSubmittedBy');
         const submitters = new Map();
         allLeads.forEach(l => {
-          if (l.submitted_by_email) submitters.set(l.submitted_by_email, l.submitted_by_name || l.submitted_by_email);
+          if (l.submitted_by_email && !LEADS_SUBMITTER_HIDDEN.has(l.submitted_by_email.toLowerCase())) {
+            submitters.set(l.submitted_by_email, l.submitted_by_name || l.submitted_by_email);
+          }
         });
         const sorted = Array.from(submitters.entries()).sort((a, b) => a[1].localeCompare(b[1]));
         submitterSelect.innerHTML = '<option value="">Submitted by: any</option>' +
