@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth, requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
+const { syncLeadEventOutbound } = require('../services/leadCalendarSyncService');
 
 router.use(requireAuth);
 
@@ -194,7 +195,17 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
     await getDb().execute({ sql: `UPDATE leads SET ${sets.join(', ')}, updated_at = now() WHERE id = ?`, args });
 
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+    res.json(updated);
+
+    // Outbound calendar sync — fire-and-forget, after the response is sent,
+    // so a Google API hiccup never delays or fails the status update itself.
+    if ('leadCalledStatus' in req.body && updated.lead_called_status === 'scheduled' && updated.lead_called_at) {
+      syncLeadEventOutbound(updated, 'call');
+    }
+    if ('centreVisitedStatus' in req.body && updated.centre_visited_status === 'scheduled' && updated.centre_visited_at) {
+      syncLeadEventOutbound(updated, 'visit');
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -872,3 +872,57 @@ CREATE TABLE IF NOT EXISTS lead_notes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lead_notes_lead_id ON lead_notes(lead_id);
+
+-- Google Calendar sync (Workforce Partner scheduling) ──────────────
+-- Links a lead to the calendar event representing its scheduled call or
+-- visit, in either direction: 'app' = HeartBeat created/updated the
+-- event when a status was set to "scheduled"; 'calendar' = a Workforce
+-- Partner created the event by hand and it was fuzzy-matched back to
+-- this lead. The unique index is what makes outbound sync idempotent —
+-- re-syncing the same lead's same event type updates the existing
+-- Google event instead of creating a duplicate.
+CREATE TABLE IF NOT EXISTS lead_calendar_events (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT NOT NULL,
+  event_type TEXT NOT NULL, -- 'call' | 'visit'
+  google_event_id TEXT NOT NULL,
+  calendar_owner_email CITEXT NOT NULL,
+  source TEXT NOT NULL, -- 'app' | 'calendar'
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_calendar_events_google_id ON lead_calendar_events(google_event_id, calendar_owner_email);
+CREATE INDEX IF NOT EXISTS idx_lead_calendar_events_lead_id ON lead_calendar_events(lead_id);
+
+-- One row per Workforce Partner calendar being watched — the sync_token
+-- is the incremental-fetch cursor Google's events.list returns, so a
+-- push notification only has to ask "what changed since sync_token",
+-- never re-scan the whole calendar. channel_id/resource_id/expires_at
+-- track the active push-notification subscription so it can be renewed
+-- before Google expires it.
+CREATE TABLE IF NOT EXISTS calendar_watch_state (
+  calendar_owner_email CITEXT PRIMARY KEY,
+  sync_token TEXT,
+  channel_id TEXT,
+  resource_id TEXT,
+  channel_expires_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Inbound calendar events that couldn't be confidently matched to a
+-- lead (below the fuzzy-match threshold, or two leads scored almost
+-- identically) land here instead of guessing — resolved manually via
+-- the admin panel once that UI exists.
+CREATE TABLE IF NOT EXISTS calendar_sync_review_queue (
+  id TEXT PRIMARY KEY,
+  google_event_id TEXT NOT NULL,
+  calendar_owner_email CITEXT NOT NULL,
+  event_title TEXT,
+  event_type TEXT,
+  candidate_lead_id TEXT,
+  candidate_score REAL,
+  reason TEXT,
+  resolved BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;

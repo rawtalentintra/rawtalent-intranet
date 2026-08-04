@@ -9,6 +9,7 @@ const { initDatabase, getDb } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
 const PgSessionStore = require('./services/sessionStore');
 const webexService = require('./services/webexService');
+const calendarSync = require('./services/leadCalendarSyncService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,7 @@ app.use('/api/leave-requests', require('./routes/leaveRequests'));
 app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/calendar-sync', require('./routes/calendarSync'));
 
 // 'qa_view' gets into the admin panel shell — the panel itself then hides
 // everything except the small set of sections that role is scoped to
@@ -117,6 +119,16 @@ async function start() {
     setInterval(() => {
       webexService.syncCallHistory('auto-sync').catch(err => console.error('Webex CDR auto-sync error:', err.message));
     }, 5 * 60 * 1000);
+  }
+  // Renews Google Calendar push-notification channels before their ~30-day
+  // expiry, and registers new ones for any partner missing a channel (e.g.
+  // right after CALENDAR_PARTNER_MAP is first configured). No-ops entirely
+  // until domain-wide delegation is authorized, so it's always safe to run.
+  if (calendarSync.getPartnerCalendarMap && Object.keys(calendarSync.getPartnerCalendarMap()).length) {
+    calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
+    setInterval(() => {
+      calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
+    }, 12 * 60 * 60 * 1000);
   }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
