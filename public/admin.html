@@ -61,6 +61,9 @@
     #leadsTable th { padding: 6px 7px; font-size: 9.5px; }
     #leadsTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; }
     #leadsTable .lead-badge, #leadsTable .agency-badge { padding: 2px 7px; font-size: 10.5px; }
+    #routeCentresTable th { padding: 6px 7px; font-size: 9.5px; }
+    #routeCentresTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; }
+    #routeCentresTable .lead-badge { padding: 2px 7px; font-size: 10.5px; }
     .leads-filter-bar {
       display: flex; gap: 6px; flex-wrap: wrap;
       padding: 10px 14px; border-bottom: 1px solid var(--gray-200);
@@ -78,7 +81,7 @@
        the data itself (unlike the earlier Suburb table-column fix, where
        truncating the actual data was the bug). */
     .leads-filter-bar select { max-width: 132px; text-overflow: ellipsis; }
-    .leads-filter-bar input#leadsFilterCentre { flex: 0 1 150px; min-width: 110px; width: auto; }
+    .leads-filter-bar input#leadsFilterCentre, .leads-filter-bar input#routeFilterCentre { flex: 0 1 150px; min-width: 110px; width: auto; }
     .leads-stats-bar {
       display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline;
       background: white; border: 1px solid var(--gray-200); border-radius: var(--radius-lg);
@@ -612,30 +615,53 @@
 
         <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
           <div class="leads-filter-bar" style="padding:0 0 12px;border-bottom:none">
+            <input type="text" id="routeFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterRoutePlannerLeads()">
+            <select id="routeFilterPeriod" onchange="filterRoutePlannerLeads()">
+              <option value="all" selected>All time</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="quarter">This quarter</option>
+            </select>
+            <select id="routeFilterPartner" onchange="filterRoutePlannerLeads()">
+              <option value="">WF Partner: any</option>
+            </select>
             <select id="routeFilterState" onchange="filterRoutePlannerLeads()">
               <option value="">State: any</option>
             </select>
             <select id="routeFilterSuburb" onchange="filterRoutePlannerLeads()">
               <option value="">Suburb: any</option>
             </select>
+            <select id="routeFilterAgencyUsage" onchange="filterRoutePlannerLeads()">
+              <option value="">Agency Usage: any</option>
+              <option value="target_temp">Target Temp</option>
+              <option value="high_agency_user">High Agency User</option>
+            </select>
+            <select id="routeFilterLeadCalled" onchange="filterRoutePlannerLeads()">
+              <option value="">Called: any</option>
+              <option value="to_schedule">To schedule</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="done">Called</option>
+            </select>
             <select id="routeFilterVisited" onchange="filterRoutePlannerLeads()">
-              <option value="">Visit status: any</option>
-              <option value="to_schedule">To Schedule</option>
+              <option value="">Visited: any</option>
+              <option value="to_schedule">To schedule</option>
               <option value="scheduled">Scheduled</option>
               <option value="done">Visited</option>
             </select>
-            <select id="routeFilterPartner" onchange="filterRoutePlannerLeads()">
-              <option value="">WF Partner: any</option>
+            <select id="routeFilterProfileCreated" onchange="filterRoutePlannerLeads()">
+              <option value="">Profile: any</option>
+              <option value="pending">Pending</option>
+              <option value="signed">Profile Created</option>
             </select>
             <span id="routeSelectedCount" style="margin-left:auto;font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
-            <table class="data-table data-table-compact">
+            <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
-                <tr><th style="width:28px"></th><th>Centre</th><th>Suburb</th><th>State</th><th>Visit Status</th><th>WF Partner</th></tr>
+                <tr><th style="width:28px"></th><th>Centre</th><th>Address</th><th>Suburb</th><th>State</th><th>Called</th><th>Visited</th><th>Profile</th><th>WF Partner</th></tr>
               </thead>
               <tbody id="routePlannerLeadsBody">
-                <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -4695,38 +4721,57 @@
         if (!mapboxTokenCache) mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json());
         document.getElementById('routePlannerMapboxNotice').style.display = mapboxTokenCache.configured ? 'none' : 'block';
       } catch {
-        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Failed to load centres</td></tr>`;
+        body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">Failed to load centres</td></tr>`;
       }
     }
 
     function filterRoutePlannerLeads() {
+      const centreSearch = document.getElementById('routeFilterCentre').value.trim().toLowerCase();
+      const periodKey = document.getElementById('routeFilterPeriod').value;
+      const partner = document.getElementById('routeFilterPartner').value;
       const state = document.getElementById('routeFilterState').value;
       const suburb = document.getElementById('routeFilterSuburb').value;
+      const agencyUsage = document.getElementById('routeFilterAgencyUsage').value;
+      const leadCalled = document.getElementById('routeFilterLeadCalled').value;
       const visited = document.getElementById('routeFilterVisited').value;
-      const partner = document.getElementById('routeFilterPartner').value;
+      const profileCreated = document.getElementById('routeFilterProfileCreated').value;
+
       let filtered = routePlannerLeads;
+      if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
+      if (periodKey !== 'all') {
+        const { from, to } = salesDashRange(periodKey);
+        filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
+      }
+      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
       if (state) filtered = filtered.filter(l => l.state === state);
       if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
-      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
+      if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
+      if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
       if (visited) filtered = filtered.filter(l => l.centre_visited_status === visited);
+      if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
       renderRoutePlannerLeadsTable(filtered);
     }
 
     function renderRoutePlannerLeadsTable(list) {
       const body = document.getElementById('routePlannerLeadsBody');
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
+        body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
         return;
       }
       body.innerHTML = list.map(l => {
         const checked = routeSelectedOrder.includes(l.id);
-        const meta = CENTRE_VISITED_META[l.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
+        const calledMeta = LEAD_CALLED_META[l.lead_called_status] || LEAD_CALLED_META.to_schedule;
+        const visitedMeta = CENTRE_VISITED_META[l.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
+        const profileMeta = SIGNED_META[l.signed_status] || SIGNED_META.pending;
         return `<tr>
           <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${l.id}', this)"></td>
           <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
+          <td>${escHtml(l.street_address || '—')}</td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
-          <td><span class="lead-badge ${meta.cls}">${escHtml(meta.label)}</span></td>
+          <td><span class="lead-badge ${calledMeta.cls}">${escHtml(calledMeta.label)}</span></td>
+          <td><span class="lead-badge ${visitedMeta.cls}">${escHtml(visitedMeta.label)}</span></td>
+          <td><span class="lead-badge ${profileMeta.cls}">${escHtml(profileMeta.label)}</span></td>
           <td>${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
         </tr>`;
       }).join('');
@@ -4802,9 +4847,13 @@
             <span>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong>${escHtml(b.label)}</strong></span>
           </div>`;
         }
+        const fullAddress = [b.stop.street_address, b.stop.suburb, b.stop.state].filter(Boolean).join(', ');
         return `<div style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0">
           <span>${iconFor.visit}</span>
-          <span>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong> <span style="color:var(--text-muted)">(${escHtml(b.stop.suburb || '')})</span></span>
+          <div>
+            <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong></div>
+            ${fullAddress ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escHtml(fullAddress)}</div>` : ''}
+          </div>
         </div>`;
       }).join('');
 
@@ -4894,8 +4943,29 @@
           const el = document.createElement('div');
           el.style.cssText = `width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;background:${i === 0 ? 'var(--navy)' : 'var(--orange)'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3)`;
           el.textContent = i === 0 ? '🏁' : String(i);
+
+          // Built as DOM nodes (textContent, not innerHTML) rather than an
+          // interpolated HTML string — centre names/addresses are user-
+          // entered data, not markup we should ever be parsing as such.
+          const popupEl = document.createElement('div');
+          popupEl.style.cssText = 'font-size:12.5px;line-height:1.4;max-width:200px';
+          const title = document.createElement('div');
+          title.style.cssText = 'font-weight:700;color:var(--navy)';
+          const isStart = i === 0;
+          const stop = isStart ? null : data.stops[i - 1];
+          title.textContent = isStart ? 'Start' : stop.centre_name;
+          popupEl.appendChild(title);
+          const addressText = isStart ? document.getElementById('routeStartAddress').value.trim()
+            : [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ');
+          if (addressText) {
+            const addr = document.createElement('div');
+            addr.style.cssText = 'color:var(--text-muted);margin-top:2px';
+            addr.textContent = addressText;
+            popupEl.appendChild(addr);
+          }
+
           new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat])
-            .setPopup(new mapboxgl.Popup({ offset: 16 }).setText(i === 0 ? 'Start' : data.stops[i - 1].centre_name))
+            .setPopup(new mapboxgl.Popup({ offset: 16 }).setDOMContent(popupEl))
             .addTo(routeMapInstance);
           bounds.extend([c.lng, c.lat]);
         });
