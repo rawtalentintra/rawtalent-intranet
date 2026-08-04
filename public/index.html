@@ -2557,6 +2557,10 @@
             .map(m => m.name)
             .sort((a, b) => a.localeCompare(b));
           names.forEach((name, i) => { map[name] = LEAVE_PERSON_COLORS[i % LEAVE_PERSON_COLORS.length]; });
+          // Requested swap — Prince and Sophia's auto-assigned colors felt
+          // backwards to them, so they trade slots here rather than
+          // reshuffling everyone else's colors to fix it.
+          [map.Prince, map.Sophia] = [map.Sophia, map.Prince];
         } catch { /* falls back to hashPersonColor below for everyone */ }
         leaveColorMap = map;
         return map;
