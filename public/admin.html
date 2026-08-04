@@ -4859,6 +4859,8 @@
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to generate route', 'error'); return; }
+        data.departureTime = departure.toISOString();
+        data.startLabel = startAddress;
         currentRouteResult = data;
         renderRouteResults(data);
       } catch { toast('Network error', 'error'); }
@@ -4899,7 +4901,13 @@
           </div>`;
         }
         const fullAddress = formatLeadAddress(b.stop);
-        return `<div style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0">
+        return `<div class="route-visit-row" draggable="true" data-stop-id="${b.stop.id}"
+            ondragstart="onRouteStopDragStart(event, '${b.stop.id}')"
+            ondragover="onRouteStopDragOver(event)"
+            ondragleave="onRouteStopDragLeave(event)"
+            ondrop="onRouteStopDrop(event, '${b.stop.id}')"
+            style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0;cursor:grab;border-radius:0 var(--radius) var(--radius) 0;transition:background .12s">
+          <span style="color:var(--gray-400);letter-spacing:-1px" title="Drag to reorder">⠿⠿</span>
           <span>${iconFor.visit}</span>
           <div>
             <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong>${b.waitMinutes > 1 ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400">(rounded to a clean start — ${b.waitMinutes} min wait)</span>` : ''}</div>
@@ -4910,6 +4918,77 @@
 
       document.getElementById('routeSyncStatus').style.display = 'none';
       renderRouteMap(data);
+    }
+
+    // Drag-to-reorder — lets a partner override the optimizer with local
+    // knowledge (a closed road, an urgent visit that should come first)
+    // without losing the schedule math. Only the visit rows are drag
+    // targets; drive/lunch blocks are derived, not draggable themselves.
+    let routeDragStopId = null;
+
+    function onRouteStopDragStart(evt, stopId) {
+      routeDragStopId = stopId;
+      evt.dataTransfer.effectAllowed = 'move';
+    }
+    function onRouteStopDragOver(evt) {
+      evt.preventDefault();
+      evt.dataTransfer.dropEffect = 'move';
+      evt.currentTarget.style.background = 'var(--gray-100)';
+    }
+    function onRouteStopDragLeave(evt) {
+      evt.currentTarget.style.background = '';
+    }
+    function onRouteStopDrop(evt, targetStopId) {
+      evt.preventDefault();
+      evt.currentTarget.style.background = '';
+      if (!routeDragStopId || routeDragStopId === targetStopId || !currentRouteResult) { routeDragStopId = null; return; }
+
+      const stops = currentRouteResult.stops.slice();
+      const fromIdx = stops.findIndex(s => s.id === routeDragStopId);
+      const toIdx = stops.findIndex(s => s.id === targetStopId);
+      routeDragStopId = null;
+      if (fromIdx === -1 || toIdx === -1) return;
+
+      const [moved] = stops.splice(fromIdx, 1);
+      stops.splice(toIdx, 0, moved);
+      rescheduleRoute(stops);
+    }
+
+    // Recomputes the schedule for a manually reordered stop list. When
+    // Mapbox is configured, leg times come from the full distance matrix
+    // /optimize already returned (every stop's matrixIndex was stamped on
+    // it there) — purely a client-side lookup, no network call needed to
+    // work out the new drive times. The /reschedule call itself just re-
+    // runs the same itinerary/lunch-break/rounding logic /optimize used,
+    // so the two never drift apart into two different scheduling rules.
+    async function rescheduleRoute(newStopsOrder) {
+      let legMinutes = newStopsOrder.map(() => null);
+      let legDistancesKm = null;
+      if (currentRouteResult.mapboxConfigured && currentRouteResult.matrix) {
+        legMinutes = [];
+        legDistancesKm = [];
+        let prevIdx = 0;
+        for (const stop of newStopsOrder) {
+          legMinutes.push(currentRouteResult.matrix.durationsMinutes[prevIdx][stop.matrixIndex]);
+          legDistancesKm.push(currentRouteResult.matrix.distancesKm[prevIdx][stop.matrixIndex]);
+          prevIdx = stop.matrixIndex;
+        }
+      }
+      try {
+        const res = await fetch('/api/route-planner/reschedule', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stops: newStopsOrder, legMinutes, legDistancesKm,
+            departureTime: currentRouteResult.departureTime, startLabel: currentRouteResult.startLabel
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to reorder stops', 'error'); return; }
+        currentRouteResult.stops = newStopsOrder;
+        currentRouteResult.order = newStopsOrder.map(s => s.id);
+        currentRouteResult.itinerary = data.itinerary;
+        renderRouteResults(currentRouteResult);
+      } catch { toast('Network error reordering stops', 'error'); }
     }
 
     // No API key needed — Google Maps' own directions URL scheme accepts

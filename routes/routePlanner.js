@@ -64,6 +64,13 @@ router.post('/optimize', async (req, res) => {
 
     const coords = [startCoord, ...stops.map(s => ({ lat: s.latitude, lng: s.longitude }))];
     const { durationsMinutes, distancesKm } = await mapboxService.getDistanceMatrix(coords);
+    // Stamped onto each stop (index into the coords/matrix arrays above, 0
+    // being the start point) so the client can recompute leg times for any
+    // manual drag-to-reorder entirely locally — no need to re-hit Mapbox
+    // just because the visiting order changed, the full pairwise matrix
+    // already has every distance/duration it could need.
+    stops.forEach((s, i) => { s.matrixIndex = i + 1; });
+
     const stopIndices = stops.map((_, i) => i + 1);
     const order = optimizeRoute(durationsMinutes, 0, stopIndices);
     const orderedStops = order.map(idx => stops[idx - 1]);
@@ -78,7 +85,32 @@ router.post('/optimize', async (req, res) => {
     }
 
     const itinerary = buildItinerary({ stops: orderedStops, legMinutes, legDistancesKm, departureTime, startLabel: startAddress });
-    res.json({ mapboxConfigured: true, order: orderedStops.map(s => s.id), stops: orderedStops, startCoord, itinerary });
+    res.json({
+      mapboxConfigured: true, order: orderedStops.map(s => s.id), stops: orderedStops, startCoord, itinerary,
+      matrix: { durationsMinutes, distancesKm }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recomputes the schedule for a manually reordered stop list — no Mapbox
+// calls, just re-runs the same pure itinerary builder /optimize used, over
+// leg times the client already worked out from the matrix /optimize
+// returned. Lets drag-to-reorder feel instant.
+router.post('/reschedule', (req, res) => {
+  try {
+    const { stops, legMinutes, legDistancesKm, departureTime, startLabel } = req.body;
+    if (!Array.isArray(stops) || !stops.length) return res.status(400).json({ error: 'No stops to schedule' });
+    if (!departureTime) return res.status(400).json({ error: 'Departure time is required' });
+    const itinerary = buildItinerary({
+      stops,
+      legMinutes: Array.isArray(legMinutes) ? legMinutes : stops.map(() => null),
+      legDistancesKm: Array.isArray(legDistancesKm) ? legDistancesKm : null,
+      departureTime,
+      startLabel: startLabel || 'Start'
+    });
+    res.json({ itinerary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
