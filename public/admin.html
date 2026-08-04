@@ -374,9 +374,19 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Leave Requests</div>
-            <div class="admin-page-sub">Full history, for visibility — approve/reject happens in the main app, by the actual resolved approver</div>
+            <div class="admin-page-sub">Full history, plus approvals and the team calendar — same actions as the main app, just from here too</div>
           </div>
         </div>
+
+        <div id="leaveApprovalsWrap"></div>
+
+        <div class="admin-table-card" style="margin-bottom:16px">
+          <div style="padding:14px 20px;border-bottom:1px solid var(--gray-200);font-weight:700;color:var(--navy);font-size:14px">Team Leave Calendar</div>
+          <div style="padding:16px 20px">
+            <div id="leaveTeamCalendarWrap"><div class="loading-spinner"><div class="spinner"></div></div></div>
+          </div>
+        </div>
+
         <div class="admin-table-card">
           <div style="overflow-x:auto">
             <table class="data-table">
@@ -3715,7 +3725,133 @@
       approved: { label: 'Approved', color: '#15803d' },
       rejected: { label: 'Rejected', color: '#b91c1c' }
     };
+
+    // ── Leave approvals + Team Leave Calendar — mirrors the main app's
+    // Leave Request tab, restricted to admin/super_admin here since this
+    // whole section is already gated to that (see RESTRICTED_ROLE_SECTIONS).
+    // Approve/reject still goes through the same server-side check as the
+    // main app (leaveService.decide() only lets the actual resolved
+    // approver for that specific request succeed) — this just adds the UI.
+    let pendingLeaveApprovalsAdmin = [];
+    async function loadLeaveApprovalsAdmin() {
+      try {
+        pendingLeaveApprovalsAdmin = await fetch('/api/leave-requests/pending').then(r => r.json());
+      } catch { pendingLeaveApprovalsAdmin = []; }
+      renderLeaveApprovalsAdmin();
+    }
+    function renderLeaveApprovalsAdmin() {
+      const wrap = document.getElementById('leaveApprovalsWrap');
+      if (!wrap) return;
+      if (!pendingLeaveApprovalsAdmin.length) { wrap.innerHTML = ''; return; }
+      wrap.innerHTML = `
+        <div class="admin-table-card" style="margin-bottom:16px;padding:16px 20px">
+          <div style="font-weight:700;color:var(--navy);font-size:14px;margin-bottom:10px">Pending Your Approval</div>
+          ${pendingLeaveApprovalsAdmin.map(l => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:10px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:4px">${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+              <div style="font-size:12.5px;color:var(--text);margin-bottom:10px">${escHtml(l.reason)}</div>
+              <div style="display:flex;gap:8px">
+                <button onclick="decideLeaveRequestAdmin('${l.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+                <button onclick="decideLeaveRequestAdmin('${l.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+    async function decideLeaveRequestAdmin(id, decision) {
+      let note = '';
+      if (decision === 'reject') note = prompt('Reason for rejecting (optional):') || '';
+      try {
+        const res = await fetch(`/api/leave-requests/${id}/${decision}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit decision', 'error'); return; }
+        toast(decision === 'approve' ? 'Leave approved' : 'Leave rejected', 'success');
+        loadLeaveApprovalsAdmin();
+        loadLeaveRequestsAdmin();
+        loadLeaveTeamCalendarAdmin();
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function toDateStr(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function daysInMonthGrid(year, month) {
+      const firstOfMonth = new Date(year, month, 1);
+      const gridStart = new Date(year, month, 1 - firstOfMonth.getDay());
+      const cells = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + i);
+        cells.push({ date: d, dateStr: toDateStr(d), inMonth: d.getMonth() === month });
+      }
+      return cells;
+    }
+    let leaveTeamMonthAdmin = new Date();
+    let leaveTeamDataAdmin = [];
+    async function loadLeaveTeamCalendarAdmin() {
+      const year = leaveTeamMonthAdmin.getFullYear(), month = leaveTeamMonthAdmin.getMonth();
+      const from = toDateStr(new Date(year, month, 1));
+      const to = toDateStr(new Date(year, month + 1, 0));
+      try {
+        leaveTeamDataAdmin = await fetch(`/api/leave-requests/calendar?from=${from}&to=${to}`).then(r => r.json());
+      } catch { leaveTeamDataAdmin = []; }
+      await ensureLeaveColorMap();
+      renderLeaveTeamCalendarAdmin();
+    }
+    function changeLeaveTeamMonthAdmin(delta) {
+      leaveTeamMonthAdmin.setMonth(leaveTeamMonthAdmin.getMonth() + delta);
+      loadLeaveTeamCalendarAdmin();
+    }
+    function renderLeaveTeamCalendarAdmin() {
+      const wrap = document.getElementById('leaveTeamCalendarWrap');
+      if (!wrap) return;
+      const year = leaveTeamMonthAdmin.getFullYear(), month = leaveTeamMonthAdmin.getMonth();
+      const cells = daysInMonthGrid(year, month);
+      const monthLabel = leaveTeamMonthAdmin.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const byDate = {};
+      leaveTeamDataAdmin.forEach(l => {
+        const fullName = l.user_name || l.user_email;
+        const d = new Date(l.start_date + 'T00:00:00');
+        const end = new Date(l.end_date + 'T00:00:00');
+        while (d <= end) {
+          const ds = toDateStr(d);
+          (byDate[ds] = byDate[ds] || []).push({ name: fullName.split(' ')[0], key: fullName });
+          d.setDate(d.getDate() + 1);
+        }
+      });
+      const cellsHtml = cells.map(c => {
+        const people = byDate[c.dateStr] || [];
+        return `<div style="min-height:58px;border:1px solid var(--gray-100);border-radius:6px;padding:4px;opacity:${c.inMonth ? 1 : 0.35}">
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:3px">${c.date.getDate()}</div>
+          ${people.map(p => {
+            const col = leavePersonColor(p.key);
+            return `<div style="font-size:10px;font-weight:600;background:${col.bg};color:${col.text};border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(p.name)} on Leave</div>`;
+          }).join('')}
+        </div>`;
+      }).join('');
+      wrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <button onclick="changeLeaveTeamMonthAdmin(-1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">‹</button>
+          <div style="font-weight:700;font-size:14px;color:var(--navy)">${monthLabel}</div>
+          <button onclick="changeLeaveTeamMonthAdmin(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;font-weight:700;color:var(--navy);text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:.02em">
+          ${dayNames.map(d => `<div style="background:#eef2ff;border-radius:5px;padding:4px 0">${d}</div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cellsHtml}</div>
+      `;
+    }
+
     async function loadLeaveRequestsAdmin() {
+      loadLeaveApprovalsAdmin();
+      leaveTeamMonthAdmin = new Date();
+      loadLeaveTeamCalendarAdmin();
       const body = document.getElementById('leaveRequestsTableBody');
       body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
