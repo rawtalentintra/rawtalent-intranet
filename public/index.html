@@ -104,6 +104,28 @@
     }
     .sidebar-collapse-toggle:hover { background: var(--gray-100); }
     .app-shell.sidebar-collapsed .sidebar-collapse-toggle { left: -13px; transform: rotate(180deg); }
+
+    /* Mobile nav — below 900px the sidebar becomes a slide-in drawer
+       instead of a permanent 216px column, opened via a hamburger button
+       in the navbar. .mobile-sidebar-toggle/.mobile-sidebar-overlay base
+       (display:none) come from style.css, shared with admin.html's
+       identical drawer pattern — this block only adds the parts specific
+       to .sidebar-nav/.app-shell's different class names. Uses a separate
+       .mobile-open class (not .collapsed, which is the desktop
+       collapse/expand state) so the two mechanisms can't fight each other
+       if a desktop-collapsed sidebar is later viewed on a narrow screen. */
+    @media (max-width: 900px) {
+      .sidebar-nav {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 300;
+        width: 260px !important; padding: 20px 12px !important;
+        border-right: 1px solid #c7d2fe !important;
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        overflow-y: auto;
+      }
+      .sidebar-nav.mobile-open { transform: translateX(0); }
+      .sidebar-collapse-toggle { display: none; }
+    }
     .mode-tab {
       padding: 9px 16px;
       border-radius: 10px;
@@ -673,6 +695,7 @@
 <body>
 
   <nav class="navbar">
+    <button class="mobile-sidebar-toggle" onclick="toggleMobileSidebar()" aria-label="Open menu">☰</button>
     <a class="nav-brand" href="/">
       <img src="/images/logo-dark-bg.png" alt="RawTalent" height="28" style="display:block">
       <span class="nav-tag">HeartBeat</span>
@@ -683,7 +706,7 @@
           🔔
           <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
         </button>
-        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
+        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:min(360px, calc(100vw - 24px));max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
           <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
             <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
             <div style="display:flex;gap:10px;align-items:center">
@@ -728,6 +751,8 @@
     <span id="viewBannerText"></span>
     <span style="font-size:9.5px;font-weight:400;opacity:.75;margin-left:6px">— Users will never see the Admin button.</span>
   </div>
+
+  <div class="mobile-sidebar-overlay" id="mobileSidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
   <div class="app-shell">
     <button class="sidebar-collapse-toggle" id="sidebarCollapseToggle" onclick="toggleDesktopSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
@@ -1447,12 +1472,24 @@
       localStorage.setItem('hbSidebarCollapsed', collapsed ? '1' : '0');
     }
 
+    // Mobile nav drawer — separate from the desktop collapse above (see the
+    // .mobile-open CSS comment near .sidebar-nav for why they're distinct).
+    function toggleMobileSidebar() {
+      document.getElementById('sidebarNav').classList.toggle('mobile-open');
+      document.getElementById('mobileSidebarOverlay').classList.toggle('open');
+    }
+    function closeMobileSidebar() {
+      document.getElementById('sidebarNav').classList.remove('mobile-open');
+      document.getElementById('mobileSidebarOverlay').classList.remove('open');
+    }
+
     // ── Mode ──────────────────────────────────────────────────────
     function setMode(mode) {
       // A pending debounced search from the previous tab must not fire after
       // switching away — it renders into the same #resultsList every view
       // shares, so it would silently overwrite whatever tab is now active.
       clearTimeout(searchTimer);
+      closeMobileSidebar();
       currentMode = mode;
       const isAI = mode === 'ai';
       const isAnnouncements = mode === 'announcements';
@@ -2611,10 +2648,14 @@
           <div style="font-weight:700;font-size:14px;color:var(--navy)">${monthLabel}</div>
           <button onclick="changeLeaveTeamMonth(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;font-weight:700;color:var(--navy);text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:.02em">
-          ${dayNames.map(d => `<div style="background:#eef2ff;border-radius:5px;padding:4px 0">${d}</div>`).join('')}
+        <div style="overflow-x:auto">
+          <div style="min-width:560px">
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;font-weight:700;color:var(--navy);text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:.02em">
+              ${dayNames.map(d => `<div style="background:#eef2ff;border-radius:5px;padding:4px 0">${d}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cellsHtml}</div>
+          </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cellsHtml}</div>
       `;
     }
 
