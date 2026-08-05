@@ -6,12 +6,18 @@ const path = require('path');
 const multer = require('multer');
 const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
+const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
 const { logActivity } = require('../services/activityLog');
 const { invalidateUserCache } = require('../config/passport');
 const { BUCKETS, uploadBuffer, extForMimetype, remove: removeFile } = require('../services/storageService');
+
+function getAnthropicClient() {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -165,6 +171,45 @@ router.put('/articles/:id', articleAccess, async (req, res) => {
   } catch (err) {
     console.error('Update article error:', err);
     res.status(500).json({ error: err.message || 'Failed to update article' });
+  }
+});
+
+// Generates a plain-English summary of what changed between two versions of
+// an article, for the "Announce Changes" flow — the admin previews/edits it
+// before it's actually posted as a real Announcement, so this endpoint just
+// returns a draft rather than writing anything itself. Deliberately called
+// on-demand (after a save, only if the admin clicks Announce Changes) rather
+// than generated automatically inside PUT /articles/:id above, so routine
+// saves that nobody intends to announce don't all pay for an AI call.
+router.post('/articles/:id/summarize-changes', articleAccess, async (req, res) => {
+  const { oldTitle, oldContent, newTitle, newContent } = req.body;
+  if (!newContent) return res.status(400).json({ error: 'newContent is required' });
+  const client = getAnthropicClient();
+  if (!client) return res.status(500).json({ error: 'AI is not configured — set ANTHROPIC_API_KEY.' });
+  try {
+    // Same HTML-stripping approach already used elsewhere (aiService.js,
+    // callGradingService.js) to turn Jodit's rich-text HTML into plain text
+    // before it goes into a prompt.
+    const strip = (html) => (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const oldText = strip(oldContent).slice(0, 6000);
+    const newText = strip(newContent).slice(0, 6000);
+
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 220,
+      system: `You write short, plain-English change summaries for RawTalent's internal knowledge base, so staff can see what's new in an article without re-reading the whole thing. One to three sentences, factual and specific — name the actual thing that changed (a step added, a number or date updated, a broken link fixed, a new section) rather than vague language like "content was updated". Write in Australian English (e.g. "organise", "recognise", "centre"). If the title changed, mention that too. Respond with ONLY the summary text, nothing else.`,
+      messages: [{
+        role: 'user',
+        content: `Article title: ${newTitle || oldTitle}${oldTitle && oldTitle !== newTitle ? ` (previously titled: ${oldTitle})` : ''}\n\nPREVIOUS VERSION:\n${oldText || '(no previous content on file)'}\n\nNEW VERSION:\n${newText}\n\nSummarise what changed, for a staff announcement.`
+      }]
+    });
+    const textBlock = response.content.find(b => b.type === 'text');
+    const summary = textBlock?.text?.trim();
+    if (!summary) return res.status(500).json({ error: 'Could not generate a summary — please try again or write one manually.' });
+    res.json({ summary });
+  } catch (err) {
+    console.error('Summarize article changes error:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate summary' });
   }
 });
 

@@ -825,6 +825,7 @@
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn-secondary" id="viewLogsBtn" style="display:none" onclick="openLogsModal()">📋 Logs</button>
+            <button class="btn-secondary" id="announceChangesBtn" style="display:none;color:var(--orange);border-color:var(--orange)" onclick="openAnnounceChangesModal()">📣 Announce Changes</button>
             <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
             <button class="btn-add" onclick="saveArticle()">💾 Save Article</button>
           </div>
@@ -1990,6 +1991,10 @@
       </div>
       <div class="modal-body">
         <div class="form-group-modal">
+          <label class="form-label-modal">Title</label>
+          <input type="text" id="announcementTitle" class="form-control" placeholder="Short summary — this is what shows in the notification bell" maxlength="120">
+        </div>
+        <div class="form-group-modal">
           <label class="form-label-modal">Message</label>
           <textarea id="announcementMessage" class="form-control" style="min-height:100px;resize:vertical" placeholder="What should everyone know?"></textarea>
         </div>
@@ -2001,6 +2006,34 @@
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeAnnouncementModal()">Cancel</button>
         <button class="btn-add" onclick="submitAnnouncement()">Send Announcement</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Announce Changes Modal — preview/edit an AI-drafted "what changed"
+       summary for an edited article before it's posted as a real
+       Announcement. See saveArticle()/openAnnounceChangesModal(). -->
+  <div class="modal-overlay" id="announceChangesModal" onclick="if(event.target===this)closeAnnounceChangesModal()">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div class="modal-title">Announce Changes</div>
+        <button class="modal-close" onclick="closeAnnounceChangesModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align:center;padding:4px 0 16px">
+          <div style="font-size:32px;line-height:1;margin-bottom:8px">📝</div>
+          <div style="font-weight:800;font-size:15px;color:var(--navy)">Article Updated!</div>
+          <div id="announceChangesArticleTitle" style="font-weight:700;color:var(--orange);font-size:13.5px;margin-top:4px"></div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">What changed <span class="optional">(AI-drafted — edit before posting)</span></label>
+          <textarea id="announceChangesSummary" class="form-control" style="min-height:110px;resize:vertical" placeholder="Generating summary…" disabled></textarea>
+        </div>
+        <div id="announceChangesLoading" style="text-align:center;padding:6px 0;color:var(--text-muted);font-size:12.5px">✨ Generating summary…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeAnnounceChangesModal()">Cancel</button>
+        <button class="btn-add" id="announceChangesPostBtn" onclick="postAnnounceChanges()" disabled>📣 Post Announcement</button>
       </div>
     </div>
   </div>
@@ -2364,6 +2397,12 @@
     let allArticles = [];
     let allUsers = [];
     let editingArticleId = null;
+    // Captured when an existing article is loaded into the editor, so a
+    // later save can tell what actually changed — needed for "Announce
+    // Changes" (see saveArticle()/openAnnounceChangesModal()). Cleared on
+    // any transition away from editing an existing article.
+    let originalArticleSnapshot = null;
+    let lastSavedChangeContext = null;
     let confirmCallback = null;
     let joditEditor = null;
     let selectedRelated = []; // { id, title }
@@ -2738,6 +2777,7 @@
     }
 
     function openAnnouncementModal() {
+      document.getElementById('announcementTitle').value = '';
       document.getElementById('announcementMessage').value = '';
       document.getElementById('announcementSendAt').value = '';
       document.getElementById('announcementModal').classList.add('open');
@@ -2747,19 +2787,73 @@
       document.getElementById('announcementModal').classList.remove('open');
     }
     async function submitAnnouncement() {
+      const title = document.getElementById('announcementTitle').value.trim();
       const message = document.getElementById('announcementMessage').value.trim();
+      if (!title) { toast('Add a title first', 'error'); return; }
       if (!message) { toast('Write a message first', 'error'); return; }
       const sendAtLocal = document.getElementById('announcementSendAt').value;
       const send_at = sendAtLocal ? new Date(sendAtLocal).toISOString() : null;
       try {
         const res = await fetch('/api/notifications/announcements', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, send_at })
+          body: JSON.stringify({ title, message, send_at })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to send', 'error'); return; }
         toast(send_at ? 'Announcement scheduled' : 'Announcement sent', 'success');
         closeAnnouncementModal();
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Announce Changes (article edit → AI summary → real announcement) ──
+    async function openAnnounceChangesModal() {
+      if (!lastSavedChangeContext) return;
+      document.getElementById('announceChangesArticleTitle').textContent = lastSavedChangeContext.title;
+      const textarea = document.getElementById('announceChangesSummary');
+      const postBtn = document.getElementById('announceChangesPostBtn');
+      textarea.value = '';
+      textarea.disabled = true;
+      postBtn.disabled = true;
+      document.getElementById('announceChangesLoading').style.display = 'block';
+      document.getElementById('announceChangesModal').classList.add('open');
+      try {
+        const res = await fetch(`/api/admin/articles/${lastSavedChangeContext.articleId}/summarize-changes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            oldTitle: lastSavedChangeContext.oldTitle,
+            oldContent: lastSavedChangeContext.oldContent,
+            newTitle: lastSavedChangeContext.title,
+            newContent: lastSavedChangeContext.newContent
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to generate summary', 'error'); }
+        else textarea.value = data.summary;
+      } catch { toast('Network error', 'error'); }
+      textarea.disabled = false;
+      postBtn.disabled = false;
+      document.getElementById('announceChangesLoading').style.display = 'none';
+    }
+    function closeAnnounceChangesModal() {
+      document.getElementById('announceChangesModal').classList.remove('open');
+    }
+    async function postAnnounceChanges() {
+      if (!lastSavedChangeContext) return;
+      const summary = document.getElementById('announceChangesSummary').value.trim();
+      if (!summary) { toast('Add a summary before posting', 'error'); return; }
+      try {
+        const res = await fetch('/api/notifications/announcements', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: `📝 Article Updated: ${lastSavedChangeContext.title}`, message: summary })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to post announcement', 'error'); return; }
+        toast('Announcement posted!', 'success');
+        closeAnnounceChangesModal();
+        const announceBtn = document.getElementById('announceChangesBtn');
+        if (announceBtn) announceBtn.style.display = 'none';
+        lastSavedChangeContext = null;
         loadNotifications();
       } catch { toast('Network error', 'error'); }
     }
@@ -3420,6 +3514,10 @@
       try {
         const a = await fetch(`/api/admin/articles/${id}`).then(r => r.json());
         editingArticleId = id;
+        originalArticleSnapshot = { title: a.title || '', content: a.content || '' };
+        lastSavedChangeContext = null;
+        const announceBtn = document.getElementById('announceChangesBtn');
+        if (announceBtn) announceBtn.style.display = 'none';
         document.getElementById('articleFormTitle').textContent = 'Edit Article';
         document.getElementById('articleFormSub').textContent = 'Update this knowledge base article';
         document.getElementById('editingArticleId').value = id;
@@ -3474,6 +3572,10 @@
 
     function resetArticleForm() {
       editingArticleId = null;
+      originalArticleSnapshot = null;
+      lastSavedChangeContext = null;
+      const announceBtn = document.getElementById('announceChangesBtn');
+      if (announceBtn) announceBtn.style.display = 'none';
       document.getElementById('articleFormTitle').textContent = 'New Article';
       document.getElementById('articleFormSub').textContent = 'Create a new knowledge base article';
       document.getElementById('editingArticleId').value = '';
@@ -3544,10 +3646,35 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
         toast(id ? 'Article updated!' : 'Article created!', 'success');
-        editingArticleId = null;
-        resetArticleForm();
         await loadArticles();
-        showSection('articles', document.querySelector('[onclick*="\'articles\'"]'));
+        if (id) {
+          // Stay on the edit page (rather than the usual navigate-back-to-
+          // list) so "Announce Changes" is available right where the admin
+          // is looking — only offered when something actually changed, not
+          // on every save (e.g. re-saving with no edits, or a brand-new
+          // article, has nothing to announce).
+          const changed = originalArticleSnapshot &&
+            (originalArticleSnapshot.title !== title || originalArticleSnapshot.content !== content);
+          const announceBtn = document.getElementById('announceChangesBtn');
+          if (changed) {
+            lastSavedChangeContext = {
+              articleId: id, title,
+              oldTitle: originalArticleSnapshot.title, oldContent: originalArticleSnapshot.content,
+              newContent: content
+            };
+            if (announceBtn) announceBtn.style.display = 'inline-flex';
+          } else {
+            lastSavedChangeContext = null;
+            if (announceBtn) announceBtn.style.display = 'none';
+          }
+          // Baseline resets to what was just saved, so a second save in the
+          // same session only offers to announce what changed since then.
+          originalArticleSnapshot = { title, content };
+        } else {
+          editingArticleId = null;
+          resetArticleForm();
+          showSection('articles', document.querySelector('[onclick*="\'articles\'"]'));
+        }
       } catch { toast('Network error', 'error'); }
     }
 
