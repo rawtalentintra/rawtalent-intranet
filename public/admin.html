@@ -5577,7 +5577,15 @@
           label: 'Bookings List',
           dated: true,
           idField: 'clientBookingId',
+          statusField: 'statusId',
+          searchPlaceholder: 'Search client or candidate…',
+          noun: 'bookings',
           searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
+          datePresets: [
+            { id: 'today', label: 'Today', default: true, range: dayRange(0) },
+            { id: 'yesterday', label: 'Yesterday', range: dayRange(-1) },
+            { id: 'week', label: 'This Week', range: payPeriodRange(0) }
+          ],
           extraFilters: [
             { id: 'unassigned', label: 'Unassigned only', type: 'checkbox', test: r => !r.assignedUserId }
           ],
@@ -5639,7 +5647,7 @@
         label: 'Timesheets', icon: '🕒',
         sub: 'Logged hours against bookings in the RawTalent app.',
         dateField: 'startTime', dateFieldLabel: 'shift start time',
-        trendLabel: 'Hours', trendValueField: 'duration',
+        trendLabel: 'Hours', trendValueField: timesheetHours,
         needsLookups: true,
         extendedPeriod: true,
         searchTest: (r, q) => candidateName(r.userId).toLowerCase().includes(q),
@@ -5649,11 +5657,11 @@
           { id: 'paid', label: 'Paid only', type: 'checkbox', test: r => r.isPaid }
         ],
         kpis: rows => {
-          const totalHours = rows.reduce((sum, r) => sum + (r.duration || 0), 0);
-          const unpaidHours = rows.filter(r => !r.isPaid).reduce((sum, r) => sum + (r.duration || 0), 0);
+          const totalHours = rows.reduce((sum, r) => sum + timesheetHours(r), 0);
+          const unpaidHours = rows.filter(r => !r.isPaid).reduce((sum, r) => sum + timesheetHours(r), 0);
           return [
             { label: 'Total Timesheets', value: rows.length, hint: 'Matching current filters' },
-            { label: 'Total Hours', value: totalHours.toFixed(1), hint: 'Sum of logged duration' },
+            { label: 'Total Hours', value: totalHours.toFixed(1), hint: 'Start→end minus lunch break' },
             { label: 'Avg Hours / Timesheet', value: rows.length ? (totalHours / rows.length).toFixed(1) : '0.0', hint: 'Average shift length logged' },
             { label: 'Invoiced', value: pct(rows.filter(r => r.isInvoiced).length, rows.length) + '%', hint: `${rows.filter(r => r.isInvoiced).length} of ${rows.length} timesheets` },
             { label: 'Paid', value: pct(rows.filter(r => r.isPaid).length, rows.length) + '%', hint: `${rows.filter(r => r.isPaid).length} of ${rows.length} timesheets` },
@@ -5663,24 +5671,64 @@
         breakdowns: [
           { title: 'By Status', sub: 'Raw status codes', compute: rows => computeCodeBreakdown(rows, 'status', 'Status') },
           { title: 'Invoiced / Paid', sub: 'Billing reconciliation at a glance', compute: computeInvoicePaidBreakdown },
-          { title: 'Hours by Day of Week', sub: 'When logged shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'startTime', r => r.duration) }
+          { title: 'Hours by Day of Week', sub: 'When logged shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'startTime', timesheetHours) }
         ],
         leaderboards: [
-          { title: 'Top Candidates by Hours', sub: 'Highest logged hours in this set', compute: rows => computeTopByField(rows, 'userId', candidateName, r => r.duration, 8) },
-          { title: 'Top Candidates by Unpaid Hours', sub: 'Owed the most in this set', compute: rows => computeTopByField(rows.filter(r => !r.isPaid), 'userId', candidateName, r => r.duration, 8) }
+          { title: 'Top Candidates by Hours', sub: 'Highest logged hours in this set', compute: rows => computeTopByField(rows, 'userId', candidateName, timesheetHours, 8) },
+          { title: 'Top Candidates by Unpaid Hours', sub: 'Owed the most in this set', compute: rows => computeTopByField(rows.filter(r => !r.isPaid), 'userId', candidateName, timesheetHours, 8) }
         ],
         columns: [
           { header: 'Candidate', render: r => escHtml(candidateName(r.userId)) },
           { header: 'Booking ID', render: r => escHtml(r.bookingId ?? '—') },
           { header: 'Start', render: r => fmtDate(r.startTime) },
           { header: 'End', render: r => fmtDate(r.endTime) },
-          { header: 'Duration', render: r => (r.duration ?? 0) + 'h' },
+          { header: 'Hours', render: r => timesheetHours(r).toFixed(1) + 'h' },
           { header: 'Lunch Break', render: r => (r.lunchBreak ?? 0) + 'm' },
           { header: 'Status', render: r => escHtml(r.status ?? '—') },
           { header: 'Invoiced', render: r => r.isInvoiced ? '✅' : '—' },
           { header: 'Paid', render: r => r.isPaid ? '✅' : '—' },
           { header: 'Comment', render: r => escHtml(r.comment || '—') }
-        ]
+        ],
+        // Weekly pay-period view: educators are paid Fridays for the week
+        // prior, and timesheets get finalized/approved the Thursday before
+        // that payout — so "Current Pay Period" (the most recently completed
+        // Mon-Sun week) is the one that actually needs reviewing right now,
+        // regardless of which day of the current week it happens to be.
+        hasListView: true,
+        listView: {
+          label: 'Timesheet List',
+          dated: true,
+          idField: 'timeSheetDetailsId',
+          statusField: 'status',
+          searchPlaceholder: 'Search candidate…',
+          noun: 'timesheets',
+          searchTest: (r, q) => candidateName(r.userId).toLowerCase().includes(q),
+          datePresets: [
+            { id: 'payperiod', label: 'Current Pay Period', default: true, range: payPeriodRange(1) },
+            { id: 'thisweek', label: 'This Week', range: payPeriodRange(0) },
+            { id: 'prevpayperiod', label: 'Previous Pay Period', range: payPeriodRange(2) }
+          ],
+          extraFilters: [
+            { id: 'unpaid', label: 'Unpaid only', type: 'checkbox', test: r => !r.isPaid },
+            { id: 'unreviewed', label: 'Not yet reviewed', type: 'checkbox', test: r => !r.approvedRejectedUserId }
+          ],
+          columns: [
+            { header: 'Candidate', render: r => escHtml(candidateName(r.userId)) },
+            { header: 'Booking ID', render: r => escHtml(r.bookingId ?? '—') },
+            { header: 'Shift', render: r => timesheetTimeRange(r) },
+            { header: 'Hours', render: r => timesheetHours(r).toFixed(1) + 'h' },
+            { header: 'Paid', render: r => r.isPaid ? '✅ Paid' : '⚠️ Unpaid' },
+            { header: 'Status', render: r => `Status ${r.status ?? '—'}` }
+          ],
+          renderSummary: rows => {
+            const totalHours = rows.reduce((sum, r) => sum + timesheetHours(r), 0);
+            const unpaid = rows.filter(r => !r.isPaid);
+            const unpaidHours = unpaid.reduce((sum, r) => sum + timesheetHours(r), 0);
+            return `${rows.length} timesheet${rows.length === 1 ? '' : 's'} · ${totalHours.toFixed(1)}h logged · ${unpaid.length} unpaid (${unpaidHours.toFixed(1)}h)`;
+          },
+          detailTitle: r => `Timesheet #${r.timeSheetDetailsId}`,
+          renderDetail: timesheetDetailHtml
+        }
       }
     };
 
@@ -5787,27 +5835,28 @@
             ${cfg.listView.dated ? `
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-                <button class="cat-chip active" id="report_${type}_datepreset_today" onclick="setBookingsListDatePreset('${type}','today')">Today</button>
-                <button class="cat-chip" id="report_${type}_datepreset_yesterday" onclick="setBookingsListDatePreset('${type}','yesterday')">Yesterday</button>
-                <button class="cat-chip" id="report_${type}_datepreset_week" onclick="setBookingsListDatePreset('${type}','week')">This Week</button>
-                <button class="cat-chip" id="report_${type}_datepreset_custom" onclick="setBookingsListDatePreset('${type}','custom')">Custom Range…</button>
-                <input type="date" id="report_${type}_list_from" class="form-control" style="width:150px;display:none" onchange="loadBookingsListData('${type}')">
+                ${cfg.listView.datePresets.map(p => `
+                  <button class="cat-chip${p.default ? ' active' : ''}" id="report_${type}_datepreset_${p.id}" onclick="setDatedListPreset('${type}','${p.id}')">${escHtml(p.label)}</button>
+                `).join('')}
+                <button class="cat-chip" id="report_${type}_datepreset_custom" onclick="setDatedListPreset('${type}','custom')">Custom Range…</button>
+                <input type="date" id="report_${type}_list_from" class="form-control" style="width:150px;display:none" onchange="loadDatedListData('${type}')">
                 <span id="report_${type}_list_to_sep" style="display:none;color:var(--text-muted);font-size:12.5px">to</span>
-                <input type="date" id="report_${type}_list_to" class="form-control" style="width:150px;display:none" onchange="loadBookingsListData('${type}')">
+                <input type="date" id="report_${type}_list_to" class="form-control" style="width:150px;display:none" onchange="loadDatedListData('${type}')">
               </div>
               <div id="report_${type}_list_daterange_label" style="font-size:12.5px;font-weight:600;color:var(--navy);margin-bottom:10px"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search client or candidate…" style="width:220px;flex:1;min-width:180px" oninput="applyBookingsListFilters('${type}')">
-                <select id="report_${type}_list_status" class="form-control" style="width:150px" onchange="applyBookingsListFilters('${type}')">
+                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="${escHtml(cfg.listView.searchPlaceholder || 'Search…')}" style="width:220px;flex:1;min-width:180px" oninput="applyDatedListFilters('${type}')">
+                <select id="report_${type}_list_status" class="form-control" style="width:150px" onchange="applyDatedListFilters('${type}')">
                   <option value="">Status: Any</option>
                 </select>
                 ${(cfg.listView.extraFilters || []).map(f => `
                   <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
-                    <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyBookingsListFilters('${type}')"> ${escHtml(f.label)}
+                    <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyDatedListFilters('${type}')"> ${escHtml(f.label)}
                   </label>
                 `).join('')}
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
               </div>
+              ${cfg.listView.renderSummary ? `<div id="report_${type}_list_summary" style="font-size:12.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)"></div>` : ''}
             </div>
             ` : `
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
@@ -6051,8 +6100,12 @@
     // valueField sums that field per bucket (e.g. timesheet duration);
     // omitted, it counts records (e.g. bookings).
     function computeTrendBuckets(rows, dateField, valueField) {
+      // valueField can be a plain field name (Bookings' 'duration'-style
+      // fields) or a compute function (e.g. timesheetHours, since RT's own
+      // `duration` field is always 0 — see the comment on timesheetHours).
+      const getValue = typeof valueField === 'function' ? valueField : (r => valueField ? (r[valueField] || 0) : 1);
       const dated = rows
-        .map(r => ({ d: new Date(r[dateField]), v: valueField ? (r[valueField] || 0) : 1 }))
+        .map(r => ({ d: new Date(r[dateField]), v: getValue(r) }))
         .filter(x => !isNaN(x.d));
       if (!dated.length) return [];
 
@@ -6199,11 +6252,11 @@
       document.getElementById(`report_${type}_tab_list`).classList.toggle('active', view === 'list');
       document.getElementById(`report_${type}_dashboardView`).style.display = view === 'dashboard' ? '' : 'none';
       document.getElementById(`report_${type}_listView`).style.display = view === 'list' ? '' : 'none';
-      // `dated` List tabs (Bookings) own their data independently of the
-      // Dashboard tab — always (re)load on entry so it's never showing a
-      // stale day from last time it was open.
+      // `dated` List tabs (Bookings, Timesheets) own their data independently
+      // of the Dashboard tab — always (re)load on entry so it's never
+      // showing a stale range from last time it was open.
       const cfg = REPORT_CONFIG[type];
-      if (view === 'list' && cfg.listView?.dated) loadBookingsListData(type);
+      if (view === 'list' && cfg.listView?.dated) loadDatedListData(type);
     }
 
     // Suburb lives per-location/address, not on the record itself — a
@@ -6316,68 +6369,91 @@
       document.getElementById('reportDetailModal').classList.remove('open');
     }
 
-    // ── Bookings List (the one `dated` List tab) ──────────────────────
+    // ── Dated List tabs (Bookings, Timesheets) ─────────────────────────
+    // Both are ~100k-row datasets where fetch-everything-then-filter (what
+    // the Clients/Candidates List tabs do) isn't viable — see the `dated`
+    // comment on REPORT_CONFIG.bookings.listView. Presets are config-driven
+    // (`cfg.listView.datePresets`) since each type's presets mean something
+    // different: Bookings cares about calendar days (Today/Yesterday),
+    // Timesheets cares about weekly pay periods.
     function ymd(d) { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+
+    // Factory: a single day, `offsetDays` from today (0 = today, -1 = yesterday).
+    function dayRange(offsetDays) {
+      return () => {
+        const d = new Date();
+        d.setDate(d.getDate() + offsetDays);
+        return { from: d, to: d };
+      };
+    }
+
+    // Factory: the Mon-Sun week `weeksAgo` weeks back (0 = this week,
+    // 1 = last week — i.e. the pay period currently being finalized/paid,
+    // since educators are paid Fridays for the week prior — 2 = the week
+    // before that).
+    function payPeriodRange(weeksAgo) {
+      return () => {
+        const monday = new Date();
+        monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - (weeksAgo * 7));
+        const sunday = new Date(monday);
+        sunday.setDate(sunday.getDate() + 6);
+        return { from: monday, to: sunday };
+      };
+    }
 
     // Preset chips and the custom date range are mutually exclusive, not two
     // filters stacked on top of each other — clicking a preset both sets the
     // dates AND hides the pickers; "Custom Range…" is the only way to reveal
     // them. The label underneath always spells out exactly what's loaded, so
     // there's never a question of what's currently being filtered.
-    function setBookingsListDatePreset(type, preset) {
+    function setDatedListPreset(type, presetId) {
+      const cfg = REPORT_CONFIG[type];
       const fromEl = document.getElementById(`report_${type}_list_from`);
       const toEl = document.getElementById(`report_${type}_list_to`);
       const toSep = document.getElementById(`report_${type}_list_to_sep`);
-      ['today', 'yesterday', 'week', 'custom'].forEach(p => {
-        const btn = document.getElementById(`report_${type}_datepreset_${p}`);
-        if (btn) btn.classList.toggle('active', p === preset);
-      });
-      const showPickers = preset === 'custom';
+      const presets = cfg.listView.datePresets;
+      presets.forEach(p => document.getElementById(`report_${type}_datepreset_${p.id}`)?.classList.toggle('active', p.id === presetId));
+      document.getElementById(`report_${type}_datepreset_custom`)?.classList.toggle('active', presetId === 'custom');
+
+      const showPickers = presetId === 'custom';
       fromEl.style.display = showPickers ? '' : 'none';
       toEl.style.display = showPickers ? '' : 'none';
       if (toSep) toSep.style.display = showPickers ? '' : 'none';
 
-      const today = new Date();
-      if (preset === 'today') {
-        fromEl.value = toEl.value = ymd(today);
-      } else if (preset === 'yesterday') {
-        const y = new Date(today); y.setDate(y.getDate() - 1);
-        fromEl.value = toEl.value = ymd(y);
-      } else if (preset === 'week') {
-        const monday = new Date(today);
-        monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-        const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
-        fromEl.value = ymd(monday);
-        toEl.value = ymd(sunday);
-      } else if (preset === 'custom' && (!fromEl.value || !toEl.value)) {
+      const preset = presets.find(p => p.id === presetId);
+      if (preset) {
+        const { from, to } = preset.range();
+        fromEl.value = ymd(from);
+        toEl.value = ymd(to);
+      } else if (!fromEl.value || !toEl.value) {
         // First switch to Custom with nothing picked yet — seed with today
         // rather than leaving the pickers blank.
-        fromEl.value = toEl.value = ymd(today);
+        fromEl.value = toEl.value = ymd(new Date());
       }
-      loadBookingsListData(type);
+      loadDatedListData(type);
     }
 
-    function updateBookingsDateRangeLabel(type) {
+    function updateDatedListRangeLabel(type) {
+      const cfg = REPORT_CONFIG[type];
       const fromEl = document.getElementById(`report_${type}_list_from`);
       const toEl = document.getElementById(`report_${type}_list_to`);
       const label = document.getElementById(`report_${type}_list_daterange_label`);
       if (!label || !fromEl.value || !toEl.value) return;
+      const noun = cfg.listView.noun || 'records';
       const fmt = v => new Date(v + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
       label.textContent = fromEl.value === toEl.value
-        ? `Showing bookings for ${fmt(fromEl.value)}`
-        : `Showing bookings from ${fmt(fromEl.value)} to ${fmt(toEl.value)}`;
+        ? `Showing ${noun} for ${fmt(fromEl.value)}`
+        : `Showing ${noun} from ${fmt(fromEl.value)} to ${fmt(toEl.value)}`;
     }
 
-    // Server-scoped fetch for the selected date range — see the `dated`
-    // comment on REPORT_CONFIG.bookings.listView for why this doesn't reuse
-    // the Clients/Candidates List tabs' fetch-everything-then-filter approach.
-    async function loadBookingsListData(type) {
+    // Server-scoped fetch for the selected date range.
+    async function loadDatedListData(type) {
       const cfg = REPORT_CONFIG[type];
       const tbody = document.getElementById(`report_${type}_list_table`);
       const fromEl = document.getElementById(`report_${type}_list_from`);
       const toEl = document.getElementById(`report_${type}_list_to`);
       if (!fromEl.value || !toEl.value) { fromEl.value = toEl.value = ymd(new Date()); }
-      updateBookingsDateRangeLabel(type);
+      updateDatedListRangeLabel(type);
 
       tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       try {
@@ -6395,43 +6471,48 @@
         ]);
         if (!Array.isArray(rows)) throw new Error(rows.error || 'Unexpected response');
         reportListDataCache[type] = rows;
-        populateBookingsStatusOptions(type, rows);
-        applyBookingsListFilters(type);
+        populateDatedListStatusOptions(type, rows);
+        applyDatedListFilters(type);
       } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
       }
     }
 
-    function populateBookingsStatusOptions(type, rows) {
+    function populateDatedListStatusOptions(type, rows) {
+      const cfg = REPORT_CONFIG[type];
       const sel = document.getElementById(`report_${type}_list_status`);
-      if (!sel) return;
+      const field = cfg.listView.statusField;
+      if (!sel || !field) return;
       const current = sel.value;
-      const statuses = [...new Set(rows.map(r => r.statusId).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+      const statuses = [...new Set(rows.map(r => r[field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
       sel.innerHTML = `<option value="">Status: Any</option>` + statuses.map(s => `<option value="${s}">Status ${s}</option>`).join('');
       if (statuses.map(String).includes(current)) sel.value = current;
     }
 
-    function applyBookingsListFilters(type) {
+    function applyDatedListFilters(type) {
       const cfg = REPORT_CONFIG[type];
       const rows = reportListDataCache[type] || [];
       const search = (document.getElementById(`report_${type}_list_search`)?.value || '').trim().toLowerCase();
       const statusVal = document.getElementById(`report_${type}_list_status`)?.value || '';
+      const statusField = cfg.listView.statusField;
 
       let filtered = rows;
-      if (statusVal !== '') filtered = filtered.filter(r => String(r.statusId) === statusVal);
+      if (statusVal !== '' && statusField) filtered = filtered.filter(r => String(r[statusField]) === statusVal);
       filtered = filtered.filter(r => (cfg.listView.extraFilters || []).every(f => {
         const checked = document.getElementById(`report_${type}_list_${f.id}`)?.checked;
         return !checked || f.test(r);
       }));
       if (search && cfg.listView.searchTest) filtered = filtered.filter(r => cfg.listView.searchTest(r, search));
 
-      // Chronological within the day — the whole point of this tab is "what's
-      // happening when", so time order beats whatever order the API returned.
+      // Chronological within the range — the whole point of these tabs is
+      // "what's happening when", so time order beats API response order.
       filtered = filtered.slice().sort((a, b) => new Date(a.startTime || a.bookingDate) - new Date(b.startTime || b.bookingDate));
 
       reportListFilteredCache[type] = filtered;
       const countEl = document.getElementById(`report_${type}_list_count`);
       if (countEl) countEl.textContent = rows.length ? `${filtered.length} of ${rows.length}` : '';
+      const summaryEl = document.getElementById(`report_${type}_list_summary`);
+      if (summaryEl && cfg.listView.renderSummary) summaryEl.textContent = cfg.listView.renderSummary(filtered);
       reportListPage[type] = 1;
       renderListViewTable(type, filtered);
     }
@@ -6489,6 +6570,54 @@
           <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(b.notes)}</div>
         ` : ''}
         <div style="font-size:11px;color:var(--text-muted);margin-top:16px">Booking #${b.clientBookingId} · ${escHtml(b.guid || '')}</div>
+      `;
+    }
+
+    // RT's own `duration` field is always 0 in real data (confirmed live —
+    // every timesheet sampled, old and new, returns duration: 0.0), so the
+    // Dashboard tab's Total/Avg/Unpaid Hours and this List's Hours column
+    // both compute it themselves from start→end minus the lunch break
+    // instead of trusting that field.
+    function timesheetHours(t) {
+      if (!t.startTime || !t.endTime) return 0;
+      const raw = (new Date(t.endTime) - new Date(t.startTime)) / 3600000;
+      const hours = raw - (t.lunchBreak || 0) / 60;
+      return hours > 0 ? hours : 0;
+    }
+
+    function timesheetTimeRange(t) {
+      if (!t.startTime) return '—';
+      const fmt = d => new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+      return `${fmtDate(t.startTime)} · ${fmt(t.startTime)}${t.endTime ? ` – ${fmt(t.endTime)}` : ''}`;
+    }
+
+    function timesheetDetailHtml(t) {
+      return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px">
+          ${[
+            ['Candidate', candidateName(t.userId)],
+            ['Booking ID', t.bookingId ?? '—'],
+            ['Start Time', t.startTime ? new Date(t.startTime).toLocaleString('en-AU') : '—'],
+            ['End Time', t.endTime ? new Date(t.endTime).toLocaleString('en-AU') : '—'],
+            ['Lunch Break', `${t.lunchBreak ?? 0} min`],
+            ['Hours (computed)', timesheetHours(t).toFixed(1) + 'h'],
+            ['Paid', t.isPaid ? '✅ Paid' : '⚠️ Unpaid'],
+            ['Invoiced', t.isInvoiced ? '✅ Invoiced' : '— Not invoiced'],
+            ['Status', t.status ?? '—'],
+            ['Reviewed By', t.approvedRejectedUserId ? `User #${t.approvedRejectedUserId}` : 'Not yet reviewed'],
+            ['Active', t.isActive ? '✅ Active' : '❌ Inactive'],
+            ['Created', fmtDate(t.createdDate)]
+          ].map(([label, value]) => `
+            <div>
+              <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">${escHtml(label)}</div>
+              <div style="font-size:13.5px;color:var(--navy);font-weight:600">${escHtml(String(value))}</div>
+            </div>`).join('')}
+        </div>
+        ${t.comment ? `
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Comment</div>
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(t.comment)}</div>
+        ` : ''}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:16px">Timesheet #${t.timeSheetDetailsId} · ${escHtml(t.guid || '')}</div>
       `;
     }
 
