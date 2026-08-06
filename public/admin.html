@@ -6365,6 +6365,7 @@
             <div style="font-size:12.5px;color:var(--text)">${escHtml(q.collegeName || '—')}${q.gradeId != null ? ` · Grade ${q.gradeId}` : ''}</div>
             ${q.qualifiedDate ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">Qualified ${fmtDate(q.qualifiedDate)}</div>` : ''}
             ${q.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${escHtml(q.description)}</div>` : ''}
+            ${q.documentPath ? `<a href="${escHtml(q.documentPath)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}
           </div>
         `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No qualifications on file.</div>`}
 
@@ -6383,6 +6384,7 @@
             </div>
             <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}${req.isReviewed ? ' · Reviewed' : ''}</div>
+            ${req.documentPath ? `<a href="${escHtml(req.documentPath)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}
           </div>
         `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No compliance documents on file.</div>`}
 
