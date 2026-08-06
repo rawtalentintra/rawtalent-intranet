@@ -218,13 +218,29 @@ router.get('/', async (req, res) => {
     });
     const leaveDecisions = myDecidedRes.rows;
 
+    // Article-feedback suggestions I submitted that an admin has since
+    // marked Done — informational, dismissed via notification_dismissals
+    // same as leave decisions/announcements. This is the whole point of
+    // wiring feedback into the bell: the submitter previously had no way to
+    // ever find out their suggestion was seen, let alone acted on.
+    const myFeedbackRes = await db.execute({
+      sql: `SELECT f.*, (d.user_email IS NOT NULL) AS is_read
+            FROM feedback f
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'feedback:' || f.id AND d.user_email = ?
+            WHERE LOWER(f.submitted_by) = LOWER(?) AND f.status = 'done'
+            ORDER BY f.updated_at DESC LIMIT 30`,
+      args: [req.user.email, req.user.email]
+    });
+    const feedbackDecisions = myFeedbackRes.rows;
+
     const unreadCount = receivedGreetings.filter(g => !g.is_read).length
       + upcomingEvents.filter(e => !e.alreadySent).length
       + announcements.filter(a => !a.is_read).length
       + trainingAssignments.length
       + leaveApprovals.length
-      + leaveDecisions.filter(l => !l.is_read).length;
-    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, unreadCount });
+      + leaveDecisions.filter(l => !l.is_read).length
+      + feedbackDecisions.filter(f => !f.is_read).length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, feedbackDecisions, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -464,6 +480,20 @@ router.post('/read-all', async (req, res) => {
         sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
               ON CONFLICT (user_email, notification_key) DO NOTHING`,
         args: [req.user.email, `leave:${row.id}`]
+      });
+    }
+
+    const unreadFeedback = await db.execute({
+      sql: `SELECT f.id FROM feedback f
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'feedback:' || f.id AND d.user_email = ?
+            WHERE LOWER(f.submitted_by) = LOWER(?) AND f.status = 'done' AND d.user_email IS NULL`,
+      args: [req.user.email, req.user.email]
+    });
+    for (const row of unreadFeedback.rows) {
+      await db.execute({
+        sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
+              ON CONFLICT (user_email, notification_key) DO NOTHING`,
+        args: [req.user.email, `feedback:${row.id}`]
       });
     }
 

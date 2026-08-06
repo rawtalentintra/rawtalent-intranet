@@ -1085,7 +1085,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -1130,6 +1130,17 @@
             <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
               <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      if (notifData.feedbackDecisions?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your feedback</div>
+          ${notifData.feedbackDecisions.map(f => `
+            <div style="background:${f.is_read ? 'white' : '#eef2ff'};border:1px solid ${f.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
+              <div style="font-weight:${f.is_read ? '500' : '700'};color:${f.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
+              <div style="font-size:11px;color:var(--text-muted)">${fmtDate(f.updated_at)}</div>
             </div>
           `).join('')}
         `);
@@ -1259,6 +1270,23 @@
         fetch(`/api/notifications/${id}/read`, { method: 'POST' }).then(() => loadNotifications());
       }
       showCelebrationModal(g);
+    }
+
+    // Same celebratory treatment as approved leave — the whole point of
+    // wiring this up is to make submitting an edit suggestion feel genuinely
+    // worthwhile, not just quietly logged somewhere. Surfaces the admin's
+    // note when there is one.
+    function openFeedbackDecision(id) {
+      const f = notifData.feedbackDecisions.find(x => x.id === id);
+      if (!f) return;
+      document.getElementById('celebrationEmoji').textContent = '🙌';
+      document.getElementById('celebrationTitle').textContent = 'Your feedback made a difference!';
+      const note = f.admin_comments?.trim();
+      document.getElementById('celebrationMessage').textContent = note
+        ? `Your suggestion on "${f.article_title}" was actioned — "${note}". Thanks for helping make HeartBeat better — keep the feedback coming! 💡`
+        : `Your suggestion on "${f.article_title}" was actioned. Thanks for helping make HeartBeat better — keep the feedback coming! 💡`;
+      document.getElementById('celebrationModal').classList.add('open');
+      spawnConfetti(document.getElementById('confettiLayer'));
     }
 
     function markAllNotificationsRead() {
