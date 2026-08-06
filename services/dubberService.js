@@ -245,7 +245,30 @@ async function insertRecordingIfNew(db, r) {
 //  2. Content pass — for up to MAX_CONTENT_FETCH_PER_RUN rows still missing
 //     transcript/audio (from this run or any earlier one), fetches both and
 //     marks content_synced=1 only once that succeeds.
+// Guards against two syncs running at once — the actual cause of a real
+// "over throttle limit (calls per second)" incident from Dubber. Before this
+// existed, the auto-sync (server.js, every 15min) and a manual "Sync Calls
+// Now" click had no way to know about each other: if an admin clicked sync
+// while an auto-sync was already mid-run (easily 10-20s+ with a content
+// backlog), both ran their own unpaced page-listing loop and paced
+// content-fetch loop fully independently, doubling up on Dubber calls at the
+// same moment. Now a second call while one is in flight just waits for the
+// first to finish and returns its result — nothing ever runs concurrently.
+let syncInFlight = null;
+
 async function syncRecordings(direction = 'recent') {
+  if (syncInFlight) return syncInFlight;
+  syncInFlight = syncRecordingsInner(direction).finally(() => { syncInFlight = null; });
+  return syncInFlight;
+}
+
+// Small gap between successive Dubber list calls — the metadata pass used to
+// fire up to SYNC_MAX_PAGES/BACKFILL_MAX_PAGES page requests back-to-back
+// with zero spacing, which is fine for an occasional manual click but adds
+// up fast once this runs unattended every 15 minutes.
+const LIST_PAGE_PACE_MS = 350;
+
+async function syncRecordingsInner(direction = 'recent') {
   const db = getDb();
   let totalSeen = 0, totalNew = 0, reachedEnd = false;
 
@@ -254,6 +277,7 @@ async function syncRecordings(direction = 'recent') {
     let beforeId = oldestRow.rows[0]?.id || null;
 
     for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
+      if (page > 0) await sleepMs(LIST_PAGE_PACE_MS);
       const params = { count: SYNC_PAGE_SIZE };
       if (beforeId) params.before_id = beforeId;
       const data = await listRecordings(params);
@@ -273,6 +297,7 @@ async function syncRecordings(direction = 'recent') {
   } else {
     let offset = 0;
     for (let page = 0; page < SYNC_MAX_PAGES; page++) {
+      if (page > 0) await sleepMs(LIST_PAGE_PACE_MS);
       const data = await listRecordings({ count: SYNC_PAGE_SIZE, offset });
       const recordings = data.recordings || data.items || [];
       if (!recordings.length) break;
