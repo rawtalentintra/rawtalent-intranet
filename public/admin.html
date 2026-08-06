@@ -5786,14 +5786,16 @@
           <div id="report_${type}_listView" style="display:none">
             ${cfg.listView.dated ? `
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
-              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
                 <button class="cat-chip active" id="report_${type}_datepreset_today" onclick="setBookingsListDatePreset('${type}','today')">Today</button>
                 <button class="cat-chip" id="report_${type}_datepreset_yesterday" onclick="setBookingsListDatePreset('${type}','yesterday')">Yesterday</button>
                 <button class="cat-chip" id="report_${type}_datepreset_week" onclick="setBookingsListDatePreset('${type}','week')">This Week</button>
-                <input type="date" id="report_${type}_list_from" class="form-control" style="width:150px" onchange="setBookingsListDatePreset('${type}','custom')">
-                <span style="color:var(--text-muted);font-size:12.5px">to</span>
-                <input type="date" id="report_${type}_list_to" class="form-control" style="width:150px" onchange="setBookingsListDatePreset('${type}','custom')">
+                <button class="cat-chip" id="report_${type}_datepreset_custom" onclick="setBookingsListDatePreset('${type}','custom')">Custom Range…</button>
+                <input type="date" id="report_${type}_list_from" class="form-control" style="width:150px;display:none" onchange="loadBookingsListData('${type}')">
+                <span id="report_${type}_list_to_sep" style="display:none;color:var(--text-muted);font-size:12.5px">to</span>
+                <input type="date" id="report_${type}_list_to" class="form-control" style="width:150px;display:none" onchange="loadBookingsListData('${type}')">
               </div>
+              <div id="report_${type}_list_daterange_label" style="font-size:12.5px;font-weight:600;color:var(--navy);margin-bottom:10px"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search client or candidate…" style="width:220px;flex:1;min-width:180px" oninput="applyBookingsListFilters('${type}')">
                 <select id="report_${type}_list_status" class="form-control" style="width:150px" onchange="applyBookingsListFilters('${type}')">
@@ -5867,20 +5869,25 @@
       const periodKey = document.getElementById(`report_${type}_period`).value;
       const activeVal = document.getElementById(`report_${type}_active`).value;
       const params = new URLSearchParams();
+      // RT's API wants plain YYYY-MM-DD, not a UTC-converted ISO timestamp —
+      // toISOString() shifts a Melbourne-local midnight backward across the
+      // UTC offset (producing something like "2026-08-06T13:59:59.000Z"),
+      // which RT's API 400s on outright ("not valid for StartDate/EndDate",
+      // confirmed live). ymd() below formats in local time instead.
       if (periodKey === 'custom') {
         const fromVal = document.getElementById(`report_${type}_customFrom`)?.value;
         const toVal = document.getElementById(`report_${type}_customTo`)?.value;
-        if (fromVal) params.set('startDate', new Date(fromVal).toISOString());
+        if (fromVal) params.set('startDate', fromVal);
         if (toVal) {
           // End date is inclusive of the whole day the user picked.
-          const to = new Date(toVal);
+          const to = new Date(toVal + 'T00:00:00');
           to.setDate(to.getDate() + 1);
-          params.set('endDate', to.toISOString());
+          params.set('endDate', ymd(to));
         }
       } else if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
-        params.set('startDate', from.toISOString());
-        params.set('endDate', to.toISOString());
+        params.set('startDate', ymd(from));
+        params.set('endDate', ymd(to));
       }
       if (activeVal) params.set('isActive', activeVal);
 
@@ -6312,13 +6319,24 @@
     // ── Bookings List (the one `dated` List tab) ──────────────────────
     function ymd(d) { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
+    // Preset chips and the custom date range are mutually exclusive, not two
+    // filters stacked on top of each other — clicking a preset both sets the
+    // dates AND hides the pickers; "Custom Range…" is the only way to reveal
+    // them. The label underneath always spells out exactly what's loaded, so
+    // there's never a question of what's currently being filtered.
     function setBookingsListDatePreset(type, preset) {
       const fromEl = document.getElementById(`report_${type}_list_from`);
       const toEl = document.getElementById(`report_${type}_list_to`);
-      ['today', 'yesterday', 'week'].forEach(p => {
+      const toSep = document.getElementById(`report_${type}_list_to_sep`);
+      ['today', 'yesterday', 'week', 'custom'].forEach(p => {
         const btn = document.getElementById(`report_${type}_datepreset_${p}`);
         if (btn) btn.classList.toggle('active', p === preset);
       });
+      const showPickers = preset === 'custom';
+      fromEl.style.display = showPickers ? '' : 'none';
+      toEl.style.display = showPickers ? '' : 'none';
+      if (toSep) toSep.style.display = showPickers ? '' : 'none';
+
       const today = new Date();
       if (preset === 'today') {
         fromEl.value = toEl.value = ymd(today);
@@ -6331,10 +6349,23 @@
         const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
         fromEl.value = ymd(monday);
         toEl.value = ymd(sunday);
+      } else if (preset === 'custom' && (!fromEl.value || !toEl.value)) {
+        // First switch to Custom with nothing picked yet — seed with today
+        // rather than leaving the pickers blank.
+        fromEl.value = toEl.value = ymd(today);
       }
-      // 'custom' just falls through — the date inputs already hold whatever
-      // the admin picked directly, nothing to compute.
       loadBookingsListData(type);
+    }
+
+    function updateBookingsDateRangeLabel(type) {
+      const fromEl = document.getElementById(`report_${type}_list_from`);
+      const toEl = document.getElementById(`report_${type}_list_to`);
+      const label = document.getElementById(`report_${type}_list_daterange_label`);
+      if (!label || !fromEl.value || !toEl.value) return;
+      const fmt = v => new Date(v + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      label.textContent = fromEl.value === toEl.value
+        ? `Showing bookings for ${fmt(fromEl.value)}`
+        : `Showing bookings from ${fmt(fromEl.value)} to ${fmt(toEl.value)}`;
     }
 
     // Server-scoped fetch for the selected date range — see the `dated`
@@ -6346,13 +6377,18 @@
       const fromEl = document.getElementById(`report_${type}_list_from`);
       const toEl = document.getElementById(`report_${type}_list_to`);
       if (!fromEl.value || !toEl.value) { fromEl.value = toEl.value = ymd(new Date()); }
+      updateBookingsDateRangeLabel(type);
 
       tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       try {
-        const params = new URLSearchParams({
-          startDate: new Date(fromEl.value + 'T00:00:00').toISOString(),
-          endDate: new Date(toEl.value + 'T23:59:59').toISOString()
-        });
+        // RT's API wants plain YYYY-MM-DD, not a UTC-converted ISO timestamp
+        // — toISOString() shifts local midnight across the UTC offset and
+        // gets rejected outright with a 400 ("not valid for StartDate/
+        // EndDate", confirmed live). EndDate is exclusive of that calendar
+        // day, so +1 day makes the picked "to" date fully inclusive.
+        const toExclusive = new Date(toEl.value + 'T00:00:00');
+        toExclusive.setDate(toExclusive.getDate() + 1);
+        const params = new URLSearchParams({ startDate: fromEl.value, endDate: ymd(toExclusive) });
         const [rows] = await Promise.all([
           fetch(`/api/reports/${type}?${params}`).then(r => r.json()),
           ensureReportLookups()
