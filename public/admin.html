@@ -5402,6 +5402,7 @@
     const REPORT_PAGE_SIZE = 50;
     let reportListFilteredCache = {}; // type -> rows after the List sub-view's own independent filters
     let reportListPage = {};          // type -> List sub-view's current table page (1-based)
+    let reportListDataCache = {};     // type -> unfiltered rows for a `dated` (server-scoped) List tab, e.g. Bookings — kept separate from reportDataCache so it never clobbers whatever the Dashboard tab has loaded
     let reportLookupsLoaded = false;
     let clientNameById = {};
     let candidateNameById = {};
@@ -5563,6 +5564,33 @@
         extraFilters: [
           { id: 'status', label: 'Status', type: 'select', field: 'statusId' }
         ],
+        // Bookings is a fundamentally different scale from Clients/Candidates
+        // (100k+ rows total) — fetch-everything-then-filter-client-side, the
+        // approach the Dashboard tab above and the Clients/Candidates List
+        // tabs both use, doesn't work here. `dated: true` marks this as a
+        // server-date-scoped list instead: it fetches only the selected
+        // day(s) via StartDate/EndDate (confirmed against real data — those
+        // params filter on bookingDate), defaulting to today, so "what's
+        // happening today" loads fast regardless of total booking volume.
+        hasListView: true,
+        listView: {
+          label: 'Bookings List',
+          dated: true,
+          idField: 'clientBookingId',
+          searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
+          extraFilters: [
+            { id: 'unassigned', label: 'Unassigned only', type: 'checkbox', test: r => !r.assignedUserId }
+          ],
+          columns: [
+            { header: 'Time', render: r => bookingTimeRange(r) },
+            { header: 'Client', render: r => escHtml(clientName(r.clientId)) },
+            { header: 'Candidate', render: r => r.assignedUserId ? escHtml(candidateName(r.assignedUserId)) : '⚠️ Unassigned' },
+            { header: 'Shift', render: r => bookingShiftStateBadge(r) },
+            { header: 'Status', render: r => `Status ${r.statusId ?? '—'}` }
+          ],
+          detailTitle: r => `Booking #${r.clientBookingId}`,
+          renderDetail: bookingDetailHtml
+        },
         kpis: rows => {
           const hours = r => (new Date(r.endTime) - new Date(r.startTime)) / 3600000;
           const validDurations = rows.map(hours).filter(h => isFinite(h) && h > 0 && h < 24);
@@ -5756,6 +5784,30 @@
 
           ${cfg.hasListView ? `
           <div id="report_${type}_listView" style="display:none">
+            ${cfg.listView.dated ? `
+            <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+                <button class="cat-chip active" id="report_${type}_datepreset_today" onclick="setBookingsListDatePreset('${type}','today')">Today</button>
+                <button class="cat-chip" id="report_${type}_datepreset_yesterday" onclick="setBookingsListDatePreset('${type}','yesterday')">Yesterday</button>
+                <button class="cat-chip" id="report_${type}_datepreset_week" onclick="setBookingsListDatePreset('${type}','week')">This Week</button>
+                <input type="date" id="report_${type}_list_from" class="form-control" style="width:150px" onchange="setBookingsListDatePreset('${type}','custom')">
+                <span style="color:var(--text-muted);font-size:12.5px">to</span>
+                <input type="date" id="report_${type}_list_to" class="form-control" style="width:150px" onchange="setBookingsListDatePreset('${type}','custom')">
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search client or candidate…" style="width:220px;flex:1;min-width:180px" oninput="applyBookingsListFilters('${type}')">
+                <select id="report_${type}_list_status" class="form-control" style="width:150px" onchange="applyBookingsListFilters('${type}')">
+                  <option value="">Status: Any</option>
+                </select>
+                ${(cfg.listView.extraFilters || []).map(f => `
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
+                    <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyBookingsListFilters('${type}')"> ${escHtml(f.label)}
+                  </label>
+                `).join('')}
+                <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
+              </div>
+            </div>
+            ` : `
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search…" style="width:220px;flex:1;min-width:180px" oninput="applyListViewFilters('${type}')">
@@ -5775,6 +5827,7 @@
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
               </div>
             </div>
+            `}
             <div class="admin-table-card">
               <div style="overflow-x:auto">
                 <table class="data-table data-table-compact">
@@ -5841,7 +5894,7 @@
         populateReportExtraFilterOptions(type, rows);
         reportPage[type] = 1;
         applyReportFilters(type);
-        if (cfg.hasListView) { populateListViewSuburbOptions(type, rows); applyListViewFilters(type); }
+        if (cfg.hasListView && !cfg.listView.dated) { populateListViewSuburbOptions(type, rows); applyListViewFilters(type); }
       } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
       }
@@ -6139,6 +6192,11 @@
       document.getElementById(`report_${type}_tab_list`).classList.toggle('active', view === 'list');
       document.getElementById(`report_${type}_dashboardView`).style.display = view === 'dashboard' ? '' : 'none';
       document.getElementById(`report_${type}_listView`).style.display = view === 'list' ? '' : 'none';
+      // `dated` List tabs (Bookings) own their data independently of the
+      // Dashboard tab — always (re)load on entry so it's never showing a
+      // stale day from last time it was open.
+      const cfg = REPORT_CONFIG[type];
+      if (view === 'list' && cfg.listView?.dated) loadBookingsListData(type);
     }
 
     // Suburb lives per-location/address, not on the record itself — a
@@ -6239,7 +6297,8 @@
 
     function openReportDetail(type, id) {
       const cfg = REPORT_CONFIG[type];
-      const row = (reportDataCache[type] || []).find(r => r[cfg.listView.idField] === id);
+      const source = cfg.listView.dated ? reportListDataCache[type] : reportDataCache[type];
+      const row = (source || []).find(r => r[cfg.listView.idField] === id);
       if (!row) return;
       document.getElementById('reportDetailTitle').textContent = cfg.listView.detailTitle(row);
       document.getElementById('reportDetailBody').innerHTML = cfg.listView.renderDetail(row);
@@ -6248,6 +6307,153 @@
 
     function closeReportDetailModal() {
       document.getElementById('reportDetailModal').classList.remove('open');
+    }
+
+    // ── Bookings List (the one `dated` List tab) ──────────────────────
+    function ymd(d) { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+
+    function setBookingsListDatePreset(type, preset) {
+      const fromEl = document.getElementById(`report_${type}_list_from`);
+      const toEl = document.getElementById(`report_${type}_list_to`);
+      ['today', 'yesterday', 'week'].forEach(p => {
+        const btn = document.getElementById(`report_${type}_datepreset_${p}`);
+        if (btn) btn.classList.toggle('active', p === preset);
+      });
+      const today = new Date();
+      if (preset === 'today') {
+        fromEl.value = toEl.value = ymd(today);
+      } else if (preset === 'yesterday') {
+        const y = new Date(today); y.setDate(y.getDate() - 1);
+        fromEl.value = toEl.value = ymd(y);
+      } else if (preset === 'week') {
+        const monday = new Date(today);
+        monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+        const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+        fromEl.value = ymd(monday);
+        toEl.value = ymd(sunday);
+      }
+      // 'custom' just falls through — the date inputs already hold whatever
+      // the admin picked directly, nothing to compute.
+      loadBookingsListData(type);
+    }
+
+    // Server-scoped fetch for the selected date range — see the `dated`
+    // comment on REPORT_CONFIG.bookings.listView for why this doesn't reuse
+    // the Clients/Candidates List tabs' fetch-everything-then-filter approach.
+    async function loadBookingsListData(type) {
+      const cfg = REPORT_CONFIG[type];
+      const tbody = document.getElementById(`report_${type}_list_table`);
+      const fromEl = document.getElementById(`report_${type}_list_from`);
+      const toEl = document.getElementById(`report_${type}_list_to`);
+      if (!fromEl.value || !toEl.value) { fromEl.value = toEl.value = ymd(new Date()); }
+
+      tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+      try {
+        const params = new URLSearchParams({
+          startDate: new Date(fromEl.value + 'T00:00:00').toISOString(),
+          endDate: new Date(toEl.value + 'T23:59:59').toISOString()
+        });
+        const [rows] = await Promise.all([
+          fetch(`/api/reports/${type}?${params}`).then(r => r.json()),
+          ensureReportLookups()
+        ]);
+        if (!Array.isArray(rows)) throw new Error(rows.error || 'Unexpected response');
+        reportListDataCache[type] = rows;
+        populateBookingsStatusOptions(type, rows);
+        applyBookingsListFilters(type);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
+      }
+    }
+
+    function populateBookingsStatusOptions(type, rows) {
+      const sel = document.getElementById(`report_${type}_list_status`);
+      if (!sel) return;
+      const current = sel.value;
+      const statuses = [...new Set(rows.map(r => r.statusId).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+      sel.innerHTML = `<option value="">Status: Any</option>` + statuses.map(s => `<option value="${s}">Status ${s}</option>`).join('');
+      if (statuses.map(String).includes(current)) sel.value = current;
+    }
+
+    function applyBookingsListFilters(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportListDataCache[type] || [];
+      const search = (document.getElementById(`report_${type}_list_search`)?.value || '').trim().toLowerCase();
+      const statusVal = document.getElementById(`report_${type}_list_status`)?.value || '';
+
+      let filtered = rows;
+      if (statusVal !== '') filtered = filtered.filter(r => String(r.statusId) === statusVal);
+      filtered = filtered.filter(r => (cfg.listView.extraFilters || []).every(f => {
+        const checked = document.getElementById(`report_${type}_list_${f.id}`)?.checked;
+        return !checked || f.test(r);
+      }));
+      if (search && cfg.listView.searchTest) filtered = filtered.filter(r => cfg.listView.searchTest(r, search));
+
+      // Chronological within the day — the whole point of this tab is "what's
+      // happening when", so time order beats whatever order the API returned.
+      filtered = filtered.slice().sort((a, b) => new Date(a.startTime || a.bookingDate) - new Date(b.startTime || b.bookingDate));
+
+      reportListFilteredCache[type] = filtered;
+      const countEl = document.getElementById(`report_${type}_list_count`);
+      if (countEl) countEl.textContent = rows.length ? `${filtered.length} of ${rows.length}` : '';
+      reportListPage[type] = 1;
+      renderListViewTable(type, filtered);
+    }
+
+    function bookingTimeRange(r) {
+      if (!r.startTime) return '—';
+      const fmt = t => new Date(t).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+      return `${fmtDate(r.bookingDate)} · ${fmt(r.startTime)}${r.endTime ? ` – ${fmt(r.endTime)}` : ''}`;
+    }
+
+    // "Completed" isn't something statusId can answer yet (see the raw-codes
+    // note elsewhere) — this is purely arithmetic on the shift's own start/end
+    // time vs. right now, so it's accurate regardless of what statusId turns
+    // out to mean once the vendor clarifies it.
+    function bookingShiftState(r) {
+      const now = Date.now();
+      const start = r.startTime ? new Date(r.startTime).getTime() : null;
+      const end = r.endTime ? new Date(r.endTime).getTime() : null;
+      if (end != null && end < now) return 'ended';
+      if (start != null && start <= now && (end == null || end >= now)) return 'inprogress';
+      return 'upcoming';
+    }
+
+    function bookingShiftStateBadge(r) {
+      const state = bookingShiftState(r);
+      if (state === 'ended') return '<span class="lead-badge lead-badge-done">Shift Ended</span>';
+      if (state === 'inprogress') return '<span class="lead-badge lead-badge-sched">In Progress</span>';
+      return '<span class="lead-badge lead-badge-todo">Upcoming</span>';
+    }
+
+    function bookingDetailHtml(b) {
+      return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px">
+          ${[
+            ['Client', clientName(b.clientId)],
+            ['Candidate', b.assignedUserId ? candidateName(b.assignedUserId) : 'Unassigned'],
+            ['Booking Date', fmtDate(b.bookingDate)],
+            ['Start Time', b.startTime ? new Date(b.startTime).toLocaleString('en-AU') : '—'],
+            ['End Time', b.endTime ? new Date(b.endTime).toLocaleString('en-AU') : '—'],
+            ['Shift State', bookingShiftState(b) === 'ended' ? 'Shift Ended' : bookingShiftState(b) === 'inprogress' ? 'In Progress' : 'Upcoming'],
+            ['Status', b.statusId ?? '—'],
+            ['Grade', b.gradeId ?? '—'],
+            ['Certificate', b.certificateId ?? '—'],
+            ['Location ID', b.locationId ?? '—'],
+            ['Active', b.isActive ? '✅ Active' : '❌ Inactive'],
+            ['Created', fmtDate(b.createdDate)]
+          ].map(([label, value]) => `
+            <div>
+              <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">${escHtml(label)}</div>
+              <div style="font-size:13.5px;color:var(--navy);font-weight:600">${escHtml(String(value))}</div>
+            </div>`).join('')}
+        </div>
+        ${b.notes ? `
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Notes</div>
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(b.notes)}</div>
+        ` : ''}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:16px">Booking #${b.clientBookingId} · ${escHtml(b.guid || '')}</div>
+      `;
     }
 
     function clientDetailHtml(client) {
