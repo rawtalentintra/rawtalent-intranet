@@ -61,9 +61,18 @@
     #leadsTable th { padding: 6px 7px; font-size: 9.5px; }
     #leadsTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; }
     #leadsTable .lead-badge, #leadsTable .agency-badge { padding: 2px 7px; font-size: 10.5px; }
+    /* table-layout:fixed + per-column widths (below, on the <th>s) instead
+       of letting the table size itself to content — badge text ("To
+       Schedule") and long centre names were pushing the natural width past
+       the viewport, forcing a horizontal scrollbar. Fixed widths plus
+       ellipsis truncation on the long freeform columns (centre name,
+       suburb) keeps every row on one line with no scroll, at the cost of
+       occasionally truncating a very long name — title="" on those cells
+       (see renderRoutePlannerLeadsTable) surfaces the full text on hover. */
+    #routeCentresTable { table-layout: fixed; }
     #routeCentresTable th { padding: 6px 7px; font-size: 9.5px; }
-    #routeCentresTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; }
-    #routeCentresTable .lead-badge { padding: 2px 7px; font-size: 10.5px; }
+    #routeCentresTable td { padding: 4px 7px; font-size: 11.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #routeCentresTable .lead-badge { padding: 2px 6px; font-size: 10px; }
     .leads-filter-bar {
       display: flex; gap: 6px; flex-wrap: wrap;
       padding: 10px 14px; border-bottom: 1px solid var(--gray-200);
@@ -679,7 +688,7 @@
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
-                <tr><th style="width:28px"></th><th>Centre</th><th>Suburb</th><th>State</th><th>Called</th><th>Visited</th><th>Profile</th><th>WF Partner</th></tr>
+                <tr><th style="width:26px"></th><th style="width:24%">Centre</th><th style="width:13%">Suburb</th><th style="width:7%">State</th><th style="width:13%">Called</th><th style="width:13%">Visited</th><th style="width:14%">Profile</th><th style="width:10%">WF Partner</th></tr>
               </thead>
               <tbody id="routePlannerLeadsBody">
                 <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
@@ -5003,8 +5012,8 @@
           : escHtml(l.centre_name);
         return `<tr>
           <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${l.id}', this)"></td>
-          <td style="font-weight:600;color:var(--navy)">${centreLabel}</td>
-          <td>${escHtml(l.suburb || '—')}</td>
+          <td style="font-weight:600;color:var(--navy)" title="${escHtml(l.centre_name)}">${centreLabel}</td>
+          <td title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td><span class="lead-badge ${calledMeta.cls}">${escHtml(calledMeta.label)}</span></td>
           <td><span class="lead-badge ${visitedMeta.cls}">${escHtml(visitedMeta.label)}</span></td>
