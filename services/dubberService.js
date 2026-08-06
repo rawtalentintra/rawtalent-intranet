@@ -334,4 +334,24 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getAiInfo, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording };
+const AUTO_SYNC_TZ = 'Australia/Melbourne';
+const AUTO_SYNC_START_HOUR = 4; // 4am
+const AUTO_SYNC_END_HOUR = 20; // 8pm
+
+// Gates the background auto-sync (server.js) to Mon-Fri, 4am-8pm Melbourne
+// time — outside those hours nobody's fielding calls, so there's nothing
+// new to pull. Uses Intl against a fixed IANA zone rather than the server's
+// own clock/offset, so it stays correct across AEST/AEDT without any manual
+// DST handling. The manual "Sync Calls Now" button is unaffected by this —
+// it always calls syncRecordings() directly.
+function isWithinAutoSyncWindow(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-AU', {
+    timeZone: AUTO_SYNC_TZ, hour: 'numeric', hourCycle: 'h23', weekday: 'short'
+  }).formatToParts(now);
+  const hour = Number(parts.find(p => p.type === 'hour').value);
+  const weekday = parts.find(p => p.type === 'weekday').value; // 'Mon'..'Sun'
+  const isWeekday = !['Sat', 'Sun'].includes(weekday);
+  return isWeekday && hour >= AUTO_SYNC_START_HOUR && hour < AUTO_SYNC_END_HOUR;
+}
+
+module.exports = { isConfigured, listRecordings, getRecording, getAiInfo, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording, isWithinAutoSyncWindow };
