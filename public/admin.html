@@ -784,17 +784,19 @@
         </div>
       </div>
 
-      <!-- RT API Reports: Client detail (read-only — this is a reporting mirror
-           of the external RT app, not something this app can edit) -->
-      <div class="modal-overlay" id="clientDetailModal" onclick="if(event.target===this)closeClientDetailModal()">
+      <!-- RT API Reports: record detail (read-only — this is a reporting mirror
+           of the external RT app, not something this app can edit). Shared
+           across every report type's List sub-view (Clients, Candidates, …) —
+           REPORT_CONFIG[type].listView.renderDetail supplies the content. -->
+      <div class="modal-overlay" id="reportDetailModal" onclick="if(event.target===this)closeReportDetailModal()">
         <div class="modal" style="max-width:640px">
           <div class="modal-header">
-            <div class="modal-title" id="clientDetailTitle">Client Details</div>
-            <button class="modal-close" onclick="closeClientDetailModal()">×</button>
+            <div class="modal-title" id="reportDetailTitle">Details</div>
+            <button class="modal-close" onclick="closeReportDetailModal()">×</button>
           </div>
-          <div class="modal-body" id="clientDetailBody" style="max-height:70vh;overflow-y:auto"></div>
+          <div class="modal-body" id="reportDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer">
-            <button class="btn-secondary" onclick="closeClientDetailModal()">Close</button>
+            <button class="btn-secondary" onclick="closeReportDetailModal()">Close</button>
           </div>
         </div>
       </div>
@@ -5445,7 +5447,12 @@
         hasListView: true,
         listView: {
           label: 'Client List',
+          idField: 'clientId',
+          suburbFn: clientSuburbs,
           searchFields: ['name', 'nickName', 'email', 'emailAddress', 'contactNo'],
+          extraFilters: [
+            { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
+          ],
           columns: [
             { header: 'Name', render: r => escHtml(r.name || '—') },
             { header: 'Nickname', render: r => escHtml(r.nickName || '—') },
@@ -5455,7 +5462,9 @@
             { header: 'Locations', render: r => String((r.locations || []).length) },
             { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
             { header: 'Active', render: r => r.isActive ? '✅' : '—' }
-          ]
+          ],
+          detailTitle: r => r.name || 'Client Details',
+          renderDetail: clientDetailHtml
         },
         kpis: rows => {
           const active = rows.filter(r => r.isActive).length;
@@ -5491,6 +5500,32 @@
         extraFilters: [
           { id: 'status', label: 'Status', type: 'select', field: 'status' }
         ],
+        // Same sub-view pattern as Clients — a searchable directory over the
+        // same already-fetched dataset, plus a Compliance filter since
+        // attachedRequirements[] (WWCC/PCC-type documents, each with its own
+        // expiry) is otherwise invisible anywhere else in this app.
+        hasListView: true,
+        listView: {
+          label: 'Candidate List',
+          idField: 'userId',
+          suburbFn: candidateSuburbs,
+          searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
+          extraFilters: [
+            { id: 'expiring', label: 'Expiring/expired docs only', type: 'checkbox', test: r => candidateExpiringDocsCount(r) > 0 }
+          ],
+          columns: [
+            { header: 'Name', render: r => escHtml([r.firstName, r.lastName].filter(Boolean).join(' ') || '—') },
+            { header: 'Username', render: r => escHtml(r.userName || '—') },
+            { header: 'Suburb(s)', render: r => escHtml(candidateSuburbs(r).join(', ') || '—') },
+            { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+            { header: 'Email', render: r => escHtml(r.email || '—') },
+            { header: 'Quals', render: r => String((r.qualifications || []).length) },
+            { header: 'Compliance', render: r => candidateExpiringDocsCount(r) > 0 ? `⚠️ ${candidateExpiringDocsCount(r)} expiring/expired` : '✅ OK' },
+            { header: 'Active', render: r => r.isActive ? '✅' : '—' }
+          ],
+          detailTitle: r => [r.firstName, r.lastName].filter(Boolean).join(' ') || r.userName || 'Candidate Details',
+          renderDetail: candidateDetailHtml
+        },
         kpis: rows => {
           const active = rows.filter(r => r.isActive).length;
           const missingContact = rows.filter(r => !r.email && !r.contactNo).length;
@@ -5723,15 +5758,20 @@
           <div id="report_${type}_listView" style="display:none">
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search name, nickname, email, phone…" style="width:220px;flex:1;min-width:180px" oninput="applyClientListFilters('${type}')">
-                <select id="report_${type}_list_suburb" class="form-control" style="width:170px" onchange="applyClientListFilters('${type}')">
+                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search…" style="width:220px;flex:1;min-width:180px" oninput="applyListViewFilters('${type}')">
+                <select id="report_${type}_list_suburb" class="form-control" style="width:170px" onchange="applyListViewFilters('${type}')">
                   <option value="">Suburb: Any</option>
                 </select>
-                <select id="report_${type}_list_active" class="form-control" style="width:150px" onchange="applyClientListFilters('${type}')">
+                <select id="report_${type}_list_active" class="form-control" style="width:150px" onchange="applyListViewFilters('${type}')">
                   <option value="">Active + Inactive</option>
                   <option value="true">Active Only</option>
                   <option value="false">Inactive Only</option>
                 </select>
+                ${(cfg.listView.extraFilters || []).map(f => `
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
+                    <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyListViewFilters('${type}')"> ${escHtml(f.label)}
+                  </label>
+                `).join('')}
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
               </div>
             </div>
@@ -5801,7 +5841,7 @@
         populateReportExtraFilterOptions(type, rows);
         reportPage[type] = 1;
         applyReportFilters(type);
-        if (cfg.hasListView) { populateClientListSuburbOptions(type, rows); applyClientListFilters(type); }
+        if (cfg.hasListView) { populateListViewSuburbOptions(type, rows); applyListViewFilters(type); }
       } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
       }
@@ -6101,23 +6141,43 @@
       document.getElementById(`report_${type}_listView`).style.display = view === 'list' ? '' : 'none';
     }
 
-    // Suburb lives per-location, not on the client record itself — a client
-    // can have several sites in different suburbs, so this returns every
-    // distinct suburb across all of a client's locations (usually just one).
+    // Suburb lives per-location/address, not on the record itself — a
+    // client can have several sites, a candidate several addresses, each
+    // possibly in a different suburb — so these return every distinct
+    // suburb found (usually just one).
     function clientSuburbs(client) {
       return [...new Set((client.locations || []).map(l => l.suburb).filter(Boolean))];
     }
+    function candidateSuburbs(candidate) {
+      return [...new Set((candidate.addresses || []).map(a => a.suburb).filter(Boolean))];
+    }
 
-    function populateClientListSuburbOptions(type, rows) {
+    // attachedRequirements[] is where WWCC/PCC-type compliance documents
+    // live, each with its own expiryDate. isExpiry is the RT app's own
+    // "already expired" flag; falls back to comparing expiryDate against
+    // "30 days from now" so a document expiring imminently also counts as
+    // needing attention, not just one that's already lapsed.
+    function candidateExpiringDocsCount(candidate) {
+      const soon = Date.now() + 30 * 86400000;
+      return (candidate.attachedRequirements || []).filter(req => {
+        if (req.isExpiry) return true;
+        if (!req.expiryDate) return false;
+        const t = new Date(req.expiryDate).getTime();
+        return !isNaN(t) && t < soon;
+      }).length;
+    }
+
+    function populateListViewSuburbOptions(type, rows) {
+      const cfg = REPORT_CONFIG[type];
       const sel = document.getElementById(`report_${type}_list_suburb`);
-      if (!sel) return;
+      if (!sel || !cfg.listView.suburbFn) return;
       const current = sel.value;
-      const suburbs = [...new Set(rows.flatMap(clientSuburbs))].sort((a, b) => a.localeCompare(b));
+      const suburbs = [...new Set(rows.flatMap(cfg.listView.suburbFn))].sort((a, b) => a.localeCompare(b));
       sel.innerHTML = `<option value="">Suburb: Any</option>` + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
       if (suburbs.includes(current)) sel.value = current;
     }
 
-    function applyClientListFilters(type) {
+    function applyListViewFilters(type) {
       const cfg = REPORT_CONFIG[type];
       const rows = reportDataCache[type] || [];
       const search = (document.getElementById(`report_${type}_list_search`)?.value || '').trim().toLowerCase();
@@ -6126,7 +6186,12 @@
 
       let filtered = rows;
       if (activeVal !== '') filtered = filtered.filter(r => String(r.isActive) === activeVal);
-      if (suburb) filtered = filtered.filter(r => clientSuburbs(r).includes(suburb));
+      if (suburb && cfg.listView.suburbFn) filtered = filtered.filter(r => cfg.listView.suburbFn(r).includes(suburb));
+      // Checkbox extraFilters (mirrors the Dashboard tab's own pattern).
+      filtered = filtered.filter(r => (cfg.listView.extraFilters || []).every(f => {
+        const checked = document.getElementById(`report_${type}_list_${f.id}`)?.checked;
+        return !checked || f.test(r);
+      }));
       if (search) {
         filtered = filtered.filter(r => (cfg.listView.searchFields || []).some(field => (r[field] || '').toString().toLowerCase().includes(search)));
       }
@@ -6135,10 +6200,10 @@
       const countEl = document.getElementById(`report_${type}_list_count`);
       if (countEl) countEl.textContent = rows.length ? `${filtered.length} of ${rows.length}` : '';
       reportListPage[type] = 1;
-      renderClientListTable(type, filtered);
+      renderListViewTable(type, filtered);
     }
 
-    function renderClientListTable(type, rows) {
+    function renderListViewTable(type, rows) {
       const cfg = REPORT_CONFIG[type];
       const tbody = document.getElementById(`report_${type}_list_table`);
       if (!rows.length) {
@@ -6149,37 +6214,45 @@
       const page = reportListPage[type] || 1;
       const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
       const slice = rows.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE);
-      const idField = type === 'clients' ? 'clientId' : 'id';
-      tbody.innerHTML = slice.map(r => `<tr style="cursor:pointer" onclick="openClientDetail(${r[idField]})">${cfg.listView.columns.map(c => `<td>${c.render(r)}</td>`).join('')}</tr>`).join('');
+      const idField = cfg.listView.idField;
+      tbody.innerHTML = slice.map(r => `<tr style="cursor:pointer" onclick="openReportDetail('${type}',${r[idField]})">${cfg.listView.columns.map(c => `<td>${c.render(r)}</td>`).join('')}</tr>`).join('');
       document.getElementById(`report_${type}_list_pagination`).innerHTML = `
-        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeClientListPage('${type}',-1)" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeListViewPage('${type}',-1)" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
         <span>Page ${page} of ${totalPages} (${rows.length} total)</span>
-        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeClientListPage('${type}',1)" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`;
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeListViewPage('${type}',1)" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`;
     }
 
-    function changeClientListPage(type, delta) {
+    function changeListViewPage(type, delta) {
       const rows = reportListFilteredCache[type] || [];
       const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
       reportListPage[type] = Math.min(totalPages, Math.max(1, (reportListPage[type] || 1) + delta));
-      renderClientListTable(type, rows);
+      renderListViewTable(type, rows);
     }
 
-    // Detail view: every field the RT API returns for this client, read
+    // Detail view: every field the RT API returns for this record, read
     // straight from the already-fetched list row (the list endpoint already
-    // returns each client's full locations[] array, so no extra request is
-    // needed just to see one client's details).
-    function clientAddressLine(loc) {
-      return [loc.addressLine1, loc.addressLine2, loc.addressLine3].filter(Boolean).join(', ')
-        || '—';
+    // returns each record's full nested arrays — locations/addresses/
+    // qualifications/etc — so no extra request is needed for one detail view).
+    function formatAddressLine(loc) {
+      return [loc.addressLine1, loc.addressLine2, loc.addressLine3].filter(Boolean).join(', ') || '—';
     }
 
-    function openClientDetail(clientId) {
-      const client = (reportDataCache.clients || []).find(c => c.clientId === clientId);
-      if (!client) return;
-      document.getElementById('clientDetailTitle').textContent = client.name || 'Client Details';
+    function openReportDetail(type, id) {
+      const cfg = REPORT_CONFIG[type];
+      const row = (reportDataCache[type] || []).find(r => r[cfg.listView.idField] === id);
+      if (!row) return;
+      document.getElementById('reportDetailTitle').textContent = cfg.listView.detailTitle(row);
+      document.getElementById('reportDetailBody').innerHTML = cfg.listView.renderDetail(row);
+      document.getElementById('reportDetailModal').classList.add('open');
+    }
 
+    function closeReportDetailModal() {
+      document.getElementById('reportDetailModal').classList.remove('open');
+    }
+
+    function clientDetailHtml(client) {
       const locations = client.locations || [];
-      document.getElementById('clientDetailBody').innerHTML = `
+      return `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px">
           ${[
             ['Nickname', client.nickName || '—'],
@@ -6213,18 +6286,118 @@
                 ${!loc.isActive ? '<span class="lead-badge lead-badge-not">Inactive</span>' : ''}
               </div>
             </div>
-            <div style="font-size:12.5px;color:var(--text)">${escHtml(clientAddressLine(loc))}</div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml(formatAddressLine(loc))}</div>
             <div style="font-size:12.5px;color:var(--text)">${escHtml([loc.suburb, loc.state, loc.postCode].filter(Boolean).join(', ') || '—')}${loc.country ? ', ' + escHtml(loc.country) : ''}</div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${loc.contactName ? `Contact: ${escHtml(loc.contactName)} ` : ''}${loc.contactNo ? `· ${escHtml(loc.contactNo)}` : ''}</div>
             ${loc.latitude && loc.longitude ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">📌 ${loc.latitude}, ${loc.longitude}</div>` : ''}
           </div>
         `).join('') : `<div style="font-size:12.5px;color:var(--text-muted)">No locations on file.</div>`}
       `;
-      document.getElementById('clientDetailModal').classList.add('open');
     }
 
-    function closeClientDetailModal() {
-      document.getElementById('clientDetailModal').classList.remove('open');
+    // isDocExpiring mirrors candidateExpiringDocsCount's own rule (already
+    // expired per the RT app's isExpiry flag, or expiring within 30 days) so
+    // the same document is flagged consistently between the list column and
+    // this detail view.
+    function isDocExpiring(req) {
+      if (req.isExpiry) return true;
+      if (!req.expiryDate) return false;
+      const t = new Date(req.expiryDate).getTime();
+      return !isNaN(t) && t < Date.now() + 30 * 86400000;
+    }
+
+    function candidateDetailHtml(candidate) {
+      const addresses = candidate.addresses || [];
+      const quals = candidate.qualifications || [];
+      const reqs = candidate.attachedRequirements || [];
+      // Availability can run to many rows (a rolling day-by-day calendar) —
+      // capped here to the next 14 upcoming entries so the modal stays
+      // readable; the raw status code (0/1/2) isn't documented anywhere in
+      // the RT API's own spec, so it's shown as-is rather than guessing a
+      // label, same convention as every other raw code elsewhere in this app.
+      const upcomingAvailability = (candidate.availableCandidateList || [])
+        .filter(a => a.date && new Date(a.date).getTime() >= Date.now() - 86400000)
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+        .slice(0, 14);
+
+      return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px">
+          ${[
+            ['Username', candidate.userName || '—'],
+            ['User ID', candidate.userId],
+            ['Title', candidate.title || '—'],
+            ['Email', candidate.email || '—'],
+            ['Contact No', candidate.contactNo || '—'],
+            ['Active', candidate.isActive ? '✅ Active' : '❌ Inactive'],
+            ['User Type', candidate.userTypeId ?? '—'],
+            ['Role', candidate.userRoleId ?? '—'],
+            ['Status', candidate.status ?? '—'],
+            ['Client ID', candidate.userClientId ?? '—'],
+            ['Created', fmtDate(candidate.createdDate)]
+          ].map(([label, value]) => `
+            <div>
+              <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">${escHtml(label)}</div>
+              <div style="font-size:13.5px;color:var(--navy);font-weight:600">${escHtml(String(value))}</div>
+            </div>`).join('')}
+        </div>
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
+          📍 Addresses (${addresses.length})
+        </div>
+        ${addresses.length ? addresses.map(a => `
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
+            <div style="font-size:12.5px;color:var(--text)">${escHtml(formatAddressLine(a))}</div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml([a.suburb, a.state, a.postCode].filter(Boolean).join(', ') || '—')}${a.country ? ', ' + escHtml(a.country) : ''}</div>
+            ${a.contactNo ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${escHtml(a.contactNo)}</div>` : ''}
+            ${a.latitude && a.longitude ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">📌 ${a.latitude}, ${a.longitude}</div>` : ''}
+          </div>
+        `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No addresses on file.</div>`}
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">
+          🎓 Qualifications (${quals.length})
+        </div>
+        ${quals.length ? quals.map(q => `
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(q.qualificationName || q.shortCode || 'Unnamed qualification')}</div>
+              ${q.qualified ? '<span class="lead-badge lead-badge-done">Qualified</span>' : '<span class="lead-badge lead-badge-todo">Not Confirmed</span>'}
+            </div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml(q.collegeName || '—')}${q.gradeId != null ? ` · Grade ${q.gradeId}` : ''}</div>
+            ${q.qualifiedDate ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">Qualified ${fmtDate(q.qualifiedDate)}</div>` : ''}
+            ${q.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${escHtml(q.description)}</div>` : ''}
+          </div>
+        `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No qualifications on file.</div>`}
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">
+          📄 Compliance Documents (${reqs.length})
+        </div>
+        ${reqs.length ? reqs.map(req => `
+          <div style="background:${isDocExpiring(req) ? '#fef2f2' : 'var(--gray-100)'};border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(req.requirementName || 'Unnamed requirement')}</div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                ${isDocExpiring(req) ? '<span class="lead-badge lead-badge-not">⚠️ Expiring/Expired</span>' : ''}
+                ${req.isMandatory ? '<span class="lead-badge lead-badge-sched">Mandatory</span>' : ''}
+                ${req.isShiftCritical ? '<span class="lead-badge lead-badge-sched">Shift-Critical</span>' : ''}
+              </div>
+            </div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}${req.isReviewed ? ' · Reviewed' : ''}</div>
+          </div>
+        `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No compliance documents on file.</div>`}
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">
+          📅 Upcoming Availability
+        </div>
+        ${upcomingAvailability.length ? `
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${upcomingAvailability.map(a => `
+              <div style="background:var(--gray-100);border-radius:6px;padding:6px 10px;font-size:11.5px;color:var(--text)">
+                ${escHtml(a.day || '')} ${fmtDate(a.date)} · Status ${a.status ?? '—'}
+              </div>`).join('')}
+          </div>
+        ` : `<div style="font-size:12.5px;color:var(--text-muted)">No upcoming availability on file.</div>`}
+      `;
     }
 
     let currentLeadDetailId = null;
