@@ -450,7 +450,7 @@
           </select>
         </div>
 
-        <div class="kpi-row" id="salesKpiRow"></div>
+        <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(4,1fr)"></div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Pipeline Funnel — by state</div>
@@ -4558,16 +4558,17 @@
         total: leads.length,
         called: leads.filter(l => l.lead_called_status === 'done').length,
         visited: leads.filter(l => l.centre_visited_status === 'done').length,
-        signed: leads.filter(l => l.signed_status === 'signed').length,
-        notInterested: leads.filter(l => l.signed_status === 'not_interested').length
+        signed: leads.filter(l => l.signed_status === 'signed').length
       };
     }
 
     function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
 
-    // "inverse" metrics (e.g. Not Interested) are good when they go DOWN —
-    // the up/down CSS classes represent good/bad, not literal direction, so
-    // color stays intuitive (green = good) regardless of which way is "up".
+    // "inverse" metrics (e.g. a churn/loss rate) are good when they go DOWN
+    // — the up/down CSS classes represent good/bad, not literal direction,
+    // so color stays intuitive (green = good) regardless of which way is
+    // "up". No current KPI card uses inverse:true, but the plumbing stays
+    // since it's a one-word opt-in for whichever metric needs it next.
     function trendArrow(curr, prev, inverse) {
       if (prev === 0 && curr === 0) return '<span class="kpi-trend flat">— no change</span>';
       if (prev === 0) return `<span class="kpi-trend ${inverse ? 'down' : 'up'}">▲ new</span>`;
@@ -4630,8 +4631,7 @@
         { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
         { label: 'Called Rate', value: pct(c.called, c.total) + '%', trend: trendArrow(pct(c.called, c.total), pct(p.called, p.total)), hint: `${c.called} of ${c.total} leads called` },
         { label: 'Visited Rate', value: pct(c.visited, c.called) + '%', trend: trendArrow(pct(c.visited, c.called), pct(p.visited, p.called)), hint: `${c.visited} of ${c.called} called leads visited` },
-        { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
-        { label: 'Not Interested', value: pct(c.notInterested, c.total) + '%', trend: trendArrow(c.notInterested, p.notInterested, true), hint: `${c.notInterested} lead${c.notInterested === 1 ? '' : 's'} lost this period` }
+        { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` }
       ];
       document.getElementById('salesKpiRow').innerHTML = cards.map(k => `
         <div class="kpi-card">
