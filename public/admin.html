@@ -784,6 +784,21 @@
         </div>
       </div>
 
+      <!-- RT API Reports: Client detail (read-only — this is a reporting mirror
+           of the external RT app, not something this app can edit) -->
+      <div class="modal-overlay" id="clientDetailModal" onclick="if(event.target===this)closeClientDetailModal()">
+        <div class="modal" style="max-width:640px">
+          <div class="modal-header">
+            <div class="modal-title" id="clientDetailTitle">Client Details</div>
+            <button class="modal-close" onclick="closeClientDetailModal()">×</button>
+          </div>
+          <div class="modal-body" id="clientDetailBody" style="max-height:70vh;overflow-y:auto"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeClientDetailModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Meetings (private — super_admin only) -->
       <div class="admin-section" id="section-meetings">
         <div class="admin-header">
@@ -5383,6 +5398,8 @@
     let reportFilteredCache = {};  // type -> that array after client-side filters (search, status, etc.)
     let reportPage = {};           // type -> current table page (1-based)
     const REPORT_PAGE_SIZE = 50;
+    let reportListFilteredCache = {}; // type -> rows after the List sub-view's own independent filters
+    let reportListPage = {};          // type -> List sub-view's current table page (1-based)
     let reportLookupsLoaded = false;
     let clientNameById = {};
     let candidateNameById = {};
@@ -5420,6 +5437,26 @@
         extraFilters: [
           { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
         ],
+        // Sub-view: a searchable directory (not an analytical slice like the
+        // Dashboard tab above) — its own independent search/suburb/active
+        // filters, click a row to see every field the RT API returns for
+        // that client, including all of its locations (suburb/address/geo
+        // isn't on the client record itself — it only exists per-location).
+        hasListView: true,
+        listView: {
+          label: 'Client List',
+          searchFields: ['name', 'nickName', 'email', 'emailAddress', 'contactNo'],
+          columns: [
+            { header: 'Name', render: r => escHtml(r.name || '—') },
+            { header: 'Nickname', render: r => escHtml(r.nickName || '—') },
+            { header: 'Suburb(s)', render: r => escHtml(clientSuburbs(r).join(', ') || '—') },
+            { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+            { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
+            { header: 'Locations', render: r => String((r.locations || []).length) },
+            { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
+            { header: 'Active', render: r => r.isActive ? '✅' : '—' }
+          ]
+        },
         kpis: rows => {
           const active = rows.filter(r => r.isActive).length;
           const trial = rows.filter(r => r.isTrialClient).length;
@@ -5595,6 +5632,15 @@
             </div>
           </div>
 
+          ${cfg.hasListView ? `
+            <div style="display:flex;gap:8px;margin-bottom:16px">
+              <button class="cat-chip active" id="report_${type}_tab_dashboard" onclick="switchReportView('${type}','dashboard')">📊 Dashboard</button>
+              <button class="cat-chip" id="report_${type}_tab_list" onclick="switchReportView('${type}','list')">📋 ${escHtml(cfg.listView.label)}</button>
+            </div>
+          ` : ''}
+
+          <div id="report_${type}_dashboardView">
+
           <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <select id="report_${type}_period" class="form-control" style="width:135px" onchange="onReportPeriodChange('${type}')">
@@ -5670,6 +5716,38 @@
             </div>
             <div id="report_${type}_pagination" style="display:flex;justify-content:center;gap:12px;padding:14px;align-items:center;font-size:12.5px;color:var(--text-muted)"></div>
           </div>
+
+          </div>
+
+          ${cfg.hasListView ? `
+          <div id="report_${type}_listView" style="display:none">
+            <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search name, nickname, email, phone…" style="width:220px;flex:1;min-width:180px" oninput="applyClientListFilters('${type}')">
+                <select id="report_${type}_list_suburb" class="form-control" style="width:170px" onchange="applyClientListFilters('${type}')">
+                  <option value="">Suburb: Any</option>
+                </select>
+                <select id="report_${type}_list_active" class="form-control" style="width:150px" onchange="applyClientListFilters('${type}')">
+                  <option value="">Active + Inactive</option>
+                  <option value="true">Active Only</option>
+                  <option value="false">Inactive Only</option>
+                </select>
+                <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
+              </div>
+            </div>
+            <div class="admin-table-card">
+              <div style="overflow-x:auto">
+                <table class="data-table data-table-compact">
+                  <thead><tr>${cfg.listView.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                  <tbody id="report_${type}_list_table">
+                    <tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="report_${type}_list_pagination" style="display:flex;justify-content:center;gap:12px;padding:14px;align-items:center;font-size:12.5px;color:var(--text-muted)"></div>
+            </div>
+          </div>
+          ` : ''}
         </div>`).join('');
     }
 
@@ -5723,6 +5801,7 @@
         populateReportExtraFilterOptions(type, rows);
         reportPage[type] = 1;
         applyReportFilters(type);
+        if (cfg.hasListView) { populateClientListSuburbOptions(type, rows); applyClientListFilters(type); }
       } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
       }
@@ -6008,6 +6087,144 @@
       const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
       reportPage[type] = Math.min(totalPages, Math.max(1, (reportPage[type] || 1) + delta));
       renderReportTable(type, rows);
+    }
+
+    // ── Report sub-views: List + Detail (currently Clients only) ──────
+    // Switches between a report type's analytical Dashboard tab and its
+    // searchable List tab. Both read from the same reportDataCache — the
+    // List tab isn't a separate fetch, just a different filter/render over
+    // data already on hand.
+    function switchReportView(type, view) {
+      document.getElementById(`report_${type}_tab_dashboard`).classList.toggle('active', view === 'dashboard');
+      document.getElementById(`report_${type}_tab_list`).classList.toggle('active', view === 'list');
+      document.getElementById(`report_${type}_dashboardView`).style.display = view === 'dashboard' ? '' : 'none';
+      document.getElementById(`report_${type}_listView`).style.display = view === 'list' ? '' : 'none';
+    }
+
+    // Suburb lives per-location, not on the client record itself — a client
+    // can have several sites in different suburbs, so this returns every
+    // distinct suburb across all of a client's locations (usually just one).
+    function clientSuburbs(client) {
+      return [...new Set((client.locations || []).map(l => l.suburb).filter(Boolean))];
+    }
+
+    function populateClientListSuburbOptions(type, rows) {
+      const sel = document.getElementById(`report_${type}_list_suburb`);
+      if (!sel) return;
+      const current = sel.value;
+      const suburbs = [...new Set(rows.flatMap(clientSuburbs))].sort((a, b) => a.localeCompare(b));
+      sel.innerHTML = `<option value="">Suburb: Any</option>` + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+      if (suburbs.includes(current)) sel.value = current;
+    }
+
+    function applyClientListFilters(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportDataCache[type] || [];
+      const search = (document.getElementById(`report_${type}_list_search`)?.value || '').trim().toLowerCase();
+      const suburb = document.getElementById(`report_${type}_list_suburb`)?.value || '';
+      const activeVal = document.getElementById(`report_${type}_list_active`)?.value || '';
+
+      let filtered = rows;
+      if (activeVal !== '') filtered = filtered.filter(r => String(r.isActive) === activeVal);
+      if (suburb) filtered = filtered.filter(r => clientSuburbs(r).includes(suburb));
+      if (search) {
+        filtered = filtered.filter(r => (cfg.listView.searchFields || []).some(field => (r[field] || '').toString().toLowerCase().includes(search)));
+      }
+
+      reportListFilteredCache[type] = filtered;
+      const countEl = document.getElementById(`report_${type}_list_count`);
+      if (countEl) countEl.textContent = rows.length ? `${filtered.length} of ${rows.length}` : '';
+      reportListPage[type] = 1;
+      renderClientListTable(type, filtered);
+    }
+
+    function renderClientListTable(type, rows) {
+      const cfg = REPORT_CONFIG[type];
+      const tbody = document.getElementById(`report_${type}_list_table`);
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.listView.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">No records match these filters</td></tr>`;
+        document.getElementById(`report_${type}_list_pagination`).innerHTML = '';
+        return;
+      }
+      const page = reportListPage[type] || 1;
+      const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
+      const slice = rows.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE);
+      const idField = type === 'clients' ? 'clientId' : 'id';
+      tbody.innerHTML = slice.map(r => `<tr style="cursor:pointer" onclick="openClientDetail(${r[idField]})">${cfg.listView.columns.map(c => `<td>${c.render(r)}</td>`).join('')}</tr>`).join('');
+      document.getElementById(`report_${type}_list_pagination`).innerHTML = `
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeClientListPage('${type}',-1)" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
+        <span>Page ${page} of ${totalPages} (${rows.length} total)</span>
+        <button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="changeClientListPage('${type}',1)" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`;
+    }
+
+    function changeClientListPage(type, delta) {
+      const rows = reportListFilteredCache[type] || [];
+      const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
+      reportListPage[type] = Math.min(totalPages, Math.max(1, (reportListPage[type] || 1) + delta));
+      renderClientListTable(type, rows);
+    }
+
+    // Detail view: every field the RT API returns for this client, read
+    // straight from the already-fetched list row (the list endpoint already
+    // returns each client's full locations[] array, so no extra request is
+    // needed just to see one client's details).
+    function clientAddressLine(loc) {
+      return [loc.addressLine1, loc.addressLine2, loc.addressLine3].filter(Boolean).join(', ')
+        || '—';
+    }
+
+    function openClientDetail(clientId) {
+      const client = (reportDataCache.clients || []).find(c => c.clientId === clientId);
+      if (!client) return;
+      document.getElementById('clientDetailTitle').textContent = client.name || 'Client Details';
+
+      const locations = client.locations || [];
+      document.getElementById('clientDetailBody').innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px">
+          ${[
+            ['Nickname', client.nickName || '—'],
+            ['Client ID', client.clientId],
+            ['Email', client.email || client.emailAddress || '—'],
+            ['Contact No', client.contactNo || '—'],
+            ['Landline', client.landLineNo || '—'],
+            ['Active', client.isActive ? '✅ Active' : '❌ Inactive'],
+            ['Trial Client', client.isTrialClient ? 'Yes' : 'No'],
+            ['Assignment Type', client.clientAssignmentTypeId ?? '—'],
+            ['Preference', client.clientPreferenceId ?? '—'],
+            ['Invoice by Location', client.isInvoiceByLocation ? 'Yes' : 'No'],
+            ['Timesheet by Location', client.isTimesheetByLocation ? 'Yes' : 'No'],
+            ['Created', fmtDate(client.createdDate)]
+          ].map(([label, value]) => `
+            <div>
+              <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">${escHtml(label)}</div>
+              <div style="font-size:13.5px;color:var(--navy);font-weight:600">${escHtml(String(value))}</div>
+            </div>`).join('')}
+        </div>
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
+          📍 Locations (${locations.length})
+        </div>
+        ${locations.length ? locations.map(loc => `
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(loc.locationName || 'Unnamed location')}</div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                ${loc.isPrimary ? '<span class="lead-badge lead-badge-done">Primary</span>' : ''}
+                ${loc.isBilling ? '<span class="lead-badge lead-badge-sched">Billing</span>' : ''}
+                ${!loc.isActive ? '<span class="lead-badge lead-badge-not">Inactive</span>' : ''}
+              </div>
+            </div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml(clientAddressLine(loc))}</div>
+            <div style="font-size:12.5px;color:var(--text)">${escHtml([loc.suburb, loc.state, loc.postCode].filter(Boolean).join(', ') || '—')}${loc.country ? ', ' + escHtml(loc.country) : ''}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${loc.contactName ? `Contact: ${escHtml(loc.contactName)} ` : ''}${loc.contactNo ? `· ${escHtml(loc.contactNo)}` : ''}</div>
+            ${loc.latitude && loc.longitude ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">📌 ${loc.latitude}, ${loc.longitude}</div>` : ''}
+          </div>
+        `).join('') : `<div style="font-size:12.5px;color:var(--text-muted)">No locations on file.</div>`}
+      `;
+      document.getElementById('clientDetailModal').classList.add('open');
+    }
+
+    function closeClientDetailModal() {
+      document.getElementById('clientDetailModal').classList.remove('open');
     }
 
     let currentLeadDetailId = null;
