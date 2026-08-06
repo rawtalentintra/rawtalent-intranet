@@ -50,4 +50,35 @@ async function getDirections(coords) {
   return data.routes?.[0]?.geometry || null;
 }
 
-module.exports = { isConfigured, geocodeAddress, getDistanceMatrix, getDirections };
+const EARTH_RADIUS_KM = 6371;
+function toRad(deg) { return (deg * Math.PI) / 180; }
+
+// Haversine, in km — accurate enough for the sub-few-hundred-km spans this
+// app deals with (route corridor search, single point-to-point checks).
+function haversineKm(a, b) {
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(s));
+}
+
+// Shortest distance from `point` to the straight-line segment start→end, in
+// km. Coordinates are projected onto a local flat plane (equirectangular,
+// centred on the segment) before doing ordinary point-to-segment geometry —
+// simple and plenty accurate at the city/regional scale a driving corridor
+// search needs; a full great-circle segment projection would be overkill.
+function distanceToSegmentKm(point, start, end) {
+  const latRef = toRad((start.lat + end.lat) / 2);
+  const kmPerDegLat = 110.574;
+  const kmPerDegLng = 111.320 * Math.cos(latRef);
+  const project = (p) => ({ x: p.lng * kmPerDegLng, y: p.lat * kmPerDegLat });
+  const p = project(point), a = project(start), b = project(end);
+  const abx = b.x - a.x, aby = b.y - a.y;
+  const lenSq = abx * abx + aby * aby;
+  let t = lenSq === 0 ? 0 : ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + t * abx, cy = a.y + t * aby;
+  return Math.hypot(p.x - cx, p.y - cy);
+}
+
+module.exports = { isConfigured, geocodeAddress, getDistanceMatrix, getDirections, haversineKm, distanceToSegmentKm };

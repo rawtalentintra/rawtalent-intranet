@@ -133,4 +133,60 @@ router.post('/sync-calendar', async (req, res) => {
   }
 });
 
+// Caps how many not-yet-geocoded leads a single search will resolve via
+// Mapbox (sequential HTTP calls — geocodeAddress has no batch endpoint).
+// Well above what a normal filtered view returns; protects against an
+// unfiltered "all leads" search turning into hundreds of blocking calls.
+const MAX_GEOCODES_PER_SEARCH = 150;
+
+// "Along My Route" — given a start and destination address, returns every
+// lead within radiusKm of the straight-line path between them (a driving
+// corridor approximation; see mapboxService.distanceToSegmentKm). Lets a
+// workforce partner plan a route by literally describing the journey
+// ("I'm starting here, ending there") instead of filtering by suburb.
+router.post('/geofence', async (req, res) => {
+  try {
+    if (!mapboxService.isConfigured()) return res.status(422).json({ error: 'Mapbox is not configured — route-based search needs MAPBOX_ACCESS_TOKEN' });
+    const { startAddress, endAddress, radiusKm } = req.body;
+    if (!startAddress?.trim()) return res.status(400).json({ error: 'Start location is required' });
+    if (!endAddress?.trim()) return res.status(400).json({ error: 'Destination is required' });
+    const radius = Number(radiusKm) > 0 ? Number(radiusKm) : 5;
+
+    const [startCoord, endCoord] = await Promise.all([
+      mapboxService.geocodeAddress(startAddress),
+      mapboxService.geocodeAddress(endAddress)
+    ]);
+    if (!startCoord) return res.status(422).json({ error: `Could not locate "${startAddress}" — try a more specific address` });
+    if (!endCoord) return res.status(422).json({ error: `Could not locate "${endAddress}" — try a more specific address` });
+
+    const db = getDb();
+    const leadsRes = await db.execute({ sql: 'SELECT id, centre_name, street_address, suburb, state, latitude, longitude FROM leads', args: [] });
+    const leads = leadsRes.rows;
+
+    let geocodeCount = 0;
+    let geocodeSkipped = 0;
+    for (const lead of leads) {
+      if (lead.latitude != null && lead.longitude != null) continue;
+      if (geocodeCount >= MAX_GEOCODES_PER_SEARCH) { geocodeSkipped++; continue; }
+      const address = [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ') || lead.centre_name;
+      const coord = await mapboxService.geocodeAddress(address);
+      geocodeCount++;
+      if (!coord) continue;
+      lead.latitude = coord.lat;
+      lead.longitude = coord.lng;
+      await db.execute({ sql: 'UPDATE leads SET latitude = ?, longitude = ? WHERE id = ?', args: [coord.lat, coord.lng, lead.id] });
+    }
+
+    const matches = leads
+      .filter(l => l.latitude != null && l.longitude != null)
+      .map(l => ({ id: l.id, distanceKm: mapboxService.distanceToSegmentKm({ lat: l.latitude, lng: l.longitude }, startCoord, endCoord) }))
+      .filter(m => m.distanceKm <= radius)
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+
+    res.json({ matches, startCoord, endCoord, radiusKm: radius, geocodeSkipped });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -614,6 +614,27 @@
         </div>
 
         <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
+          <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:8px">🎯 Find Centres Along a Route</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div>
+              <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">I'm starting at</label>
+              <input type="text" id="geofenceStartAddress" class="form-control" placeholder="e.g. your home or office address" style="width:230px">
+            </div>
+            <div>
+              <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">I'm heading to</label>
+              <input type="text" id="geofenceEndAddress" class="form-control" placeholder="destination address" style="width:230px">
+            </div>
+            <div>
+              <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Within (km)</label>
+              <input type="number" id="geofenceRadiusKm" class="form-control" value="5" min="1" max="50" style="width:70px">
+            </div>
+            <button class="btn-add" id="geofenceSearchBtn" onclick="runRouteGeofenceSearch()">Find Centres</button>
+            <button class="btn-secondary" id="geofenceClearBtn" style="display:none" onclick="clearRouteGeofenceSearch()">Clear</button>
+            <span id="geofenceStatus" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
           <div class="leads-filter-bar" style="padding:0 0 12px;border-bottom:none">
             <input type="text" id="routeFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterRoutePlannerLeads()">
             <select id="routeFilterPeriod" onchange="filterRoutePlannerLeads()">
@@ -658,10 +679,10 @@
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
-                <tr><th style="width:28px"></th><th>Centre</th><th>Address</th><th>Suburb</th><th>State</th><th>Called</th><th>Visited</th><th>Profile</th><th>WF Partner</th></tr>
+                <tr><th style="width:28px"></th><th>Centre</th><th>Suburb</th><th>State</th><th>Called</th><th>Visited</th><th>Profile</th><th>WF Partner</th></tr>
               </thead>
               <tbody id="routePlannerLeadsBody">
-                <tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -4831,6 +4852,8 @@
     let currentRouteResult = null; // last /optimize response
     let mapboxTokenCache = null; // { configured, token } — fetched once per session
     let routeMapInstance = null;
+    let routeGeofenceLeadIds = null; // Set of lead ids within the searched route corridor, or null when no search is active
+    let routeGeofenceDistances = new Map(); // lead id -> distanceKm, for the "Xkm from route" label
 
     const ROUTE_MAX_STOPS = 10;
 
@@ -4889,7 +4912,7 @@
         if (!mapboxTokenCache) mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json());
         document.getElementById('routePlannerMapboxNotice').style.display = mapboxTokenCache.configured ? 'none' : 'block';
       } catch {
-        body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">Failed to load centres</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">Failed to load centres</td></tr>`;
       }
     }
 
@@ -4905,6 +4928,7 @@
       const profileCreated = document.getElementById('routeFilterProfileCreated').value;
 
       let filtered = routePlannerLeads;
+      if (routeGeofenceLeadIds) filtered = filtered.filter(l => routeGeofenceLeadIds.has(l.id));
       if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
       if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
@@ -4917,13 +4941,55 @@
       if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
       if (visited) filtered = filtered.filter(l => l.centre_visited_status === visited);
       if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
+      if (routeGeofenceLeadIds) filtered = filtered.slice().sort((a, b) => (routeGeofenceDistances.get(a.id) ?? 0) - (routeGeofenceDistances.get(b.id) ?? 0));
       renderRoutePlannerLeadsTable(filtered);
+    }
+
+    async function runRouteGeofenceSearch() {
+      const startAddress = document.getElementById('geofenceStartAddress').value.trim();
+      const endAddress = document.getElementById('geofenceEndAddress').value.trim();
+      const radiusKm = document.getElementById('geofenceRadiusKm').value;
+      if (!startAddress || !endAddress) { toast('Enter both a start and destination address', 'error'); return; }
+
+      const btn = document.getElementById('geofenceSearchBtn');
+      const status = document.getElementById('geofenceStatus');
+      btn.disabled = true;
+      status.textContent = 'Searching…';
+      try {
+        const res = await fetch('/api/route-planner/geofence', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startAddress, endAddress, radiusKm })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Search failed', 'error'); status.textContent = ''; return; }
+
+        routeGeofenceLeadIds = new Set(data.matches.map(m => m.id));
+        routeGeofenceDistances = new Map(data.matches.map(m => [m.id, m.distanceKm]));
+        document.getElementById('geofenceClearBtn').style.display = 'inline-flex';
+        status.textContent = `${data.matches.length} centre${data.matches.length === 1 ? '' : 's'} within ${data.radiusKm}km of your route`
+          + (data.geocodeSkipped ? ` (some centres skipped — search again to include more)` : '');
+
+        // Convenient default for Generate Route below, since it's the same journey.
+        const startInput = document.getElementById('routeStartAddress');
+        if (startInput && !startInput.value) startInput.value = startAddress;
+
+        filterRoutePlannerLeads();
+      } catch { toast('Search failed', 'error'); status.textContent = ''; }
+      btn.disabled = false;
+    }
+
+    function clearRouteGeofenceSearch() {
+      routeGeofenceLeadIds = null;
+      routeGeofenceDistances = new Map();
+      document.getElementById('geofenceClearBtn').style.display = 'none';
+      document.getElementById('geofenceStatus').textContent = '';
+      filterRoutePlannerLeads();
     }
 
     function renderRoutePlannerLeadsTable(list) {
       const body = document.getElementById('routePlannerLeadsBody');
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
         return;
       }
       body.innerHTML = list.map(l => {
@@ -4931,10 +4997,13 @@
         const calledMeta = LEAD_CALLED_META[l.lead_called_status] || LEAD_CALLED_META.to_schedule;
         const visitedMeta = CENTRE_VISITED_META[l.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
         const profileMeta = SIGNED_META[l.signed_status] || SIGNED_META.pending;
+        const geofenceDist = routeGeofenceDistances.get(l.id);
+        const centreLabel = geofenceDist != null
+          ? `${escHtml(l.centre_name)} <span style="color:var(--text-muted);font-weight:500;font-size:11.5px">· ${geofenceDist.toFixed(1)}km from route</span>`
+          : escHtml(l.centre_name);
         return `<tr>
           <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${l.id}', this)"></td>
-          <td style="font-weight:600;color:var(--navy)">${escHtml(l.centre_name)}</td>
-          <td>${escHtml(l.street_address || '—')}</td>
+          <td style="font-weight:600;color:var(--navy)">${centreLabel}</td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td><span class="lead-badge ${calledMeta.cls}">${escHtml(calledMeta.label)}</span></td>
