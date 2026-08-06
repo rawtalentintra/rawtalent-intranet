@@ -8,6 +8,8 @@ const { emailForPartner, syncRouteToCalendar } = require('../services/leadCalend
 
 router.use(requireRole('admin', 'super_admin', 'workforce_partner'));
 
+function sleepMs(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 const MAX_STOPS = 10;
 
 // Mapbox tokens meant for browser use (public "pk." tokens, restricted by
@@ -163,14 +165,28 @@ router.post('/geofence', async (req, res) => {
     const leadsRes = await db.execute({ sql: 'SELECT id, centre_name, street_address, suburb, state, latitude, longitude FROM leads', args: [] });
     const leads = leadsRes.rows;
 
+    // Paced (not fired back-to-back) and individually try/caught — Mapbox's
+    // geocoding rate limit is per-second, and up to MAX_GEOCODES_PER_SEARCH
+    // sequential calls with no spacing was enough to trip a 429 on a single
+    // search (typically the very first one, before any lead has a cached
+    // coordinate). One throttled/failed lookup used to throw and abort the
+    // whole search with a raw "Mapbox geocoding failed" error — now it just
+    // skips that one centre and keeps going.
     let geocodeCount = 0;
     let geocodeSkipped = 0;
     for (const lead of leads) {
       if (lead.latitude != null && lead.longitude != null) continue;
       if (geocodeCount >= MAX_GEOCODES_PER_SEARCH) { geocodeSkipped++; continue; }
+      if (geocodeCount > 0) await sleepMs(120);
       const address = [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ') || lead.centre_name;
-      const coord = await mapboxService.geocodeAddress(address);
       geocodeCount++;
+      let coord;
+      try {
+        coord = await mapboxService.geocodeAddress(address);
+      } catch (err) {
+        console.error(`Geofence geocode failed for lead ${lead.id} (${address}):`, err.message);
+        continue;
+      }
       if (!coord) continue;
       lead.latitude = coord.lat;
       lead.longitude = coord.lng;
