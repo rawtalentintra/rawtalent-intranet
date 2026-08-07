@@ -1314,6 +1314,37 @@
           </div>
         </div>
 
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;border-left:3px solid #ef4444">
+          <div style="font-weight:700;font-size:14px;color:#b91c1c;margin-bottom:4px">🏢 Clients CRM view — gap analysis (for the dev team ask)</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">
+            Same exercise again, checked against the live Clients/Client Visits/Service Provider screens. One structural thing worth knowing first: the live "Clients" list is actually a flattened list of <strong>locations</strong>, one row per centre (e.g. three separate rows for "Happy Hippo Kindergarten and Childcare" at Annadale/Brunswick/Lovely Banks, all sharing one parent client) — not one row per top-level <code>ClientResponse</code>. Our Clients report currently treats each <code>ClientResponse</code> as a row; matching this view means iterating <code>locations[]</code> instead.
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:14px 0 6px">Completely missing — no corresponding field or entity anywhere in the API</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">CRM section</th><th>Missing fields</th></tr></thead>
+              <tbody>
+                <tr><td>Clients list</td><td>Profile photo — no photo field on <code>ClientResponse</code> or <code>ClientLocationResponse</code>.</td></tr>
+                <tr><td>Clients list</td><td>Express Onboarding status — no onboarding-workflow/stage field anywhere (our own Leads feature tracks something conceptually similar for our own pipeline, but there's nothing like it exposed for RT's own client records).</td></tr>
+                <tr><td><strong>Client Visits</strong></td><td><strong>The entire entity is missing.</strong> Profile, Email, Phone, Centre Name, Location, Consultant Name, and the Approve/Reject workflow state have no representation in <code>ClientResponse</code> at all — this looks like RawTalent's own version of a lead/visit-request pipeline (conceptually close to our own Leads feature), sitting on a completely separate, unexposed data model.</td></tr>
+                <tr><td><strong>Service Provider</strong></td><td><strong>The entire entity is missing.</strong> Approval Number (the "PR-xxxxx" CCS provider registration number), Provider Name (may cover multiple client locations under one legal entity), Provider Address/State, and the "View" count column — none of this exists on <code>ClientResponse</code>. This is very likely a distinct data model (the government Child Care Subsidy approved-provider record), not just missing fields on the client record.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:18px 0 6px">Already covered — just needs the list flattened by location</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Live UI column</th><th>Where it actually comes from</th></tr></thead>
+              <tbody>
+                <tr><td>Name</td><td>Client's <code>name</code> combined with that location's <code>locationName</code> — not a single field, needs joining the two.</td></tr>
+                <tr><td>State of centre</td><td><code>ClientLocationResponse.state</code>.</td></tr>
+                <tr><td>Contact Number</td><td><code>ClientLocationResponse.contactNo</code>.</td></tr>
+                <tr><td>Status</td><td><code>isActive</code> — present at both the client and location level, worth confirming which one the live screen actually reads.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Candidates</div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/candidates</code> — <code>CandidateResponse</code></div>
