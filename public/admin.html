@@ -1479,9 +1479,40 @@
                 <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
                 <tr><td><code>locationId</code></td><td>int</td><td style="color:#92400e;font-weight:700">⚠ Resolvable</td><td>Matches a <code>clientsLocationId</code> inside that client's <code>locations[]</code> — not a flat lookup.</td></tr>
-                <tr><td><code>statusId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>certificateId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>statusId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above. <strong>Label set confirmed</strong> from the live booking screens — at least Open, Assigned, Cancelled, Requested, Failed, Trial — just not which number is which.</td></tr>
+                <tr><td><code>certificateId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above. <strong>Confirmed real</strong> — this is the "Qualif" badge (e.g. "CertIII", "DE") shown per booking in the live screens, i.e. the qualification required for that shift. Genuinely useful once labeled.</td></tr>
                 <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;border-left:3px solid #ef4444">
+          <div style="font-weight:700;font-size:14px;color:#b91c1c;margin-bottom:4px">🗓️ Bookings CRM view — gap analysis (for the dev team ask)</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">
+            Same exercise as the Candidates gap analysis above, checked against the live Bookings/Requested Bookings screens (Home dashboard's Attention widget included). A few of the reporting API's vague codes got confirmed as real, useful fields along the way — see the updated notes on <code>statusId</code> and <code>certificateId</code> in the table above.
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:14px 0 6px">Completely missing — nothing like this exists in the API at all</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">CRM section</th><th>Missing fields</th></tr></thead>
+              <tbody>
+                <tr><td>Requested Bookings</td><td><strong>Requested Educator</strong> — the whole concept of "who was asked first" is absent from <code>ClientBookingResponse</code>; the API only has <code>assignedUserId</code> (who actually ended up on the shift). No way to tell a booking was ever offered to someone else first, or reconstruct the request→assignment chain.</td></tr>
+                <tr><td>Requested Bookings</td><td><strong>Requested Date</strong> — when the request was sent to that candidate, distinct from <code>createdDate</code> (when the booking record itself was created). Not exposed anywhere.</td></tr>
+                <tr><td>Bookings / Requested Bookings tooltip</td><td><strong>Created By</strong> as a name (e.g. "Shalini Khanna", "Nicole Dodds") — <code>createdBy</code> is a raw ID with no lookup, same gap as everywhere else, but now visually confirmed this is a real staff name in the source system.</td></tr>
+                <tr><td>Bookings list</td><td><strong>Notify</strong> flag/action — whether a notification was sent to candidates about an open shift. No such field anywhere.</td></tr>
+                <tr><td>Home → Attention widget</td><td><strong>Client Chat</strong> / <strong>Candidate Chat</strong> — unread message counts imply a whole messaging system with no equivalent data anywhere in the reporting API.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:18px 0 6px">Already covered — confirmed computable from what we have</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:220px">Home → Attention item</th><th>Why it's already covered</th></tr></thead>
+              <tbody>
+                <tr><td>Document Pending Review / Document Expired</td><td>Computable today from Candidates' <code>attachedRequirements[].isReviewed</code> and <code>.expiryDate</code> — worth adding as KPIs to the Candidates report dashboard rather than asking the dev team for anything new.</td></tr>
+                <tr><td>"43/43 Filled Booking"</td><td>A fill-rate stat — our Bookings report dashboard already computes an equivalent Fill Rate KPI from <code>assignedUserId</code> being null or not.</td></tr>
+                <tr><td>Rejected Timesheets / Booking Pending Approval</td><td>The counts themselves need <code>statusId</code>/Timesheet <code>status</code> resolved first (see master list) — not a missing field, just blocked on the same label-mapping ask already queued up.</td></tr>
               </tbody>
             </table>
           </div>
