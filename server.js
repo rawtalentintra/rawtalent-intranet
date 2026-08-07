@@ -122,20 +122,10 @@ async function start() {
       webexService.syncCallHistory('auto-sync').catch(err => console.error('Webex CDR auto-sync error:', err.message));
     }, 5 * 60 * 1000);
   }
-  // Call Quality Evaluator's "Sync Calls Now" used to be purely manual —
-  // fine for occasional use, but meant call data could sit stale for hours.
-  // This mirrors it automatically every 15 minutes, gated to Mon-Fri
-  // 4am-8pm Melbourne time (see dubberService.isWithinAutoSyncWindow) so it
-  // stays quiet outside working hours/weekends and never competes with the
-  // manual button, which always works regardless of this gate.
-  if (dubberService.isConfigured()) {
-    const runDubberAutoSync = () => {
-      if (!dubberService.isWithinAutoSyncWindow()) return;
-      dubberService.syncRecordings('recent').catch(err => console.error('Dubber auto-sync error:', err.message));
-    };
-    runDubberAutoSync();
-    setInterval(runDubberAutoSync, 15 * 60 * 1000);
-  }
+  // Call Quality Evaluator's "Sync Calls Now" is manual-only again — the
+  // 15-minute background auto-sync introduced glitches for evaluators
+  // actively grading a call (a mid-session refetch landing under them).
+  // Reverted; the manual button (routes/calls.js) is unaffected.
   // Renews Google Calendar push-notification channels before their ~30-day
   // expiry, and registers new ones for any partner missing a channel (e.g.
   // right after CALENDAR_PARTNER_MAP is first configured). No-ops entirely
