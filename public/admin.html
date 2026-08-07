@@ -1239,33 +1239,39 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;border-left:3px solid #f59e0b">
-          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:8px">⚠ Master list — vague fields worth taking to RawTalent's dev team</div>
+          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:8px">⚠ Master list — still worth taking to RawTalent's dev team</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Updated after the live-data sweep below — several fields that were on this list got resolved or narrowed down and were removed (see each field's own table for what the sweep found). What's left here still has no reliable answer from data alone.</div>
           <div style="overflow-x:auto">
             <table class="data-table" style="font-size:12px">
-              <thead><tr><th style="width:130px">Report</th><th style="width:190px">Field</th><th>Best guess / why it matters</th></tr></thead>
+              <thead><tr><th style="width:130px">Report</th><th style="width:190px">Field</th><th>Why it's still open</th></tr></thead>
               <tbody>
-                <tr><td>Clients</td><td><code>clientAssignmentTypeId</code></td><td>Some kind of client category — currently shown as a raw number in Reports.</td></tr>
-                <tr><td>Clients</td><td><code>clientPreferenceId</code></td><td>Unclear what preference this tracks.</td></tr>
-                <tr><td>Candidates</td><td><code>userTypeId</code></td><td>Likely distinguishes educator vs. office/admin staff, but no confirmed mapping.</td></tr>
-                <tr><td>Candidates</td><td><code>userRoleId</code></td><td>Possibly job role (Educator, Room Leader, Director…) — would be genuinely useful for reporting if resolved.</td></tr>
-                <tr><td>Candidates</td><td><code>status</code></td><td>Plain integer, no enum defined anywhere in the schema — active/inactive/on-leave/etc. is a guess.</td></tr>
-                <tr><td>Candidate Address</td><td><code>addressTypeId</code></td><td>Probably home vs. postal vs. work address — matters for knowing which address is the real "where do they live."</td></tr>
-                <tr><td>Candidate Address</td><td><code>regionId</code></td><td>Could be a recruitment/service region — would help with geographic grouping if resolved.</td></tr>
-                <tr><td>Candidate Qualification</td><td><code>qualificationId</code> / <code>qualificationNameId</code></td><td>Two separate ID fields for the same qualification — unclear why, or which is authoritative. <code>qualificationName</code> (the string) is usable directly though.</td></tr>
-                <tr><td>Candidate Qualification</td><td><code>qualified</code></td><td>Typed as an integer, not a boolean — likely a status (e.g. pending/verified/expired) rather than plain yes/no.</td></tr>
-                <tr><td>Candidate Qualification</td><td><code>gradeId</code></td><td>No grade lookup exposed.</td></tr>
-                <tr><td>Candidate Availability</td><td><code>status</code> (<code>CandidateAvailabilityStatus</code>)</td><td>Enum with values 0/1/2 and zero labels in the schema. This is the field Micropods would need most — worth prioritizing getting this one resolved.</td></tr>
-                <tr><td>Candidate Requirement</td><td><code>documentId</code></td><td>FK with no lookup, though <code>requirementName</code> alongside it is a usable label already.</td></tr>
-                <tr><td>Candidate Requirement</td><td><code>qualified</code></td><td>Same ambiguity as the Qualification record's field above.</td></tr>
-                <tr><td>Bookings</td><td><code>statusId</code></td><td>No lookup — can't currently tell confirmed vs. cancelled vs. completed apart.</td></tr>
-                <tr><td>Bookings</td><td><code>certificateId</code></td><td>Presumably the qualification required for the shift — no lookup to confirm.</td></tr>
-                <tr><td>Bookings</td><td><code>gradeId</code></td><td>No grade lookup exposed.</td></tr>
-                <tr><td>Bookings</td><td><code>locationId</code></td><td>Resolvable, but only by cross-referencing a client's <code>locations[]</code> array for a matching <code>clientsLocationId</code> — not a flat lookup.</td></tr>
-                <tr><td>Timesheets</td><td><code>status</code></td><td>No lookup — approved/rejected/pending is a guess.</td></tr>
-                <tr><td>Timesheets</td><td><code>approvedRejectedUserId</code></td><td>Tells you who acted, but since <code>status</code> itself is unlabeled, can't tell if they approved or rejected.</td></tr>
-                <tr><td>All records</td><td><code>createdBy</code></td><td>Raw user ID on every record type — no lookup, so "who created this" isn't resolvable without one.</td></tr>
+                <tr><td>Clients</td><td><code>clientAssignmentTypeId</code></td><td>Values narrowed to {0,1,2,3} by the sweep, but no correlation found against anything else that would hint at meaning.</td></tr>
+                <tr><td>Clients</td><td><code>clientPreferenceId</code></td><td>Almost always 0 in real data — low priority, but still unlabeled.</td></tr>
+                <tr><td>Candidates</td><td><code>status</code></td><td>Sweep found strong evidence it's a <strong>bitmask</strong> (1/2/4/8 + combinations), not a simple enum — worth telling the dev team that shape specifically, since a single value→label table won't be the right ask.</td></tr>
+                <tr><td>Candidate Availability</td><td><code>status</code> (<code>CandidateAvailabilityStatus</code>)</td><td><strong>Still the top priority.</strong> 99.95% of 21,000+ sampled entries are the same value (0) — far too rare a spread to infer 1 vs. 2 from behavior. This is the field Micropods would need most.</td></tr>
+                <tr><td>Bookings</td><td><code>statusId</code></td><td>Sweep produced a strong hypothesis (see the Bookings table below) from correlating against assignment + past/future date, but it's inferred, not confirmed — worth a quick sanity check with the dev team before relying on it.</td></tr>
+                <tr><td>Bookings</td><td><code>certificateId</code></td><td>Shares its value range with the confirmed <code>qualificationId</code> codes, but the dominant value doesn't intuitively fit — don't assume it's the same table without asking.</td></tr>
+                <tr><td>Bookings</td><td><code>locationId</code></td><td>Resolvable, but only by cross-referencing a client's <code>locations[]</code> array for a matching <code>clientsLocationId</code> — not a flat lookup. (Not really a dev-team ask, just an implementation note.)</td></tr>
+                <tr><td>Timesheets</td><td><code>status</code></td><td>Sweep narrowed it to a plausible Pending/Approved-or-Rejected split, but can't tell approved from rejected apart without a label.</td></tr>
+                <tr><td>Timesheets</td><td><code>approvedRejectedUserId</code></td><td>Same blocker — correlates with <code>status</code>, but still can't tell which action was taken.</td></tr>
+                <tr><td>Timesheets</td><td><code>duration</code>, <code>isPaid</code>, <code>isInvoiced</code></td><td><strong>Not a labeling problem</strong> — these look genuinely unpopulated in every sampled record (see the callout below). Worth asking directly whether they're wired up at all.</td></tr>
+                <tr><td>All records</td><td><code>createdBy</code></td><td>Raw user ID on every record type — no lookup, so "who created this" isn't resolvable without one. Confirmed on the live Bookings screens that this does resolve to a real staff name in the source system.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#ecfeff;border:1px solid #a5f3fc">
+          <div style="font-weight:700;font-size:14px;color:#0e7490;margin-bottom:6px">🔬 Live data sweep — RT API now connected to the real production database</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:10px">
+            Once the dev team pointed this API at the live database, most of the "vague code" fields above stopped being unknowable — pulling real samples (1,000–1,600 records per type, mixing oldest and newest) and cross-referencing values against other fields on the same records resolved several of them outright, and gave strong evidence for several more. Two confidence tiers, marked directly on each field below:
+          </div>
+          <div style="font-size:13px;line-height:1.8">
+            <span class="rtapi-confirmed">🔬 Confirmed</span> — an ID and its human-readable label appear together in the same real record (e.g. a qualification's <code>qualificationId</code> and <code>qualificationName</code> on the same object) — this is as reliable as reading it straight from documentation.<br>
+            <span class="rtapi-inferred">🔬 Inferred</span> — no label exists anywhere, but the value's behavior across hundreds of real records makes the meaning very likely (e.g. a booking status that's <em>always</em> paired with an assigned candidate and a past date). Strong evidence, not a guarantee — still worth a quick confirmation from the dev team before anything depends on it being exactly right.
+          </div>
+          <div style="font-size:12.5px;color:var(--text-muted);line-height:1.7;margin-top:12px;padding-top:12px;border-top:1px solid #a5f3fc">
+            Two things came out of this sweep that aren't code-labeling issues at all, worth flagging separately: Timesheets' <code>duration</code> field is <strong>0 in every one of 1,000 sampled records</strong> — looks unpopulated/unused by the source system, so actual worked hours should be computed from <code>endTime − startTime</code> instead. And <code>isPaid</code>/<code>isInvoiced</code> were <strong>false in all 1,000 sampled records</strong> regardless of status — worth asking the dev team directly whether those two fields are actually being written to at all.
           </div>
         </div>
 
@@ -1287,8 +1293,8 @@
                 <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Raw user ID, no lookup.</td></tr>
                 <tr><td><code>primaryUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Presumably the main contact person — no lookup to a name.</td></tr>
-                <tr><td><code>clientAssignmentTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>clientPreferenceId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>clientAssignmentTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Sweep found only {0, 1, 2, 3} across 1,200 sampled clients — 0 and 1 dominate, 2/3 are rare outliers. No correlation found against <code>isTrialClient</code> or anything else that would hint at meaning. Still needs the dev team.</td></tr>
+                <tr><td><code>clientPreferenceId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Sweep found it's <strong>0 in 1,199 of 1,200</strong> sampled clients — essentially unset in practice. Low priority to resolve even once labeled, since it carries almost no information either way.</td></tr>
                 <tr><td><code>locations[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Client Locations table below — full address <strong>with lat/lng already geocoded</strong>.</td></tr>
               </tbody>
             </table>
@@ -1360,9 +1366,9 @@
                 <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>userTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>userRoleId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>No enum defined anywhere in the schema.</td></tr>
+                <tr><td><code>userTypeId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep found this is <strong>2 in every single one</strong> of 1,600 sampled candidates — since this endpoint only ever returns candidates, 2 almost certainly just means "Candidate" as a user type, distinguishing from staff/client-contact users elsewhere in RT's system. Doesn't differentiate anything within this report.</td></tr>
+                <tr><td><code>userRoleId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Same finding as <code>userTypeId</code> — constant at 2 across every sampled candidate. Not differentiating within this report either.</td></tr>
+                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Sweep found values {0, 1, 2, 4, 8, 9} — <strong>1, 2, 4, 8 are all powers of two, and 9 = 8+1</strong>, a strong sign this is a <em>bitmask of flags</em> (e.g. verified/onboarded/compliant/etc., combinable) rather than a simple sequential status enum. Worth telling the dev team this shape specifically — a single "which number = which status" table won't be right if it's really flags.</td></tr>
                 <tr><td><code>userClientId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Presumably which agency/client owns this candidate record.</td></tr>
                 <tr><td><code>addresses[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Addresses table below — <strong>pre-geocoded</strong>.</td></tr>
                 <tr><td><code>qualifications[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Qualifications table below.</td></tr>
@@ -1385,8 +1391,8 @@
                 <tr><td><code>latitude</code>, <code>longitude</code></td><td>double</td><td class="rtapi-clear">✓ Clear</td><td>Pre-geocoded — this is what would unblock candidate density mapping.</td></tr>
                 <tr><td><code>contactNo</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>addressTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>regionId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>addressTypeId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep found this is <strong>1 on every single one</strong> of 1,440 sampled addresses. Very likely means "home"/primary residential — but since only one value has ever been observed, whatever 2/3/etc. mean (postal? work?) is still unconfirmed.</td></tr>
+                <tr><td><code>regionId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep cross-referenced against each address's own <code>state</code> string and found a clean pattern: <strong>4 = Victoria, 1 = New South Wales, 2 = Queensland</strong>. No South Australia, WA, or Tasmania addresses turned up in this sample to confirm those numbers — worth a targeted follow-up sweep once SA/WA data is needed.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1400,15 +1406,16 @@
               <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
               <tbody>
                 <tr><td><code>userQualificationId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>qualificationName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>The actual usable label — e.g. "Certificate III", "Diploma", "Early Childhood Teaching" (verify exact values against real data).</td></tr>
+                <tr><td><code>qualificationName</code></td><td>string</td><td class="rtapi-confirmed">🔬 Confirmed</td><td>Real observed values (1,356 sampled): "Certificate III Educator", "Diploma Educator", "Childcare Cook".</td></tr>
                 <tr><td><code>shortCode</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Abbreviation of the above.</td></tr>
                 <tr><td><code>description</code>, <code>collegeName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>qualifiedDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>documentPath</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>qualificationId</code>, <code>qualificationNameId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above — two IDs, unclear relationship.</td></tr>
-                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>No grade lookup.</td></tr>
-                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Integer, not boolean — see master list above.</td></tr>
+                <tr><td><code>qualificationId</code></td><td>int</td><td class="rtapi-confirmed">🔬 Confirmed</td><td><strong>1 = Childcare Cook, 2 = Certificate III Educator, 5 = Diploma Educator</strong> — validated consistent (no conflicting name for the same ID) across 1,500 sampled candidates.</td></tr>
+                <tr><td><code>qualificationNameId</code></td><td>int</td><td class="rtapi-confirmed">🔬 Confirmed</td><td>A genuinely <strong>separate</strong> numbering from <code>qualificationId</code> above — <strong>1 = Certificate III Educator, 2 = Diploma Educator, 5 = Childcare Cook</strong>. Same three qualifications, different codes. Use <code>qualificationId</code> as the primary key; this field looks like it's from a different classification table entirely.</td></tr>
+                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>1 in every one of 1,356 sampled qualification records — not differentiating anything observed so far.</td></tr>
+                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep found only {0, 1} across 1,356 sampled qualification records (52 at 1) — behaves like a plain boolean despite the int32 type, more likely than the "status code" theory in the master list above. Same finding on the Requirement record's <code>qualified</code> field below.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1423,7 +1430,7 @@
               <tbody>
                 <tr><td><code>date</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>day</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>e.g. "Monday" — redundant with <code>date</code> but harmless.</td></tr>
-                <tr><td><code>status</code></td><td>enum (0, 1, 2)</td><td class="rtapi-vague">⚠ Vague code</td><td><strong>The one field worth chasing down first</strong> — the whole point of "availability" data is knowing which of 0/1/2 means available, and the schema gives zero labels for it.</td></tr>
+                <tr><td><code>status</code></td><td>enum (0, 1, 2)</td><td class="rtapi-vague">⚠ Vague code</td><td><strong>Still the one field worth chasing down first.</strong> Sweep couldn't crack this one — across 21,000+ sampled availability entries, 0 is the value <strong>99.95%</strong> of the time, with 1 and 2 both appearing fewer than 10 times total. Too rare to infer meaning from behavior; 0 is clearly the default state but whether that means "available" or "not set" isn't determinable from data alone. This one genuinely needs the dev team.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1441,8 +1448,8 @@
                 <tr><td><code>expiryDate</code>, <code>qualifiedDate</code>, <code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>isMandatory</code>, <code>isExpiry</code>, <code>isShiftCritical</code>, <code>isQualification</code>, <code>isReviewed</code>, <code>isReChecked</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>documentId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td><code>requirementName</code> alongside it is usable directly though.</td></tr>
-                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Same ambiguity as the Qualification record's field above.</td></tr>
+                <tr><td><code>documentId</code></td><td>int</td><td class="rtapi-confirmed">🔬 Confirmed</td><td>Full lookup table found across 8,534 sampled requirement records: <strong>1 = Police Check, 2 = Passport/Birth Certificate/Citizenship, 4 = Qualification/Course of Study, 6 = Working with Children's Check (WWCC), 7 = Protecting Children Certificate (VIC Only), 8 = First Aid, 48 = Blue Card, 50 = WWCC (NSW), 51 = Do Food Safety, 53 = Name Change, 54 = Agency Payslip, 55 = Teachers Accreditation, 56 = Child Safety Training.</strong> Matches the live Documents tab exactly.</td></tr>
+                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Only {0, 1} seen across 8,534 sampled records (136 at 1) — same boolean-not-status-code finding as the Qualification record's field above.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1510,9 +1517,9 @@
                 <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
                 <tr><td><code>locationId</code></td><td>int</td><td style="color:#92400e;font-weight:700">⚠ Resolvable</td><td>Matches a <code>clientsLocationId</code> inside that client's <code>locations[]</code> — not a flat lookup.</td></tr>
-                <tr><td><code>statusId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above. <strong>Label set confirmed</strong> from the live booking screens — at least Open, Assigned, Cancelled, Requested, Failed, Trial — just not which number is which.</td></tr>
-                <tr><td><code>certificateId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above. <strong>Confirmed real</strong> — this is the "Qualif" badge (e.g. "CertIII", "DE") shown per booking in the live screens, i.e. the qualification required for that shift. Genuinely useful once labeled.</td></tr>
-                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>statusId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep correlated each value against <code>assignedUserId</code> presence and whether <code>bookingDate</code> is past/future, across 2,000 sampled bookings. Best-fit hypothesis: <strong>1 = Open</strong> (never assigned, always future), <strong>2 = Requested</strong> (assigned, mostly future, rare), <strong>3 = Assigned</strong> (always assigned, mostly future), <strong>5 = Completed</strong> (always assigned, always past — the dominant value), <strong>6 = Cancelled</strong> (mixed assigned/unassigned, mixed past/future), <strong>7 = Failed/Unfilled</strong> (never assigned, always past). Strong correlational evidence, not authoritative — confirm before relying on it.</td></tr>
+                <tr><td><code>certificateId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Sweep found values {1, 2, 4, 5, 6} — 1, 2, and 5 overlap exactly with the confirmed <code>qualificationId</code> set, suggesting it reuses that same code table. But the dominant value (1, 87% of 1,000 sampled bookings) would mean "Childcare Cook" under that mapping, which doesn't intuitively fit "most shifts require a cook" — and codes 4/6 don't appear in the qualification data at all. Don't assume it's the same table without confirming.</td></tr>
+                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td><strong>-1 in 992 of 1,000</strong> sampled bookings — looks like an unset/not-applicable sentinel value rather than a real code, similar to how the Qualification record's <code>gradeId</code> is constant.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1561,15 +1568,15 @@
                 <tr><td><code>bookingId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Bookings' <code>clientBookingId</code>.</td></tr>
                 <tr><td><code>userId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Candidates' <code>userId</code>.</td></tr>
                 <tr><td><code>startTime</code>, <code>endTime</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>duration</code></td><td>double</td><td class="rtapi-clear">✓ Clear</td><td>Almost certainly hours — spot-check against a known shift to confirm the unit.</td></tr>
-                <tr><td><code>lunchBreak</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Unit not stated in the schema — likely minutes, worth a quick sanity check.</td></tr>
+                <tr><td><code>duration</code></td><td>double</td><td style="color:#b91c1c;font-weight:700">🚩 Looks unused</td><td><strong>0 in every one of 1,000 sampled timesheets, no exceptions.</strong> Not a labeling issue — this field appears to just not be populated by the source system. Compute actual worked hours from <code>endTime − startTime</code> instead.</td></tr>
+                <tr><td><code>lunchBreak</code></td><td>int</td><td class="rtapi-confirmed">🔬 Confirmed</td><td>Values observed: 0, 30, 60 — confirms minutes, not hours.</td></tr>
                 <tr><td><code>comment</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
-                <tr><td><code>isInvoiced</code>, <code>isPaid</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isInvoiced</code>, <code>isPaid</code></td><td>bool</td><td style="color:#b91c1c;font-weight:700">🚩 Looks unused</td><td><strong>false in every one of 1,000 sampled timesheets</strong>, regardless of status. Worth asking the dev team directly whether these are actually being written to anywhere yet, rather than assuming it's a labeling gap.</td></tr>
                 <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
-                <tr><td><code>approvedRejectedUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>status</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep found {0, 2, 3} across 1,000 sampled timesheets (611 at 2, 388 at 0). <strong>2 always has an <code>approvedRejectedUserId</code> set</strong> — consistent with Approved or Rejected. <strong>0 is split</strong> (278 with an approver, 110 without) — consistent with Pending/Submitted, though the 278-with-approver-but-still-0 subset doesn't fully fit that story. Can't distinguish Approved from Rejected from this data alone (both would have an approver set) — needs the dev team.</td></tr>
+                <tr><td><code>approvedRejectedUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above — confirmed it correlates with <code>status</code> (see above), but still can't tell approved from rejected without a label.</td></tr>
               </tbody>
             </table>
           </div>

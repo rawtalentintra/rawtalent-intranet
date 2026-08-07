@@ -850,6 +850,15 @@ button { cursor: pointer; font-family: inherit; }
    shape would just add visual noise at that density. */
 .rtapi-clear { color: #15803d; font-weight: 700; white-space: nowrap; }
 .rtapi-vague { color: #92400e; font-weight: 700; white-space: nowrap; }
+/* Confirmed by directly sweeping real production data (e.g. an ID and its
+   resolved name co-occur in the same record) — as reliable as .rtapi-clear,
+   kept as a separate color so it's obvious this came from a live sweep
+   rather than the schema alone. */
+.rtapi-confirmed { color: #0e7490; font-weight: 700; white-space: nowrap; }
+/* Not directly stated anywhere — inferred from correlating a code's value
+   against other fields in real records (e.g. a status always co-occurring
+   with an assigned candidate). Strong evidence, not a guarantee. */
+.rtapi-inferred { color: #6d28d9; font-weight: 700; white-space: nowrap; }
 .lead-badge-not { background: #fef2f2; color: #c0392b; }
 
 /* Agency Usage badges — not editable/clickable, purely a visual flag, so no
