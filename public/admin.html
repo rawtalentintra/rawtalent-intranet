@@ -1417,6 +1417,51 @@
           </div>
         </div>
 
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;border-left:3px solid #ef4444">
+          <div style="font-weight:700;font-size:14px;color:#b91c1c;margin-bottom:4px">📋 Candidates CRM view — gap analysis (for the dev team ask)</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">
+            RawTalent's actual candidate management screens (the ones staff use day to day) show far more than this reporting API returns — that's expected, since <code>RtApiReport</code> is a read-only reporting export, not the operational database behind those screens. This table is what to hand the dev team: exactly which fields are missing to build an equivalent view here, versus what's already covered.
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:14px 0 6px">Completely missing — nothing like this exists in the API at all</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">CRM section</th><th>Missing fields</th></tr></thead>
+              <tbody>
+                <tr><td>List view</td><td>Profile photo, Gender, Onboarding Steps / OB Status</td></tr>
+                <tr><td>Personal</td><td>Date of birth</td></tr>
+                <tr><td>Contact (Emergency Contact)</td><td>Everything — contact name, number, relationship</td></tr>
+                <tr><td>Activity</td><td>Everything — the whole activity log (type, note, created by, priority, flag, date)</td></tr>
+                <tr><td>Notes</td><td>Everything — the whole notes thread (type, created by, priority, flag, date)</td></tr>
+                <tr><td>Bank</td><td>Everything — account name, BSB, account number, super fund, fund name, membership number</td></tr>
+                <tr><td>Visa</td><td>Everything — country of origin, passport number, TRN, visa type, expiry date, citizenship flag, student hours override</td></tr>
+                <tr><td>Taxation</td><td>Everything — TFN, tax declaration options, employment basis, residency status</td></tr>
+                <tr><td>Contract</td><td>Everything — acknowledgment checkboxes, signature image, signature date</td></tr>
+                <tr><td>Banned</td><td>Everything — no ban flag or ban history field of any kind</td></tr>
+                <tr><td>References</td><td>Everything — reference name, position, centre name, centre email/phone, status</td></tr>
+                <tr><td>Interview</td><td>Everything — video recordings, transcribed answers, interview stage/finalist label</td></tr>
+                <tr><td>Rating</td><td>Everything — no rating value or breakdown anywhere in the schema</td></tr>
+                <tr><td>Qualification pay rates</td><td>Base rate, GBU (Custom/Total), WRP (Custom/Total) — the qualification record has name/college/status but no rate data at all</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy);margin:18px 0 6px">Partially available — some of it, but not enough to match the CRM view</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">CRM section</th><th style="width:260px">What we have</th><th>What's missing</th></tr></thead>
+              <tbody>
+                <tr><td>Documents</td><td>Requirement name, expiry date, document number, mandatory/reviewed/rechecked flags</td><td><strong>Who</strong> reviewed/rechecked it (only a yes/no flag, no reviewer name); College Name isn't on this record; Status is a raw code, not a labeled value</td></tr>
+                <tr><td>Status / OB Status badges</td><td>Raw numeric codes (<code>status</code> on the candidate, <code>qualified</code> on documents)</td><td>Label mappings for what each number means — same gap as the master list above</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-muted);line-height:1.7;margin-top:16px;padding-top:14px;border-top:1px solid var(--gray-200)">
+            <strong style="color:var(--navy)">Questions worth asking the dev team, in this order:</strong><br>
+            1. Can the reporting API be extended to include Notes, Activity, References, and Document reviewer names? (Reasonable, non-sensitive, useful for ops visibility.)<br>
+            2. Or is there a separate, more privileged endpoint already used internally that exposes more — read-only access to that would close most of this gap at once, rather than extending the reporting API field-by-field.<br>
+            3. Bank/Visa/Taxation/Contract data is worth asking about last and separately — it's sensitive PII/financial data, and there may be a good reason it's deliberately excluded from a reporting-tier API even if a richer endpoint exists.
+          </div>
+        </div>
+
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Bookings</div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/getbookings</code> — <code>ClientBookingResponse</code></div>
