@@ -12,29 +12,48 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jodit@3.24.6/build/jodit.min.css">
   <style>
-    /* Jodit editor overrides */
-    .jodit-container { border: 1px solid var(--gray-200) !important; border-radius: var(--radius) !important; font-family: 'Inter', sans-serif !important; }
-    .jodit-toolbar__box { background: var(--gray-100) !important; border-bottom: 1px solid var(--gray-200) !important; border-radius: var(--radius) var(--radius) 0 0 !important; }
-    .jodit-workplace { min-height: 340px !important; }
-    .jodit-wysiwyg { font-family: 'Inter', sans-serif !important; font-size: 14px !important; color: var(--text) !important; line-height: 1.7 !important; padding: 16px 20px !important; }
-    .jodit-wysiwyg:focus { outline: none !important; }
-    .jodit-container:focus-within { border-color: var(--orange) !important; box-shadow: 0 0 0 3px rgba(255,107,53,.12) !important; }
-    .jodit-toolbar-button__button:hover, .jodit-toolbar-button__button.jodit_active { background: rgba(255,107,53,.1) !important; color: var(--orange) !important; border-radius: 4px; }
-    .jodit-toolbar-button__button svg { color: inherit; }
-    .jodit-status-bar { display: none !important; }
+    /* Rich text editor (TipTap-based, replaces Jodit) */
+    .rte-root { border: 1px solid var(--gray-200); border-radius: var(--radius); font-family: 'Inter', sans-serif; overflow: hidden; background: #fff; }
+    .rte-root:focus-within { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(255,107,53,.12); }
+    .rte-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 8px; background: var(--gray-100); border-bottom: 1px solid var(--gray-200); position: relative; }
+    .rte-group { display: flex; align-items: center; gap: 2px; }
+    .rte-divider { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--gray-200); }
+    .rte-spacer { flex: 1; }
+    .rte-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 30px; min-width: 30px; padding: 0 6px; border: none; background: transparent; border-radius: 5px; color: var(--text); cursor: pointer; font-size: 13px; font-family: inherit; line-height: 1; }
+    .rte-btn:hover { background: rgba(255,107,53,.1); color: var(--orange); }
+    .rte-btn-active { background: rgba(255,107,53,.14); color: var(--orange); }
+    .rte-btn-wide { min-width: 92px; justify-content: space-between; padding: 0 8px; font-weight: 600; }
+    .rte-caret { display: inline-flex; }
+    .rte-dropdown { position: relative; }
+    .rte-popover { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; min-width: 160px; }
+    .rte-popover.open { display: block; }
+    .rte-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border: none; background: none; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 13px; color: var(--text); white-space: nowrap; }
+    .rte-menu-item:hover { background: var(--gray-100); color: var(--orange); }
+    .rte-popover-swatches { display: flex; flex-wrap: wrap; gap: 6px; min-width: auto; width: 116px; padding: 8px; }
+    .rte-swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(0,0,0,.1); cursor: pointer; padding: 0; }
+    .rte-swatch:hover { transform: scale(1.12); }
+    .rte-swatch-reset { background: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--gray-400, #999); }
+    .rte-content-wrap { max-height: 460px; overflow-y: auto; }
+    .rte-content .ProseMirror { min-height: 340px; padding: 16px 20px; font-family: 'Inter', sans-serif; font-size: 14px; color: var(--text); line-height: 1.7; outline: none; }
+    .rte-content .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: var(--gray-400, #aaa); pointer-events: none; }
+    .rte-fullscreen { position: fixed; inset: 16px; z-index: 1000; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+    .rte-fullscreen .rte-content-wrap { max-height: none; flex: 1; }
     /* Editor content heading/block styles */
-    .jodit-wysiwyg h1 { font-size: 22px; font-weight: 800; color: var(--navy); margin: 16px 0 8px; }
-    .jodit-wysiwyg h2 { font-size: 18px; font-weight: 700; color: var(--navy); margin: 14px 0 6px; }
-    .jodit-wysiwyg h3 { font-size: 15px; font-weight: 700; color: var(--navy); margin: 12px 0 4px; }
-    .jodit-wysiwyg p { margin-bottom: 10px; }
-    .jodit-wysiwyg ul, .jodit-wysiwyg ol { padding-left: 20px; margin-bottom: 10px; }
-    .jodit-wysiwyg li { margin-bottom: 4px; }
-    .jodit-wysiwyg blockquote { border-left: 4px solid var(--orange); padding: 10px 16px; margin: 12px 0; background: var(--orange-glow); border-radius: 0 var(--radius) var(--radius) 0; color: var(--navy); }
-    .jodit-wysiwyg table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-    .jodit-wysiwyg th, .jodit-wysiwyg td { border: 1px solid var(--gray-200); padding: 8px 12px; font-size: 13px; }
-    .jodit-wysiwyg th { background: var(--gray-100); font-weight: 700; }
+    .rte-content .ProseMirror h1 { font-size: 22px; font-weight: 800; color: var(--navy); margin: 16px 0 8px; }
+    .rte-content .ProseMirror h2 { font-size: 18px; font-weight: 700; color: var(--navy); margin: 14px 0 6px; }
+    .rte-content .ProseMirror h3 { font-size: 15px; font-weight: 700; color: var(--navy); margin: 12px 0 4px; }
+    .rte-content .ProseMirror p { margin-bottom: 10px; }
+    .rte-content .ProseMirror ul, .rte-content .ProseMirror ol { padding-left: 20px; margin-bottom: 10px; }
+    .rte-content .ProseMirror li { margin-bottom: 4px; }
+    .rte-content .ProseMirror blockquote { border-left: 4px solid var(--orange); padding: 10px 16px; margin: 12px 0; background: var(--orange-glow); border-radius: 0 var(--radius) var(--radius) 0; color: var(--navy); }
+    .rte-content .ProseMirror table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    .rte-content .ProseMirror th, .rte-content .ProseMirror td { border: 1px solid var(--gray-200); padding: 8px 12px; font-size: 13px; position: relative; }
+    .rte-content .ProseMirror th { background: var(--gray-100); font-weight: 700; }
+    .rte-content .ProseMirror a { color: var(--orange); }
+    .rte-content .ProseMirror img { max-width: 100%; border-radius: 6px; }
+    .rte-content .ProseMirror hr { border: none; border-top: 2px solid var(--gray-200); margin: 16px 0; }
+    .rte-content .ProseMirror .selectedCell { background: rgba(255,107,53,.08); }
     /* Live Preview content styles (mirrors editor styles exactly) */
     #articlePreview h1 { font-size: 22px; font-weight: 800; color: var(--navy); margin: 16px 0 8px; }
     #articlePreview h2 { font-size: 18px; font-weight: 700; color: var(--navy); margin: 14px 0 6px; }
@@ -291,6 +310,9 @@
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Documentation</div>
         <div class="admin-nav-item" onclick="showSection('tech-docs', this)">
           <span class="admin-nav-icon">📚</span> Technical Documentation
+        </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('rt-api-reference', this)">
+          <span class="admin-nav-icon">🗂️</span> RT API Data Reference
         </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
@@ -1181,6 +1203,268 @@
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Local Development</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
             Clone the repo, copy <code>.env.example</code> to <code>.env</code> and fill in at least the Supabase and admin-account variables (everything else is optional), then <code>npm install</code> and <code>npm start</code> (or <code>npm run dev</code> for auto-restart via nodemon). The app runs on <code>http://localhost:3000</code> by default.
+          </div>
+        </div>
+      </div>
+
+      <!-- RT API Data Reference — super_admin only, personal reference for
+           what's actually pullable from the RtApiReport API (the source
+           behind Reports → Clients/Candidates/Bookings/Timesheets). Static
+           content, hand-verified against the live swagger.json rather than
+           the Reports dashboard's own field usage, since the dashboard only
+           surfaces what's currently displayed, not everything the API
+           returns. Re-check swagger.json periodically — this API has
+           changed shape at least once already (see the callout below). -->
+      <div class="admin-section" id="section-rt-api-reference">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🗂️ RT API Data Reference</div>
+            <div class="admin-page-sub">Every field the RtApiReport API (behind Reports) actually returns, verified against its live swagger.json — not just what's currently shown in the Reports dashboard. Super admin only, personal reference.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#f0fdf4;border:1px solid #bbf7d0">
+          <div style="font-weight:700;font-size:14px;color:#15803d;margin-bottom:6px">🎉 Worth knowing: this API grew since Micropods was shelved</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.7">
+            When Micropods was scoped, the Candidates and Clients endpoints exposed no address, qualification, or availability data at all — that's why it was shelved. Re-checking the live schema for this reference turned up that the API has since grown: <code>CandidateResponse</code> now includes <code>addresses[]</code> (with <strong>pre-geocoded latitude/longitude</strong>), <code>qualifications[]</code>, and <code>availableCandidateList[]</code>; <code>ClientResponse</code> now includes <code>locations[]</code> (also pre-geocoded). The specific blocker for Micropods no longer applies as-is — worth a fresh look if that feature comes back up. See the Candidates and Clients tables below for exactly what's in each.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">How to read this</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            <span class="lead-badge lead-badge-done" style="margin-right:6px">✓ Clear</span> the field's name and type tell you exactly what it is — safe to use directly.<br>
+            <span class="lead-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">⚠ Vague code</span> a raw numeric ID or status code with <strong>no lookup table exposed anywhere in the API</strong> — the number means something, but the API doesn't say what. Only way to resolve these is to ask RawTalent's original developers for the code tables, or reverse-engineer meaning by cross-checking known real records against what you'd expect.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;border-left:3px solid #f59e0b">
+          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:8px">⚠ Master list — vague fields worth taking to RawTalent's dev team</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:130px">Report</th><th style="width:190px">Field</th><th>Best guess / why it matters</th></tr></thead>
+              <tbody>
+                <tr><td>Clients</td><td><code>clientAssignmentTypeId</code></td><td>Some kind of client category — currently shown as a raw number in Reports.</td></tr>
+                <tr><td>Clients</td><td><code>clientPreferenceId</code></td><td>Unclear what preference this tracks.</td></tr>
+                <tr><td>Candidates</td><td><code>userTypeId</code></td><td>Likely distinguishes educator vs. office/admin staff, but no confirmed mapping.</td></tr>
+                <tr><td>Candidates</td><td><code>userRoleId</code></td><td>Possibly job role (Educator, Room Leader, Director…) — would be genuinely useful for reporting if resolved.</td></tr>
+                <tr><td>Candidates</td><td><code>status</code></td><td>Plain integer, no enum defined anywhere in the schema — active/inactive/on-leave/etc. is a guess.</td></tr>
+                <tr><td>Candidate Address</td><td><code>addressTypeId</code></td><td>Probably home vs. postal vs. work address — matters for knowing which address is the real "where do they live."</td></tr>
+                <tr><td>Candidate Address</td><td><code>regionId</code></td><td>Could be a recruitment/service region — would help with geographic grouping if resolved.</td></tr>
+                <tr><td>Candidate Qualification</td><td><code>qualificationId</code> / <code>qualificationNameId</code></td><td>Two separate ID fields for the same qualification — unclear why, or which is authoritative. <code>qualificationName</code> (the string) is usable directly though.</td></tr>
+                <tr><td>Candidate Qualification</td><td><code>qualified</code></td><td>Typed as an integer, not a boolean — likely a status (e.g. pending/verified/expired) rather than plain yes/no.</td></tr>
+                <tr><td>Candidate Qualification</td><td><code>gradeId</code></td><td>No grade lookup exposed.</td></tr>
+                <tr><td>Candidate Availability</td><td><code>status</code> (<code>CandidateAvailabilityStatus</code>)</td><td>Enum with values 0/1/2 and zero labels in the schema. This is the field Micropods would need most — worth prioritizing getting this one resolved.</td></tr>
+                <tr><td>Candidate Requirement</td><td><code>documentId</code></td><td>FK with no lookup, though <code>requirementName</code> alongside it is a usable label already.</td></tr>
+                <tr><td>Candidate Requirement</td><td><code>qualified</code></td><td>Same ambiguity as the Qualification record's field above.</td></tr>
+                <tr><td>Bookings</td><td><code>statusId</code></td><td>No lookup — can't currently tell confirmed vs. cancelled vs. completed apart.</td></tr>
+                <tr><td>Bookings</td><td><code>certificateId</code></td><td>Presumably the qualification required for the shift — no lookup to confirm.</td></tr>
+                <tr><td>Bookings</td><td><code>gradeId</code></td><td>No grade lookup exposed.</td></tr>
+                <tr><td>Bookings</td><td><code>locationId</code></td><td>Resolvable, but only by cross-referencing a client's <code>locations[]</code> array for a matching <code>clientsLocationId</code> — not a flat lookup.</td></tr>
+                <tr><td>Timesheets</td><td><code>status</code></td><td>No lookup — approved/rejected/pending is a guess.</td></tr>
+                <tr><td>Timesheets</td><td><code>approvedRejectedUserId</code></td><td>Tells you who acted, but since <code>status</code> itself is unlabeled, can't tell if they approved or rejected.</td></tr>
+                <tr><td>All records</td><td><code>createdBy</code></td><td>Raw user ID on every record type — no lookup, so "who created this" isn't resolvable without one.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Clients</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/clients</code> — <code>ClientResponse</code></div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>clientId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Internal record ID.</td></tr>
+                <tr><td><code>guid</code></td><td>uuid</td><td class="rtapi-clear">✓ Clear</td><td>External/API identifier.</td></tr>
+                <tr><td><code>name</code>, <code>nickName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Centre name.</td></tr>
+                <tr><td><code>email</code>, <code>emailAddress</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Two separate fields for what looks like the same thing — check both, they may not always agree.</td></tr>
+                <tr><td><code>contactNo</code>, <code>landLineNo</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isTrialClient</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isInvoiceByLocation</code>, <code>isTimesheetByLocation</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Raw user ID, no lookup.</td></tr>
+                <tr><td><code>primaryUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Presumably the main contact person — no lookup to a name.</td></tr>
+                <tr><td><code>clientAssignmentTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>clientPreferenceId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>locations[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Client Locations table below — full address <strong>with lat/lng already geocoded</strong>.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Client Locations <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Client's <code>locations[]</code>)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>ClientLocationResponse</code> — newly added since Micropods was scoped</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>clientsLocationId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches a Booking's <code>locationId</code>.</td></tr>
+                <tr><td><code>locationName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>addressLine1/2/3</code>, <code>suburb</code>, <code>postCode</code>, <code>state</code>, <code>country</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Full postal address.</td></tr>
+                <tr><td><code>latitude</code>, <code>longitude</code></td><td>double</td><td class="rtapi-clear">✓ Clear</td><td>Pre-geocoded — no need to geocode centre locations separately.</td></tr>
+                <tr><td><code>contactName</code>, <code>contactNo</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isPrimary</code>, <code>isBilling</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Candidates</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/candidates</code> — <code>CandidateResponse</code></div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>userId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Booking's <code>assignedUserId</code> and Timesheet's <code>userId</code>.</td></tr>
+                <tr><td><code>guid</code></td><td>uuid</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>firstName</code>, <code>lastName</code>, <code>userName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>title</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Likely an honorific (Mr/Ms) rather than job title — worth a spot-check on real data.</td></tr>
+                <tr><td><code>email</code>, <code>contactNo</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>userTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>userRoleId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>No enum defined anywhere in the schema.</td></tr>
+                <tr><td><code>userClientId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Presumably which agency/client owns this candidate record.</td></tr>
+                <tr><td><code>addresses[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Addresses table below — <strong>pre-geocoded</strong>.</td></tr>
+                <tr><td><code>qualifications[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Qualifications table below.</td></tr>
+                <tr><td><code>availableCandidateList[]</code></td><td>array</td><td style="color:#92400e;font-weight:700">⚠ Partial (new)</td><td>Dates exist, but the actual availability <em>status</em> per date is an unlabeled enum — see below.</td></tr>
+                <tr><td><code>attachedRequirements[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Requirements table below — compliance docs (WWCC, First Aid, etc.).</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Candidate Addresses <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Candidate's <code>addresses[]</code>)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>CandidateAddressResponse</code> — newly added since Micropods was scoped</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>addressId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>addressLine1/2/3</code>, <code>suburb</code>, <code>postCode</code>, <code>state</code>, <code>country</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Full postal address.</td></tr>
+                <tr><td><code>latitude</code>, <code>longitude</code></td><td>double</td><td class="rtapi-clear">✓ Clear</td><td>Pre-geocoded — this is what would unblock candidate density mapping.</td></tr>
+                <tr><td><code>contactNo</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>addressTypeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>regionId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Candidate Qualifications <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Candidate's <code>qualifications[]</code>)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>CandidateQualificationResponse</code> — newly added since Micropods was scoped</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>userQualificationId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>qualificationName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>The actual usable label — e.g. "Certificate III", "Diploma", "Early Childhood Teaching" (verify exact values against real data).</td></tr>
+                <tr><td><code>shortCode</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>Abbreviation of the above.</td></tr>
+                <tr><td><code>description</code>, <code>collegeName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>qualifiedDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>documentPath</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>qualificationId</code>, <code>qualificationNameId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above — two IDs, unclear relationship.</td></tr>
+                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>No grade lookup.</td></tr>
+                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Integer, not boolean — see master list above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Candidate Availability <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Candidate's <code>availableCandidateList[]</code>)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>AvailableCandidateResponse</code> — newly added since Micropods was scoped</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>date</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>day</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>e.g. "Monday" — redundant with <code>date</code> but harmless.</td></tr>
+                <tr><td><code>status</code></td><td>enum (0, 1, 2)</td><td class="rtapi-vague">⚠ Vague code</td><td><strong>The one field worth chasing down first</strong> — the whole point of "availability" data is knowing which of 0/1/2 means available, and the schema gives zero labels for it.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Candidate Requirements <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Candidate's <code>attachedRequirements[]</code>)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>CandidateRequirementResponse</code> — compliance documents (WWCC, First Aid, etc.)</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>requirementName</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td>e.g. "Working With Children Check" — usable directly.</td></tr>
+                <tr><td><code>uploadedDocumentName</code>, <code>documentPath</code>, <code>documentNumber</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>expiryDate</code>, <code>qualifiedDate</code>, <code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isMandatory</code>, <code>isExpiry</code>, <code>isShiftCritical</code>, <code>isQualification</code>, <code>isReviewed</code>, <code>isReChecked</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>documentId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td><code>requirementName</code> alongside it is usable directly though.</td></tr>
+                <tr><td><code>qualified</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Same ambiguity as the Qualification record's field above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Bookings</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/getbookings</code> — <code>ClientBookingResponse</code></div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>clientBookingId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>guid</code></td><td>uuid</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>clientId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Clients' <code>clientId</code>.</td></tr>
+                <tr><td><code>assignedUserId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Candidates' <code>userId</code> (unfilled bookings have this null).</td></tr>
+                <tr><td><code>bookingDate</code>, <code>startTime</code>, <code>endTime</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>notes</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>locationId</code></td><td>int</td><td style="color:#92400e;font-weight:700">⚠ Resolvable</td><td>Matches a <code>clientsLocationId</code> inside that client's <code>locations[]</code> — not a flat lookup.</td></tr>
+                <tr><td><code>statusId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>certificateId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>gradeId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">Timesheets</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>GET /api/Reports/timesheets</code> — <code>TimeSheetResponse</code></div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12px">
+              <thead><tr><th style="width:170px">Field</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th>Note</th></tr></thead>
+              <tbody>
+                <tr><td><code>timeSheetDetailsId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>guid</code></td><td>uuid</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>bookingId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Bookings' <code>clientBookingId</code>.</td></tr>
+                <tr><td><code>userId</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Matches Candidates' <code>userId</code>.</td></tr>
+                <tr><td><code>startTime</code>, <code>endTime</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>duration</code></td><td>double</td><td class="rtapi-clear">✓ Clear</td><td>Almost certainly hours — spot-check against a known shift to confirm the unit.</td></tr>
+                <tr><td><code>lunchBreak</code></td><td>int</td><td class="rtapi-clear">✓ Clear</td><td>Unit not stated in the schema — likely minutes, worth a quick sanity check.</td></tr>
+                <tr><td><code>comment</code></td><td>string</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isInvoiced</code>, <code>isPaid</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>isActive</code>, <code>isDeleted</code></td><td>bool</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdDate</code></td><td>datetime</td><td class="rtapi-clear">✓ Clear</td><td></td></tr>
+                <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+                <tr><td><code>approvedRejectedUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -2438,8 +2722,8 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jodit@3.24.6/build/jodit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js"></script>
+  <script type="module" src="/js/richEditor.js"></script>
   <script>
     let allArticles = [];
     let allUsers = [];
@@ -2454,52 +2738,24 @@
     let joditEditor = null;
     let selectedRelated = []; // { id, title }
 
-    function initEditor() {
-      if (joditEditor) return;
-      joditEditor = Jodit.make('#articleEditor', {
-        height: 420,
-        minHeight: 340,
-        toolbarButtonSize: 'small',
-        showCharsCounter: false,
-        showWordsCounter: false,
-        showXPathInStatusbar: false,
-        placeholder: 'Write your article here…',
-        buttons: [
-          'paragraph', '|',
-          'bold', 'italic', 'underline', 'strikethrough', '|',
-          'brush', '|',
-          'font', 'fontsize', '|',
-          'align', '|',
-          'ul', 'ol', '|',
-          'outdent', 'indent', '|',
-          'link', 'table', 'image', '|',
-          'hr', 'quote', '|',
-          'undo', 'redo', '|',
-          'eraser', 'fullsize'
-        ],
-        buttonsMD: [
-          'paragraph', 'bold', 'italic', 'underline', '|',
-          'brush', 'font', 'fontsize', '|',
-          'align', 'ul', 'ol', '|',
-          'link', 'table', 'image', '|',
-          'undo', 'redo'
-        ],
-        style: {
-          fontFamily: "'Inter', sans-serif",
-          fontSize: '14px',
-          color: '#334155',
-          lineHeight: '1.7'
-        },
-        uploader: { insertImageAsBase64URI: true },
-        removeButtons: ['video', 'file', 'about', 'print', 'dots', 'source', 'preview']
-      });
+    function waitForRichEditor() {
+      if (window.RichEditor) return Promise.resolve();
+      return new Promise(resolve => window.addEventListener('richeditor-ready', resolve, { once: true }));
+    }
 
-      // Live preview — mirrors editor content in real time
-      joditEditor.events.on('change', (html) => {
-        const preview = document.getElementById('articlePreview');
-        if (!preview) return;
-        const clean = DOMPurify.sanitize(html || '', { ADD_TAGS: ['table','thead','tbody','tr','th','td'] });
-        preview.innerHTML = clean || '<span style="color:var(--text-muted);font-style:italic;font-size:14px">Start typing to see a preview…</span>';
+    async function initEditor() {
+      if (joditEditor) return;
+      await waitForRichEditor();
+      if (joditEditor) return;
+      joditEditor = window.RichEditor.create(document.getElementById('articleEditor'), {
+        preset: 'full',
+        placeholder: 'Write your article here…',
+        onUpdate: (html) => {
+          const preview = document.getElementById('articlePreview');
+          if (!preview) return;
+          const clean = DOMPurify.sanitize(html || '', { ADD_TAGS: ['table','thead','tbody','tr','th','td'] });
+          preview.innerHTML = clean || '<span style="color:var(--text-muted);font-style:italic;font-size:14px">Start typing to see a preview…</span>';
+        }
       });
     }
 
@@ -3370,9 +3626,8 @@
           showSection('new-article', document.getElementById('navNewArticle'));
         }
 
-        // Ensure editor is ready, wait for it to fully initialize
-        initEditor();
-        await new Promise(r => setTimeout(r, 250));
+        // Ensure editor is ready
+        await initEditor();
 
         // Populate all fields from the document
         if (data.title) document.getElementById('articleTitle').value = data.title;
@@ -3413,7 +3668,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
 
     function showSection(id, el) {
       // Restricted roles (qa_view, workforce_partner) each have their own
@@ -3615,13 +3870,9 @@
         const filePanel = document.getElementById('fileAttachmentsPanel');
         if (filePanel) { filePanel.style.display = 'block'; loadArticleFiles(id); }
         showSection('new-article', document.getElementById('navNewArticle'));
-        // Set editor content after editor is visible
-        setTimeout(() => {
-          if (joditEditor) {
-            joditEditor.value = a.content || '';
-            document.getElementById('articlePreview').innerHTML = DOMPurify.sanitize(a.content || '', { ADD_TAGS: ['table','thead','tbody','tr','th','td'] });
-          }
-        }, 150);
+        await initEditor();
+        joditEditor.value = a.content || '';
+        document.getElementById('articlePreview').innerHTML = DOMPurify.sanitize(a.content || '', { ADD_TAGS: ['table','thead','tbody','tr','th','td'] });
       } catch { toast('Failed to load article', 'error'); }
     }
 
@@ -7506,16 +7757,16 @@
       `;
 
       if (sopEditMode) {
-        projectSopEditor = Jodit.make('#projectSopEditor', {
-          height: 300, minHeight: 220, toolbarButtonSize: 'small',
-          showCharsCounter: false, showWordsCounter: false, showXPathInStatusbar: false,
-          placeholder: 'Document the steps, checklist, or process for this project…',
-          buttons: ['paragraph', '|', 'bold', 'italic', 'underline', '|', 'ul', 'ol', '|', 'link', 'table', '|', 'undo', 'redo'],
-          style: { fontFamily: "'Inter', sans-serif", fontSize: '14px', color: '#334155', lineHeight: '1.7' },
-          uploader: { insertImageAsBase64URI: true },
-          removeButtons: ['video', 'file', 'about', 'print', 'dots', 'source', 'preview', 'image']
-        });
-        projectSopEditor.value = p.sop_content || '';
+        (async () => {
+          await waitForRichEditor();
+          const mount = document.getElementById('projectSopEditor');
+          if (!mount) return; // user navigated away before the editor library finished loading
+          projectSopEditor = window.RichEditor.create(mount, {
+            preset: 'compact',
+            placeholder: 'Document the steps, checklist, or process for this project…'
+          });
+          projectSopEditor.value = p.sop_content || '';
+        })();
       }
     }
 

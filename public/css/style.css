@@ -844,6 +844,12 @@ button { cursor: pointer; font-family: inherit; }
 .lead-badge-done { background: #dcfce7; color: #15803d; }
 .lead-badge-sched { background: #fef3c7; color: #b45309; }
 .lead-badge-todo { background: var(--gray-100); color: var(--text-muted); }
+
+/* RT API Data Reference (Documentation) — plain colored text in a table
+   cell, not a pill, since every row in those tables needs one so a badge
+   shape would just add visual noise at that density. */
+.rtapi-clear { color: #15803d; font-weight: 700; white-space: nowrap; }
+.rtapi-vague { color: #92400e; font-weight: 700; white-space: nowrap; }
 .lead-badge-not { background: #fef2f2; color: #c0392b; }
 
 /* Agency Usage badges — not editable/clickable, purely a visual flag, so no
