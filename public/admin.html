@@ -5772,12 +5772,23 @@
     let reportLookupsLoaded = false;
     let clientNameById = {};
     let candidateNameById = {};
+    let locationNameById = {};
 
     function candidateName(userId) {
       return candidateNameById[userId] || (userId ? `Candidate #${userId}` : '—');
     }
     function clientName(clientId) {
       return clientNameById[clientId] || (clientId ? `Client #${clientId}` : '—');
+    }
+    // locationId on a Booking isn't a flat lookup anywhere in the API — it
+    // only resolves by finding the matching clientsLocationId inside that
+    // client's own locations[] array (see RT API Data Reference → Bookings).
+    // clientsLocationId reads as a system-wide auto-increment key (not
+    // reset per client), so a single flat map built while walking every
+    // client's locations[] is safe — same pattern as clientNameById/
+    // candidateNameById rather than a nested per-client lookup.
+    function locationLabel(locationId) {
+      return locationNameById[locationId] || (locationId ? `Location #${locationId}` : '—');
     }
 
     // Loads Clients + Candidates once (cached for the session) purely to
@@ -5791,7 +5802,12 @@
           fetch('/api/reports/clients').then(r => r.json()),
           fetch('/api/reports/candidates').then(r => r.json())
         ]);
-        (Array.isArray(clients) ? clients : []).forEach(c => { clientNameById[c.clientId] = c.name || c.nickName || `Client #${c.clientId}`; });
+        (Array.isArray(clients) ? clients : []).forEach(c => {
+          clientNameById[c.clientId] = c.name || c.nickName || `Client #${c.clientId}`;
+          (c.locations || []).forEach(loc => {
+            locationNameById[loc.clientsLocationId] = loc.locationName || [c.name, loc.suburb].filter(Boolean).join(' — ');
+          });
+        });
         (Array.isArray(candidates) ? candidates : []).forEach(c => { candidateNameById[c.userId] = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.userName || `Candidate #${c.userId}`; });
         reportLookupsLoaded = true;
       } catch { /* Bookings/Timesheets tables just fall back to "#id" labels */ }
@@ -6008,7 +6024,7 @@
         },
         breakdowns: [
           { title: 'By Status', sub: 'Inferred from a live-data sweep, not yet confirmed by RawTalent — see RT API Data Reference', compute: rows => computeCodeBreakdown(rows, 'statusId', 'Status', null, BOOKING_STATUS_LABELS) },
-          { title: 'By Location', sub: 'Raw location codes, top 8', compute: rows => computeCodeBreakdown(rows, 'locationId', 'Location', 8) },
+          { title: 'By Location', sub: 'Top 8 centres by booking count', compute: rows => computeCodeBreakdown(rows, 'locationId', 'Location', 8, locationNameById) },
           { title: 'By Day of Week', sub: 'When shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'bookingDate') }
         ],
         leaderboards: [
@@ -6021,7 +6037,7 @@
           { header: 'Candidate', render: r => escHtml(candidateName(r.assignedUserId)) },
           { header: 'Start', render: r => r.startTime ? new Date(r.startTime).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—' },
           { header: 'End', render: r => r.endTime ? new Date(r.endTime).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—' },
-          { header: 'Location', render: r => escHtml(r.locationId ?? '—') },
+          { header: 'Location', render: r => escHtml(locationLabel(r.locationId)) },
           { header: 'Grade', render: r => escHtml(r.gradeId ?? '—') },
           { header: 'Certificate', render: r => escHtml(r.certificateId ?? '—') },
           { header: 'Status', render: r => escHtml(bookingStatusLabel(r.statusId)) },
@@ -6957,7 +6973,7 @@
             ['Status', bookingStatusLabel(b.statusId)],
             ['Grade', b.gradeId ?? '—'],
             ['Certificate', b.certificateId ?? '—'],
-            ['Location ID', b.locationId ?? '—'],
+            ['Location', locationLabel(b.locationId)],
             ['Active', b.isActive ? '✅ Active' : '❌ Inactive'],
             ['Created', fmtDate(b.createdDate)]
           ].map(([label, value]) => `
