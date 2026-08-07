@@ -6502,7 +6502,12 @@
       const sums = {};
       rows.forEach(r => {
         const id = r[idField];
-        if (id === null || id === undefined) return;
+        // Excludes 0 as well as null/undefined — RT's API uses a literal 0
+        // as its "nobody"/"nothing" sentinel (confirmed on Bookings'
+        // assignedUserId — cancelled-before-assignment shows as 0, not
+        // null), same as candidateName()/clientName() already treat it.
+        // A real ranking shouldn't have "—" as its #1 entry.
+        if (!id) return;
         sums[id] = (sums[id] || 0) + (valueFn ? (valueFn(r) || 0) : 1);
       });
       return Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, topN || 8)
