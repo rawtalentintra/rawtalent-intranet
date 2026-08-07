@@ -2896,6 +2896,7 @@
           document.getElementById('impersonationBanner').style.display = 'block';
         }
         applyRoleVisibility();
+        applyReportAllTimeRestrictions();
       } catch { location.href = '/login.html'; return; }
 
       loadArticles();
@@ -5796,6 +5797,18 @@
       } catch { /* Bookings/Timesheets tables just fall back to "#id" labels */ }
     }
 
+    // Inferred from a live-data sweep (see RT API Data Reference →
+    // Bookings), not something RawTalent's API documents anywhere —
+    // correlated against assignedUserId presence and past/future booking
+    // dates across 2,000 real bookings. Strong evidence, not confirmed.
+    // Falls back to the raw code for any value outside this set, so a
+    // status the sweep never saw still shows something instead of nothing.
+    const BOOKING_STATUS_LABELS = { 1: 'Open', 2: 'Requested', 3: 'Assigned', 5: 'Completed', 6: 'Cancelled', 7: 'Failed/Unfilled' };
+    function bookingStatusLabel(statusId) {
+      if (statusId === null || statusId === undefined) return '—';
+      return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
+    }
+
     const REPORT_CONFIG = {
       clients: {
         label: 'Clients', icon: '🏢',
@@ -5923,11 +5936,18 @@
         sub: 'Every shift booking logged in the RawTalent app.',
         dateField: 'bookingDate', dateFieldLabel: 'booking date',
         trendLabel: 'Bookings',
+        // 124,000+ total bookings — "All Time" means fetching and holding
+        // every one of them client-side. Defaults to a week so the
+        // Dashboard loads fast for everyone; "All Time" itself is still
+        // available, just tucked behind Super Admin (see the period
+        // <select> in renderReportSectionsHtml()) rather than removed.
+        defaultPeriod: 'week',
+        allTimeSuperAdminOnly: true,
         needsLookups: true,
         extendedPeriod: true,
         searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
         extraFilters: [
-          { id: 'status', label: 'Status', type: 'select', field: 'statusId' }
+          { id: 'status', label: 'Status', type: 'select', field: 'statusId', labelMap: BOOKING_STATUS_LABELS }
         ],
         // Bookings is a fundamentally different scale from Clients/Candidates
         // (100k+ rows total) — fetch-everything-then-filter-client-side, the
@@ -5943,6 +5963,7 @@
           dated: true,
           idField: 'clientBookingId',
           statusField: 'statusId',
+          statusLabelMap: BOOKING_STATUS_LABELS,
           searchPlaceholder: 'Search client or candidate…',
           noun: 'bookings',
           searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
@@ -5959,7 +5980,7 @@
             { header: 'Client', render: r => escHtml(clientName(r.clientId)) },
             { header: 'Candidate', render: r => r.assignedUserId ? escHtml(candidateName(r.assignedUserId)) : '⚠️ Unassigned' },
             { header: 'Shift', render: r => bookingShiftStateBadge(r) },
-            { header: 'Status', render: r => `Status ${r.statusId ?? '—'}` }
+            { header: 'Status', render: r => escHtml(bookingStatusLabel(r.statusId)) }
           ],
           detailTitle: r => `Booking #${r.clientBookingId}`,
           renderDetail: bookingDetailHtml
@@ -5986,7 +6007,7 @@
           ];
         },
         breakdowns: [
-          { title: 'By Status', sub: 'Raw status codes', compute: rows => computeCodeBreakdown(rows, 'statusId', 'Status') },
+          { title: 'By Status', sub: 'Inferred from a live-data sweep, not yet confirmed by RawTalent — see RT API Data Reference', compute: rows => computeCodeBreakdown(rows, 'statusId', 'Status', null, BOOKING_STATUS_LABELS) },
           { title: 'By Location', sub: 'Raw location codes, top 8', compute: rows => computeCodeBreakdown(rows, 'locationId', 'Location', 8) },
           { title: 'By Day of Week', sub: 'When shifts fall, Mon → Sun', compute: rows => computeDayOfWeekBreakdown(rows, 'bookingDate') }
         ],
@@ -6003,7 +6024,7 @@
           { header: 'Location', render: r => escHtml(r.locationId ?? '—') },
           { header: 'Grade', render: r => escHtml(r.gradeId ?? '—') },
           { header: 'Certificate', render: r => escHtml(r.certificateId ?? '—') },
-          { header: 'Status', render: r => escHtml(r.statusId ?? '—') },
+          { header: 'Status', render: r => escHtml(bookingStatusLabel(r.statusId)) },
           { header: 'Notes', render: r => escHtml(r.notes || '—') },
           { header: 'Active', render: r => r.isActive ? '✅' : '—' }
         ]
@@ -6097,6 +6118,20 @@
       }
     };
 
+    // Removes the "All Time" option from any report's period filter that's
+    // flagged allTimeSuperAdminOnly, once we actually know the signed-in
+    // role (renderReportSectionsHtml() runs before /auth/me resolves, so
+    // this can't just be baked into that template). The option's own
+    // `selected` state was already set correctly at render time from
+    // cfg.defaultPeriod, so removing it here never needs to reset anything.
+    function applyReportAllTimeRestrictions() {
+      if (currentUserRole === 'super_admin') return;
+      Object.keys(REPORT_CONFIG).forEach(type => {
+        if (!REPORT_CONFIG[type].allTimeSuperAdminOnly) return;
+        document.getElementById(`report_${type}_period`)?.querySelector('option[data-super-admin-only="true"]')?.remove();
+      });
+    }
+
     function renderReportSectionsHtml() {
       const container = document.getElementById('reportsSectionsContainer');
       container.innerHTML = Object.entries(REPORT_CONFIG).map(([type, cfg]) => `
@@ -6120,12 +6155,12 @@
           <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <select id="report_${type}_period" class="form-control" style="width:135px" onchange="onReportPeriodChange('${type}')">
-                <option value="all" selected>All Time</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="quarter">This Quarter</option>
+                <option value="all" ${!cfg.defaultPeriod ? 'selected' : ''} ${cfg.allTimeSuperAdminOnly ? 'data-super-admin-only="true"' : ''}>All Time</option>
+                <option value="week" ${cfg.defaultPeriod === 'week' ? 'selected' : ''}>This Week</option>
+                <option value="month" ${cfg.defaultPeriod === 'month' ? 'selected' : ''}>This Month</option>
+                <option value="quarter" ${cfg.defaultPeriod === 'quarter' ? 'selected' : ''}>This Quarter</option>
                 ${cfg.extendedPeriod ? `
-                  <option value="year">This Year</option>
+                  <option value="year" ${cfg.defaultPeriod === 'year' ? 'selected' : ''}>This Year</option>
                   <option value="custom">Custom Range…</option>
                 ` : ''}
               </select>
@@ -6330,7 +6365,7 @@
         const sel = document.getElementById(`report_${type}_${f.id}`);
         const current = sel.value;
         const values = [...new Set(rows.map(r => r[f.field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
-        sel.innerHTML = `<option value="">${escHtml(f.label)}: Any</option>` + values.map(v => `<option value="${v}">${escHtml(f.label)} ${v}</option>`).join('');
+        sel.innerHTML = `<option value="">${escHtml(f.label)}: Any</option>` + values.map(v => `<option value="${v}">${escHtml(f.labelMap?.[v] || `${f.label} ${v}`)}</option>`).join('');
         if (values.map(String).includes(current)) sel.value = current;
       });
     }
@@ -6395,7 +6430,7 @@
         </div>`).join('');
     }
 
-    function computeCodeBreakdown(rows, field, labelPrefix, topN) {
+    function computeCodeBreakdown(rows, field, labelPrefix, topN, labelMap) {
       const counts = {};
       rows.forEach(r => {
         const v = r[field];
@@ -6404,7 +6439,7 @@
       });
       let entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
       if (topN) entries = entries.slice(0, topN);
-      return entries.map(([key, count]) => ({ label: key === '—' ? 'Unspecified' : `${labelPrefix} ${key}`, count }));
+      return entries.map(([key, count]) => ({ label: key === '—' ? 'Unspecified' : (labelMap?.[key] || `${labelPrefix} ${key}`), count }));
     }
 
     function renderBreakdownBars(elId, rows) {
@@ -6850,7 +6885,8 @@
       if (!sel || !field) return;
       const current = sel.value;
       const statuses = [...new Set(rows.map(r => r[field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
-      sel.innerHTML = `<option value="">Status: Any</option>` + statuses.map(s => `<option value="${s}">Status ${s}</option>`).join('');
+      const labelMap = cfg.listView.statusLabelMap;
+      sel.innerHTML = `<option value="">Status: Any</option>` + statuses.map(s => `<option value="${s}">${escHtml(labelMap?.[s] || `Status ${s}`)}</option>`).join('');
       if (statuses.map(String).includes(current)) sel.value = current;
     }
 
@@ -6918,7 +6954,7 @@
             ['Start Time', b.startTime ? new Date(b.startTime).toLocaleString('en-AU') : '—'],
             ['End Time', b.endTime ? new Date(b.endTime).toLocaleString('en-AU') : '—'],
             ['Shift State', bookingShiftState(b) === 'ended' ? 'Shift Ended' : bookingShiftState(b) === 'inprogress' ? 'In Progress' : 'Upcoming'],
-            ['Status', b.statusId ?? '—'],
+            ['Status', bookingStatusLabel(b.statusId)],
             ['Grade', b.gradeId ?? '—'],
             ['Certificate', b.certificateId ?? '—'],
             ['Location ID', b.locationId ?? '—'],
