@@ -611,6 +611,130 @@ async function saveRubricDescription(rubricType, categoryKey, bullets, updatedBy
   return { description: bullets, instructions };
 }
 
+// ── Deterministic (non-AI) category checks ──────────────────────────
+// Some rubric categories are mechanical facts about the transcript, not
+// judgment calls — Opening & Rapport is the first one, added because the
+// AI's opening notes were landing as scolding ("the reverse of professional
+// protocol") even with an explicit anti-harshness instruction in the
+// system prompt, and because whether a call opened with a greeting and
+// self-identification is something a plain checklist can answer just as
+// well, for zero AI cost. gradeCall() excludes any category with an entry
+// here from what it asks the model to grade at all (not just from the
+// prompt text — from the tool schema itself, so the AI's response is
+// smaller too), then merges this result in afterward. Add another entry
+// here for any other category that turns out to be similarly mechanical.
+const GREETING_PATTERN = /\b(hi|hello|hey|good\s+morning|good\s+afternoon|good\s+day|g'?day|morning|afternoon)\b/i;
+const PURPOSE_PATTERN = /\bcalling\s+(about|regarding|re|to|from)|\bjust\s+(calling|following\s+up|checking|wanted)|\btouching\s+base|\breaching\s+out|\bwanted\s+to\s+(check|confirm|let\s+you\s+know|follow\s+up)/i;
+
+// Call transcripts are consistently "Speaker: sentence" per line (see
+// dubberService.js getAiInfo) — reliable enough to parse mechanically.
+function parseTranscriptTurns(transcript) {
+  return (transcript || '').split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const m = line.match(/^([^:]{1,40}):\s*(.*)$/);
+    return m ? { speaker: m[1].trim(), text: m[2].trim() } : { speaker: null, text: line };
+  });
+}
+
+// Checked empirically against this account's real transcripts: Dubber's
+// diarization here essentially never returns a per-person name — ~97% of
+// labelled transcripts carry the flat, generic "Multiple speakers" tag on
+// every single line rather than actually distinguishing who's talking.
+// Matching repName against speaker labels (the ideal case) is still tried
+// first, but for the overwhelming majority of real calls it won't find
+// anything, so this needs a fallback that doesn't depend on speaker labels
+// at all.
+const GENERIC_SPEAKER_LABEL = /^multiple speakers$/i;
+
+// What this can't do: judge whether the rep's tone actually matched the
+// contact's mood (the rubric's second Opening & Rapport criterion) — that's
+// a genuine judgment call. This only scores the mechanically verifiable
+// half: who spoke first, and whether a greeting + identification appear in
+// the rep's opening turn(s).
+function checkOpeningRapport(transcript, repName, callType) {
+  const turns = parseTranscriptTurns(transcript);
+  if (!turns.length) {
+    return { score: 3, notes: 'No transcript text was available to check the opening — scored as inconclusive rather than penalised. Checked automatically from the transcript, not AI-graded.' };
+  }
+
+  const repFirstName = (repName || '').trim().split(/\s+/)[0]?.toLowerCase();
+  const namedRepTurnIndexes = repFirstName
+    ? turns.reduce((acc, t, i) => { if (t.speaker && !GENERIC_SPEAKER_LABEL.test(t.speaker) && t.speaker.toLowerCase().includes(repFirstName)) acc.push(i); return acc; }, [])
+    : [];
+
+  let firstRepTurnIndex;
+  let namedSpeaker = false;
+  if (namedRepTurnIndexes.length) {
+    firstRepTurnIndex = namedRepTurnIndexes[0];
+    namedSpeaker = true;
+  } else if (callType === 'inbound') {
+    // No usable per-speaker label — fall back to the one thing still known
+    // for certain from our own call metadata rather than the transcript:
+    // on an inbound call, whoever answers and speaks first is RawTalent
+    // picking up the phone. Not available for outbound calls (the rep
+    // dialling out is never reliably the first line — could ring out,
+    // reach voicemail, or the other party could answer first).
+    firstRepTurnIndex = 0;
+  } else {
+    return {
+      score: 3,
+      notes: `Couldn't identify which lines are the rep's — this transcript has no per-speaker names (Dubber's diarization returned a generic "Multiple speakers" tag rather than distinguishing speakers, which is the case for most calls on this account), and it's an outbound call, so position alone can't safely stand in for a real speaker label either. Scored as inconclusive rather than guessed. Checked automatically from the transcript, not AI-graded.`
+    };
+  }
+
+  const repSpokeFirst = firstRepTurnIndex === 0;
+  let openingText;
+  if (namedSpeaker) {
+    // A real speaker label — only the rep's own consecutive opening
+    // sentences, stopping at the first turn that isn't theirs, so a
+    // greeting/purpose word in the OTHER party's reply can never get
+    // credited to the rep.
+    const repOpeningLines = [];
+    for (let i = firstRepTurnIndex; i < turns.length && turns[i].speaker?.toLowerCase().includes(repFirstName); i++) {
+      repOpeningLines.push(turns[i].text);
+    }
+    openingText = repOpeningLines.join(' ');
+  } else {
+    // Positional fallback — no way to detect a turn boundary without a
+    // real speaker label, so this uses a short fixed window of the call's
+    // very first lines instead of "until the speaker changes."
+    openingText = turns.slice(0, 3).map(t => t.text).join(' ');
+  }
+
+  const hasGreeting = GREETING_PATTERN.test(openingText);
+  const mentionsCompany = /rawtalent/i.test(openingText);
+  const mentionsOwnName = !!repFirstName && new RegExp(`\\b${repFirstName}\\b`, 'i').test(openingText);
+  const identifies = mentionsCompany || mentionsOwnName;
+  const statesPurpose = PURPOSE_PATTERN.test(openingText);
+
+  let score;
+  if (repSpokeFirst && hasGreeting && identifies) score = statesPurpose ? 5 : 4;
+  else if (hasGreeting && identifies) score = 4; // recovered well even though the other party opened
+  else if (hasGreeting || identifies) score = 3;
+  else score = 2;
+  // A positionally-assumed opening (no real speaker label) never earns the
+  // top score — "the rep spoke first" wasn't actually confirmed there, it
+  // was inferred from the call being inbound, so 5/5 would overstate how
+  // certain this is.
+  if (!namedSpeaker) score = Math.min(score, 4);
+
+  const checklist = [
+    namedSpeaker
+      ? `${repSpokeFirst ? '✓' : '✗'} Rep opened the call (${repSpokeFirst ? 'spoke first' : 'the other party spoke first'})`
+      : `~ Rep assumed to open the call (inbound — no per-speaker label to confirm this, so this is inferred from call direction, not verified)`,
+    `${hasGreeting ? '✓' : '✗'} Greeting detected in the opening turn`,
+    `${identifies ? '✓' : '✗'} Identified ${mentionsCompany ? 'RawTalent' : mentionsOwnName ? 'themselves by name' : 'themselves or RawTalent'}`,
+    `${statesPurpose ? '✓' : '✗'} Stated a reason for the call`
+  ].join('\n');
+
+  const quoted = openingText.length > 200 ? `${openingText.slice(0, 200)}…` : openingText;
+  const openingLabel = namedSpeaker ? "Rep's opening" : "Call's opening lines (assumed to be the rep — no speaker label available)";
+  const notes = `${openingLabel}: "${quoted}"\n${checklist}\n\nChecked automatically from the transcript — this is a mechanical checklist, not AI-graded.`;
+
+  return { score, notes };
+}
+
+const DETERMINISTIC_CHECKS = { opening: checkOpeningRapport };
+
 // Shared by AI grading and manual (human) grading so both produce comparable
 // weighted scores/outcomes for the future Call Quality Reporting rollup.
 function computeResult(rubric, rawScores, summary) {
@@ -622,7 +746,8 @@ function computeResult(rubric, rawScores, summary) {
       weight: c.weight,
       critical: c.critical,
       score: found?.score ?? 3,
-      notes: found?.notes ?? ''
+      notes: found?.notes ?? '',
+      method: found?.method || 'ai'
     };
   });
 
@@ -650,7 +775,7 @@ function stripMarkup(text) {
 }
 
 async function gradeCall(transcriptText, rubricType, repName = null, options = {}) {
-  const { feedbackItems = [], sentimentScore = null, documentEmotion = null, sentenceEmotion = null, currentResult = null } = options;
+  const { feedbackItems = [], sentimentScore = null, documentEmotion = null, sentenceEmotion = null, currentResult = null, callType = null } = options;
   if (!RUBRICS[rubricType]) throw new Error(`Unknown rubric type: ${rubricType}`);
   // Effective rubric merges in any admin-authored per-category grading
   // instructions, so a reviewer's added guidance is always applied — not
@@ -667,6 +792,20 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
 
   const calibration = await getCalibrationNotes(rubricType);
 
+  // Any category with a deterministic check (see DETERMINISTIC_CHECKS above)
+  // is graded here from the transcript, not by the model — and excluded
+  // from what the AI is even asked for below, via aiRubric. That's a real
+  // (if modest) credit saving on top of the tone benefit: one fewer
+  // category's criteria in the prompt, one fewer category's notes in the
+  // response. NOTE: any admin-authored per-category instructions added on
+  // the Rubric Reference page for a now-deterministic category go unused —
+  // there's no AI call left for them to steer.
+  const deterministicResults = {};
+  for (const [key, check] of Object.entries(DETERMINISTIC_CHECKS)) {
+    if (rubric.categories.some(c => c.key === key)) deterministicResults[key] = check(cleanTranscript, repName, callType);
+  }
+  const aiRubric = { ...rubric, categories: rubric.categories.filter(c => !deterministicResults[c.key]) };
+
   // Grounds this evaluation in the same knowledge base the main KB AI
   // answers staff questions from, so the two are never out of sync on
   // policy/compliance facts — a failure here is non-fatal to grading.
@@ -678,7 +817,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
   }
   const glossaryBlock = await getGlossaryBlock(getDb());
 
-  const { cached, dynamic } = buildSystemPrompt(rubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, documentEmotion, sentenceEmotion, glossaryBlock, currentResult });
+  const { cached, dynamic } = buildSystemPrompt(aiRubric, repName, { knowledgeMatches, calibration, feedbackItems, sentimentScore, documentEmotion, sentenceEmotion, glossaryBlock, currentResult });
   if (process.env.DEBUG_CACHE_USAGE) console.log('CACHED_BLOCK_CHARS', cached.length, '~tokens', Math.round(cached.length / 4));
   // The rubric/calibration/glossary block is identical across every call
   // graded against this rubric until a note is added or removed — marking
@@ -691,7 +830,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
     { type: 'text', text: cached, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: dynamic }
   ];
-  const tool = buildGradingTool(rubric);
+  const tool = buildGradingTool(aiRubric);
 
   async function runOnce() {
     // 7 categories x 3-5 sentences of expert, evidence-based notes (evidence +
@@ -741,7 +880,7 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
     // score attached means something went wrong generating that entry.
     const scores = scoresRaw.map(s => ({ ...s, notes: stripMarkup(s.notes) }));
     const summary = stripMarkup(parsed.summary);
-    const missing = rubric.categories.filter(c => !scores.find(s => s.key === c.key && s.notes && s.notes.length > 20));
+    const missing = aiRubric.categories.filter(c => !scores.find(s => s.key === c.key && s.notes && s.notes.length > 20));
     return { scores, summary, missing };
   }
 
@@ -754,7 +893,16 @@ async function gradeCall(transcriptText, rubricType, repName = null, options = {
     }
   }
 
-  return computeResult(rubric, result.scores, result.summary);
+  // Merge the deterministic categories back in alongside the AI's — from
+  // here on this is just one combined set of category scores, same as
+  // always, weighted against the FULL rubric (deterministic categories
+  // still count toward the overall score, they're just not AI-authored).
+  const combinedScores = [
+    ...result.scores,
+    ...Object.entries(deterministicResults).map(([key, r]) => ({ key, score: r.score, notes: r.notes, method: 'rule-based' }))
+  ];
+
+  return computeResult(rubric, combinedScores, result.summary);
 }
 
 // Human grading via the manual evaluation form — same weighting/zero-tolerance
@@ -830,5 +978,5 @@ module.exports = {
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
-  analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL
+  analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL, checkOpeningRapport
 };

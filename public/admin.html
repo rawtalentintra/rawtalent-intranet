@@ -11146,11 +11146,32 @@
       } catch { list.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calls.</td></tr>'; }
     }
 
-    function playRecording(recordingId) {
+    // The Eval Detail modal already has everything the mini-player needs in
+    // evalDetailCurrentData — reading it directly here (real JS values, no
+    // string-escaping through an onclick attribute) is simpler than trying
+    // to serialize it into the button's markup.
+    function playCurrentEvalRecording() {
+      const e = evalDetailCurrentData;
+      if (!e) return;
+      playRecording(e.recording_id, {
+        repName: e.rep_name || 'Unknown',
+        direction: e.call_type === 'outbound' ? 'Out' : e.call_type === 'inbound' ? 'In' : '—',
+        contact: (e.call_type === 'outbound' ? e.to_number : e.from_number) || '—',
+        dateLabel: e.call_date || '—'
+      });
+    }
+
+    // `infoOverride` is for callers that already have the call's details in
+    // hand (e.g. the Evaluation Detail modal) and shouldn't rely on
+    // callsListCache — that cache is only populated by the Calls list table,
+    // so playing a recording from anywhere else left it empty and the
+    // player showed "Unknown · — · —" regardless of who the call was
+    // actually with.
+    function playRecording(recordingId, infoOverride) {
       const existing = document.getElementById('callAudioPlayerWrap');
       if (existing) existing.remove();
 
-      const info = callsListCache[recordingId] || {};
+      const info = infoOverride || callsListCache[recordingId] || {};
       const wrap = document.createElement('div');
       wrap.id = 'callAudioPlayerWrap';
       wrap.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:1000;background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:8px 10px';
@@ -11418,9 +11439,15 @@
       const container = document.getElementById('detailFeedbackRows');
       if (!container) return;
       const rubric = callRubrics[evalDetailCurrentData?.rubric_type];
+      // A rule-based category (see the 📏 badge) has no AI reasoning behind
+      // it to give feedback on — this dropdown is for correcting the AI's
+      // judgment, and re-grading would just recompute the same mechanical
+      // result from the transcript regardless of what's typed here. If the
+      // check itself is wrong, that's a bug to report, not feedback to give.
+      const ruleBasedKeys = new Set((evalDetailCurrentData?.category_scores || []).filter(c => c.method === 'rule-based').map(c => c.key));
       const allOptions = [
         { key: 'general', label: 'General — applies to every category' },
-        ...(rubric?.categories || []).map(c => ({ key: c.key, label: c.label }))
+        ...(rubric?.categories || []).filter(c => !ruleBasedKeys.has(c.key)).map(c => ({ key: c.key, label: c.label }))
       ];
       container.innerHTML = detailFeedbackRows.map((row, i) => {
         const usedElsewhere = detailFeedbackRows.filter((r, j) => j !== i).map(r => r.categoryKey).filter(Boolean);
@@ -11496,9 +11523,10 @@
           <td style="width:50px;text-align:center;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums">${c.weight}%</td>
           <td style="font-weight:700;color:var(--navy);width:190px">
             ${escHtml(c.category)}${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}
+            ${c.method === 'rule-based' ? '<div title="Checked mechanically from the transcript — not AI-graded, so there\'s nothing to give AI feedback on for this category." style="font-size:9.5px;font-weight:700;color:#0e7490;background:#ecfeff;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">📏 Rule-based, not AI</div>' : ''}
             ${def ? `<ul style="margin:6px 0 0;padding-left:14px;font-size:10.5px;color:var(--text-muted);font-weight:400;line-height:1.5">${def.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}</ul>` : ''}
           </td>
-          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(c.notes) || '<span style="font-style:italic">No notes</span>'}</td>
+          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6;white-space:pre-line">${escHtml(c.notes) || '<span style="font-style:italic">No notes</span>'}</td>
           <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${c.score}/5</td>
         </tr>`;
       }).join('');
@@ -11525,7 +11553,7 @@
           <div><strong style="color:var(--navy)">Phone:</strong> ${escHtml((e.call_type === 'outbound' ? e.to_number : e.from_number) || '—')}</div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:16px">
-          ${e.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playRecording('${e.recording_id}')">▶ Play Recording</button>` : ''}
+          ${e.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playCurrentEvalRecording()">▶ Play Recording</button>` : ''}
           ${e.has_audio ? `<a class="btn-secondary" style="font-size:12.5px;padding:6px 14px;text-decoration:none;display:inline-flex;align-items:center" href="/api/calls/local/${e.recording_id}/audio" download="call-${e.recording_id}.mp3">⬇ Download Call</a>` : ''}
           ${e.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${e.recording_id}')">📄 View Transcript</button>` : ''}
           ${!e.has_audio && !e.has_transcript ? '<span style="font-size:12px;color:var(--text-muted);font-style:italic">No recording or transcript available for this call.</span>' : ''}
@@ -11601,8 +11629,9 @@
             <td style="padding:9px 10px;border:1px solid #dde3f0">
               <strong style="color:#0b1d3e">${escHtml(c.category)}</strong>
               ${c.critical ? '<div style="font-size:9px;font-weight:700;color:#c0392b;margin-top:2px">⛔ ZERO-TOLERANCE</div>' : ''}
+              ${c.method === 'rule-based' ? '<div style="font-size:9px;font-weight:700;color:#0e7490;margin-top:2px">📏 RULE-BASED, NOT AI</div>' : ''}
             </td>
-            <td style="padding:9px 10px;border:1px solid #dde3f0;font-size:12px;color:#333;line-height:1.5">${escHtml(c.notes) || '—'}</td>
+            <td style="padding:9px 10px;border:1px solid #dde3f0;font-size:12px;color:#333;line-height:1.5;white-space:pre-line">${escHtml(c.notes) || '—'}</td>
             <td style="padding:9px 10px;border:1px solid #dde3f0;text-align:center;font-weight:800;color:#0b1d3e">${c.score}/5</td>
           </tr>`;
       }).join('');

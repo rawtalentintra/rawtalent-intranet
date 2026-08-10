@@ -434,7 +434,8 @@ router.post('/:recordingId/evaluate', async (req, res) => {
     const result = await gradeCall(transcript, rubricType, repName, {
       sentimentScore: recording.sentiment_score ?? null,
       documentEmotion,
-      sentenceEmotion
+      sentenceEmotion,
+      callType: recording.call_type
     });
 
     const id = await saveEvaluation({
@@ -494,7 +495,8 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
       sentimentScore: local.sentiment_score ?? null,
       documentEmotion: local.document_emotion || null,
       sentenceEmotion: local.sentence_emotion || null,
-      currentResult
+      currentResult,
+      callType: evaluation.call_type
     });
 
     const rubric = RUBRICS[evaluation.rubric_type];
