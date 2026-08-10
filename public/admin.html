@@ -730,46 +730,56 @@
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <label class="form-label-modal">Find a Candidate</label>
-          <div style="display:flex;gap:8px">
-            <input type="text" id="docCheckCandidateSearch" class="form-control" placeholder="Search by name, email, or phone…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();runDocCheckCandidateSearch();}">
-            <button class="btn-add" style="padding:0 20px;white-space:nowrap" onclick="runDocCheckCandidateSearch()">🔍 Search</button>
+        <!-- Search screen: find-a-candidate + audit log. Selecting a result
+             swaps this whole screen out for docCheckCandidateScreen below,
+             rather than appending the candidate's documents inline underneath
+             a growing results list — the two were stacking into one long,
+             disorganised scroll. -->
+        <div id="docCheckSearchScreen">
+          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+            <label class="form-label-modal">Find a Candidate</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="docCheckCandidateSearch" class="form-control" placeholder="Search by name, email, or phone…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();runDocCheckCandidateSearch();}">
+              <button class="btn-add" style="padding:0 20px;white-space:nowrap" onclick="runDocCheckCandidateSearch()">🔍 Search</button>
+            </div>
+            <div id="docCheckCandidateResults" style="display:none;margin-top:14px"></div>
           </div>
-          <div id="docCheckCandidateResults" style="display:none;margin-top:14px"></div>
+
+          <div class="admin-table-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
+              <div style="font-weight:700;color:var(--navy);font-size:14px">Recent Checks</div>
+              <div style="font-size:11px;color:var(--text-muted)">Click a row for the full findings and to add notes</div>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact" style="table-layout:fixed;width:100%">
+                <thead>
+                  <tr>
+                    <th style="width:10%">Date</th>
+                    <th style="width:20%">Candidate</th>
+                    <th style="width:16%">Document</th>
+                    <th style="width:13%">Outcome</th>
+                    <th style="width:11%">Reviewed</th>
+                    <th style="width:20%">Checked by</th>
+                    <th style="width:10%"></th>
+                  </tr>
+                </thead>
+                <tbody id="docCheckHistoryBody">
+                  <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div id="docCheckCandidateWrap" style="display:none;margin-bottom:20px">
+        <!-- Candidate screen: one candidate's documents, full width, nothing
+             else competing for space. Not a popup/modal — it replaces the
+             search screen in place so it reads as its own dedicated page. -->
+        <div id="docCheckCandidateWrap" style="display:none">
+          <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="clearDocCheckCandidate()">← Back to search</button>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div style="font-weight:700;color:var(--navy);font-size:14px" id="docCheckCandidateName"></div>
-            <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="clearDocCheckCandidate()">✕ Clear</button>
+            <div style="font-weight:700;color:var(--navy);font-size:16px" id="docCheckCandidateName"></div>
           </div>
           <div id="docCheckCandidateDocsWrap"></div>
-        </div>
-
-        <div class="admin-table-card">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
-            <div style="font-weight:700;color:var(--navy);font-size:14px">Recent Checks</div>
-            <div style="font-size:11px;color:var(--text-muted)">Click a row for the full findings and to add notes</div>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="data-table data-table-compact" style="table-layout:fixed;width:100%">
-              <thead>
-                <tr>
-                  <th style="width:10%">Date</th>
-                  <th style="width:20%">Candidate</th>
-                  <th style="width:16%">Document</th>
-                  <th style="width:13%">Outcome</th>
-                  <th style="width:11%">Reviewed</th>
-                  <th style="width:20%">Checked by</th>
-                  <th style="width:10%"></th>
-                </tr>
-              </thead>
-              <tbody id="docCheckHistoryBody">
-                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
 
@@ -5637,9 +5647,14 @@
     }
 
     async function selectDocCheckCandidate(userId) {
+      // Swap screens rather than appending below the search results — this
+      // candidate's documents are now the only thing on screen, not one
+      // more section in an ever-growing scroll.
+      document.getElementById('docCheckSearchScreen').style.display = 'none';
       const wrap = document.getElementById('docCheckCandidateWrap');
       const docsWrap = document.getElementById('docCheckCandidateDocsWrap');
       wrap.style.display = 'block';
+      window.scrollTo({ top: 0 });
       document.getElementById('docCheckCandidateName').textContent = 'Loading…';
       docsWrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
@@ -5662,6 +5677,8 @@
       document.getElementById('docCheckCandidateWrap').style.display = 'none';
       document.getElementById('docCheckCandidateDocsWrap').innerHTML = '';
       currentCandidateDetailContext = null;
+      document.getElementById('docCheckSearchScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
     }
 
     function renderCandidateDocCard(req) {
@@ -5753,6 +5770,11 @@
           document_source_url: req.documentPath
         };
         document.getElementById(`doc-card-${userDocumentDetailId}`).outerHTML = renderCandidateDocCard(req);
+        // Show the reason right where the check just happened — a fresh
+        // valid/invalid tag with no visible explanation next to it just
+        // raises the question of why, and the card re-render above starts
+        // the findings panel collapsed like any other card.
+        toggleDocFindings(userDocumentDetailId);
         toast('Check complete', 'success');
       } catch { toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Document'; } }
     }
