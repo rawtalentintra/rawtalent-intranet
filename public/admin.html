@@ -5776,6 +5776,11 @@
         // the findings panel collapsed like any other card.
         toggleDocFindings(userDocumentDetailId);
         toast('Check complete', 'success');
+        // Recent Checks lives on the search screen, hidden behind this one
+        // right now — refresh it in the background so it's already current
+        // by the time "← Back to search" is clicked, not stale until a
+        // manual page reload.
+        loadDocumentCheckHistory();
       } catch { toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Document'; } }
     }
 
@@ -5809,9 +5814,16 @@
         // re-render the findings panel in place (keeps it open, now
         // showing the saved state) rather than collapsing it.
         const historyFindings = document.getElementById(`doc-history-findings-${checkId}`);
-        if (historyFindings) historyFindings.innerHTML = docCheckFindingsHtml(data);
-        const reviewedCell = document.getElementById(`doc-history-reviewed-${checkId}`);
-        if (reviewedCell) reviewedCell.textContent = data.reviewed ? '✓ Reviewed' : '—';
+        if (historyFindings) {
+          historyFindings.innerHTML = docCheckFindingsHtml(data);
+          const reviewedCell = document.getElementById(`doc-history-reviewed-${checkId}`);
+          if (reviewedCell) reviewedCell.textContent = data.reviewed ? '✓ Reviewed' : '—';
+        } else {
+          // Reviewed from the candidate screen, not the history table itself
+          // — that table is hidden behind this one right now, so refresh it
+          // in the background rather than leaving it stale until reloaded.
+          loadDocumentCheckHistory();
+        }
 
         toast('Review saved', 'success');
       } catch { toast('Network error', 'error'); }
