@@ -28,7 +28,7 @@ router.post('/', async (req, res) => {
     const {
       centreName, streetAddress, suburb, state, centrePhone,
       educatorName, agencyName, numberOfShifts, agencyUsage, position,
-      contactFirstName, contactLastName, contactEmail
+      contactFirstName, contactLastName, contactEmail, entryType
     } = req.body;
     if (!centreName?.trim()) return res.status(400).json({ error: 'Centre name is required' });
     if (!streetAddress?.trim()) return res.status(400).json({ error: 'Street address is required' });
@@ -37,18 +37,22 @@ router.post('/', async (req, res) => {
 
     const id = uuidv4();
     const assignedWorkforcePartner = STATE_WORKFORCE_PARTNER[state] || null;
+    // Defaults to 'lead' (a consultant's vetting-call submission) unless the
+    // Leads table's "Add Centre" button explicitly says otherwise — that's
+    // the only caller that should ever send 'centre'.
+    const resolvedEntryType = entryType === 'centre' ? 'centre' : 'lead';
     await getDb().execute({
       sql: `INSERT INTO leads (
               id, centre_name, street_address, suburb, state, centre_phone,
               educator_name, agency_name, number_of_shifts, agency_usage, position,
               contact_first_name, contact_last_name, contact_email,
-              submitted_by_email, submitted_by_name, assigned_workforce_partner
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              submitted_by_email, submitted_by_name, assigned_workforce_partner, entry_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id, centreName.trim(), streetAddress?.trim() || null, suburb?.trim() || null, state || null, centrePhone?.trim() || null,
         educatorName?.trim() || null, agencyName?.trim() || null, numberOfShifts?.trim() || null, agencyUsage || null, position || null,
         contactFirstName?.trim() || null, contactLastName?.trim() || null, contactEmail?.trim() || null,
-        req.user.email, req.user.name || req.user.email, assignedWorkforcePartner
+        req.user.email, req.user.name || req.user.email, assignedWorkforcePartner, resolvedEntryType
       ]
     });
     res.json({ success: true, id });

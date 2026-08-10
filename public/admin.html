@@ -655,7 +655,7 @@
           </div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeAddCentreModal()">Cancel</button>
-            <button class="btn-add" id="centreLeadSubmitBtn" onclick="submitCentreLead()">Submit Lead</button>
+            <button class="btn-add" id="centreLeadSubmitBtn" onclick="submitCentreLead()">Add Centre</button>
           </div>
         </div>
       </div>
@@ -4845,17 +4845,21 @@
         educatorName: document.getElementById('centreLeadEducatorName').value,
         agencyName: document.getElementById('centreLeadAgencyName').value,
         numberOfShifts: document.getElementById('centreLeadNumberOfShifts').value,
-        agencyUsage
+        agencyUsage,
+        // Distinguishes this from a consultant's "Submit Lead" vetting-call
+        // entry — same table, same downstream workflow, but not a lead in
+        // the pipeline-performance sense. See entry_type on the leads table.
+        entryType: 'centre'
       };
       const btn = document.getElementById('centreLeadSubmitBtn');
-      btn.disabled = true; btn.textContent = 'Submitting…';
+      btn.disabled = true; btn.textContent = 'Adding…';
       try {
         const res = await fetch('/api/leads', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        if (!res.ok) { toast(data.error || 'Failed to add centre', 'error'); return; }
         if (notesForPartner) {
           try {
             await fetch(`/api/leads/${data.id}/notes`, {
@@ -4864,11 +4868,11 @@
             });
           } catch {}
         }
-        toast('Lead submitted', 'success');
+        toast('Centre added', 'success');
         closeAddCentreModal();
         loadLeadsTable();
       } catch { toast('Network error', 'error'); }
-      finally { btn.disabled = false; btn.textContent = 'Submit Lead'; }
+      finally { btn.disabled = false; btn.textContent = 'Add Centre'; }
     }
 
     const LEAD_CALLED_META = {
@@ -5027,7 +5031,10 @@
       body.innerHTML = list.map(l => `
         <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
-          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">${escHtml(l.centre_name)}</td>
+          <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">
+            ${escHtml(l.centre_name)}
+            ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
+          </td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
@@ -7449,7 +7456,8 @@
       const lead = allLeads.find(l => l.id === id);
       if (!lead) return;
       currentLeadDetailId = id;
-      document.getElementById('leadDetailTitle').textContent = lead.centre_name;
+      document.getElementById('leadDetailTitle').innerHTML = escHtml(lead.centre_name) +
+        (lead.entry_type === 'centre' ? ' <span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : '');
       document.getElementById('leadDetailDeleteBtn').style.display = currentUserRole === 'super_admin' ? '' : 'none';
       const row = (label, value) => `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">

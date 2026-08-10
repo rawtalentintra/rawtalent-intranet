@@ -854,6 +854,11 @@ CREATE TABLE IF NOT EXISTS leads (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Distinguishes a consultant's vetting-call submission from a centre a
+-- Workforce Partner/Admin added directly via the Leads table's "Add Centre"
+-- button — same table and downstream workflow either way, but not a lead
+-- in the pipeline-performance sense, so the UI badges it differently.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'lead'; -- 'lead' | 'centre'
 CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
 CREATE INDEX IF NOT EXISTS idx_leads_submitted_by ON leads(submitted_by_email);
 
