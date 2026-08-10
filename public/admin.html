@@ -11057,7 +11057,7 @@
             <option value="">— Select a category —</option>
             ${opts.map(o => `<option value="${o.key}" ${o.key === row.categoryKey ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
           </select>
-          <textarea class="form-control textarea" style="min-height:60px" placeholder="Your feedback for this category…" oninput="updateDetailFeedbackRowText(${i}, this.value)">${escHtml(row.feedbackText || '')}</textarea>
+          <textarea id="detail-feedback-text-${i}" class="form-control textarea" style="min-height:60px" placeholder="Your feedback for this category…" oninput="updateDetailFeedbackRowText(${i}, this.value)">${escHtml(row.feedbackText || '')}</textarea>
         </div>`;
       }).join('');
     }
@@ -11071,6 +11071,13 @@
         detailFeedbackRows.push({ categoryKey: null, feedbackText: '' });
       }
       renderDetailFeedbackRows();
+      // renderDetailFeedbackRows() rebuilds every row's DOM node via
+      // innerHTML, which silently drops focus to <body> — so anyone who
+      // picks a category and starts typing right away (the natural flow)
+      // had their keystrokes go nowhere, with no visible error. Picking a
+      // category is what the reviewer just did to get here, so send focus
+      // straight to that row's textarea.
+      if (value) document.getElementById(`detail-feedback-text-${i}`)?.focus();
     }
 
     function updateDetailFeedbackRowText(i, value) {
