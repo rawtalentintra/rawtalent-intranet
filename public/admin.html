@@ -1210,7 +1210,7 @@
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <strong style="color:var(--navy)">user</strong> — public site only, no admin panel access.<br>
             <strong style="color:var(--navy)">qa_view</strong> — a narrow admin role: Articles (view/add/edit, no delete), Glossary (view/add/edit, no delete), Leads and the WFP Dashboard (both view-only), FAQ Review (add/edit approved FAQs only), and Call Quality (Dashboard/Rubrics/Evaluator). See the Role Permissions page for the full breakdown.<br>
-            <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): Leads (view all, edit only Position/Contact Name/Email, add their own notes) and the WFP Dashboard. No other admin panel access; status/assignment editing stays admin/super_admin only.<br>
+            <strong style="color:var(--navy)">workforce_partner</strong> — for external Workforce Partners (Gwen, Justine, Liam): the same base set as qa_view (Articles, Glossary, FAQ Review, Call Quality — see qa_view above), plus Leads (view all, edit only Position/Contact Name/Email, add their own notes, add centres — status/assignment editing stays admin/super_admin only), the WFP Dashboard, and Route Planner. Newer role, still being shaped — expect individual items to change. See the Role Permissions page for the full breakdown.<br>
             <strong style="color:var(--navy)">admin</strong> — full admin panel access.
           </div>
         </div>
@@ -2435,7 +2435,7 @@
               <option value="user">User (view only)</option>
               <option value="admin">Admin (edit articles)</option>
               <option value="qa_view">QA View (articles, glossary, leads + WFP Dashboard view-only, FAQ, call quality)</option>
-              <option value="workforce_partner">Workforce Partner (leads + WFP Dashboard, own contact fields/notes)</option>
+              <option value="workforce_partner">Workforce Partner (articles, glossary, FAQ, call quality, leads + WFP Dashboard, own contact fields/notes, route planner)</option>
             </select>
           </div>
         </div>
@@ -3008,14 +3008,17 @@
     // leadStatusBadge()/openLeadDetail() below), and WFP Dashboard
     // (view-only — computed client-side from /api/leads, already readable
     // by qa_view, so no backend change was needed). workforce_partner:
-    // leads (view + edit their own contact fields/notes — see
-    // openLeadDetail()) and Sales Dashboard. Enforced here for nav
-    // visibility AND in showSection() so a saved/typed section id outside
-    // the list can't be reached by editing localStorage or the URL — the
-    // real enforcement is server-side per route regardless.
+    // deliberately given the same base set as qa_view (this is a newer
+    // role, still being shaped — expect individual items here to change),
+    // plus its own pre-existing extras: leads (view + edit their own
+    // contact fields/notes — see openLeadDetail()) and route-planner.
+    // Enforced here for nav visibility AND in showSection() so a saved/
+    // typed section id outside the list can't be reached by editing
+    // localStorage or the URL — the real enforcement is server-side per
+    // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
-      workforce_partner: ['leads', 'sales-dashboard', 'route-planner']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'route-planner']
     };
 
     function applyRoleVisibility() {
@@ -3040,7 +3043,7 @@
           section.style.display = anyVisible ? '' : 'none';
         });
       }
-      if (currentUserRole === 'qa_view' || currentUserRole === 'admin') {
+      if (currentUserRole === 'qa_view' || currentUserRole === 'workforce_partner' || currentUserRole === 'admin') {
         // FAQ Review, scoped down to just add/edit — no Slack/Fathom scan
         // access and no candidate review queue (both stay super_admin only
         // server-side too, this is just matching the UI to what's usable).
@@ -4015,7 +4018,7 @@
             <div style="display:flex;gap:6px">
               <a class="action-btn view" href="/article?id=${a.id}" target="_blank">View</a>
               <button class="action-btn edit" onclick="editArticle('${a.id}')">Edit</button>
-              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteArticleConfirm('${a.id}','${escHtml(a.title)}')">Delete</button>` : ''}
+              ${(currentUserRole !== 'qa_view' && currentUserRole !== 'workforce_partner') ? `<button class="action-btn delete" onclick="deleteArticleConfirm('${a.id}','${escHtml(a.title)}')">Delete</button>` : ''}
             </div>
           </td>
         </tr>
@@ -4344,9 +4347,9 @@
       { area: 'Smart Routing — plan/optimize centre visit routes, export to Maps/Calendar', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Articles — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Articles — view, add, edit', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Articles — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Glossary — view, add, edit', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Glossary — view, add, edit', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Glossary — delete', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'WFP Dashboard', user: false, qa: 'View-only', wfp: true, admin: true, superAdmin: true },
       { area: 'Leads — view list/detail', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
@@ -4356,9 +4359,9 @@
       { area: 'Leads — delete a note', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Users — create/edit/deactivate', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
       { area: 'AI Sources (crawled websites/documents)', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
-      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'FAQ Review — add/edit approved FAQs', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'FAQ Review — scan Slack/Fathom/docs, review candidates, delete', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
-      { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, wfp: false, admin: true, superAdmin: true },
+      { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
       { area: 'Workforce Queue (live agent status)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Workforce Call History Dashboard', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
@@ -7695,7 +7698,7 @@
           <td>
             <div style="display:flex;gap:6px">
               <button class="action-btn edit" onclick="openGlossaryModal(${t.id})">Edit</button>
-              ${currentUserRole !== 'qa_view' ? `<button class="action-btn delete" onclick="deleteGlossaryConfirm(${t.id},'${escHtml(t.term)}')">Delete</button>` : ''}
+              ${(currentUserRole !== 'qa_view' && currentUserRole !== 'workforce_partner') ? `<button class="action-btn delete" onclick="deleteGlossaryConfirm(${t.id},'${escHtml(t.term)}')">Delete</button>` : ''}
             </div>
           </td>
         </tr>
@@ -9689,9 +9692,10 @@
 
     // ── FAQ Review ────────────────────────────────────────────────
     function loadFaqSection() {
-      // qa_view and admin can't reach /candidates (super_admin only) — that
-      // card is hidden anyway, so skip the doomed-to-403 requests entirely.
-      if (currentUserRole !== 'qa_view' && currentUserRole !== 'admin') {
+      // qa_view, workforce_partner, and admin can't reach /candidates
+      // (super_admin only) — that card is hidden anyway, so skip the
+      // doomed-to-403 requests entirely.
+      if (currentUserRole !== 'qa_view' && currentUserRole !== 'workforce_partner' && currentUserRole !== 'admin') {
         loadFaqCandidates();
         loadFaqScannedSources();
       }
@@ -9864,7 +9868,7 @@
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               <button class="action-btn edit" onclick="editFaqPrompt('${f.id}','${escHtml(f.question)}','${escHtml(f.answer)}')">Edit</button>
-              ${(currentUserRole !== 'qa_view' && currentUserRole !== 'admin') ? `<button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>` : ''}
+              ${(currentUserRole !== 'qa_view' && currentUserRole !== 'workforce_partner' && currentUserRole !== 'admin') ? `<button class="action-btn delete" onclick="deleteFaq('${f.id}')">Remove</button>` : ''}
             </div>
           </div>
         `).join('');

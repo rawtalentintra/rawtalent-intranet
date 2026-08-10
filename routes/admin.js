@@ -23,17 +23,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // ── Articles (view/add/edit + attachments) — admin, super_admin, and ──
-// ── qa_view, a role scoped to exactly this plus FAQ management and call ──
-// ── quality. Registered ahead of the blanket requireAdmin below so qa_view ──
-// ── can reach these specific routes without gaining access to anything else ──
-// ── in this router (users, glossary, feedback, logs, drive sync, etc). ──
-const articleAccess = requireRole('admin', 'super_admin', 'qa_view');
+// ── qa_view/workforce_partner, two narrow roles scoped to exactly this ──
+// ── plus FAQ management and call quality. Registered ahead of the blanket ──
+// ── requireAdmin below so they can reach these specific routes without ──
+// ── gaining access to anything else in this router (users, glossary, ──
+// ── feedback, logs, drive sync, etc). ──
+const articleAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforce_partner');
 
-// ── Glossary (view/add/edit) — same qa_view access as Articles, delete ──
-// ── stays admin/super_admin only (registered further down, after the ──
-// ── blanket requireAdmin). Plain users get read-only terms elsewhere ──
-// ── via /api/articles/glossary. ──
-const glossaryAccess = requireRole('admin', 'super_admin', 'qa_view');
+// ── Glossary (view/add/edit) — same qa_view/workforce_partner access as ──
+// ── Articles, delete stays admin/super_admin only (registered further ──
+// ── down, after the blanket requireAdmin). Plain users get read-only ──
+// ── terms elsewhere via /api/articles/glossary. ──
+const glossaryAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforce_partner');
 
 router.get('/glossary', glossaryAccess, async (req, res) => {
   try {

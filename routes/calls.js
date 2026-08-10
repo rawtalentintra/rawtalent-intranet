@@ -28,12 +28,13 @@ const MELBOURNE_TZ = 'Australia/Melbourne';
 
 // Call recordings are confidential, but admins (not just super_admin) get
 // full access here — evaluate, delete, and manage rubric/calibration.
-// qa_view also gets full access to this router (Dashboard/Rubrics/Evaluator
-// is one of the sections that role is explicitly scoped to) — the
-// requireSuperAdmin calls sprinkled below (sync, test-connection,
-// extract-faqs, rubric description edits) still exclude both admin and
-// qa_view from those specific actions, unchanged.
-router.use(requireRole('admin', 'super_admin', 'qa_view'));
+// qa_view/workforce_partner also get full access to this router
+// (Dashboard/Rubrics/Evaluator is one of the sections both roles are
+// explicitly scoped to) — the requireSuperAdmin calls sprinkled below
+// (sync, test-connection, extract-faqs, rubric description edits) still
+// exclude admin, qa_view, and workforce_partner from those specific
+// actions, unchanged.
+router.use(requireRole('admin', 'super_admin', 'qa_view', 'workforce_partner'));
 
 // Grading notes should read naturally ("Gelliane handled this well") rather
 // than using a rep's full name or a Dubber extension number tacked on
