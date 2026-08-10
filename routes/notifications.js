@@ -93,11 +93,12 @@ function nextOccurrence(dateStr) {
   return { daysUntil };
 }
 
-// Reminders fire 2 days before, 1 day before, and on the day itself — not a
-// full rolling window (so the panel doesn't stay cluttered all week), but
-// enough that a 1-day gap doesn't leave everyone with nothing to act on the
-// day before something like a work anniversary.
-const REMINDER_DAYS_BEFORE = [0, 1, 2];
+// Reminders fire a week before, 2 days before, 1 day before, and on the day
+// itself — not a full rolling window (so the panel doesn't stay cluttered
+// all week), but enough that a 1-day gap doesn't leave everyone with nothing
+// to act on the day before something like a work anniversary, and the
+// 7-day heads-up gives people enough notice to actually plan something.
+const REMINDER_DAYS_BEFORE = [0, 1, 2, 7];
 
 router.get('/', async (req, res) => {
   try {
