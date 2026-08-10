@@ -955,11 +955,16 @@ CREATE TABLE IF NOT EXISTS calendar_sync_review_queue (
 -- Document Checker — deterministic (no AI) validation of compliance
 -- documents (Police Check first; more document types get their own rule
 -- set in services/documentCheckerService.js over time) against the actual
--- SOPs in our Articles. extracted_fields/flags/reasons are the checker's
--- output, kept so a reviewer can see exactly why something was flagged
--- without re-running the check. extracted_text is capped in the app layer
--- before insert — kept for audit/debugging, not meant to store the whole
--- raw OCR dump of a large document indefinitely.
+-- SOPs in our Articles. Documents come from the RT API — a candidate's own
+-- attachedRequirements[] (documentPath is a fetchable URL, e.g. an S3
+-- link) — never uploaded manually. extracted_fields/flags/reasons are the
+-- checker's output, kept so a reviewer can see exactly why something was
+-- flagged without re-running the check. extracted_text is capped in the
+-- app layer before insert. One row per check RUN (append-only, like RT's
+-- own Recheck concept) — the UI shows the latest row per
+-- user_document_detail_id; reviewed/review_notes belong to that specific
+-- automated result, not the requirement in general, so re-checking a
+-- document naturally starts its review state fresh.
 CREATE TABLE IF NOT EXISTS document_checks (
   id TEXT PRIMARY KEY,
   document_type TEXT NOT NULL, -- 'police_check' (more types added over time)
@@ -977,6 +982,19 @@ CREATE TABLE IF NOT EXISTS document_checks (
   checked_by_name TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+-- RT-sourced context — nullable so the table also still supports a
+-- freestanding check with no candidate context if that's ever needed again.
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS candidate_id BIGINT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS user_document_detail_id BIGINT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS requirement_name TEXT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS document_source_url TEXT;
+-- Human review layer on top of the automated result.
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS reviewed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS review_notes TEXT;
 CREATE INDEX IF NOT EXISTS idx_document_checks_created_at ON document_checks(created_at);
 CREATE INDEX IF NOT EXISTS idx_document_checks_outcome ON document_checks(outcome);
+CREATE INDEX IF NOT EXISTS idx_document_checks_candidate ON document_checks(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_document_checks_requirement ON document_checks(user_document_detail_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;

@@ -715,37 +715,20 @@
         </div>
       </div>
 
-      <!-- Document Checker — deterministic (no AI credits) validation of
-           compliance documents against our actual SOPs (see
-           services/documentCheckerService.js). Police Check is the first
-           document type; more get added there over time. -->
+      <!-- Document Checker audit log — deterministic (no AI credits)
+           validation of compliance documents against our actual SOPs (see
+           services/documentCheckerService.js). Documents are never
+           uploaded here: this is a read-only log of checks run from the
+           Compliance Documents section of a candidate's own profile
+           (Reports → Candidates → open a candidate), which pulls the
+           actual file straight from RT's attachedRequirements[]. Police
+           Check is the first document type supported. -->
       <div class="admin-section" id="section-document-checker">
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Document Checker</div>
-            <div class="admin-page-sub">Scans a compliance document against our SOPs — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles. Police Check is the first document type supported.</div>
+            <div class="admin-page-sub">A log of every compliance document checked — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles. To check a document, open a candidate under Reports → Candidates and use the Compliance Documents section on their profile.</div>
           </div>
-        </div>
-
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div class="form-group-modal" style="margin-bottom:0">
-              <label class="form-label-modal">Document Type</label>
-              <select id="docCheckType" class="form-control">
-                <option value="police_check">Police Check</option>
-              </select>
-            </div>
-            <div class="form-group-modal" style="margin-bottom:0">
-              <label class="form-label-modal">Candidate Name <span class="optional">(optional — checked against the name on the document)</span></label>
-              <input type="text" id="docCheckCandidateName" class="form-control" placeholder="e.g. Jane Smith">
-            </div>
-          </div>
-          <div class="form-group-modal" style="margin-top:14px;margin-bottom:0">
-            <label class="form-label-modal">File <span class="optional">(PDF with a real text layer, or JPG/PNG scan — max 15MB)</span></label>
-            <input type="file" id="docCheckFile" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp">
-          </div>
-          <button class="btn-add" id="docCheckSubmitBtn" style="margin-top:14px" onclick="runDocumentCheck()">Scan Document</button>
-          <div id="docCheckResult" style="margin-top:18px;display:none"></div>
         </div>
 
         <div class="admin-table-card">
@@ -757,10 +740,10 @@
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>File</th>
-                  <th>Type</th>
                   <th>Candidate</th>
+                  <th>Document</th>
                   <th>Outcome</th>
+                  <th>Reviewed</th>
                   <th>Checked by</th>
                   <th></th>
                 </tr>
@@ -5586,60 +5569,65 @@
     }
 
     // ── Document Checker ──────────────────────────────────────────
-    // Deterministic (no AI credits) — OCR via self-hosted Tesseract plus
-    // a rule set derived from our own Articles/SOPs. See
-    // services/documentCheckerService.js for the actual rules.
+    // Deterministic (no AI credits) — OCR via self-hosted Tesseract plus a
+    // rule set derived from our own Articles/SOPs (see
+    // services/documentCheckerService.js). Documents always come from RT —
+    // a candidate's own attachedRequirements[] on their profile — never
+    // uploaded manually; the primary UI for this is the Compliance
+    // Documents section of the Candidate detail view (candidateDetailHtml
+    // et al, above), not a standalone page. Only requirement names in
+    // SUPPORTED_DOC_CHECK_TYPES have a real rule set behind them.
+    const SUPPORTED_DOC_CHECK_TYPES = new Set(['Police Check']);
     const DOC_CHECK_OUTCOME_META = {
       valid: { label: '✅ Valid', cls: 'badge-published' },
       needs_review: { label: '⚠️ Needs Review', cls: 'badge-user' },
       invalid: { label: '❌ Invalid', cls: 'badge-draft' }
     };
 
-    async function runDocumentCheck() {
-      const fileInput = document.getElementById('docCheckFile');
-      const file = fileInput.files[0];
-      if (!file) { toast('Choose a file first', 'error'); return; }
-      const documentType = document.getElementById('docCheckType').value;
-      const candidateName = document.getElementById('docCheckCandidateName').value.trim();
-
-      const btn = document.getElementById('docCheckSubmitBtn');
-      btn.disabled = true; btn.textContent = 'Scanning…';
-      const resultBox = document.getElementById('docCheckResult');
-      resultBox.style.display = 'block';
-      resultBox.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Extracting text and checking against our SOPs…</div>';
-
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('documentType', documentType);
-        if (candidateName) formData.append('candidateName', candidateName);
-        const res = await fetch('/api/document-checker/check', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (!res.ok) {
-          resultBox.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Check failed')}</div>`;
-          return;
-        }
-        renderDocCheckResult(resultBox, data);
-        fileInput.value = '';
-        loadDocumentCheckHistory();
-      } catch {
-        resultBox.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Network error — check failed.</div>';
-      } finally {
-        btn.disabled = false; btn.textContent = 'Scan Document';
-      }
+    function renderCandidateDocCard(req) {
+      const detailId = req.userDocumentDetailId;
+      const check = currentCandidateDocChecks[detailId];
+      const expiring = isDocExpiring(req);
+      return `
+        <div id="doc-card-${detailId}" style="background:${expiring ? '#fef2f2' : 'var(--gray-100)'};border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(req.requirementName || 'Unnamed requirement')}</div>
+            <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+              ${expiring ? '<span class="lead-badge lead-badge-not">⚠️ Expiring/Expired</span>' : ''}
+              ${req.isMandatory ? '<span class="lead-badge lead-badge-sched">Mandatory</span>' : ''}
+              ${req.isShiftCritical ? '<span class="lead-badge lead-badge-sched">Shift-Critical</span>' : ''}
+            </div>
+          </div>
+          <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}</div>
+          <div id="doc-controls-${detailId}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+            ${req.documentPath ? `<a href="${escHtml(req.documentPath)}" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : '<span style="font-size:11.5px;color:var(--text-muted);font-style:italic">No document uploaded</span>'}
+            ${docCheckControlsHtml(req, check)}
+          </div>
+          <div id="doc-findings-${detailId}" style="display:none;margin-top:10px">${check ? docCheckFindingsHtml(check) : ''}</div>
+        </div>`;
     }
 
-    function renderDocCheckResult(box, data) {
-      const meta = DOC_CHECK_OUTCOME_META[data.outcome] || { label: data.outcome, cls: 'badge-user' };
-      const e = data.extracted || {};
-      box.innerHTML = `
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px 18px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span class="badge ${meta.cls}" style="font-size:12.5px">${meta.label}</span>
-            <span style="font-size:11px;color:var(--text-muted)">${data.extractionMethod === 'tesseract-ocr' ? `OCR confidence: ${data.ocrConfidence}%` : 'Read from PDF text layer'}</span>
-          </div>
-          ${data.reasons?.length ? `<ul style="margin:0 0 12px;padding-left:18px;font-size:12.5px;color:var(--text)">${data.reasons.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>` : '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">All checks passed.</div>'}
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+    function docCheckControlsHtml(req, check) {
+      if (!req.documentPath) return '';
+      if (!SUPPORTED_DOC_CHECK_TYPES.has(req.requirementName)) {
+        return '<span style="font-size:11px;color:var(--text-muted);font-style:italic">📏 No automated check for this document type yet</span>';
+      }
+      const meta = check ? (DOC_CHECK_OUTCOME_META[check.outcome] || { label: check.outcome, cls: 'badge-user' }) : null;
+      return `
+        ${check ? `<span class="badge ${meta.cls}" style="font-size:11px;cursor:pointer" onclick="toggleDocFindings(${req.userDocumentDetailId})" title="Click to view findings">${meta.label}${check.reviewed ? ' · ✓ Reviewed' : ''}</span>` : ''}
+        <button class="btn-secondary" style="font-size:11px;padding:4px 10px" onclick="runRtDocumentCheck(${req.userDocumentDetailId})">${check ? '🔄 Re-check' : '🔍 Check Document'}</button>
+      `;
+    }
+
+    function docCheckFindingsHtml(check) {
+      const e = check.extracted_fields || {};
+      const reasons = check.reasons || [];
+      return `
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;background:white">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${check.extraction_method === 'tesseract-ocr' ? `OCR confidence: ${check.ocr_confidence}%` : 'Read from PDF text layer'} · checked ${fmtDate(check.created_at)} by ${escHtml(check.checked_by_name || check.checked_by_email)}</div>
+          ${reasons.length ? `<ul style="margin:0 0 10px;padding-left:16px;font-size:12px;color:var(--text)">${reasons.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>` : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">All checks passed.</div>'}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:12px">
             <div><span style="color:var(--text-muted)">Document type confirmed:</span> ${e.documentTypeConfirmed ? 'Yes' : 'No'}</div>
             <div><span style="color:var(--text-muted)">Issuing authority:</span> ${escHtml(e.issuingAuthority || '—')}</div>
             <div><span style="color:var(--text-muted)">Issue date:</span> ${escHtml(e.issueDate || '—')}</div>
@@ -5647,9 +5635,68 @@
             <div><span style="color:var(--text-muted)">Name on document:</span> ${escHtml(e.applicantName || '—')}</div>
             <div><span style="color:var(--text-muted)">Name matches candidate:</span> ${e.nameMatchesCandidate === null ? '—' : (e.nameMatchesCandidate ? 'Yes' : 'No')}</div>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-bottom:8px">
+            <input type="checkbox" id="doc-reviewed-${check.id}" ${check.reviewed ? 'checked' : ''}> Reviewed
+          </label>
+          <textarea id="doc-notes-${check.id}" class="form-control" style="min-height:50px;font-size:12px" placeholder="Notes on what you found…">${escHtml(check.review_notes || '')}</textarea>
+          <button class="btn-add" style="margin-top:8px;padding:5px 12px;font-size:12px" onclick="saveDocCheckReview('${check.id}', ${check.user_document_detail_id})">Save Review</button>
         </div>`;
     }
 
+    function toggleDocFindings(userDocumentDetailId) {
+      const panel = document.getElementById(`doc-findings-${userDocumentDetailId}`);
+      if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function runRtDocumentCheck(userDocumentDetailId) {
+      const ctx = currentCandidateDetailContext;
+      const req = ctx?.requirementsByDetailId?.[userDocumentDetailId];
+      if (!ctx || !req) return;
+      const controls = document.getElementById(`doc-controls-${userDocumentDetailId}`);
+      const btn = controls?.querySelector('button');
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+      try {
+        const res = await fetch('/api/document-checker/check-from-rt', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidateId: ctx.candidateId, candidateName: ctx.candidateName,
+            userDocumentDetailId, requirementName: req.requirementName, documentPath: req.documentPath
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Check failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Document'; } return; }
+        currentCandidateDocChecks[userDocumentDetailId] = {
+          id: data.id, outcome: data.outcome, reasons: data.reasons, flags: data.flags,
+          extracted_fields: data.extracted, extraction_method: data.extractionMethod, ocr_confidence: data.ocrConfidence,
+          reviewed: false, review_notes: null, created_at: new Date().toISOString(),
+          checked_by_name: currentUserEmail, checked_by_email: currentUserEmail, user_document_detail_id: userDocumentDetailId
+        };
+        document.getElementById(`doc-card-${userDocumentDetailId}`).outerHTML = renderCandidateDocCard(req);
+        toast('Check complete', 'success');
+      } catch { toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Document'; } }
+    }
+
+    async function saveDocCheckReview(checkId, userDocumentDetailId) {
+      const reviewed = document.getElementById(`doc-reviewed-${checkId}`)?.checked || false;
+      const notes = document.getElementById(`doc-notes-${checkId}`)?.value || '';
+      try {
+        const res = await fetch(`/api/document-checker/${checkId}/review`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reviewed, notes })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        currentCandidateDocChecks[userDocumentDetailId] = data;
+        const req = currentCandidateDetailContext?.requirementsByDetailId?.[userDocumentDetailId];
+        if (req) {
+          document.getElementById(`doc-card-${userDocumentDetailId}`).outerHTML = renderCandidateDocCard(req);
+          toggleDocFindings(userDocumentDetailId);
+        }
+        toast('Review saved', 'success');
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Document Checker audit log (all candidates) ─────────────────
     async function loadDocumentCheckHistory() {
       const body = document.getElementById('docCheckHistoryBody');
       try {
@@ -5663,10 +5710,10 @@
           return `
           <tr>
             <td style="white-space:nowrap">${fmtDateShort(r.created_at)}</td>
-            <td class="td-truncate" style="max-width:220px" title="${escHtml(r.filename)}"><a href="/api/document-checker/file/${r.id}" target="_blank" rel="noopener">${escHtml(r.filename)}</a></td>
-            <td>${escHtml(r.document_type.replace('_', ' '))}</td>
-            <td>${escHtml(r.candidate_name_input || '—')}</td>
+            <td class="td-truncate" style="max-width:180px" title="${escHtml(r.candidate_name_input || '—')}">${escHtml(r.candidate_name_input || (r.candidate_id ? `Candidate #${r.candidate_id}` : '—'))}</td>
+            <td>${escHtml(r.requirement_name || r.document_type.replace('_', ' '))}</td>
             <td><span class="badge ${meta.cls}" style="font-size:11px">${meta.label}</span></td>
+            <td>${r.reviewed ? '✓ Reviewed' : '—'}</td>
             <td class="td-truncate" style="max-width:140px" title="${escHtml(r.checked_by_name || r.checked_by_email)}">${escHtml(r.checked_by_name || r.checked_by_email)}</td>
             <td>${currentUserRole === 'super_admin' ? `<button class="action-btn delete" onclick="deleteDocCheck('${r.id}')">Delete</button>` : ''}</td>
           </tr>`;
@@ -7156,14 +7203,29 @@
       return [loc.addressLine1, loc.addressLine2, loc.addressLine3].filter(Boolean).join(', ') || '—';
     }
 
-    function openReportDetail(type, id) {
+    // Candidate → Compliance Documents needs the latest automated check per
+    // requirement before it can render — keyed by user_document_detail_id
+    // so candidateDetailHtml() can look each one up by row. Fetched fresh
+    // every time the modal opens (not cached across candidates) since a
+    // check run from here should show up immediately.
+    let currentCandidateDocChecks = {};
+
+    async function openReportDetail(type, id) {
       const cfg = REPORT_CONFIG[type];
       const source = cfg.listView.dated ? reportListDataCache[type] : reportDataCache[type];
       const row = (source || []).find(r => r[cfg.listView.idField] === id);
       if (!row) return;
       document.getElementById('reportDetailTitle').textContent = cfg.listView.detailTitle(row);
-      document.getElementById('reportDetailBody').innerHTML = cfg.listView.renderDetail(row);
       document.getElementById('reportDetailModal').classList.add('open');
+      if (type === 'candidates') {
+        document.getElementById('reportDetailBody').innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+        currentCandidateDocChecks = {};
+        try {
+          const checks = await fetch(`/api/document-checker/for-candidate/${row.userId}`).then(r => r.json());
+          (checks || []).forEach(c => { currentCandidateDocChecks[c.user_document_detail_id] = c; });
+        } catch { /* Document Checker status is a nicety on this view, not load-bearing — render the rest of the profile regardless */ }
+      }
+      document.getElementById('reportDetailBody').innerHTML = cfg.listView.renderDetail(row);
     }
 
     function closeReportDetailModal() {
@@ -7483,6 +7545,16 @@
       const addresses = candidate.addresses || [];
       const quals = candidate.qualifications || [];
       const reqs = candidate.attachedRequirements || [];
+      // Document Checker calls (runRtDocumentCheck/saveDocCheckReview) take
+      // just a userDocumentDetailId and look everything else up from here —
+      // avoids threading candidate name/URLs through onclick attribute
+      // string-escaping, which gets fragile fast (apostrophes in names,
+      // query strings in S3 URLs).
+      currentCandidateDetailContext = {
+        candidateId: candidate.userId,
+        candidateName: [candidate.firstName, candidate.lastName].filter(Boolean).join(' '),
+        requirementsByDetailId: Object.fromEntries(reqs.map(r => [r.userDocumentDetailId, r]))
+      };
       // Availability can run to many rows (a rolling day-by-day calendar) —
       // capped here to the next 14 upcoming entries so the modal stays
       // readable; the raw status code (0/1/2) isn't documented anywhere in
@@ -7545,21 +7617,9 @@
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">
           📄 Compliance Documents (${reqs.length})
         </div>
-        ${reqs.length ? reqs.map(req => `
-          <div style="background:${isDocExpiring(req) ? '#fef2f2' : 'var(--gray-100)'};border-radius:var(--radius);padding:12px 16px;margin-bottom:10px">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">
-              <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(req.requirementName || 'Unnamed requirement')}</div>
-              <div style="display:flex;gap:6px;flex-shrink:0">
-                ${isDocExpiring(req) ? '<span class="lead-badge lead-badge-not">⚠️ Expiring/Expired</span>' : ''}
-                ${req.isMandatory ? '<span class="lead-badge lead-badge-sched">Mandatory</span>' : ''}
-                ${req.isShiftCritical ? '<span class="lead-badge lead-badge-sched">Shift-Critical</span>' : ''}
-              </div>
-            </div>
-            <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}${req.isReviewed ? ' · Reviewed' : ''}</div>
-            ${req.documentPath ? `<a href="${escHtml(req.documentPath)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}
-          </div>
-        `).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No compliance documents on file.</div>`}
+        <div id="candidateDocsWrap">
+          ${reqs.length ? reqs.map(req => renderCandidateDocCard(req)).join('') : `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">No compliance documents on file.</div>`}
+        </div>
 
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">
           📅 Upcoming Availability
