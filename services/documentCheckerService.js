@@ -62,7 +62,15 @@ const ISSUING_AUTHORITY_PATTERN = /victoria\s+police|nsw\s+police|new\s+south\s+
 
 // Matches "12 Jan 2026", "12/01/2026", "12-01-2026", "January 12, 2026" —
 // the range covers the formats we've actually seen on these certificates.
-const DATE_PATTERN = /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})|(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})|((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi;
+// The slash/hyphen alternatives each require a CONSISTENT separator (not a
+// shared [/-] class matching either at each position) — found empirically
+// against a real certificate: an address like "7/11-13 Sydney Street"
+// (unit 7 of 11-13 Sydney Street) was matching as a date "7/11-13" →
+// parsed as 7 Nov 2013, which then got treated as the certificate's issue
+// date. Real dates never mix "/" and "-" within the same value; addresses
+// with a unit-of-range format do, so requiring one consistent separator
+// throughout rules out that whole class of false positive.
+const DATE_PATTERN = /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})|(\d{1,2}\/\d{1,2}\/\d{2,4})|(\d{1,2}-\d{1,2}-\d{2,4})|((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi;
 
 const MONTH_INDEX = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
@@ -81,8 +89,9 @@ const MONTH_INDEX = {
 function parseFlexibleDate(raw) {
   const cleaned = raw.replace(',', '').trim();
 
-  // DD/MM/YYYY or DD-MM-YYYY (AU convention — day first)
-  const slashMatch = cleaned.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  // DD/MM/YYYY or DD-MM-YYYY (AU convention — day first) — same consistent-
+  // separator requirement as DATE_PATTERN above, for the same reason.
+  const slashMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/) || cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
   if (slashMatch) {
     let [, d, m, y] = slashMatch;
     if (y.length === 2) y = `20${y}`;
@@ -106,16 +115,37 @@ function parseFlexibleDate(raw) {
   return null;
 }
 
-// Pulls every date out of the text and returns the one nearest an
-// "issued"/"issue date" label if we can find one — falls back to the
-// earliest plausible date in the document (a real certificate has few
-// dates; the issue date is usually one of the first).
+// Pulls every date out of the text and returns the one nearest a
+// recognised issue-date label if we can find one — "Report Run Date/Time"
+// is the actual label real ACIC-template certificates use (verified
+// against two real documents; there's no separate "Issue Date" field on
+// that template at all), so it has to be treated as a real issue-date
+// label, not just the generic English ones. Falls back to the earliest
+// plausible date in the document only if no label matches at all.
 function extractIssueDate(text) {
   const dates = [...text.matchAll(DATE_PATTERN)].map(m => ({ raw: m[0], parsed: parseFlexibleDate(m[0]), index: m.index }));
-  const valid = dates.filter(d => d.parsed && d.parsed.getFullYear() > 2000 && d.parsed <= new Date());
+  let valid = dates.filter(d => d.parsed && d.parsed.getFullYear() > 2000 && d.parsed <= new Date());
   if (!valid.length) return null;
 
-  const labelIndex = text.search(/date\s+of\s+issue|issue\s+date|date\s+issued|certificate\s+date|issued\s*:/i);
+  // A candidate's birth date is always earlier than the certificate's real
+  // issue date, so if it's left in the pool it wins the "earliest date"
+  // fallback below on any format where the issue-date label isn't
+  // recognised — verified against a real certificate where this produced a
+  // false "expired" result off someone's date of birth. Drop whichever
+  // date sits right next to a "Birth Date" label (a few characters away,
+  // not just nearest across the whole document) before falling back.
+  const birthLabelIndex = text.search(/birth\s*date/i);
+  if (birthLabelIndex !== -1 && valid.length > 1) {
+    let closestIdx = -1, closestDist = Infinity;
+    valid.forEach((d, i) => {
+      const dist = Math.abs(d.index - birthLabelIndex);
+      if (dist < closestDist) { closestDist = dist; closestIdx = i; }
+    });
+    if (closestIdx !== -1 && closestDist < 60) valid = valid.filter((_, i) => i !== closestIdx);
+  }
+  if (!valid.length) return null;
+
+  const labelIndex = text.search(/date\s+of\s+issue|issue\s+date|date\s+issued|certificate\s+date|issued\s*:|report\s+run\s+date/i);
   if (labelIndex !== -1) {
     const nearest = valid.reduce((best, d) => {
       const dist = Math.abs(d.index - labelIndex);

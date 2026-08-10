@@ -1027,6 +1027,9 @@ CREATE TABLE IF NOT EXISTS rt_candidates_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_name_trgm ON rt_candidates_cache USING gin ((coalesce(first_name,'') || ' ' || coalesce(last_name,'')) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_email_trgm ON rt_candidates_cache USING gin (email gin_trgm_ops);
+-- Digits-only so a search for "0421 413 425" or "+61421413425" matches a
+-- phone stored as either, without the caller having to normalise anything.
+CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_phone_trgm ON rt_candidates_cache USING gin ((regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g')) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_active ON rt_candidates_cache(is_active);
 CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_synced_at ON rt_candidates_cache(synced_at);
 

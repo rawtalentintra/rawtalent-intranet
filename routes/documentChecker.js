@@ -128,7 +128,7 @@ router.get('/history', async (req, res) => {
     const result = await getDb().execute(
       `SELECT id, document_type, filename, extraction_method, ocr_confidence, candidate_name_input, candidate_id,
               requirement_name, outcome, flags, reasons, extracted_fields, reviewed, reviewed_by, reviewed_at,
-              review_notes, checked_by_email, checked_by_name, created_at
+              review_notes, checked_by_email, checked_by_name, created_at, document_source_url
        FROM document_checks ORDER BY created_at DESC LIMIT 200`
     );
     res.json(result.rows);

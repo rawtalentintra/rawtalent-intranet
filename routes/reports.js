@@ -34,14 +34,26 @@ function parseFilters(req) {
 router.get('/candidates-search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
+  // A phone search only makes sense once there's a handful of digits typed
+  // (a bare "1" or "20" would otherwise match almost every phone number in
+  // the cache) — compared digits-only on both sides so "0421 413 425",
+  // "+61421413425" and "421413425" all find the same candidate regardless
+  // of how either side is formatted.
+  const qDigits = q.replace(/\D/g, '');
+  const conditions = [`(first_name || ' ' || last_name) ILIKE ?`, 'email ILIKE ?'];
+  const args = [`%${q}%`, `%${q}%`];
+  if (qDigits.length >= 4) {
+    conditions.push(`regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g') ILIKE ?`);
+    args.push(`%${qDigits}%`);
+  }
   try {
     const result = await getDb().execute({
-      sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", email, is_active AS "isActive"
+      sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", email, contact_no AS "contactNo", is_active AS "isActive"
             FROM rt_candidates_cache
-            WHERE (first_name || ' ' || last_name) ILIKE ? OR email ILIKE ?
+            WHERE ${conditions.join(' OR ')}
             ORDER BY similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) DESC
             LIMIT 20`,
-      args: [`%${q}%`, `%${q}%`, q]
+      args: [...args, q]
     });
     res.json(result.rows);
   } catch (err) {

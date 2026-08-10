@@ -730,10 +730,13 @@
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;position:relative">
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <label class="form-label-modal">Find a Candidate</label>
-          <input type="text" id="docCheckCandidateSearch" class="form-control" placeholder="Search by name or email…" autocomplete="off" oninput="scheduleDocCheckCandidateSearch()">
-          <div id="docCheckCandidateResults" style="display:none;position:absolute;left:24px;right:24px;z-index:20;background:white;border:1px solid var(--gray-200);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.1);max-height:280px;overflow-y:auto"></div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="docCheckCandidateSearch" class="form-control" placeholder="Search by name, email, or phone…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();runDocCheckCandidateSearch();}">
+            <button class="btn-add" style="padding:0 20px;white-space:nowrap" onclick="runDocCheckCandidateSearch()">🔍 Search</button>
+          </div>
+          <div id="docCheckCandidateResults" style="display:none;margin-top:14px"></div>
         </div>
 
         <div id="docCheckCandidateWrap" style="display:none;margin-bottom:20px">
@@ -750,16 +753,16 @@
             <div style="font-size:11px;color:var(--text-muted)">Click a row for the full findings and to add notes</div>
           </div>
           <div style="overflow-x:auto">
-            <table class="data-table data-table-compact">
+            <table class="data-table data-table-compact" style="table-layout:fixed;width:100%">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Candidate</th>
-                  <th>Document</th>
-                  <th>Outcome</th>
-                  <th>Reviewed</th>
-                  <th>Checked by</th>
-                  <th></th>
+                  <th style="width:10%">Date</th>
+                  <th style="width:20%">Candidate</th>
+                  <th style="width:16%">Document</th>
+                  <th style="width:13%">Outcome</th>
+                  <th style="width:11%">Reviewed</th>
+                  <th style="width:20%">Checked by</th>
+                  <th style="width:10%"></th>
                 </tr>
               </thead>
               <tbody id="docCheckHistoryBody">
@@ -5600,35 +5603,40 @@
     };
 
     // ── Document Checker page's own candidate picker ────────────────
-    let docCheckSearchTimer = null;
-    function scheduleDocCheckCandidateSearch() {
-      clearTimeout(docCheckSearchTimer);
-      docCheckSearchTimer = setTimeout(runDocCheckCandidateSearch, 300);
-    }
-
+    // Deliberately an explicit Search button + a plain results list in
+    // normal document flow, not a live-as-you-type autocomplete dropdown —
+    // the dropdown version was clipped by its ancestor card's
+    // `overflow:hidden` whenever there were enough results to need
+    // scrolling, and got in the way of picking a result reliably. A normal
+    // block-level list has nothing to clip it and needs no z-index/overlay
+    // positioning at all.
     async function runDocCheckCandidateSearch() {
       const q = document.getElementById('docCheckCandidateSearch').value.trim();
       const box = document.getElementById('docCheckCandidateResults');
-      if (q.length < 2) { box.style.display = 'none'; return; }
+      if (q.length < 2) {
+        box.style.display = 'block';
+        box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">Type at least 2 characters, then press Search.</div>';
+        return;
+      }
+      box.style.display = 'block';
+      box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const results = await fetch(`/api/reports/candidates-search?q=${encodeURIComponent(q)}`).then(r => r.json());
         if (!results.length) {
-          box.innerHTML = '<div style="padding:12px 16px;font-size:12.5px;color:var(--text-muted)">No candidates found.</div>';
-          box.style.display = 'block';
+          box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">No candidates found.</div>';
           return;
         }
-        box.innerHTML = results.map(c => `
-          <div style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--gray-100)" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''" onclick="selectDocCheckCandidate(${c.userId})">
+        box.innerHTML = `<div style="border:1px solid var(--gray-200);border-radius:var(--radius);overflow:hidden">` + results.map((c, i) => `
+          <div style="padding:10px 16px;cursor:pointer;${i < results.length - 1 ? 'border-bottom:1px solid var(--gray-100)' : ''}" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''" onclick="selectDocCheckCandidate(${c.userId})">
             <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml([c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed candidate')} ${!c.isActive ? '<span style="font-size:10px;color:var(--text-muted)">(inactive)</span>' : ''}</div>
-            <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(c.email || '—')}</div>
-          </div>`).join('');
-        box.style.display = 'block';
-      } catch { box.style.display = 'none'; }
+            <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(c.email || '—')}${c.contactNo ? ` · ${escHtml(c.contactNo)}` : ''}</div>
+          </div>`).join('') + `</div>`;
+      } catch {
+        box.innerHTML = '<div style="font-size:12.5px;color:#c0392b">Search failed — try again.</div>';
+      }
     }
 
     async function selectDocCheckCandidate(userId) {
-      document.getElementById('docCheckCandidateResults').style.display = 'none';
-      document.getElementById('docCheckCandidateSearch').value = '';
       const wrap = document.getElementById('docCheckCandidateWrap');
       const docsWrap = document.getElementById('docCheckCandidateDocsWrap');
       wrap.style.display = 'block';
@@ -5655,14 +5663,6 @@
       document.getElementById('docCheckCandidateDocsWrap').innerHTML = '';
       currentCandidateDetailContext = null;
     }
-
-    document.addEventListener('click', (e) => {
-      const results = document.getElementById('docCheckCandidateResults');
-      const input = document.getElementById('docCheckCandidateSearch');
-      if (results && results.style.display !== 'none' && !results.contains(e.target) && e.target !== input) {
-        results.style.display = 'none';
-      }
-    });
 
     function renderCandidateDocCard(req) {
       const detailId = req.userDocumentDetailId;
@@ -5705,7 +5705,7 @@
       const reasons = check.reasons || [];
       return `
         <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;background:white">
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${check.extraction_method === 'tesseract-ocr' ? `OCR confidence: ${check.ocr_confidence}%` : 'Read from PDF text layer'} · checked ${fmtDate(check.created_at)} by ${escHtml(check.checked_by_name || check.checked_by_email)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${check.extraction_method === 'tesseract-ocr' ? `OCR confidence: ${check.ocr_confidence}%` : 'Read from PDF text layer'} · checked ${fmtDate(check.created_at)} by ${escHtml(check.checked_by_name || check.checked_by_email)}${check.document_source_url ? ` · <a href="${escHtml(check.document_source_url)}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}</div>
           ${reasons.length ? `<ul style="margin:0 0 10px;padding-left:16px;font-size:12px;color:var(--text)">${reasons.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>` : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">All checks passed.</div>'}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:12px">
             <div><span style="color:var(--text-muted)">Document type confirmed:</span> ${e.documentTypeConfirmed ? 'Yes' : 'No'}</div>
@@ -5749,7 +5749,8 @@
           id: data.id, outcome: data.outcome, reasons: data.reasons, flags: data.flags,
           extracted_fields: data.extracted, extraction_method: data.extractionMethod, ocr_confidence: data.ocrConfidence,
           reviewed: false, review_notes: null, created_at: new Date().toISOString(),
-          checked_by_name: currentUserEmail, checked_by_email: currentUserEmail, user_document_detail_id: userDocumentDetailId
+          checked_by_name: currentUserEmail, checked_by_email: currentUserEmail, user_document_detail_id: userDocumentDetailId,
+          document_source_url: req.documentPath
         };
         document.getElementById(`doc-card-${userDocumentDetailId}`).outerHTML = renderCandidateDocCard(req);
         toast('Check complete', 'success');
@@ -5826,8 +5827,8 @@
             <td>${currentUserRole === 'super_admin' ? `<button class="action-btn delete" onclick="event.stopPropagation();deleteDocCheck('${r.id}')">Delete</button>` : ''}</td>
           </tr>
           <tr id="doc-history-findings-row-${r.id}" style="display:none">
-            <td colspan="7" style="background:var(--offwhite);padding:14px 20px">
-              <div id="doc-history-findings-${r.id}">${docCheckFindingsHtml(r)}</div>
+            <td colspan="7" style="background:var(--offwhite);padding:14px 20px;white-space:normal">
+              <div id="doc-history-findings-${r.id}" style="width:100%;box-sizing:border-box">${docCheckFindingsHtml(r)}</div>
             </td>
           </tr>`;
         }).join('');
