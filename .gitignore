@@ -8,3 +8,6 @@ db/*.db-wal
 
 knowledgebase.db
 .claude/
+
+# Tesseract's downloaded language model — see documentExtractionWorker.js
+*.traineddata

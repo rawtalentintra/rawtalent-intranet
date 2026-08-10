@@ -241,6 +241,12 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Compliance</div>
+        <div class="admin-nav-item" onclick="showSection('document-checker', this)">
+          <span class="admin-nav-icon">🛡️</span> Document Checker
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Content</div>
         <div class="admin-nav-item active" onclick="showSection('articles', this)">
           <span class="admin-nav-icon">📄</span> Articles
@@ -705,6 +711,64 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Document Checker — deterministic (no AI credits) validation of
+           compliance documents against our actual SOPs (see
+           services/documentCheckerService.js). Police Check is the first
+           document type; more get added there over time. -->
+      <div class="admin-section" id="section-document-checker">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Document Checker</div>
+            <div class="admin-page-sub">Scans a compliance document against our SOPs — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles. Police Check is the first document type supported.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="form-group-modal" style="margin-bottom:0">
+              <label class="form-label-modal">Document Type</label>
+              <select id="docCheckType" class="form-control">
+                <option value="police_check">Police Check</option>
+              </select>
+            </div>
+            <div class="form-group-modal" style="margin-bottom:0">
+              <label class="form-label-modal">Candidate Name <span class="optional">(optional — checked against the name on the document)</span></label>
+              <input type="text" id="docCheckCandidateName" class="form-control" placeholder="e.g. Jane Smith">
+            </div>
+          </div>
+          <div class="form-group-modal" style="margin-top:14px;margin-bottom:0">
+            <label class="form-label-modal">File <span class="optional">(PDF with a real text layer, or JPG/PNG scan — max 15MB)</span></label>
+            <input type="file" id="docCheckFile" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp">
+          </div>
+          <button class="btn-add" id="docCheckSubmitBtn" style="margin-top:14px" onclick="runDocumentCheck()">Scan Document</button>
+          <div id="docCheckResult" style="margin-top:18px;display:none"></div>
+        </div>
+
+        <div class="admin-table-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
+            <div style="font-weight:700;color:var(--navy);font-size:14px">Recent Checks</div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>File</th>
+                  <th>Type</th>
+                  <th>Candidate</th>
+                  <th>Outcome</th>
+                  <th>Checked by</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="docCheckHistoryBody">
+                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -3925,6 +3989,7 @@
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
+      if (id === 'document-checker') loadDocumentCheckHistory();
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
@@ -5518,6 +5583,107 @@
       if (lead.suburb && !street.toLowerCase().includes(lead.suburb.toLowerCase())) parts.push(lead.suburb);
       if (lead.state && !street.toUpperCase().includes(lead.state.toUpperCase())) parts.push(lead.state);
       return parts.filter(Boolean).join(', ');
+    }
+
+    // ── Document Checker ──────────────────────────────────────────
+    // Deterministic (no AI credits) — OCR via self-hosted Tesseract plus
+    // a rule set derived from our own Articles/SOPs. See
+    // services/documentCheckerService.js for the actual rules.
+    const DOC_CHECK_OUTCOME_META = {
+      valid: { label: '✅ Valid', cls: 'badge-published' },
+      needs_review: { label: '⚠️ Needs Review', cls: 'badge-user' },
+      invalid: { label: '❌ Invalid', cls: 'badge-draft' }
+    };
+
+    async function runDocumentCheck() {
+      const fileInput = document.getElementById('docCheckFile');
+      const file = fileInput.files[0];
+      if (!file) { toast('Choose a file first', 'error'); return; }
+      const documentType = document.getElementById('docCheckType').value;
+      const candidateName = document.getElementById('docCheckCandidateName').value.trim();
+
+      const btn = document.getElementById('docCheckSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Scanning…';
+      const resultBox = document.getElementById('docCheckResult');
+      resultBox.style.display = 'block';
+      resultBox.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div><div style="text-align:center;color:var(--text-muted);font-size:13px">Extracting text and checking against our SOPs…</div>';
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('documentType', documentType);
+        if (candidateName) formData.append('candidateName', candidateName);
+        const res = await fetch('/api/document-checker/check', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          resultBox.innerHTML = `<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Check failed')}</div>`;
+          return;
+        }
+        renderDocCheckResult(resultBox, data);
+        fileInput.value = '';
+        loadDocumentCheckHistory();
+      } catch {
+        resultBox.innerHTML = '<div style="padding:14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Network error — check failed.</div>';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Scan Document';
+      }
+    }
+
+    function renderDocCheckResult(box, data) {
+      const meta = DOC_CHECK_OUTCOME_META[data.outcome] || { label: data.outcome, cls: 'badge-user' };
+      const e = data.extracted || {};
+      box.innerHTML = `
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px 18px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span class="badge ${meta.cls}" style="font-size:12.5px">${meta.label}</span>
+            <span style="font-size:11px;color:var(--text-muted)">${data.extractionMethod === 'tesseract-ocr' ? `OCR confidence: ${data.ocrConfidence}%` : 'Read from PDF text layer'}</span>
+          </div>
+          ${data.reasons?.length ? `<ul style="margin:0 0 12px;padding-left:18px;font-size:12.5px;color:var(--text)">${data.reasons.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>` : '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">All checks passed.</div>'}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+            <div><span style="color:var(--text-muted)">Document type confirmed:</span> ${e.documentTypeConfirmed ? 'Yes' : 'No'}</div>
+            <div><span style="color:var(--text-muted)">Issuing authority:</span> ${escHtml(e.issuingAuthority || '—')}</div>
+            <div><span style="color:var(--text-muted)">Issue date:</span> ${escHtml(e.issueDate || '—')}</div>
+            <div><span style="color:var(--text-muted)">Expiry (12mo policy):</span> ${escHtml(e.expiryDate || '—')}</div>
+            <div><span style="color:var(--text-muted)">Name on document:</span> ${escHtml(e.applicantName || '—')}</div>
+            <div><span style="color:var(--text-muted)">Name matches candidate:</span> ${e.nameMatchesCandidate === null ? '—' : (e.nameMatchesCandidate ? 'Yes' : 'No')}</div>
+          </div>
+        </div>`;
+    }
+
+    async function loadDocumentCheckHistory() {
+      const body = document.getElementById('docCheckHistoryBody');
+      try {
+        const rows = await fetch('/api/document-checker/history').then(r => r.json());
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">No documents checked yet.</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => {
+          const meta = DOC_CHECK_OUTCOME_META[r.outcome] || { label: r.outcome, cls: 'badge-user' };
+          return `
+          <tr>
+            <td style="white-space:nowrap">${fmtDateShort(r.created_at)}</td>
+            <td class="td-truncate" style="max-width:220px" title="${escHtml(r.filename)}"><a href="/api/document-checker/file/${r.id}" target="_blank" rel="noopener">${escHtml(r.filename)}</a></td>
+            <td>${escHtml(r.document_type.replace('_', ' '))}</td>
+            <td>${escHtml(r.candidate_name_input || '—')}</td>
+            <td><span class="badge ${meta.cls}" style="font-size:11px">${meta.label}</span></td>
+            <td class="td-truncate" style="max-width:140px" title="${escHtml(r.checked_by_name || r.checked_by_email)}">${escHtml(r.checked_by_name || r.checked_by_email)}</td>
+            <td>${currentUserRole === 'super_admin' ? `<button class="action-btn delete" onclick="deleteDocCheck('${r.id}')">Delete</button>` : ''}</td>
+          </tr>`;
+        }).join('');
+      } catch {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load history.</td></tr>';
+      }
+    }
+
+    async function deleteDocCheck(id) {
+      if (!confirm('Delete this check record? This cannot be undone.')) return;
+      try {
+        const res = await fetch(`/api/document-checker/${id}`, { method: 'DELETE' });
+        if (!res.ok) { toast('Failed to delete', 'error'); return; }
+        toast('Deleted', 'success');
+        loadDocumentCheckHistory();
+      } catch { toast('Network error', 'error'); }
     }
 
     async function loadRoutePlannerSection() {

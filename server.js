@@ -63,6 +63,7 @@ app.use('/api/leads', require('./routes/leads'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/calendar-sync', require('./routes/calendarSync'));
 app.use('/api/route-planner', require('./routes/routePlanner'));
+app.use('/api/document-checker', require('./routes/documentChecker'));
 
 // 'qa_view' gets into the admin panel shell — the panel itself then hides
 // everything except the small set of sections that role is scoped to

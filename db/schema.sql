@@ -951,4 +951,32 @@ CREATE TABLE IF NOT EXISTS calendar_sync_review_queue (
   resolved BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Document Checker — deterministic (no AI) validation of compliance
+-- documents (Police Check first; more document types get their own rule
+-- set in services/documentCheckerService.js over time) against the actual
+-- SOPs in our Articles. extracted_fields/flags/reasons are the checker's
+-- output, kept so a reviewer can see exactly why something was flagged
+-- without re-running the check. extracted_text is capped in the app layer
+-- before insert — kept for audit/debugging, not meant to store the whole
+-- raw OCR dump of a large document indefinitely.
+CREATE TABLE IF NOT EXISTS document_checks (
+  id TEXT PRIMARY KEY,
+  document_type TEXT NOT NULL, -- 'police_check' (more types added over time)
+  filename TEXT NOT NULL,
+  storage_path TEXT,
+  extraction_method TEXT, -- 'pdf-text-layer' | 'tesseract-ocr'
+  ocr_confidence INTEGER, -- 0-100, only set for tesseract-ocr; null for a real PDF text layer
+  candidate_name_input TEXT,
+  outcome TEXT NOT NULL, -- 'valid' | 'needs_review' | 'invalid'
+  flags JSONB DEFAULT '[]',
+  reasons JSONB DEFAULT '[]',
+  extracted_fields JSONB DEFAULT '{}',
+  extracted_text TEXT,
+  checked_by_email CITEXT NOT NULL,
+  checked_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_document_checks_created_at ON document_checks(created_at);
+CREATE INDEX IF NOT EXISTS idx_document_checks_outcome ON document_checks(outcome);
 CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;
