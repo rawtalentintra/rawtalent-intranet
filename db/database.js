@@ -46,6 +46,39 @@ function getDb() {
   };
 }
 
+// getDb().execute() grabs a (possibly different) connection from the pool
+// on every call, so several calls in a row are NOT a transaction — fine for
+// almost everything this app does, but wrong for a bulk refresh like the RT
+// candidates sync, where a failure partway through must never leave readers
+// looking at a half-old-half-new table. This checks out one client, runs
+// the callback against it (via the same execute({sql,args}) shape so
+// existing query code doesn't need to change), and commits/rolls back as a
+// single unit.
+async function transaction(callback) {
+  getDb(); // ensures pool is initialized
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const scopedDb = {
+      async execute(arg) {
+        const sql = typeof arg === 'string' ? arg : arg.sql;
+        const args = typeof arg === 'string' ? undefined : arg.args;
+        const { text, values } = toPgQuery(sql, args);
+        const result = await client.query(text, values);
+        return { rows: result.rows, rowsAffected: result.rowCount };
+      }
+    };
+    const result = await callback(scopedDb);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 const ECEC_GLOSSARY = [
   { term: 'ASQA', definition: 'Australian Skills Quality Authority — the national regulator for vocational education and training (VET) in Australia.' },
   { term: 'WWCC', definition: 'Working With Children Check — mandatory government clearance required for anyone working with children in Australia.' },
@@ -175,4 +208,4 @@ async function runSchemaSql(sql) {
   await pool.query(sql);
 }
 
-module.exports = { getDb, initDatabase };
+module.exports = { getDb, initDatabase, transaction };

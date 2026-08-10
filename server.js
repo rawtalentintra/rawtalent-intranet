@@ -11,6 +11,8 @@ const PgSessionStore = require('./services/sessionStore');
 const webexService = require('./services/webexService');
 const dubberService = require('./services/dubberService');
 const calendarSync = require('./services/leadCalendarSyncService');
+const rtCandidatesSync = require('./services/rtCandidatesSyncService');
+const rtApiService = require('./services/rtApiReportService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,6 +92,28 @@ app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 
+const RT_CANDIDATES_SYNC_TZ = 'Australia/Melbourne';
+async function maybeRunNightlyCandidatesSync() {
+  const state = await rtCandidatesSync.getSyncState();
+  if (rtCandidatesSync.isSyncRunning(state)) return;
+
+  const nowMelbourne = new Date(new Date().toLocaleString('en-US', { timeZone: RT_CANDIDATES_SYNC_TZ }));
+  if (nowMelbourne.getHours() !== 2) return; // only inside the 2-3am Melbourne window
+
+  const lastRunDay = state?.started_at
+    ? new Date(new Date(state.started_at).toLocaleString('en-US', { timeZone: RT_CANDIDATES_SYNC_TZ })).toDateString()
+    : null;
+  if (lastRunDay === nowMelbourne.toDateString()) return; // already ran today
+
+  console.log('Starting nightly RT candidates sync…');
+  try {
+    const { count, durationMs } = await rtCandidatesSync.syncAllCandidates('schedule');
+    console.log(`Nightly RT candidates sync complete — ${count} candidates in ${Math.round(durationMs / 1000)}s.`);
+  } catch (err) {
+    console.error('Nightly RT candidates sync failed:', err.message);
+  }
+}
+
 async function start() {
   await initDatabase();
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
@@ -136,6 +160,28 @@ async function start() {
     setInterval(() => {
       calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
     }, 12 * 60 * 60 * 1000);
+  }
+  if (rtApiService.isConfigured()) {
+    // First-ever boot (or a wiped cache) would otherwise show an empty
+    // Candidates list until the next 2am window — bootstrap it once
+    // immediately instead. Steady-state deploys/restarts skip this (cache
+    // already has rows) so redeploying never triggers an unwanted extra
+    // sync outside the nightly schedule.
+    getDb().execute('SELECT count(*) AS n FROM rt_candidates_cache').then(r => {
+      if (Number(r.rows[0].n) === 0) {
+        console.log('RT candidates cache is empty — running an initial sync…');
+        rtCandidatesSync.syncAllCandidates('initial-bootstrap').catch(err => console.error('Initial RT candidates sync error:', err.message));
+      }
+    }).catch(err => console.error('RT candidates cache check error:', err.message));
+
+    // Checked every 30 min rather than computing a precise next-run delay —
+    // simpler, and self-correcting across a redeploy or a missed tick,
+    // which a one-shot setTimeout-until-2am wouldn't be. Runs once per
+    // Melbourne calendar day, inside the 2-3am window, gated on the sync
+    // job's own started_at so a restart mid-window can't double-trigger it.
+    setInterval(() => {
+      maybeRunNightlyCandidatesSync().catch(err => console.error('Nightly RT candidates sync check error:', err.message));
+    }, 30 * 60 * 1000);
   }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);

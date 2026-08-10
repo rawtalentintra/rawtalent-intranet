@@ -997,4 +997,53 @@ CREATE INDEX IF NOT EXISTS idx_document_checks_created_at ON document_checks(cre
 CREATE INDEX IF NOT EXISTS idx_document_checks_outcome ON document_checks(outcome);
 CREATE INDEX IF NOT EXISTS idx_document_checks_candidate ON document_checks(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_document_checks_requirement ON document_checks(user_document_detail_id);
+
+-- Local mirror of RT's Candidates report — RT's API has no server-side name
+-- search and no "updated since" field (only createdDate), so the only way
+-- to know what changed on an EXISTING candidate is a full re-fetch. This
+-- table exists purely to make the Candidates list/search fast (a live full
+-- fetch is ~25k records, ~60s+) — it is NEVER the source of truth for a
+-- specific candidate's actual current documents. Opening one candidate
+-- (Candidate detail, Document Checker) always re-fetches that one record
+-- live from RT regardless of how stale this table is, so compliance
+-- accuracy is never affected by sync staleness — only browsing/search
+-- speed is. Refreshed by a full nightly re-sync (services/
+-- rtCandidatesSyncService.js), replacing the whole table's contents in one
+-- transaction so a reader never sees a half-old-half-new mix.
+CREATE TABLE IF NOT EXISTS rt_candidates_cache (
+  user_id BIGINT PRIMARY KEY,
+  first_name TEXT,
+  last_name TEXT,
+  email CITEXT,
+  contact_no TEXT,
+  is_active BOOLEAN,
+  is_deleted BOOLEAN,
+  status INTEGER,
+  suburb TEXT,
+  created_date TIMESTAMPTZ,
+  expiring_docs_count INTEGER NOT NULL DEFAULT 0,
+  raw JSONB NOT NULL, -- the full RT candidate record, exact same shape RT's own API returns (addresses/qualifications/availableCandidateList/attachedRequirements all nested inside) — so callers can't tell whether a list came from here or a live fetch
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_name_trgm ON rt_candidates_cache USING gin ((coalesce(first_name,'') || ' ' || coalesce(last_name,'')) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_email_trgm ON rt_candidates_cache USING gin (email gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_active ON rt_candidates_cache(is_active);
+CREATE INDEX IF NOT EXISTS idx_rt_candidates_cache_synced_at ON rt_candidates_cache(synced_at);
+
+-- Singleton row (id is always 1) tracking the sync job itself — lets the
+-- admin UI show "last synced X ago" / "sync failed: ..." and stops two
+-- syncs (the nightly schedule and a manual "Sync Now") from ever running
+-- at the same time and racing each other.
+CREATE TABLE IF NOT EXISTS rt_candidates_sync_state (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'idle', -- 'idle' | 'running' | 'success' | 'failed'
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  candidate_count INTEGER,
+  duration_ms INTEGER,
+  error_message TEXT,
+  triggered_by TEXT, -- 'schedule' or the super_admin's email for a manual Sync Now
+  CONSTRAINT rt_candidates_sync_state_singleton CHECK (id = 1)
+);
+INSERT INTO rt_candidates_sync_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;
