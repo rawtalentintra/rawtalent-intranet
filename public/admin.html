@@ -3164,9 +3164,16 @@
     // anniversary greeting (confetti + modal) — a rejected one just takes
     // you to the Leave Requests section, same as before, since there's
     // nothing to celebrate there.
+    function dismissNotification(key) {
+      return fetch('/api/notifications/dismiss', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key })
+      }).then(() => loadNotifications());
+    }
+
     function openLeaveDecision(id) {
       const l = notifData.leaveDecisions.find(x => x.id === id);
       if (!l) return;
+      if (!l.is_read) dismissNotification(`leave:${id}`);
       if (l.status !== 'approved') {
         toggleNotifPanel();
         showSection('leave-requests', document.querySelector('[onclick*=\'leave-requests\']'));
@@ -3195,6 +3202,7 @@
     function openFeedbackDecision(id) {
       const f = notifData.feedbackDecisions.find(x => x.id === id);
       if (!f) return;
+      if (!f.is_read) dismissNotification(`feedback:${id}`);
       document.getElementById('celebrationEmoji').textContent = '🙌';
       document.getElementById('celebrationTitle').textContent = 'Your feedback made a difference!';
       const note = f.admin_comments?.trim();

@@ -438,6 +438,32 @@ router.post('/:id/read', async (req, res) => {
   }
 });
 
+// Dismisses a single informational bell item the moment the user actually
+// opens it, via the same notification_dismissals mechanism 'read-all' uses
+// per-category — without this, leave-decision and feedback-decision items
+// only ever cleared via "Mark all read", so they kept reappearing as unread
+// every time the user reopened the bell after clicking them (reported by
+// several people, incl. Sophia). Deliberately excludes 'announcement' — an
+// announcement is only ever marked read via the Announcements tab checkbox
+// or "Mark all read", never by opening the bell item, per the existing
+// compliance-acknowledgment rule (see openAnnouncementRead).
+const DISMISSIBLE_KEY_PREFIXES = ['leave', 'feedback'];
+router.post('/dismiss', async (req, res) => {
+  const { key } = req.body;
+  const prefix = key?.split(':')[0];
+  if (!key || !DISMISSIBLE_KEY_PREFIXES.includes(prefix)) return res.status(400).json({ error: 'Invalid notification key' });
+  try {
+    await getDb().execute({
+      sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
+            ON CONFLICT (user_email, notification_key) DO NOTHING`,
+      args: [req.user.email, key]
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Clears the bell badge: marks received greetings read, and dismisses any
 // currently-unread announcements from the bell (via notification_dismissals
 // — NOT announcement_reads, so this never fakes the "I have read and
