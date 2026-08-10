@@ -509,7 +509,10 @@
             <div class="admin-page-title">Leads</div>
             <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the WFP Dashboard.</div>
           </div>
-          <button class="btn-secondary" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button class="btn-add" id="addCentreBtn" onclick="openAddCentreModal()">➕ Add Centre</button>
+            <button class="btn-secondary" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
+          </div>
         </div>
 
         <div class="leads-stats-bar" id="leadsStatsBar"></div>
@@ -579,6 +582,80 @@
                 <tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Centre — same fields/behaviour (excluded-centre warning, fuzzy
+           duplicate check) as the consultant-facing "Submit Lead" form on
+           the main HeartBeat Leads page (public/index.html), just in a
+           modal here so Workforce Partners/Admins can log a centre straight
+           from this table without switching pages. Posts to the same
+           POST /api/leads endpoint. -->
+      <div class="modal-overlay" id="addCentreModal" onclick="if(event.target===this)closeAddCentreModal()">
+        <div class="modal" style="max-width:520px">
+          <div class="modal-header">
+            <div class="modal-title">Add Centre</div>
+            <button class="modal-close" onclick="closeAddCentreModal()">×</button>
+          </div>
+          <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+            <div id="centreLeadExcludedWarning" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:600;margin-bottom:16px">
+              ⚠️ This looks like it might be a Goodstart, Guardian, Affinity, or G8 centre — per policy we don't pursue these as leads. Double-check before submitting.
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Centre Name</label>
+              <input type="text" id="centreLeadCentreName" class="form-control" placeholder="e.g. Little Explorers Early Learning" oninput="checkCentreLeadExcluded();scheduleCentreLeadDupCheck()">
+            </div>
+            <div id="centreLeadCentreDupWarning" class="lead-dup-warning" style="display:none"></div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Suburb</label>
+                <input type="text" id="centreLeadSuburb" class="form-control" placeholder="e.g. Queenstown">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">State</label>
+                <select id="centreLeadState" class="form-control">
+                  <option value="">Select…</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Street Address</label>
+              <input type="text" id="centreLeadStreetAddress" class="form-control" placeholder="e.g. 50 Webb St" oninput="scheduleCentreLeadDupCheck()">
+            </div>
+            <div id="centreLeadAddressDupWarning" class="lead-dup-warning" style="display:none"></div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Centre Phone Number</label>
+              <input type="text" id="centreLeadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Educator Name <span class="optional">(optional)</span></label>
+              <input type="text" id="centreLeadEducatorName" class="form-control" placeholder="Who mentioned this centre?">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Agency Name <span class="optional">(only if they've used one)</span></label>
+              <input type="text" id="centreLeadAgencyName" class="form-control">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Number of Shifts <span class="optional">(optional)</span></label>
+              <input type="text" id="centreLeadNumberOfShifts" class="form-control">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Agency Usage</label>
+              <select id="centreLeadAgencyUsage" class="form-control">
+                <option value="">Select…</option>
+                <option value="target_temp">Target Temp</option>
+                <option value="high_agency_user">High Agency User</option>
+              </select>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Notes for Workforce Partner <span class="optional">(optional)</span></label>
+              <textarea id="centreLeadNotesForPartner" class="form-control" rows="3" placeholder="Anything that might help them when they follow up — best time to call, who to ask for, anything the educator mentioned…"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeAddCentreModal()">Cancel</button>
+            <button class="btn-add" id="centreLeadSubmitBtn" onclick="submitCentreLead()">Submit Lead</button>
           </div>
         </div>
       </div>
@@ -2984,6 +3061,8 @@
         // openLeadDetail()/leadStatusEditorRow().
         const leadSaveBtn = document.getElementById('leadDetailSaveBtn');
         if (leadSaveBtn) leadSaveBtn.style.display = 'none';
+        const addCentreBtn = document.getElementById('addCentreBtn');
+        if (addCentreBtn) addCentreBtn.style.display = 'none';
         const leadsSub = document.getElementById('leadsPageSub');
         if (leadsSub) leadsSub.textContent = 'Submitted from educator vetting calls — click a row for full details. View-only.';
       }
@@ -4671,6 +4750,123 @@
     const LEADS_SUBMITTER_HIDDEN = new Set(['allyssa@rawtalent.com.au', 'jane@rawtalent.com.au']);
     const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
     const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
+
+    // ── Add Centre modal (Workforce Partner/Admin equivalent of the
+    // consultant-facing "Submit Lead" form on the main HeartBeat page) ──
+    const EXCLUDED_CENTRE_GROUPS = ['goodstart', 'guardian', 'affinity', 'g8'];
+
+    function openAddCentreModal() {
+      const stateSelect = document.getElementById('centreLeadState');
+      if (stateSelect.options.length === 1) {
+        stateSelect.insertAdjacentHTML('beforeend', AU_STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
+      }
+      ['centreLeadCentreName', 'centreLeadSuburb', 'centreLeadStreetAddress', 'centreLeadCentrePhone',
+       'centreLeadEducatorName', 'centreLeadAgencyName', 'centreLeadNumberOfShifts', 'centreLeadNotesForPartner'
+      ].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('centreLeadState').value = '';
+      document.getElementById('centreLeadAgencyUsage').value = '';
+      document.getElementById('centreLeadExcludedWarning').style.display = 'none';
+      hideCentreLeadDupWarning('centre');
+      hideCentreLeadDupWarning('address');
+      document.getElementById('addCentreModal').classList.add('open');
+    }
+    function closeAddCentreModal() {
+      document.getElementById('addCentreModal').classList.remove('open');
+    }
+
+    function checkCentreLeadExcluded() {
+      const value = document.getElementById('centreLeadCentreName').value.toLowerCase();
+      const isExcluded = EXCLUDED_CENTRE_GROUPS.some(g => value.includes(g));
+      document.getElementById('centreLeadExcludedWarning').style.display = isExcluded ? 'block' : 'none';
+    }
+
+    let centreLeadDupTimer;
+    function scheduleCentreLeadDupCheck() {
+      clearTimeout(centreLeadDupTimer);
+      centreLeadDupTimer = setTimeout(checkCentreLeadDuplicates, 400);
+    }
+
+    async function checkCentreLeadDuplicates() {
+      const centreName = document.getElementById('centreLeadCentreName').value.trim();
+      const streetAddress = document.getElementById('centreLeadStreetAddress').value.trim();
+      if (centreName.length < 3 && streetAddress.length < 5) {
+        hideCentreLeadDupWarning('centre');
+        hideCentreLeadDupWarning('address');
+        return;
+      }
+      try {
+        const params = new URLSearchParams({ centreName, streetAddress });
+        const { centreMatches, addressMatches } = await fetch(`/api/leads/check-duplicate?${params}`).then(r => r.json());
+        renderCentreLeadDupWarning('centre', centreMatches);
+        renderCentreLeadDupWarning('address', addressMatches);
+      } catch { /* soft nicety — a network hiccup here shouldn't block submitting */ }
+    }
+
+    function hideCentreLeadDupWarning(kind) {
+      document.getElementById(kind === 'centre' ? 'centreLeadCentreDupWarning' : 'centreLeadAddressDupWarning').style.display = 'none';
+    }
+
+    function renderCentreLeadDupWarning(kind, matches) {
+      const box = document.getElementById(kind === 'centre' ? 'centreLeadCentreDupWarning' : 'centreLeadAddressDupWarning');
+      if (!matches.length) { box.style.display = 'none'; return; }
+      const top = matches[0];
+      const strongMatch = top.score >= 0.6;
+      const where = [top.suburb, top.state].filter(Boolean).join(', ');
+      const alreadyNote = top.signed_status === 'signed' ? ' — already signed'
+        : top.signed_status === 'not_interested' ? ' — marked not interested' : '';
+      box.className = `lead-dup-warning${strongMatch ? ' lead-dup-strong' : ''}`;
+      box.innerHTML = `
+        <div style="font-weight:700;margin-bottom:3px">${strongMatch ? '⚠️ This centre may already be a lead' : `🔎 Did you mean “${escHtml(top.centre_name)}”?`}</div>
+        <div>${escHtml(top.centre_name)}${where ? `, ${escHtml(where)}` : ''}${alreadyNote} — submitted by ${escHtml(top.submitted_by_name || 'a teammate')} ${fmtDate(top.created_at)}</div>
+        <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:11px;margin-top:6px" onclick="hideCentreLeadDupWarning('${kind}')">Dismiss</button>
+      `;
+      box.style.display = 'block';
+    }
+
+    async function submitCentreLead() {
+      const centreName = document.getElementById('centreLeadCentreName').value.trim();
+      const streetAddress = document.getElementById('centreLeadStreetAddress').value.trim();
+      const centrePhone = document.getElementById('centreLeadCentrePhone').value.trim();
+      const agencyUsage = document.getElementById('centreLeadAgencyUsage').value;
+      if (!centreName) { toast('Centre name is required', 'error'); return; }
+      if (!streetAddress) { toast('Street address is required', 'error'); return; }
+      if (!centrePhone) { toast('Centre phone number is required', 'error'); return; }
+      if (!agencyUsage) { toast('Agency usage is required', 'error'); return; }
+      const notesForPartner = document.getElementById('centreLeadNotesForPartner').value.trim();
+      const payload = {
+        centreName,
+        suburb: document.getElementById('centreLeadSuburb').value,
+        state: document.getElementById('centreLeadState').value,
+        streetAddress,
+        centrePhone,
+        educatorName: document.getElementById('centreLeadEducatorName').value,
+        agencyName: document.getElementById('centreLeadAgencyName').value,
+        numberOfShifts: document.getElementById('centreLeadNumberOfShifts').value,
+        agencyUsage
+      };
+      const btn = document.getElementById('centreLeadSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Submitting…';
+      try {
+        const res = await fetch('/api/leads', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        if (notesForPartner) {
+          try {
+            await fetch(`/api/leads/${data.id}/notes`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ note: notesForPartner })
+            });
+          } catch {}
+        }
+        toast('Lead submitted', 'success');
+        closeAddCentreModal();
+        loadLeadsTable();
+      } catch { toast('Network error', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Submit Lead'; }
+    }
 
     const LEAD_CALLED_META = {
       done: { label: 'Called', cls: 'lead-badge-done' },
