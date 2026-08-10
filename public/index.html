@@ -995,7 +995,16 @@
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Details <span class="optional">(optional)</span></label>
-          <textarea id="ideaDescriptionInput" class="form-control" style="min-height:100px;resize:vertical" placeholder="Tell us more about it"></textarea>
+          <textarea id="ideaDescriptionInput" class="form-control" style="min-height:100px;resize:vertical" placeholder="Tell us more about it. Tip: paste a screenshot straight in here with Ctrl/Cmd+V"></textarea>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Screenshots <span class="optional">(optional)</span></label>
+          <div id="ideaImageDropzone" style="border:1px dashed var(--gray-200);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button type="button" class="btn-secondary" style="font-size:12px;padding:5px 10px" onclick="document.getElementById('ideaImageFileInput').click()">+ Attach image</button>
+            <span style="font-size:11.5px;color:var(--text-muted)">or paste (Ctrl/Cmd+V) with this field focused</span>
+            <input type="file" id="ideaImageFileInput" accept="image/*" multiple style="display:none" onchange="handleIdeaImageFiles(this.files)">
+          </div>
+          <div id="ideaImagePreviews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -3163,6 +3172,9 @@
               </div>
             </div>
             ${i.description ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">${escHtml(i.description)}</div>` : ''}
+            ${(i.files || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              ${i.files.map(f => `<a href="/api/ideas/file/${f.id}" target="_blank" rel="noopener"><img src="/api/ideas/file/${f.id}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-100)"></a>`).join('')}
+            </div>` : ''}
             <div style="font-size:11px;color:var(--text-muted);margin-top:8px">💡 ${escHtml(i.submitted_by_name || i.submitted_by_email)} · ${fmtDate(i.created_at)}</div>
             ${i.admin_feedback ? `<div style="font-size:12px;color:var(--navy);background:var(--gray-100);border-radius:8px;padding:8px 10px;margin-top:8px"><strong>Feedback:</strong> ${escHtml(i.admin_feedback)}</div>` : ''}
           </div>`;
@@ -3171,14 +3183,55 @@
       list.innerHTML = recognitionHtml + headerHtml + listHtml;
     }
 
+    const MAX_IDEA_IMAGES = 4;
+    let pendingIdeaImages = []; // [{ dataUrl, mimetype }]
+
     function openIdeaModal() {
       document.getElementById('ideaTitleInput').value = '';
       document.getElementById('ideaDescriptionInput').value = '';
+      pendingIdeaImages = [];
+      renderIdeaImagePreviews();
       document.getElementById('ideaModal').classList.add('open');
     }
     function closeIdeaModal() {
       document.getElementById('ideaModal').classList.remove('open');
     }
+
+    function addIdeaImageFromFile(file) {
+      if (!file.type.startsWith('image/')) return;
+      if (pendingIdeaImages.length >= MAX_IDEA_IMAGES) { toast(`You can attach up to ${MAX_IDEA_IMAGES} images`, 'error'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingIdeaImages.push({ dataUrl: reader.result, mimetype: file.type });
+        renderIdeaImagePreviews();
+      };
+      reader.readAsDataURL(file);
+    }
+    function handleIdeaImageFiles(fileList) {
+      Array.from(fileList || []).forEach(addIdeaImageFromFile);
+      document.getElementById('ideaImageFileInput').value = '';
+    }
+    function removeIdeaImage(index) {
+      pendingIdeaImages.splice(index, 1);
+      renderIdeaImagePreviews();
+    }
+    function renderIdeaImagePreviews() {
+      const wrap = document.getElementById('ideaImagePreviews');
+      wrap.innerHTML = pendingIdeaImages.map((img, i) => `
+        <div style="position:relative;width:64px;height:64px">
+          <img src="${img.dataUrl}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-100)">
+          <span onclick="removeIdeaImage(${i})" title="Remove" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--navy);color:white;font-size:11px;line-height:18px;text-align:center;cursor:pointer">×</span>
+        </div>`).join('');
+    }
+    // Reps pasting a screenshot from clipboard is the primary use case this
+    // exists for — bound on the modal itself (not just the textarea) so it
+    // works regardless of which field has focus while the modal is open.
+    document.getElementById('ideaModal').addEventListener('paste', (e) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageItems = items.filter(it => it.type.startsWith('image/'));
+      imageItems.forEach(it => addIdeaImageFromFile(it.getAsFile()));
+    });
+
     async function submitIdea() {
       const title = document.getElementById('ideaTitleInput').value.trim();
       if (!title) { toast('Give your idea a title', 'error'); return; }
@@ -3186,7 +3239,7 @@
       try {
         const res = await fetch('/api/ideas', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, description })
+          body: JSON.stringify({ title, description, images: pendingIdeaImages.map(i => i.dataUrl) })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }

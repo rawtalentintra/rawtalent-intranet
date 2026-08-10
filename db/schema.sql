@@ -773,8 +773,8 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
 
 -- Team suggestion box. Deliberately flat — one status field admins move
--- along, one feedback field for their response — no voting/comments/
--- attachments, kept simple on purpose.
+-- along, one feedback field for their response — no voting/comments,
+-- kept simple on purpose.
 CREATE TABLE IF NOT EXISTS ideas (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -788,6 +788,21 @@ CREATE TABLE IF NOT EXISTS ideas (
 );
 CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);
 CREATE INDEX IF NOT EXISTS idx_ideas_submitted_by ON ideas(submitted_by_email);
+
+-- Screenshots reps paste/attach when submitting an idea — always shown
+-- inline (unlike article_files/announcement_files there's no display_mode
+-- choice, since these are always images illustrating the idea, not
+-- downloadable documents).
+CREATE TABLE IF NOT EXISTS idea_files (
+  id SERIAL PRIMARY KEY,
+  idea_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_idea_files_idea_id ON idea_files(idea_id);
 
 -- Seeded once so the policy is discoverable in the knowledge base the moment
 -- the Leave Request feature ships — DO NOTHING on conflict since an admin
