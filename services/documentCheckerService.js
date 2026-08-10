@@ -126,12 +126,27 @@ function extractIssueDate(text) {
   return valid.sort((a, b) => a.parsed - b.parsed)[0].parsed;
 }
 
+// Real ACIC-format certificates — the standard results template every
+// accredited provider (Cited, Fit2Work, NCC Screening, etc.) wraps around
+// an ACIC search, not just one vendor — print the applicant's name in a
+// "Subject Details" table as "Name(s) Primary SURNAME, GIVENNAME". pdf-parse
+// collapses that table row with no whitespace between cells (verified
+// against a real certificate: "Name(s)PrimaryMO, YONGXUE"), so this can't
+// assume a space or colon after the label the way a simple "Name:" does.
+const SUBJECT_NAME_PATTERN = /name\(s\)\s*primary\s*([a-z][a-z,'\-\s]{2,60}?)(?=additional\s+identifier|birth\s+date|birth\s+place|gender\s*:|address|$)/i;
+
 // Best-effort name extraction — looks for a line right after a "Name:"/
-// "Applicant:" label. Genuinely free-form across issuers, so this is a
-// hint for the human reviewer, not something the outcome hinges on.
+// "Applicant:" label first (simpler certificate formats), then falls back
+// to the ACIC "Subject Details" table (real National Police Certificates,
+// which don't use a colon-labelled name at all). Genuinely free-form across
+// issuers, so this is a hint for the human reviewer, not something the
+// outcome hinges on by itself — see namesLikelyMatch.
 function extractApplicantName(text) {
-  const match = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
-  return match ? match[1].trim() : null;
+  const labelMatch = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
+  if (labelMatch) return labelMatch[1].trim();
+  const subjectMatch = text.match(SUBJECT_NAME_PATTERN);
+  if (subjectMatch) return subjectMatch[1].trim().replace(/\s+/g, ' ');
+  return null;
 }
 
 // Cheap, dependency-free name comparison — normalizes case/whitespace and
