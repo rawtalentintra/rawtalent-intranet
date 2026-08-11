@@ -60,9 +60,19 @@ button { cursor: pointer; font-family: inherit; }
   /* Own GPU compositing layer — see the matching comment on
      .admin-sidebar. Reported live: the top-right corner of this bar
      (notification bell/avatar/Settings/Sign Out) going blank for
-     multiple real users, same root cause as the sidebar. */
+     multiple real users, same root cause as the sidebar.
+     translateZ(0) alone turned out not to be enough — still reported
+     blinking/glitching, worse on smaller viewports (1280x832) where more
+     of the app's periodically-mutating content (Workforce Queue's 20s
+     poll, the newer Reports dated-list tables) is likely on-screen at
+     once. contain:paint is the stronger, more modern fix for this exact
+     Chrome bug class: it tells the browser this box's paint is fully
+     self-contained, so mutations inside .admin-content can no longer
+     invalidate this element's layer at all — not just "hopefully placed
+     on a separate layer" the way translateZ alone is. */
   transform: translateZ(0);
   will-change: transform;
+  contain: paint;
 }
 
 .nav-brand {
@@ -680,9 +690,14 @@ button { cursor: pointer; font-family: inherit; }
      20s poll, Reports, etc.), since the sticky element and the mutating
      content can end up sharing a compositing layer that Chrome fails to
      correctly repaint. Reported live: the sidebar and the navbar (same
-     fix applied there) going fully blank for multiple real users. */
+     fix applied there) going fully blank for multiple real users.
+     translateZ(0) alone wasn't enough — still reported blinking/glitching
+     (worse on smaller viewports like 1280x832, where more of the page's
+     periodically-mutating content is on-screen at once). contain:paint is
+     paired with it now — see the matching comment on .navbar for why. */
   transform: translateZ(0);
   will-change: transform;
+  contain: paint;
 }
 
 /* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
