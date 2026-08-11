@@ -25,7 +25,16 @@
 
 /* ─── Reset ───────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-font-smoothing: antialiased; }
+/* Explicit background on both html and body — not just body — so there's
+   never a transparent/white gap for Chrome to flash through if a GPU
+   compositing tile drops mid-repaint (a real, documented Chromium bug on
+   macOS at non-integer display scaling: fractional scale factors mean the
+   physical pixel grid doesn't line up cleanly with Chrome's own GPU tile
+   grid, so a dropped tile shows through to whatever's behind it — normally
+   transparent — until the rasterizer catches up). Cheap, harmless even if
+   this isn't the whole story, and directly targets the "white flash"
+   symptom regardless of which specific element it hits. */
+html { -webkit-font-smoothing: antialiased; background: var(--offwhite); }
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--offwhite);
@@ -71,6 +80,18 @@ button { cursor: pointer; font-family: inherit; }
   right: 0;
   z-index: 100;
   box-shadow: 0 2px 16px rgba(0,0,0,.25);
+  /* Keeps this element's own paint in one self-contained GPU layer instead
+     of letting Chrome split it into sub-tiles — position:fixed is itself
+     one of the properties that triggers GPU layer creation, and on macOS
+     at a non-integer display scale factor the physical pixel grid doesn't
+     align cleanly with Chrome's compositor tile grid, which is what causes
+     a tile to drop and flash the page background through mid-repaint.
+     contain:paint declares this box's paint fully self-contained (no
+     child can paint outside it, so Chrome doesn't need to coordinate
+     tiles across a boundary); transform-style:flat keeps its children
+     from being promoted into their own separate 3D layers. */
+  contain: paint;
+  transform-style: flat;
 }
 /* Compensates for .navbar leaving normal flow (see above) — only on pages
    that actually have a navbar, so pages without one (login, 403, etc.)
@@ -703,6 +724,11 @@ body:has(> .navbar) { padding-top: 64px; }
   width: 244px;
   height: calc(100vh - 64px);
   overflow-y: auto;
+  /* Same GPU-layer isolation as .navbar, see that comment — position:fixed
+     is itself one of the properties that triggers Chrome's layer
+     splitting, and this is the other fixed element on the page. */
+  contain: paint;
+  transform-style: flat;
 }
 
 /* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
@@ -1183,8 +1209,13 @@ body:has(> .navbar) { padding-top: 64px; }
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10,20,40,.65);
-  backdrop-filter: blur(4px);
+  /* No backdrop-filter — it's one of the specific properties documented
+     to cause Chrome GPU-layer flashing/desync on macOS at non-integer
+     display scaling (see the .navbar comment for the full explanation),
+     and modals open often enough in this app that it's worth losing the
+     blur for. Slightly darker flat overlay instead of blur+lighter, so
+     the modal still reads clearly separated from the page behind it. */
+  background: rgba(10,20,40,.72);
   z-index: 1000;
   display: flex;
   align-items: center;
