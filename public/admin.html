@@ -471,7 +471,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">📈 WFP Dashboard</div>
-            <div class="admin-page-sub">Lead pipeline health, Workforce Partner performance and what needs attention today</div>
+            <div class="admin-page-sub">New-business pipeline (leads → called → visited → signed) and what needs attention today. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
           <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="loadSalesDashboard()">
             <option value="week">This Week</option>
@@ -484,6 +484,12 @@
         <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(4,1fr)"></div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div class="sd-card-title">Portfolio Snapshot — existing centres</div>
+          <div class="sd-card-sub">Booking-trend health across your real, active client centres — see <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> for the full list</div>
+          <div id="salesPortfolioSnapshot" style="margin-top:14px"></div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Pipeline Funnel — by state</div>
           <div class="sd-card-sub">Where leads drop off between first contact and a signed centre</div>
           <div style="display:flex;gap:16px;margin-top:14px" id="salesFunnelRow"></div>
@@ -491,7 +497,7 @@
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">⚠️ Needs Attention</div>
-          <div class="sd-card-sub">Overdue calls/visits, leads going cold, and centres waiting on a sign decision — click any row to act on it</div>
+          <div class="sd-card-sub">Overdue calls/visits, leads going cold, centres waiting on a sign decision, and existing centres at risk — click any row to act on it</div>
           <div id="salesAttentionQueue" style="margin-top:10px"></div>
         </div>
 
@@ -516,22 +522,29 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">🏢 My Centres</div>
-            <div class="admin-page-sub">RawTalent's real, active client centres — booking health and when each was last visited. Not yet split by Workforce Partner territory, so everyone sees the full list for now.</div>
+            <div class="admin-page-sub">Your existing, booking centres — once a lead becomes a real client, this is where its account health lives. New business that hasn't signed yet stays on <a href="#" onclick="showSection('sales-dashboard', document.querySelector('[onclick*=\'sales-dashboard\']'));return false" style="color:var(--orange);font-weight:600">the WFP Dashboard</a>. Not yet split by Workforce Partner territory, so everyone sees the full list for now.</div>
           </div>
         </div>
 
         <div id="myCentresListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-weight:700;color:var(--navy);font-size:13px">Portfolio Health</div>
+              <div style="font-size:11px;color:var(--text-muted)">Click a category to filter the list below</div>
+            </div>
+            <div id="myCentresHealthSummary" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          </div>
+          <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div class="leads-filter-bar" style="padding:0;border-bottom:none">
               <input type="text" id="centresFilterSearch" class="form-control" placeholder="Search centre or suburb…" oninput="filterMyCentresTable()">
               <select id="centresFilterHealth" onchange="filterMyCentresTable()">
                 <option value="">Health: any</option>
-                <option value="growing">Growing</option>
-                <option value="healthy">Healthy</option>
-                <option value="opportunity">Opportunity</option>
                 <option value="needs_attention">Needs attention</option>
                 <option value="declining">Declining</option>
+                <option value="opportunity">Opportunity</option>
                 <option value="new_activating">New/Activating</option>
+                <option value="growing">Growing</option>
+                <option value="healthy">Healthy</option>
                 <option value="dormant">Dormant</option>
               </select>
               <select id="centresFilterState" onchange="filterMyCentresTable()">
@@ -551,7 +564,7 @@
                     <th>Centre</th>
                     <th>Suburb</th>
                     <th>State</th>
-                    <th>Health</th>
+                    <th title="Needs attention: booking activity just stopped, or a visit follow-up is overdue.&#10;Declining: bookings materially down vs the prior 30 days.&#10;Opportunity: steady bookings but no visit in 60+ days — likely under-engaged.&#10;New/Activating: signed in the last 60 days, still ramping up.&#10;Growing: bookings materially up vs the prior 30 days.&#10;Healthy: steady bookings, nothing concerning.&#10;Dormant: no bookings in 90 days. Hover any row's badge for its specific reason.">Health ⓘ</th>
                     <th>Bookings (30d)</th>
                     <th>Trend vs prior 30d</th>
                   </tr>
@@ -5439,9 +5452,9 @@
       // — just not force-fed into this list.
       myCentresData.forEach(c => {
         if (c.health === 'declining') {
-          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue' });
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue' });
         } else if (c.health === 'needs_attention') {
-          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, reason: c.healthReasons[0] || 'Needs attention', urgency: 30, cls: 'attn-stale' });
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Needs attention', urgency: 30, cls: 'attn-stale' });
         }
       });
       items.sort((a, b) => b.urgency - a.urgency);
@@ -5466,11 +5479,43 @@
       const previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo));
 
       renderSalesKpis(current, previous);
+      renderSalesPortfolioSnapshot();
       renderSalesFunnel(current);
       renderSalesAttentionQueue();
       renderSalesPartnerCards(current);
       renderSalesSourceBreakdown(current);
       renderSalesMonthlyTrend(allLeads);
+    }
+
+    // Framework Row 1 explicitly asks for "portfolio booking growth or
+    // decline" as a headline card — before this, the whole KPI row was
+    // 100% pipeline (leads) metrics with zero signal about the real,
+    // already-signed centre book of business.
+    function renderSalesPortfolioSnapshot() {
+      const box = document.getElementById('salesPortfolioSnapshot');
+      if (!myCentresData.length) {
+        box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">No centre data available.</div>';
+        return;
+      }
+      const bookings30d = myCentresData.reduce((sum, c) => sum + c.bookings30dCount, 0);
+      const bookingsPrev30d = myCentresData.reduce((sum, c) => sum + c.bookingsPrev30dCount, 0);
+      const counts = {};
+      myCentresData.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      const cards = [
+        { label: 'Active centres', value: myCentresData.length },
+        { label: 'Portfolio bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d) },
+        { label: '📈 Growing', value: counts.growing || 0 },
+        { label: '📉 Declining', value: counts.declining || 0 },
+        { label: '⚠️ Needs Attention', value: counts.needs_attention || 0 }
+      ];
+      box.innerHTML = `<div style="display:flex;gap:32px;flex-wrap:wrap">
+        ${cards.map(c => `
+          <div>
+            <div style="font-size:22px;font-weight:700;color:var(--navy)">${c.value}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${c.label}</div>
+            ${c.trend ? `<div style="margin-top:2px">${c.trend}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
     }
 
     function renderSalesKpis(current, previous) {
@@ -5538,13 +5583,13 @@
       box.innerHTML = `
         ${shown.map(it => it.type === 'centre' ? `
           <div class="attn-row" onclick="goToCentre360('${it.centreKey}')">
-            <span class="attn-chip ${it.cls}">${escHtml(it.reason)}</span>
+            <span class="attn-chip ${it.cls}">🏢 ${escHtml((CENTRE_HEALTH_META[it.health] || {}).label || it.health)}</span>
             <span class="attn-centre">${escHtml(it.name)}</span>
             <span class="attn-meta">${escHtml(it.suburb || '—')}, ${escHtml(it.state || '—')}</span>
-            <span class="attn-meta">Existing centre</span>
+            <span class="attn-meta" title="${escHtml(it.reason)}">${escHtml(it.reason)}</span>
           </div>` : `
           <div class="attn-row" onclick="openLeadDetail('${it.lead.id}')">
-            <span class="attn-chip ${it.cls}">${escHtml(it.reason)}</span>
+            <span class="attn-chip ${it.cls}">🆕 ${escHtml(it.reason)}</span>
             <span class="attn-centre">${escHtml(it.lead.centre_name)}</span>
             <span class="attn-meta">${escHtml(it.lead.suburb || '—')}, ${escHtml(it.lead.state || '—')}</span>
             <span class="attn-meta">${escHtml(it.lead.assigned_workforce_partner || 'Unassigned')}</span>
@@ -5622,17 +5667,25 @@
     // ~360 real active client centres, so this reads straight from RT.
     // ══════════════════════════════════════════════════════════════
     const CENTRE_HEALTH_META = {
-      growing: { label: '📈 Growing', bg: '#dcfce7', color: '#15803d' },
-      healthy: { label: '✅ Healthy', bg: 'rgba(34,197,94,.12)', color: '#15803d' },
-      new_activating: { label: '🌱 New/Activating', bg: 'rgba(37,99,235,.12)', color: '#2563eb' },
-      opportunity: { label: '💡 Opportunity', bg: '#fef3c7', color: '#b45309' },
       needs_attention: { label: '⚠️ Needs Attention', bg: '#fef3c7', color: '#b45309' },
       declining: { label: '📉 Declining', bg: '#fef2f2', color: '#c0392b' },
+      opportunity: { label: '💡 Opportunity', bg: '#fef3c7', color: '#b45309' },
+      new_activating: { label: '🌱 New/Activating', bg: 'rgba(37,99,235,.12)', color: '#2563eb' },
+      growing: { label: '📈 Growing', bg: '#dcfce7', color: '#15803d' },
+      healthy: { label: '✅ Healthy', bg: 'rgba(34,197,94,.12)', color: '#15803d' },
       dormant: { label: '💤 Dormant', bg: 'var(--gray-100)', color: 'var(--gray-600)' }
     };
-    function centreHealthBadge(category) {
+    // Display/sort order — most actionable first, so the table opens on
+    // what needs a Workforce Partner's attention rather than an
+    // alphabetical list where the 276 dormant centres (77% of the real
+    // active portfolio) are indistinguishable from the handful that
+    // actually need a call today.
+    const CENTRE_HEALTH_ORDER = ['needs_attention', 'declining', 'opportunity', 'new_activating', 'growing', 'healthy', 'dormant'];
+
+    function centreHealthBadge(category, reasons) {
       const meta = CENTRE_HEALTH_META[category] || { label: category, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
-      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
+      const title = reasons && reasons.length ? ` title="${escHtml(reasons.join(' '))}"` : '';
+      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap"${title}>${meta.label}</span>`;
     }
 
     let myCentresData = [];
@@ -5657,6 +5710,34 @@
       select.value = current;
     }
 
+    // Clickable count-per-category strip — the framework's Row 5
+    // ("Provide a visual count and list of Growing/Healthy/Opportunity/
+    // Needs attention/Declining/Dormant centres") asked for exactly this,
+    // and without it the only way to see the shape of the portfolio was
+    // to scroll a 357-row table.
+    function renderCentresHealthSummary() {
+      const box = document.getElementById('myCentresHealthSummary');
+      const counts = {};
+      myCentresData.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      const activeFilter = document.getElementById('centresFilterHealth').value;
+      box.innerHTML = CENTRE_HEALTH_ORDER.map(key => {
+        const meta = CENTRE_HEALTH_META[key];
+        const n = counts[key] || 0;
+        const active = activeFilter === key;
+        return `
+          <div onclick="toggleCentresHealthFilter('${key}')" style="cursor:pointer;padding:8px 14px;border-radius:10px;background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'};min-width:92px">
+            <div style="font-size:19px;font-weight:700;color:${meta.color}">${n}</div>
+            <div style="font-size:10.5px;color:${meta.color};font-weight:700;white-space:nowrap">${meta.label.replace(/^\S+\s/, '')}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function toggleCentresHealthFilter(key) {
+      const select = document.getElementById('centresFilterHealth');
+      select.value = select.value === key ? '' : key;
+      filterMyCentresTable();
+    }
+
     function filterMyCentresTable() {
       const q = document.getElementById('centresFilterSearch').value.trim().toLowerCase();
       const health = document.getElementById('centresFilterHealth').value;
@@ -5665,6 +5746,7 @@
       if (q) rows = rows.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
       if (health) rows = rows.filter(c => c.health === health);
       if (state) rows = rows.filter(c => c.state === state);
+      renderCentresHealthSummary();
       renderMyCentresTable(rows);
     }
 
@@ -5675,7 +5757,10 @@
         body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No centres match these filters.</td></tr>';
         return;
       }
-      const sorted = rows.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      const sorted = rows.slice().sort((a, b) => {
+        const orderDiff = CENTRE_HEALTH_ORDER.indexOf(a.health) - CENTRE_HEALTH_ORDER.indexOf(b.health);
+        return orderDiff !== 0 ? orderDiff : (a.name || '').localeCompare(b.name || '');
+      });
       body.innerHTML = sorted.map(c => {
         const trend = c.bookingsPrev30dCount > 0
           ? `${c.bookings30dCount > c.bookingsPrev30dCount ? '▲' : c.bookings30dCount < c.bookingsPrev30dCount ? '▼' : '—'} ${c.bookingsPrev30dCount} → ${c.bookings30dCount}`
@@ -5685,7 +5770,7 @@
           <td class="td-truncate" style="max-width:220px" title="${escHtml(c.name)}">${escHtml(c.name)}</td>
           <td>${escHtml(c.suburb || '—')}</td>
           <td>${escHtml(c.state || '—')}</td>
-          <td>${centreHealthBadge(c.health)}</td>
+          <td>${centreHealthBadge(c.health, c.healthReasons)}</td>
           <td>${c.bookings30dCount}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
         </tr>`;
