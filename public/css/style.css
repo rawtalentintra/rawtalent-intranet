@@ -57,6 +57,12 @@ button { cursor: pointer; font-family: inherit; }
   top: 0;
   z-index: 100;
   box-shadow: 0 2px 16px rgba(0,0,0,.25);
+  /* Own GPU compositing layer — see the matching comment on
+     .admin-sidebar. Reported live: the top-right corner of this bar
+     (notification bell/avatar/Settings/Sign Out) going blank for
+     multiple real users, same root cause as the sidebar. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .nav-brand {
@@ -667,6 +673,16 @@ button { cursor: pointer; font-family: inherit; }
   top: 64px;
   height: calc(100vh - 64px);
   overflow-y: auto;
+  /* Forces its own GPU compositing layer — without this, a known Chrome
+     bug leaves position:sticky elements blank/unpainted after enough DOM
+     mutation happens elsewhere on the page (this app has several sections
+     that periodically replace large table subtrees — Workforce Queue's
+     20s poll, Reports, etc.), since the sticky element and the mutating
+     content can end up sharing a compositing layer that Chrome fails to
+     correctly repaint. Reported live: the sidebar and the navbar (same
+     fix applied there) going fully blank for multiple real users. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 /* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
