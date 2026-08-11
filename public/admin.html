@@ -1489,7 +1489,7 @@
               <tbody>
                 <tr><td><strong>Anthropic Claude</strong></td><td>Ask AI, FAQ candidate classification, call grading, meeting Q&amp;A, report generation</td><td><code>ANTHROPIC_API_KEY</code></td></tr>
                 <tr><td><strong>Supabase</strong></td><td>Postgres database + file storage (private buckets, signed URLs)</td><td><code>SUPABASE_DB_HOST/PORT/NAME/USER/PASSWORD</code>, <code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code></td></tr>
-                <tr><td><strong>Webex</strong></td><td>Live agent presence status (Workforce Queue) and Detailed Call History (CDR-based call volume/answer-rate reporting) via a Service App</td><td><code>WEBEX_CLIENT_ID</code>, <code>WEBEX_CLIENT_SECRET</code>, <code>WEBEX_REFRESH_TOKEN</code></td></tr>
+                <tr><td><strong>Webex</strong></td><td>Live agent presence status (Workforce Queue) via a Service App</td><td><code>WEBEX_CLIENT_ID</code>, <code>WEBEX_CLIENT_SECRET</code>, <code>WEBEX_REFRESH_TOKEN</code></td></tr>
                 <tr><td><strong>Fathom</strong></td><td>Meeting transcript sync, powering the private Meetings Q&amp;A and feeding FAQ candidate scanning</td><td><code>FATHOM_API_KEY</code></td></tr>
                 <tr><td><strong>Dubber</strong></td><td>Call recording sync for the Call Quality Evaluator</td><td><code>DUBBER_ACCOUNT_ID</code>, <code>DUBBER_AUTH_ID</code>, <code>DUBBER_AUTH_TOKEN</code>, <code>DUBBER_CLIENT_ID</code>, <code>DUBBER_CLIENT_SECRET</code>, <code>DUBBER_LISTENER_EMAIL</code>, <code>DUBBER_REGION</code></td></tr>
                 <tr><td><strong>Slack</strong></td><td>Scanning team channels for FAQ candidate content</td><td><code>SLACK_BOT_TOKEN</code></td></tr>
@@ -1508,7 +1508,7 @@
             <strong style="color:var(--navy)">Content &amp; Search:</strong> full-text article search (Postgres <code>tsvector</code>), Ask AI (Claude, grounded in articles + AI Sources), Glossary, Announcements, Team directory, Training.<br>
             <strong style="color:var(--navy)">FAQ Review:</strong> scans Slack and Fathom for reusable Q&amp;A content, classifies candidates with Claude, holds them for human approval before they become live FAQs.<br>
             <strong style="color:var(--navy)">Call Quality:</strong> syncs recordings from Dubber, grades them against a configurable rubric (AI or manual), calibration notes, and period reports.<br>
-            <strong style="color:var(--navy)">Workforce Management:</strong> live agent presence (Webex), background-polled every 20s independent of who has the page open; Detailed Call History dashboard (volume, answered/missed rate, average handle time) once the org has Webex Calling licensing.<br>
+            <strong style="color:var(--navy)">Workforce Management:</strong> live agent presence (Webex), background-polled every 20s server-side independent of who has the page open.<br>
             <strong style="color:var(--navy)">Training:</strong> course builder, assignment, attempts/scoring.<br>
             <strong style="color:var(--navy)">Projects:</strong> internal project tracking with milestones and SOP file attachments.<br>
             <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — a private, restricted-access area.
@@ -1955,27 +1955,8 @@
           </div>
           <button class="btn-secondary" id="wfRefreshBtn" onclick="loadWorkforceAgentStatus()">🔄 Refresh</button>
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:20px">
-          <button class="cat-chip active" id="wf-view-agent-status" onclick="switchWorkforceView('agent-status')">Agent Status</button>
-          <button class="cat-chip super-admin-only" style="display:none" id="wf-view-call-history" onclick="switchWorkforceView('call-history')">Call History</button>
-        </div>
         <div id="workforceAgentStatusBody">
           <div class="loading-spinner"><div class="spinner"></div></div>
-        </div>
-        <div id="workforceCallHistoryBody" style="display:none">
-          <div class="admin-header" style="margin-bottom:14px">
-            <div id="callHistorySyncStatus" style="font-size:12.5px;color:var(--text-muted)">Loading sync status…</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <div style="display:flex;gap:6px">
-                <button class="cat-chip active" id="ch-range-week" onclick="setCallHistoryRange('week')">Week</button>
-                <button class="cat-chip" id="ch-range-day" onclick="setCallHistoryRange('day')">Day</button>
-              </div>
-              <button class="btn-add" id="callHistorySyncBtn" onclick="syncCallHistory()">🔄 Sync Call History</button>
-            </div>
-          </div>
-          <div id="callHistoryStatsBody">
-            <div class="loading-spinner"><div class="spinner"></div></div>
-          </div>
         </div>
       </div>
       </template>
@@ -4695,7 +4676,6 @@
       { area: 'Call Quality — Dashboard, Rubrics, Evaluator', user: false, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Call Quality — Dubber sync, rubric description edits, Extract FAQ Candidates', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
       { area: 'Workforce Queue (live agent status)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Workforce Call History Dashboard', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
       { area: 'Training Dashboard — view courses/results', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Training — build courses, assign, reset attempts', user: false, qa: false, wfp: false, admin: false, superAdmin: true },
       { area: 'Feedback queue', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
@@ -9758,102 +9738,6 @@
           </table>
           <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration reflects the real transition time — this app polls Webex in the background every 20 seconds regardless of who has this page open, so it's accurate even if nobody's been watching. It only resets on an app deploy/restart. Last Call shows the direction of their most recently synced call (auto-synced every 5 minutes) — Webex's live presence has no direction field, so if someone's currently "On a call" this reflects their last completed call, not necessarily the one happening right now.</div>`;
       } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; workforceAgentSignature = null; }
-    }
-
-    // ── Workforce Queue — Call History (Workforce Management Dashboard, super_admin only) ──
-    let callHistoryRange = 'week';
-
-    function switchWorkforceView(view) {
-      document.getElementById('wf-view-agent-status').classList.toggle('active', view === 'agent-status');
-      document.getElementById('wf-view-call-history').classList.toggle('active', view === 'call-history');
-      document.getElementById('workforceAgentStatusBody').style.display = view === 'agent-status' ? '' : 'none';
-      document.getElementById('workforceCallHistoryBody').style.display = view === 'call-history' ? '' : 'none';
-      if (view === 'agent-status') startWorkforceStatusPolling();
-      else { stopWorkforceStatusPolling(); loadCallHistoryStatus(); loadCallHistoryStats(); }
-    }
-
-    function setCallHistoryRange(range) {
-      callHistoryRange = range;
-      document.getElementById('ch-range-week').classList.toggle('active', range === 'week');
-      document.getElementById('ch-range-day').classList.toggle('active', range === 'day');
-      loadCallHistoryStats();
-    }
-
-    async function loadCallHistoryStatus() {
-      const el = document.getElementById('callHistorySyncStatus');
-      try {
-        const s = await fetch('/api/workforce/call-history/status').then(r => r.json());
-        if (!s.configured) { el.innerHTML = `<span style="color:#c0392b">Webex isn't configured.</span>`; return; }
-        const last = s.lastSyncedAt ? fmtDate(s.lastSyncedAt) : 'Never';
-        el.innerHTML = `📞 <strong>${s.recordCount}</strong> call record${s.recordCount !== 1 ? 's' : ''} stored · Last synced: <strong>${last}</strong>`;
-      } catch { el.textContent = 'Failed to load sync status'; }
-    }
-
-    async function syncCallHistory() {
-      const btn = document.getElementById('callHistorySyncBtn');
-      btn.disabled = true;
-      btn.textContent = '🔄 Syncing…';
-      try {
-        const result = await fetch('/api/workforce/call-history/sync', { method: 'POST' }).then(r => r.json());
-        if (result.error) throw new Error(result.error);
-        toast(`Synced — ${result.stored} new record${result.stored !== 1 ? 's' : ''} (${result.scanned} scanned)`, 'success');
-        await loadCallHistoryStatus();
-        await loadCallHistoryStats();
-      } catch (err) {
-        toast(err.message || 'Sync failed', 'error');
-      }
-      btn.disabled = false;
-      btn.textContent = '🔄 Sync Call History';
-    }
-
-    function formatCallDuration(seconds) {
-      if (seconds === null || seconds === undefined) return '—';
-      const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
-      return m > 0 ? `${m}m ${s}s` : `${s}s`;
-    }
-
-    async function loadCallHistoryStats() {
-      const body = document.getElementById('callHistoryStatsBody');
-      try {
-        const data = await fetch(`/api/workforce/call-history/stats?range=${callHistoryRange}`).then(r => r.json());
-        if (data.error) { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">${escHtml(data.error)}</div>`; return; }
-        if (!data.reps.length) {
-          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No call records for this range yet — click Sync Call History above.</div>`;
-          return;
-        }
-        const rows = data.reps.map(r => `
-          <tr>
-            <td style="font-weight:600;color:var(--navy)">${escHtml(r.userName || r.userEmail || 'Unknown')}</td>
-            <td>${r.totalCalls}</td>
-            <td style="color:var(--text-muted)">${r.inbound} in / ${r.outbound} out</td>
-            <td>${r.answeredRate !== null ? `<span style="color:#15803d;font-weight:600">${r.answeredRate}%</span>` : '—'}</td>
-            <td>${r.missedRate !== null ? `<span style="color:${r.missedRate > 20 ? '#c0392b' : 'var(--text-muted)'};font-weight:600">${r.missedRate}%</span>` : '—'}</td>
-            <td style="color:var(--text-muted)">${formatCallDuration(r.avgDurationSeconds)}</td>
-          </tr>`).join('');
-
-        const gapsHtml = data.gaps.length ? `
-          <div style="margin-top:20px">
-            <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:8px">⚠️ Presence/Call Gaps</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Times someone's Webex status showed "On a call" with no matching call record in this range — could be a stuck status, a dropped call, or a call type this sync doesn't capture.</div>
-            <table class="data-table">
-              <thead><tr><th>Email</th><th>Started</th><th>Ended</th><th>Duration</th></tr></thead>
-              <tbody>${data.gaps.map(g => `
-                <tr>
-                  <td>${escHtml(g.email)}</td>
-                  <td style="color:var(--text-muted);font-size:12px">${fmtDate(g.started_at)}</td>
-                  <td style="color:var(--text-muted);font-size:12px">${fmtDate(g.ended_at)}</td>
-                  <td>${formatCallDuration(g.gap_seconds)}</td>
-                </tr>`).join('')}</tbody>
-            </table>
-          </div>` : '';
-
-        body.innerHTML = `
-          <table class="data-table">
-            <thead><tr><th>Rep</th><th>Total Calls</th><th>In / Out</th><th>Answered</th><th>Missed</th><th>Avg Duration</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-          ${gapsHtml}`;
-      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load call history stats.</div>`; }
     }
 
     // ── Training Hub ─────────────────────────────────────────────
