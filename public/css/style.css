@@ -891,9 +891,21 @@ button { cursor: pointer; font-family: inherit; }
 .lead-group-label:first-child { margin-top: 0; }
 
 /* ─── Sales Dashboard ─────────────────────────────────────────── */
+/* auto-fit/minmax instead of a fixed column count + a single viewport-
+   width media query — the old breakpoint (max-width:1100px) tested the
+   raw browser viewport, not the actual content-area width left over
+   after the sidebar (~244px) and page padding (~64px). At a reported
+   1280px-wide viewport that leaves ~972px of real content width — under
+   the 1100px the breakpoint was gated on — so 5 KPI cards (report_*_kpis,
+   which has no per-instance column override) were squeezed into ~185px
+   each instead of collapsing to 3. auto-fit reflows against the real
+   available width automatically, so it stays correct regardless of
+   sidebar state, viewport size, or how many cards a given dashboard uses.
+   (report_${type}_kpis in admin.html and the WFP Dashboard's own inline
+   4-column override both rely on this.) */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -961,10 +973,6 @@ button { cursor: pointer; font-family: inherit; }
 .source-row-head { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--navy); margin-bottom: 6px; }
 .source-row-track { background: var(--gray-100); border-radius: 4px; height: 8px; overflow: hidden; }
 .source-row-fill { background: var(--orange); height: 100%; border-radius: 4px; }
-
-@media (max-width: 1100px) {
-  .kpi-row { grid-template-columns: repeat(3, 1fr); }
-}
 
 /* Denser variant for tables with many short-content rows (Leads, etc.) —
    same structure as .data-table, just tighter padding and smaller type.
@@ -1298,9 +1306,9 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 14px;
 }
 .spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--gray-200);
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid var(--gray-200);
   border-top-color: var(--orange);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -1558,17 +1566,6 @@ button { cursor: pointer; font-family: inherit; }
   font-weight: 600;
 }
 .data-table tr:hover td { background: rgba(61,111,255,.03); }
-
-/* Loading spinner — smoother */
-@keyframes spin { to { transform: rotate(360deg); } }
-.spinner {
-  width: 22px;
-  height: 22px;
-  border: 2.5px solid var(--gray-200);
-  border-top-color: var(--orange);
-  border-radius: 50%;
-  animation: spin .7s linear infinite;
-}
 
 /* Toast — cleaner */
 .toast {

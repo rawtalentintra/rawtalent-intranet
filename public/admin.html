@@ -4751,6 +4751,15 @@
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // True once a table body already shows real rows from a previous load
+    // (not the spinner, not empty). Used to skip re-flashing the spinner on
+    // sections with no dedicated data cache to check instead — re-showing
+    // a spinner over content that's already on screen just to refill it
+    // moments later reads as a glitch, not a real loading state.
+    function hasRenderedContent(el) {
+      return !!el && el.children.length > 0 && !el.querySelector('.loading-spinner');
+    }
+
     const ROLE_META = {
       super_admin: { cls: 'badge-super', label: 'Super Admin' },
       admin: { cls: 'badge-admin', label: 'Admin' },
@@ -4912,7 +4921,9 @@
       leaveTeamMonthAdmin = new Date();
       loadLeaveTeamCalendarAdmin();
       const body = document.getElementById('leaveRequestsTableBody');
-      body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      if (!hasRenderedContent(body)) {
+        body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      }
       try {
         const rows = await fetch('/api/leave-requests/admin/all').then(r => r.json());
         if (!rows.length) {
@@ -5139,7 +5150,14 @@
 
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
-      body.innerHTML = '<tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      // Only flash the spinner on the very first load — allLeads is often
+      // already populated by the time this runs (WFP Dashboard/Route
+      // Planner load it too), so re-navigating to Leads was blanking an
+      // already-visible table just to refill it with the same data a
+      // moment later.
+      if (!allLeads.length) {
+        body.innerHTML = '<tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      }
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
         partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
@@ -5466,7 +5484,17 @@
     // than each screen pulling RT independently.
     async function ensureCentresLoaded() {
       if (myCentresData.length) return;
-      try { myCentresData = await fetch('/api/centres').then(r => r.json()); } catch { myCentresData = []; }
+      try {
+        const res = await fetch('/api/centres');
+        // qa_view can reach the WFP Dashboard but isn't in routes/centres.js's
+        // allowed roles, so this 403s for that role — fetch() doesn't throw
+        // on a non-2xx status, and the error body ({error: "..."}) parses as
+        // valid JSON, so without this check myCentresData silently became a
+        // plain object instead of an array, crashing every .forEach/.length
+        // call downstream (computeAttentionItems, renderSalesPortfolioSnapshot).
+        const data = res.ok ? await res.json() : [];
+        myCentresData = Array.isArray(data) ? data : [];
+      } catch { myCentresData = []; }
     }
 
     async function loadSalesDashboard() {
@@ -7440,7 +7468,15 @@
     async function loadReportData(type) {
       const cfg = REPORT_CONFIG[type];
       const tbody = document.getElementById(`report_${type}_table`);
-      tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+      // Re-fetches live every time by design (Reports data is period/filter-
+      // scoped, not meant to go stale) — but if there's already data from a
+      // previous load, leave it on screen instead of blanking it out for the
+      // spinner first. Re-navigating to an already-visited Reports tab was
+      // flashing spinner → content on every single visit, which read as a
+      // glitch even though nothing was actually wrong.
+      if (!reportDataCache[type] || !reportDataCache[type].length) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+      }
 
       const periodKey = document.getElementById(`report_${type}_period`).value;
       const activeVal = document.getElementById(`report_${type}_active`).value;
@@ -9533,27 +9569,56 @@
       if (workforceStatusInterval) { clearInterval(workforceStatusInterval); workforceStatusInterval = null; }
     }
 
+    // Tracks the last-rendered agent set (everything except the constantly-
+    // ticking duration) so a 20s poll where nobody's status actually
+    // changed doesn't tear down and rebuild the whole table — that was
+    // happening on every single tick before this, which is what made the
+    // Workforce Queue visibly blink every 20 seconds even when nothing
+    // was actually happening. Duration itself still updates every poll,
+    // just as an in-place text update on the existing cell.
+    let workforceAgentSignature = null;
+
+    function agentEmailKey(email) {
+      return (email || '').replace(/[^a-z0-9]/gi, '_');
+    }
+
     async function loadWorkforceAgentStatus() {
       const body = document.getElementById('workforceAgentStatusBody');
       try {
         const res = await fetch('/api/workforce/agent-status').then(r => r.json());
-        if (res.error) { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">${escHtml(res.error)}</div>`; return; }
+        if (res.error) { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">${escHtml(res.error)}</div>`; workforceAgentSignature = null; return; }
         if (!res.configured) {
           body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Webex isn't connected yet — add WEBEX_CLIENT_ID / WEBEX_CLIENT_SECRET / WEBEX_REFRESH_TOKEN to get live agent status here.</div>`;
+          workforceAgentSignature = null;
           return;
         }
         if (!res.agents.length) {
           body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">No matching agents found — make sure their RawTalent KB email matches their Webex email.</div>`;
+          workforceAgentSignature = null;
           return;
         }
-        const rows = res.agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map(a => {
+        const agents = res.agents.slice().sort((a, b) => a.name.localeCompare(b.name));
+        const signature = JSON.stringify(agents.map(a => [a.email, a.status, a.statusSince, a.lastCallDirection, a.lastCallAt]));
+
+        if (signature === workforceAgentSignature && body.querySelector('tbody')) {
+          // Nothing meaningful changed — just tick the duration text in
+          // place, no DOM teardown at all.
+          agents.forEach(a => {
+            const cell = document.getElementById(`wf-dur-${agentEmailKey(a.email)}`);
+            if (cell) cell.textContent = formatWorkforceDuration(a.statusSince);
+          });
+          return;
+        }
+        workforceAgentSignature = signature;
+
+        const rows = agents.map(a => {
           const s = WORKFORCE_STATUS_LABELS[a.status] || WORKFORCE_STATUS_LABELS.unknown;
           return `
             <tr>
               <td style="font-weight:600;color:var(--navy)">${escHtml(a.name)}</td>
               <td style="color:var(--text-muted);font-size:12.5px">${escHtml(a.email)}</td>
               <td><span class="badge" style="background:${s.bg};color:${s.color}">${s.label}</span></td>
-              <td style="color:var(--text-muted);font-size:12.5px">${formatWorkforceDuration(a.statusSince)}</td>
+              <td id="wf-dur-${agentEmailKey(a.email)}" style="color:var(--text-muted);font-size:12.5px">${formatWorkforceDuration(a.statusSince)}</td>
               <td style="font-size:12.5px">${formatLastCall(a.lastCallDirection, a.lastCallAt)}</td>
             </tr>`;
         }).join('');
@@ -9563,7 +9628,7 @@
             <tbody>${rows}</tbody>
           </table>
           <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Refreshes automatically every 20 seconds. Status reflects Webex presence — "On a call" covers any call, not specifically a queue call. Duration reflects the real transition time — this app polls Webex in the background every 20 seconds regardless of who has this page open, so it's accurate even if nobody's been watching. It only resets on an app deploy/restart. Last Call shows the direction of their most recently synced call (auto-synced every 5 minutes) — Webex's live presence has no direction field, so if someone's currently "On a call" this reflects their last completed call, not necessarily the one happening right now.</div>`;
-      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; }
+      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load agent status.</div>`; workforceAgentSignature = null; }
     }
 
     // ── Workforce Queue — Call History (Workforce Management Dashboard, super_admin only) ──
@@ -10438,7 +10503,10 @@
     const SOURCES_PER_PAGE = 20;
 
     async function loadSources() {
-      document.getElementById('sourcesList').innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      const listEl = document.getElementById('sourcesList');
+      if (!hasRenderedContent(listEl)) {
+        listEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      }
       try {
         const params = new URLSearchParams({ page: sourcesPage, pageSize: SOURCES_PER_PAGE });
         if (sourcesFilter) params.set('search', sourcesFilter);
