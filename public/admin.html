@@ -213,9 +213,7 @@
           <span class="admin-nav-icon">🚀</span> Projects Dashboard
         </div>
       </div>
-      <!-- TEMP DIAGNOSTIC: Reports nav hidden — see renderReportSectionsHtml()
-           for the matching temporary disable. Revert together. -->
-      <div class="admin-nav-section" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Reports</div>
         <div class="admin-nav-item" onclick="showSection('report-clients', this)">
           <span class="admin-nav-icon">🏢</span> Clients
@@ -235,8 +233,7 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
-        <!-- TEMP DIAGNOSTIC: hidden, matching the <template>-wrapped section -->
-        <div class="admin-nav-item" style="display:none" onclick="showSection('my-centres', this)">
+        <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -246,8 +243,7 @@
           <span class="admin-nav-icon">🧭</span> Smart Routing
         </div>
       </div>
-      <!-- TEMP DIAGNOSTIC: hidden, matching the <template>-wrapped section -->
-      <div class="admin-nav-section" style="display:none">
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Compliance</div>
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
@@ -521,10 +517,14 @@
         </div>
       </div>
 
-      <!-- TEMP DIAGNOSTIC: wrapped in <template> so it's parsed but never
-           part of the live DOM (no weight, no paint cost) — not deleted,
-           just inert. Revert by removing the <template>/</template> tags. -->
-      <template id="__disabled_my_centres">
+      <!-- Wrapped in <template> so this section's markup is parsed but not
+           part of the live DOM (no weight, no paint cost) until someone
+           actually visits it — see the lazy-load block in showSection(),
+           which swaps the template's content in on first visit and leaves
+           it there. Started as a diagnostic for a Chrome rendering bug on
+           some MacBooks (confirmed live: less page weight measurably
+           reduced how often it fired) and kept as a real optimization. -->
+      <template id="__lazy_my_centres">
       <!-- My Centres -->
       <div class="admin-section" id="section-my-centres">
         <div class="admin-header">
@@ -862,9 +862,9 @@
         </div>
       </div>
 
-      <!-- TEMP DIAGNOSTIC: wrapped in <template>, see the matching comment
-           on My Centres above. Revert together. -->
-      <template id="__disabled_document_checker">
+      <!-- Wrapped in <template>, lazy-loaded from showSection() — see the
+           matching comment on My Centres above. -->
+      <template id="__lazy_document_checker">
       <!-- Document Checker — deterministic (no AI credits) validation of
            compliance documents against our actual SOPs (see
            services/documentCheckerService.js). Documents are never
@@ -3182,7 +3182,9 @@
     let currentUserCanBuildTraining = false;
 
     async function init() {
-      renderReportSectionsHtml();
+      // renderReportSectionsHtml() now runs lazily from showSection() on
+      // first visit to a report-* section instead of unconditionally here
+      // — see the comment there for why.
       try {
         const me = await fetch('/auth/me').then(r => r.json());
         if (me.error || !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(me.role)) { location.href = '/'; return; }
@@ -3199,7 +3201,9 @@
           document.getElementById('impersonationBanner').style.display = 'block';
         }
         applyRoleVisibility();
-        applyReportAllTimeRestrictions();
+        // applyReportAllTimeRestrictions() now runs lazily from
+        // showSection() alongside renderReportSectionsHtml() instead of
+        // here, since the Reports DOM doesn't exist yet at this point.
       } catch { location.href = '/login.html'; return; }
 
       loadArticles();
@@ -4134,6 +4138,20 @@
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       }
+      // Lazy-build heavy sections on first visit instead of always having
+      // their DOM present — confirmed live to measurably reduce how often
+      // some MacBooks hit a Chrome rendering bug elsewhere on this page
+      // (bigger page = more likely to trigger it), on top of being a
+      // straightforwardly good idea for a single-file app this size.
+      // Reports is generated fresh each time (cheap, and its data can go
+      // stale); My Centres/Document Checker are static markup so the
+      // <template> just gets swapped in once and stays.
+      if (id.startsWith('report-')) { renderReportSectionsHtml(); applyReportAllTimeRestrictions(); }
+      if (id === 'my-centres' || id === 'document-checker') {
+        const tpl = document.getElementById(id === 'my-centres' ? '__lazy_my_centres' : '__lazy_document_checker');
+        if (tpl) tpl.replaceWith(tpl.content);
+      }
+
       const sectionEl = document.getElementById(`section-${id}`);
       if (!sectionEl) return;
       document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
@@ -7306,12 +7324,13 @@
     }
 
     function renderReportSectionsHtml() {
-      // TEMP DIAGNOSTIC — skipped entirely, matching the hidden Reports nav
-      // above. Testing whether removing this section's DOM weight changes
-      // the Chrome rendering glitch reported on some MacBooks. Revert
-      // together with the nav change once the test is done.
-      return;
       const container = document.getElementById('reportsSectionsContainer');
+      // Built once per page load (called lazily from showSection() on
+      // first visit to a report-* section, not unconditionally at init)
+      // — REPORT_CONFIG is static, so there's nothing to gain from
+      // rebuilding it on every revisit, and doing so would reset any
+      // in-progress filter state on whichever report tab was open.
+      if (container.childElementCount) return;
       container.innerHTML = Object.entries(REPORT_CONFIG).map(([type, cfg]) => `
         <div class="admin-section" id="section-report-${type}">
           <div class="admin-header">
