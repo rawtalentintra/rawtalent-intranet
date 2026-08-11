@@ -1,3 +1,21 @@
+/* ══════════════════════════════════════════════════════════════════
+   READ BEFORE ADDING CSS HERE — known Chrome GPU compositor bug
+   (see CLAUDE.md "Known issue" section for the full writeup).
+   Reproduces only on Chrome on a MacBook's built-in display at a
+   scaled/non-native resolution — content silently fails to paint
+   (blank navbar/sidebar/tables) until something forces a repaint.
+   Not fixable in JS; these CSS rules are the actual fix. Don't
+   reintroduce the triggers:
+     - No backdrop-filter anywhere.
+     - No will-change / translateZ(0) / translate3d(...) as a "GPU
+       speed" trick — makes this bug worse, not better.
+     - Any large position:fixed/sticky element (header, sidebar,
+       persistent panel) needs `contain: paint; transform-style: flat;`
+       alongside it — see .navbar / .admin-sidebar below.
+     - Keep an explicit background-color on html/body/full-page
+       wrappers — never leave it transparent.
+   ══════════════════════════════════════════════════════════════════ */
+
 /* ─── Variables ───────────────────────────────────────────────── */
 :root {
   --navy:       #0b1d3e;

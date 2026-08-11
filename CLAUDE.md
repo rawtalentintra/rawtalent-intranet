@@ -24,3 +24,34 @@ Internal intranet/knowledge-base tool for RawTalent, a childcare staffing agency
 - `.env` holds secrets (Supabase DB creds, `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`) — git-ignored, never commit. Production values live in Railway's Variables tab, set independently.
 - No ORM — raw SQL via the `db` client (`getDb().execute({ sql, args })`).
 - Prefer small, targeted route/middleware additions over new abstractions.
+
+## Known issue: Chrome GPU compositor bug on scaled macOS displays
+
+Spent a long session (2026-08-11) chasing a "blank navbar/sidebar/table content" bug
+that turned out to be a real Chromium bug, not app code — see commit `594aceb` and
+the ones just before it for the full investigation. It only reproduces on Chrome on
+a MacBook's built-in Retina display set to a **non-native/scaled resolution**
+(anything except the display's actual default) — never on Safari, never on an
+external monitor at native resolution, and disabling GPU rasterization alone did
+NOT fix it. Root cause: fractional macOS display scaling means the physical pixel
+grid doesn't align with Chrome's GPU compositor tile grid, so a tile drops and
+flashes the page background through mid-repaint.
+
+**When adding new CSS, avoid reintroducing the triggers:**
+- Don't add `backdrop-filter` anywhere (removed from `.modal-overlay` for this
+  reason). If a blur effect is genuinely needed, test it at a scaled resolution on
+  a MacBook first.
+- Don't add `will-change` or `transform: translateZ(0)`/`translate3d(...)` as a
+  "GPU speed" trick — on this bug, they make it *worse*, not better.
+- Any new `position: fixed` (or `sticky`) element that spans a large area (a
+  header, sidebar, persistent panel) should get `contain: paint;
+  transform-style: flat;` alongside it, matching `.navbar`/`.admin-sidebar` in
+  `public/css/style.css` — isolates its paint into one GPU layer instead of
+  letting Chrome split it into sub-tiles that can desync.
+- Keep explicit `background-color` on `html`/`body`/any full-page wrapper — never
+  rely on the default transparent background, since that's what a dropped tile
+  flashes through to.
+
+If "blank/flashing content, Chrome-only, doesn't reproduce in the recording,
+reporter mentions a MacBook" comes up again: ask what physical display it's on
+and whether it's at native or scaled resolution before assuming it's an app bug.
