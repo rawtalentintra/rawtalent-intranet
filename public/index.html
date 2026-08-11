@@ -66,7 +66,12 @@
       flex-direction: column;
       gap: 3px;
       min-height: 100vh;
-      transition: width .22s ease, padding .22s ease;
+      /* No transition here on purpose — matches the admin-layout fix in
+         style.css. Animating this width was the actual trigger for the
+         navbar/sidebar blink bug (confirmed via screen recording): it
+         collides with the sticky .navbar's contain:paint/translateZ
+         compositing layer mid-transition. Instant toggle avoids the buggy
+         state instead of patching around it. */
     }
     .sidebar-nav.collapsed {
       width: 0;

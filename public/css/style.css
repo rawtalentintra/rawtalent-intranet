@@ -667,7 +667,13 @@ button { cursor: pointer; font-family: inherit; }
   display: grid;
   grid-template-columns: 244px 1fr;
   min-height: calc(100vh - 64px);
-  transition: grid-template-columns .22s ease;
+  /* No transition here on purpose — animating grid-template-columns is
+     what was actually causing the navbar/sidebar to blink/go blank
+     (confirmed via screen recording), not the periodic data polling we
+     paused earlier. Animating this grid track collides with the sticky
+     .navbar's contain:paint/translateZ compositing layer (a known Chrome
+     bug class) and mispaints it mid-transition. An instant toggle avoids
+     the buggy state entirely instead of trying to patch around it. */
   position: relative;
 }
 .admin-layout.sidebar-collapsed { grid-template-columns: 0 1fr; }
