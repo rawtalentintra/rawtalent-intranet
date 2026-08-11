@@ -345,6 +345,7 @@
     <main class="admin-content">
 
       <!-- Our Team -->
+      <template id="__lazy_team">
       <div class="admin-section" id="section-team">
         <div class="admin-header">
           <div>
@@ -388,8 +389,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Projects Dashboard -->
+      <template id="__lazy_projects_dashboard">
       <div class="admin-section" id="section-projects-dashboard">
         <div class="admin-header">
           <div>
@@ -423,8 +426,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Leave Requests (oversight — approvals themselves happen in the main app) -->
+      <template id="__lazy_leave_requests">
       <div class="admin-section" id="section-leave-requests">
         <div class="admin-header">
           <div>
@@ -464,9 +469,11 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Leads -->
       <!-- WFP Dashboard -->
+      <template id="__lazy_sales_dashboard">
       <div class="admin-section" id="section-sales-dashboard">
         <div class="admin-header">
           <div>
@@ -516,6 +523,7 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Wrapped in <template> so this section's markup is parsed but not
            part of the live DOM (no weight, no paint cost) until someone
@@ -593,6 +601,7 @@
       </template>
 
       <!-- Leads -->
+      <template id="__lazy_leads">
       <div class="admin-section" id="section-leads">
         <div class="admin-header">
           <div>
@@ -675,6 +684,7 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Add Centre — same fields/behaviour (excluded-centre warning, fuzzy
            duplicate check) as the consultant-facing "Submit Lead" form on
@@ -934,6 +944,7 @@
       </div>
       </template>
 
+      <template id="__lazy_route_planner">
       <div class="admin-section" id="section-route-planner">
         <div class="admin-header">
           <div>
@@ -1068,6 +1079,7 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Reports (Clients/Candidates/Bookings/Timesheets) — the four
            sections here are generated from REPORT_CONFIG at init() time
@@ -1126,6 +1138,7 @@
       </div>
 
       <!-- Meetings (private — super_admin only) -->
+      <template id="__lazy_meetings">
       <div class="admin-section" id="section-meetings">
         <div class="admin-header">
           <div>
@@ -1153,6 +1166,7 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Articles List -->
       <div class="admin-section active" id="section-articles">
@@ -1188,6 +1202,7 @@
       </div>
 
       <!-- New / Edit Article -->
+      <template id="__lazy_new_article">
       <div class="admin-section" id="section-new-article">
         <div class="admin-header">
           <div>
@@ -1299,8 +1314,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Users -->
+      <template id="__lazy_users">
       <div class="admin-section" id="section-users">
         <div class="admin-header">
           <div>
@@ -1346,8 +1363,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Role Permissions (reference only — super_admin only) -->
+      <template id="__lazy_role_permissions">
       <div class="admin-section" id="section-role-permissions">
         <div class="admin-header">
           <div>
@@ -1378,8 +1397,10 @@
           <strong>Note:</strong> QA View is a narrow role — Articles (view/add/edit, no delete), FAQ Review (add/edit approved FAQs only — no Slack/Fathom scanning, no candidate review, no delete), and Call Quality (Dashboard/Rubrics/Evaluator, same as Admin). Everything else in the admin panel is invisible to it, both in the nav and on every underlying route — hiding a nav item is a UX nicety here, the real enforcement is server-side on each API route.
         </div>
       </div>
+      </template>
 
       <!-- Technical Documentation -->
+      <template id="__lazy_tech_docs">
       <div class="admin-section" id="section-tech-docs">
         <div class="admin-header">
           <div>
@@ -1508,6 +1529,7 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- RT API Data Reference — super_admin only, personal reference for
            what's actually pullable from the RtApiReport API (the source
@@ -1517,6 +1539,7 @@
            surfaces what's currently displayed, not everything the API
            returns. Re-check swagger.json periodically — this API has
            changed shape at least once already (see the callout below). -->
+      <template id="__lazy_rt_api_reference">
       <div class="admin-section" id="section-rt-api-reference">
         <div class="admin-header">
           <div>
@@ -1884,8 +1907,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Glossary -->
+      <template id="__lazy_glossary">
       <div class="admin-section" id="section-glossary">
         <div class="admin-header">
           <div>
@@ -1918,8 +1943,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Workforce Queue -->
+      <template id="__lazy_workforce_queue">
       <div class="admin-section" id="section-workforce-queue">
         <div class="admin-header">
           <div>
@@ -1951,8 +1978,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Training Dashboard -->
+      <template id="__lazy_training_dashboard">
       <div class="admin-section" id="section-training-dashboard">
         <div class="admin-header">
           <div>
@@ -1964,8 +1993,10 @@
           <div class="loading-spinner"><div class="spinner"></div></div>
         </div>
       </div>
+      </template>
 
       <!-- Build Training -->
+      <template id="__lazy_training_build">
       <div class="admin-section" id="section-training-build">
         <div class="admin-header">
           <div>
@@ -2001,8 +2032,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Feedback -->
+      <template id="__lazy_feedback">
       <div class="admin-section" id="section-feedback">
         <div class="admin-header">
           <div>
@@ -2019,8 +2052,10 @@
           <div class="loading-spinner"><div class="spinner"></div></div>
         </div>
       </div>
+      </template>
 
       <!-- Change Logs -->
+      <template id="__lazy_logs">
       <div class="admin-section" id="section-logs">
         <div class="admin-header">
           <div>
@@ -2053,8 +2088,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- AI Sources -->
+      <template id="__lazy_sources">
       <div class="admin-section" id="section-sources">
         <div class="admin-header">
           <div>
@@ -2134,8 +2171,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- FAQ Review -->
+      <template id="__lazy_faq">
       <div class="admin-section" id="section-faq">
         <div class="admin-header">
           <div>
@@ -2207,8 +2246,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Call Grading Rubrics -->
+      <template id="__lazy_call_rubrics">
       <div class="admin-section" id="section-call-rubrics">
         <div class="admin-header">
           <div>
@@ -2253,8 +2294,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Call Quality Evaluator -->
+      <template id="__lazy_calls">
       <div class="admin-section" id="section-calls">
         <div class="admin-header">
           <div>
@@ -2348,8 +2391,10 @@
           </div>
         </div>
       </div>
+      </template>
 
       <!-- Call Quality Dashboard -->
+      <template id="__lazy_calls_dashboard">
       <div class="admin-section" id="section-calls-dashboard">
         <div class="admin-header">
           <div>
@@ -2448,6 +2493,7 @@
           </div>
         </div>
       </div>
+      </template>
 
     </main>
   </div>
@@ -3207,9 +3253,13 @@
       } catch { location.href = '/login.html'; return; }
 
       loadArticles();
-      if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
-      loadCategoriesForDatalist();
-      loadTagsForDatalist();
+      // loadUsers()/loadActiveSessions() moved to showSection()'s id ===
+      // 'users' branch — the Users section is now lazy-loaded, so calling
+      // these here (before that section's DOM exists) would throw.
+      // loadCategoriesForDatalist()/loadTagsForDatalist() moved to
+      // showSection()'s id === 'new-article' branch — their <datalist>
+      // targets live inside that now-lazy-loaded section, same reason as
+      // the Users move above.
       // Auto-refresh (was every 5 min) paused — this is the only background
       // function that runs for literally every role on every page, so it's
       // the prime suspect for the sidebar/navbar blinking reported even on
@@ -4144,12 +4194,24 @@
       // (bigger page = more likely to trigger it), on top of being a
       // straightforwardly good idea for a single-file app this size.
       // Reports is generated fresh each time (cheap, and its data can go
-      // stale); My Centres/Document Checker are static markup so the
-      // <template> just gets swapped in once and stays.
+      // stale, so it's not template-cached like the rest); every other
+      // non-default section's static markup sits inert in a matching
+      // <template id="__lazy_${id with hyphens as underscores}"> and gets
+      // swapped into the live DOM here on first visit, then stays — only
+      // 'articles' (the default landing section, shown pre-JS via its
+      // 'active' class) and 'my-centres'/'document-checker' (handled just
+      // above by the same convention) are exempt.
       if (id.startsWith('report-')) { renderReportSectionsHtml(); applyReportAllTimeRestrictions(); }
-      if (id === 'my-centres' || id === 'document-checker') {
-        const tpl = document.getElementById(id === 'my-centres' ? '__lazy_my_centres' : '__lazy_document_checker');
-        if (tpl) tpl.replaceWith(tpl.content);
+      const lazyTpl = document.getElementById('__lazy_' + id.replace(/-/g, '_'));
+      if (lazyTpl) {
+        lazyTpl.replaceWith(lazyTpl.content);
+        // Re-run role-based UI scoping (hiding the FAQ scan/candidate cards
+        // for qa_view etc., hiding the Leads Save button for qa_view, ...)
+        // now that this section's DOM actually exists — applyRoleVisibility()
+        // already no-oped harmlessly on these at init() (optional-chained,
+        // section didn't exist yet), so without this a lazy-loaded section
+        // would show role-inappropriate UI on first visit.
+        applyRoleVisibility();
       }
 
       const sectionEl = document.getElementById(`section-${id}`);
@@ -4164,6 +4226,8 @@
       if (id === 'new-article') {
         initEditor();
         if (!editingArticleId) resetArticleForm();
+        loadCategoriesForDatalist();
+        loadTagsForDatalist();
       }
       if (id === 'feedback') loadFeedback();
       if (id === 'logs') loadLogs();
@@ -4176,6 +4240,7 @@
       if (id === 'calls') loadCallsSection();
       if (id === 'calls-dashboard') loadCallsDashboard();
       if (id === 'call-rubrics') loadRubricReference();
+      if (id === 'users') { loadUsers(); loadActiveSessions(); }
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
@@ -4307,6 +4372,12 @@
         editingArticleId = id;
         originalArticleSnapshot = { title: a.title || '', content: a.content || '' };
         lastSavedChangeContext = null;
+        // Section must exist in the live DOM before any of the field
+        // population below — New Article is lazy-loaded (see showSection()'s
+        // __lazy_ template swap), and editingArticleId is already truthy
+        // here, so showSection() knows not to reset the form fields we're
+        // about to fill in.
+        showSection('new-article', document.getElementById('navNewArticle'));
         const announceBtn = document.getElementById('announceChangesBtn');
         if (announceBtn) announceBtn.style.display = 'none';
         document.getElementById('articleFormTitle').textContent = 'Edit Article';
@@ -4330,7 +4401,6 @@
         if (logsBtn) logsBtn.style.display = 'inline-flex';
         const filePanel = document.getElementById('fileAttachmentsPanel');
         if (filePanel) { filePanel.style.display = 'block'; loadArticleFiles(id); }
-        showSection('new-article', document.getElementById('navNewArticle'));
         await initEditor();
         joditEditor.value = a.content || '';
         document.getElementById('articlePreview').innerHTML = DOMPurify.sanitize(a.content || '', { ADD_TAGS: ['table','thead','tbody','tr','th','td'] });
@@ -4353,7 +4423,12 @@
     // on save.
     function newArticle() {
       editingArticleId = null;
-      resetArticleForm();
+      // Not resetArticleForm() directly — the New Article section is now
+      // lazy-loaded (see showSection()'s __lazy_ template swap), and this
+      // form lives inside it. showSection() unwraps that template first,
+      // then calls resetArticleForm() itself since editingArticleId is
+      // null at that point — calling it here first would hit a section
+      // that doesn't exist in the live DOM yet.
       showSection('new-article', document.getElementById('navNewArticle'));
     }
 
