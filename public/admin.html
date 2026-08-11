@@ -233,6 +233,9 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
+        <div class="admin-nav-item" onclick="showSection('my-centres', this)">
+          <span class="admin-nav-icon">🏢</span> My Centres
+        </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
@@ -508,6 +511,65 @@
         </div>
       </div>
 
+      <!-- My Centres -->
+      <div class="admin-section" id="section-my-centres">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🏢 My Centres</div>
+            <div class="admin-page-sub">RawTalent's real, active client centres — booking health and when each was last visited. Not yet split by Workforce Partner territory, so everyone sees the full list for now.</div>
+          </div>
+        </div>
+
+        <div id="myCentresListScreen">
+          <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
+            <div class="leads-filter-bar" style="padding:0;border-bottom:none">
+              <input type="text" id="centresFilterSearch" class="form-control" placeholder="Search centre or suburb…" oninput="filterMyCentresTable()">
+              <select id="centresFilterHealth" onchange="filterMyCentresTable()">
+                <option value="">Health: any</option>
+                <option value="growing">Growing</option>
+                <option value="healthy">Healthy</option>
+                <option value="opportunity">Opportunity</option>
+                <option value="needs_attention">Needs attention</option>
+                <option value="declining">Declining</option>
+                <option value="new_activating">New/Activating</option>
+                <option value="dormant">Dormant</option>
+              </select>
+              <select id="centresFilterState" onchange="filterMyCentresTable()">
+                <option value="">State: any</option>
+              </select>
+            </div>
+          </div>
+          <div class="admin-table-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
+              <div style="font-weight:700;color:var(--navy);font-size:14px">Centres</div>
+              <div style="font-size:11px;color:var(--text-muted)" id="myCentresCount"></div>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact" id="myCentresTable">
+                <thead>
+                  <tr>
+                    <th>Centre</th>
+                    <th>Suburb</th>
+                    <th>State</th>
+                    <th>Health</th>
+                    <th>Bookings (30d)</th>
+                    <th>Trend vs prior 30d</th>
+                  </tr>
+                </thead>
+                <tbody id="myCentresTableBody">
+                  <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="centre360Screen" style="display:none">
+          <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMyCentres()">← Back to My Centres</button>
+          <div id="centre360Body"></div>
+        </div>
+      </div>
+
       <!-- Leads -->
       <div class="admin-section" id="section-leads">
         <div class="admin-header">
@@ -662,6 +724,69 @@
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeAddCentreModal()">Cancel</button>
             <button class="btn-add" id="centreLeadSubmitBtn" onclick="submitCentreLead()">Add Centre</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visit logging — Centre 360's "+ Log Visit" and re-opening a past
+           visit from the activity timeline share this one modal. -->
+      <div class="modal-overlay" id="visitLogModal" onclick="if(event.target===this)closeVisitLogModal()">
+        <div class="modal" style="max-width:520px">
+          <div class="modal-header">
+            <div class="modal-title" id="visitLogModalTitle">Log a Visit</div>
+            <button class="modal-close" onclick="closeVisitLogModal()">×</button>
+          </div>
+          <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Visit date</label>
+                <input type="date" id="visitLogDate" class="form-control">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">Status</label>
+                <select id="visitLogStatus" class="form-control">
+                  <option value="planned">Planned</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Purpose</label>
+              <input type="text" id="visitLogPurpose" class="form-control" placeholder="e.g. Welcome visit, check-in, service follow-up…">
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Pre-visit brief <span class="optional">(optional)</span></label>
+              <textarea id="visitLogBrief" class="form-control" rows="2" placeholder="What to cover, recent context…"></textarea>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Outcome</label>
+              <select id="visitLogOutcome" class="form-control">
+                <option value="">—</option>
+                <option value="positive">Positive</option>
+                <option value="neutral">Neutral</option>
+                <option value="concern">Concern</option>
+                <option value="issue_raised">Issue raised</option>
+              </select>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Notes <span class="optional">(optional)</span></label>
+              <textarea id="visitLogNotes" class="form-control" rows="3" placeholder="What happened…"></textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Next step <span class="optional">(optional)</span></label>
+                <input type="text" id="visitLogNextStep" class="form-control" placeholder="e.g. Check in after second booking">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">Due</label>
+                <input type="date" id="visitLogNextStepDue" class="form-control">
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeVisitLogModal()">Cancel</button>
+            <button class="btn-add" id="visitLogSubmitBtn" onclick="submitVisitLog()">Save Visit</button>
           </div>
         </div>
       </div>
@@ -3092,7 +3217,7 @@
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'route-planner']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner']
     };
 
     function applyRoleVisibility() {
@@ -4000,6 +4125,7 @@
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') loadDocumentCheckHistory();
+      if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
@@ -5291,25 +5417,48 @@
       const now = Date.now();
       allLeads.forEach(l => {
         if (l.lead_called_status === 'scheduled' && l.lead_called_at && new Date(l.lead_called_at).getTime() < now) {
-          items.push({ lead: l, reason: `Call overdue — ${daysSince(l.lead_called_at)}d`, urgency: daysSince(l.lead_called_at), cls: 'attn-overdue' });
+          items.push({ type: 'lead', lead: l, reason: `Call overdue — ${daysSince(l.lead_called_at)}d`, urgency: daysSince(l.lead_called_at), cls: 'attn-overdue' });
         } else if (l.lead_called_status === 'to_schedule' && daysSince(l.created_at) >= 3) {
-          items.push({ lead: l, reason: `Not yet called — ${daysSince(l.created_at)}d old`, urgency: daysSince(l.created_at), cls: 'attn-stale' });
+          items.push({ type: 'lead', lead: l, reason: `Not yet called — ${daysSince(l.created_at)}d old`, urgency: daysSince(l.created_at), cls: 'attn-stale' });
         }
         if (l.centre_visited_status === 'scheduled' && l.centre_visited_at && new Date(l.centre_visited_at).getTime() < now) {
-          items.push({ lead: l, reason: `Visit overdue — ${daysSince(l.centre_visited_at)}d`, urgency: daysSince(l.centre_visited_at), cls: 'attn-overdue' });
+          items.push({ type: 'lead', lead: l, reason: `Visit overdue — ${daysSince(l.centre_visited_at)}d`, urgency: daysSince(l.centre_visited_at), cls: 'attn-overdue' });
         } else if (l.lead_called_status === 'done' && l.centre_visited_status === 'to_schedule' && l.lead_called_at && daysSince(l.lead_called_at) >= 5) {
-          items.push({ lead: l, reason: `Called, no visit booked — ${daysSince(l.lead_called_at)}d`, urgency: daysSince(l.lead_called_at), cls: 'attn-stale' });
+          items.push({ type: 'lead', lead: l, reason: `Called, no visit booked — ${daysSince(l.lead_called_at)}d`, urgency: daysSince(l.lead_called_at), cls: 'attn-stale' });
         }
         if (l.centre_visited_status === 'done' && l.signed_status === 'pending' && l.centre_visited_at && daysSince(l.centre_visited_at) >= 5) {
-          items.push({ lead: l, reason: `Awaiting sign decision — ${daysSince(l.centre_visited_at)}d`, urgency: daysSince(l.centre_visited_at), cls: 'attn-waiting' });
+          items.push({ type: 'lead', lead: l, reason: `Awaiting sign decision — ${daysSince(l.centre_visited_at)}d`, urgency: daysSince(l.centre_visited_at), cls: 'attn-waiting' });
+        }
+      });
+      // Declining/needs-attention centres — the framework's own note about
+      // "old leads shouldn't overwhelm the daily queue" applies just as
+      // much here: 'dormant' is by far the largest health category (~77%
+      // of the real active portfolio) and dumping all of them into a daily
+      // action queue would drown out everything actually urgent. Dormant
+      // centres are still fully visible via My Centres' own health filter
+      // — just not force-fed into this list.
+      myCentresData.forEach(c => {
+        if (c.health === 'declining') {
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue' });
+        } else if (c.health === 'needs_attention') {
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, reason: c.healthReasons[0] || 'Needs attention', urgency: 30, cls: 'attn-stale' });
         }
       });
       items.sort((a, b) => b.urgency - a.urgency);
       return items;
     }
 
+    // My Centres' own data doubles as the source for the dashboard's
+    // centre-health attention signals — fetched once and reused rather
+    // than each screen pulling RT independently.
+    async function ensureCentresLoaded() {
+      if (myCentresData.length) return;
+      try { myCentresData = await fetch('/api/centres').then(r => r.json()); } catch { myCentresData = []; }
+    }
+
     async function loadSalesDashboard() {
       if (!allLeads.length) { try { allLeads = await fetch('/api/leads').then(r => r.json()); } catch { allLeads = []; } }
+      await ensureCentresLoaded();
       const rangeKey = document.getElementById('salesDashRange').value;
       const { from, to } = salesDashRange(rangeKey);
       const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
@@ -5376,16 +5525,31 @@
         box.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Nothing overdue — pipeline is current 🎉</div>`;
         return;
       }
-      const shown = items.slice(0, 15);
+      // A flat sort-by-urgency-then-slice(15) buries centre signals
+      // completely once the lead backlog is large (verified against real
+      // data: 250+ leads sitting uncalled for 130+ days outrank every
+      // centre health signal on raw day-count alone) — lead staleness and
+      // centre booking-trend risk aren't really comparable on one numeric
+      // scale anyway. Reserving separate slots keeps both visible
+      // regardless of how big either backlog gets.
+      const leadItems = items.filter(it => it.type !== 'centre');
+      const centreItems = items.filter(it => it.type === 'centre');
+      const shown = [...leadItems.slice(0, 10), ...centreItems.slice(0, 5)].sort((a, b) => b.urgency - a.urgency);
       box.innerHTML = `
-        ${shown.map(it => `
+        ${shown.map(it => it.type === 'centre' ? `
+          <div class="attn-row" onclick="goToCentre360('${it.centreKey}')">
+            <span class="attn-chip ${it.cls}">${escHtml(it.reason)}</span>
+            <span class="attn-centre">${escHtml(it.name)}</span>
+            <span class="attn-meta">${escHtml(it.suburb || '—')}, ${escHtml(it.state || '—')}</span>
+            <span class="attn-meta">Existing centre</span>
+          </div>` : `
           <div class="attn-row" onclick="openLeadDetail('${it.lead.id}')">
             <span class="attn-chip ${it.cls}">${escHtml(it.reason)}</span>
             <span class="attn-centre">${escHtml(it.lead.centre_name)}</span>
             <span class="attn-meta">${escHtml(it.lead.suburb || '—')}, ${escHtml(it.lead.state || '—')}</span>
             <span class="attn-meta">${escHtml(it.lead.assigned_workforce_partner || 'Unassigned')}</span>
           </div>`).join('')}
-        ${items.length > shown.length ? `<div class="attn-more">+ ${items.length - shown.length} more need attention — open the full Leads list to work through them</div>` : ''}`;
+        ${items.length > shown.length ? `<div class="attn-more">+ ${items.length - shown.length} more need attention — open the full Leads list or My Centres to work through them</div>` : ''}`;
     }
 
     function renderSalesPartnerCards(leads) {
@@ -5394,7 +5558,12 @@
       document.getElementById('salesPartnerRow').innerHTML = partners.map(p => {
         const stateLeads = leads.filter(l => l.state === p.key);
         const c = salesFunnelCounts(stateLeads);
-        const attnCount = attention.filter(a => a.lead.state === p.key).length;
+        // Centre attention items aren't scoped to a Workforce Partner yet
+        // (see the My Centres section note) and RT's state is a full name
+        // ("Victoria") rather than this card's short 'VIC'/'SA' key, so
+        // they're excluded from this specific per-partner count rather
+        // than compared incorrectly.
+        const attnCount = attention.filter(a => a.type !== 'centre' && a.lead.state === p.key).length;
         return `
           <div class="admin-table-card" style="padding:18px 20px;flex:1">
             <div class="sd-card-title" style="margin-bottom:2px">${p.short}</div>
@@ -5443,6 +5612,276 @@
               <div class="lead-chart-bar-label">${monthLabel(k)}</div>
             </div>`).join('')}
         </div>`;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // My Centres / Centre 360 (services/centreHealthService.js backs this
+    // — see routes/centres.js for the API). A "centre" here is RT's real,
+    // live client/location data, not a leads row — 0 leads have ever
+    // reached signed_status='signed' in production, while RT already has
+    // ~360 real active client centres, so this reads straight from RT.
+    // ══════════════════════════════════════════════════════════════
+    const CENTRE_HEALTH_META = {
+      growing: { label: '📈 Growing', bg: '#dcfce7', color: '#15803d' },
+      healthy: { label: '✅ Healthy', bg: 'rgba(34,197,94,.12)', color: '#15803d' },
+      new_activating: { label: '🌱 New/Activating', bg: 'rgba(37,99,235,.12)', color: '#2563eb' },
+      opportunity: { label: '💡 Opportunity', bg: '#fef3c7', color: '#b45309' },
+      needs_attention: { label: '⚠️ Needs Attention', bg: '#fef3c7', color: '#b45309' },
+      declining: { label: '📉 Declining', bg: '#fef2f2', color: '#c0392b' },
+      dormant: { label: '💤 Dormant', bg: 'var(--gray-100)', color: 'var(--gray-600)' }
+    };
+    function centreHealthBadge(category) {
+      const meta = CENTRE_HEALTH_META[category] || { label: category, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
+      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
+    }
+
+    let myCentresData = [];
+    let currentCentreKey = null;
+
+    async function loadMyCentres() {
+      const body = document.getElementById('myCentresTableBody');
+      try {
+        myCentresData = await fetch('/api/centres').then(r => r.json());
+        populateCentresStateFilter();
+        filterMyCentresTable();
+      } catch {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load centres.</td></tr>';
+      }
+    }
+
+    function populateCentresStateFilter() {
+      const select = document.getElementById('centresFilterState');
+      const current = select.value;
+      const states = [...new Set(myCentresData.map(c => c.state).filter(Boolean))].sort();
+      select.innerHTML = '<option value="">State: any</option>' + states.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+      select.value = current;
+    }
+
+    function filterMyCentresTable() {
+      const q = document.getElementById('centresFilterSearch').value.trim().toLowerCase();
+      const health = document.getElementById('centresFilterHealth').value;
+      const state = document.getElementById('centresFilterState').value;
+      let rows = myCentresData;
+      if (q) rows = rows.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
+      if (health) rows = rows.filter(c => c.health === health);
+      if (state) rows = rows.filter(c => c.state === state);
+      renderMyCentresTable(rows);
+    }
+
+    function renderMyCentresTable(rows) {
+      const body = document.getElementById('myCentresTableBody');
+      document.getElementById('myCentresCount').textContent = `${rows.length} of ${myCentresData.length}`;
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No centres match these filters.</td></tr>';
+        return;
+      }
+      const sorted = rows.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      body.innerHTML = sorted.map(c => {
+        const trend = c.bookingsPrev30dCount > 0
+          ? `${c.bookings30dCount > c.bookingsPrev30dCount ? '▲' : c.bookings30dCount < c.bookingsPrev30dCount ? '▼' : '—'} ${c.bookingsPrev30dCount} → ${c.bookings30dCount}`
+          : (c.bookings30dCount > 0 ? `${c.bookings30dCount} (new)` : '—');
+        return `
+        <tr style="cursor:pointer" onclick="openCentre360('${c.centreKey}')">
+          <td class="td-truncate" style="max-width:220px" title="${escHtml(c.name)}">${escHtml(c.name)}</td>
+          <td>${escHtml(c.suburb || '—')}</td>
+          <td>${escHtml(c.state || '—')}</td>
+          <td>${centreHealthBadge(c.health)}</td>
+          <td>${c.bookings30dCount}</td>
+          <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Jumps here from outside My Centres (e.g. the WFP Dashboard's
+    // attention queue) — navigates to the section first, then opens the
+    // centre, done as real JS rather than a nested-quote CSS selector
+    // string inside an inline onclick attribute.
+    function goToCentre360(centreKey) {
+      showSection('my-centres', document.querySelector('[onclick*="my-centres"]'));
+      openCentre360(centreKey);
+    }
+
+    async function openCentre360(centreKey) {
+      currentCentreKey = centreKey;
+      document.getElementById('myCentresListScreen').style.display = 'none';
+      document.getElementById('centre360Screen').style.display = 'block';
+      window.scrollTo({ top: 0 });
+      const bodyEl = document.getElementById('centre360Body');
+      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const enc = encodeURIComponent(centreKey);
+        const [centre, bookingsRes, educators, activity] = await Promise.all([
+          fetch(`/api/centres/${enc}`).then(r => r.json()),
+          fetch(`/api/centres/${enc}/bookings`).then(r => r.json()),
+          fetch(`/api/centres/${enc}/educators`).then(r => r.json()),
+          fetch(`/api/centres/${enc}/activity`).then(r => r.json())
+        ]);
+        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
+      } catch {
+        bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
+      }
+    }
+
+    function backToMyCentres() {
+      document.getElementById('centre360Screen').style.display = 'none';
+      document.getElementById('myCentresListScreen').style.display = 'block';
+      currentCentreKey = null;
+      window.scrollTo({ top: 0 });
+    }
+
+    function renderCentre360(c, bookingsRes, educators, activity) {
+      const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px">
+          <div>
+            <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(c.name)}</div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${escHtml([c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file')}</div>
+          </div>
+          ${centreHealthBadge(c.health)}
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="sd-card-title">Overview</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px">
+            <div><span style="color:var(--text-muted)">Contact:</span> ${escHtml(c.contactName || '—')}</div>
+            <div><span style="color:var(--text-muted)">Phone:</span> ${escHtml(c.contactNo || '—')}</div>
+            <div><span style="color:var(--text-muted)">Email:</span> ${escHtml(c.email || '—')}</div>
+            <div><span style="color:var(--text-muted)">Client since:</span> ${c.createdDate ? fmtDate(c.createdDate) : '—'}</div>
+          </div>
+          ${c.healthReasons && c.healthReasons.length ? `
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--text)">
+              ${c.healthReasons.map(r => `<div>• ${escHtml(r)}</div>`).join('')}
+            </div>` : ''}
+          <button class="btn-add" style="margin-top:14px;padding:6px 14px;font-size:12.5px" onclick="openVisitLogModal('${c.centreKey}')">+ Log Visit</button>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="sd-card-title">Booking Performance</div>
+          <div class="sd-card-sub">Last 100 days</div>
+          <div style="display:flex;gap:28px;margin-top:12px">
+            <div><div style="font-size:20px;font-weight:700;color:var(--navy)">${bookingsRes.bookings.length}</div><div style="font-size:11.5px;color:var(--text-muted)">Total bookings</div></div>
+            <div><div style="font-size:20px;font-weight:700;color:var(--navy)">${bookingsRes.fillRate !== null ? bookingsRes.fillRate + '%' : '—'}</div><div style="font-size:11.5px;color:var(--text-muted)">Fill rate</div></div>
+            <div><div style="font-size:20px;font-weight:700;color:var(--navy)">${upcoming}</div><div style="font-size:11.5px;color:var(--text-muted)">Upcoming</div></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="sd-card-title">Educator Relationships</div>
+          <div class="sd-card-sub">Ranked by shifts worked, last 100 days</div>
+          ${educators.length ? `
+            <div style="margin-top:10px">
+              ${educators.slice(0, 10).map(e => `
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12.5px">
+                  <span>${escHtml(e.name)}</span><span style="color:var(--text-muted)">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'}</span>
+                </div>`).join('')}
+            </div>` : '<div style="font-size:12.5px;color:var(--text-muted);margin-top:10px">No filled bookings in this window.</div>'}
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px">
+          <div class="sd-card-title">Relationship History</div>
+          <div style="margin-top:10px">${renderCentreActivityTimeline(activity)}</div>
+        </div>`;
+    }
+
+    function renderCentreActivityTimeline(events) {
+      if (!events.length) return '<div style="font-size:12.5px;color:var(--text-muted)">No activity recorded yet.</div>';
+      return events.slice(0, 30).map(ev => {
+        if (ev.type === 'visit') {
+          const v = ev.data;
+          return `
+            <div class="attn-row" style="cursor:pointer" onclick="openVisitLogModal('${v.centre_key}','${v.id}')">
+              <span class="attn-chip lead-badge-sched">🚗 ${escHtml(v.status === 'planned' ? 'Planned Visit' : v.status === 'cancelled' ? 'Cancelled Visit' : 'Visit')}</span>
+              <span class="attn-centre">${escHtml(v.purpose || 'Visit')}${v.outcome ? ` · ${escHtml(v.outcome.replace('_', ' '))}` : ''}</span>
+              <span class="attn-meta">${fmtDate(v.visit_date)}</span>
+            </div>`;
+        }
+        const b = ev.data;
+        return `
+          <div class="attn-row">
+            <span class="attn-chip badge-workforce">📅 ${escHtml(bookingStatusLabel(b.statusId))}</span>
+            <span class="attn-centre">Booking</span>
+            <span class="attn-meta">${fmtDate(b.bookingDate)}</span>
+          </div>`;
+      }).join('');
+    }
+
+    // ── Visit logging modal ──────────────────────────────────────────
+    let visitLogCentreKey = null;
+    let visitLogEditingId = null;
+
+    function toDateInputValue(d) {
+      if (!d) return '';
+      return new Date(d).toISOString().slice(0, 10);
+    }
+
+    async function openVisitLogModal(centreKey, visitId) {
+      visitLogCentreKey = centreKey;
+      visitLogEditingId = visitId || null;
+      document.getElementById('visitLogModalTitle').textContent = visitId ? 'Edit Visit' : 'Log a Visit';
+      ['visitLogPurpose', 'visitLogBrief', 'visitLogNotes', 'visitLogNextStep', 'visitLogNextStepDue'].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('visitLogStatus').value = 'planned';
+      document.getElementById('visitLogOutcome').value = '';
+      document.getElementById('visitLogDate').value = toDateInputValue(new Date());
+
+      if (visitId) {
+        try {
+          const visits = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/visits`).then(r => r.json());
+          const v = visits.find(x => x.id === visitId);
+          if (v) {
+            document.getElementById('visitLogDate').value = toDateInputValue(v.visit_date);
+            document.getElementById('visitLogStatus').value = v.status;
+            document.getElementById('visitLogPurpose').value = v.purpose || '';
+            document.getElementById('visitLogBrief').value = v.pre_visit_brief || '';
+            document.getElementById('visitLogOutcome').value = v.outcome || '';
+            document.getElementById('visitLogNotes').value = v.notes || '';
+            document.getElementById('visitLogNextStep').value = v.next_step || '';
+            document.getElementById('visitLogNextStepDue').value = v.next_step_due_date || '';
+          }
+        } catch { /* fall back to a blank form rather than blocking the modal */ }
+      }
+      document.getElementById('visitLogModal').classList.add('open');
+    }
+
+    function closeVisitLogModal() {
+      document.getElementById('visitLogModal').classList.remove('open');
+      visitLogCentreKey = null;
+      visitLogEditingId = null;
+    }
+
+    async function submitVisitLog() {
+      const visitDate = document.getElementById('visitLogDate').value;
+      if (!visitDate) { toast('Visit date is required', 'error'); return; }
+      const body = {
+        visitDate: new Date(visitDate).toISOString(),
+        status: document.getElementById('visitLogStatus').value,
+        purpose: document.getElementById('visitLogPurpose').value.trim() || null,
+        preVisitBrief: document.getElementById('visitLogBrief').value.trim() || null,
+        outcome: document.getElementById('visitLogOutcome').value || null,
+        notes: document.getElementById('visitLogNotes').value.trim() || null,
+        nextStep: document.getElementById('visitLogNextStep').value.trim() || null,
+        nextStepDueDate: document.getElementById('visitLogNextStepDue').value || null
+      };
+      const btn = document.getElementById('visitLogSubmitBtn');
+      btn.disabled = true;
+      try {
+        const url = visitLogEditingId
+          ? `/api/centres/${encodeURIComponent(visitLogCentreKey)}/visits/${visitLogEditingId}`
+          : `/api/centres/${encodeURIComponent(visitLogCentreKey)}/visits`;
+        const res = await fetch(url, {
+          method: visitLogEditingId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save visit', 'error'); return; }
+        toast('Visit saved', 'success');
+        closeVisitLogModal();
+        if (currentCentreKey) openCentre360(currentCentreKey);
+      } catch {
+        toast('Network error', 'error');
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     // ══════════════════════════════════════════════════════════════

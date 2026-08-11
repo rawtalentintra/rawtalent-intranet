@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS users (
 -- Per-user grant, not a role — Build Training needs to be handed to one
 -- specific person (e.g. Sophia) without opening it to every admin.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_build_training BOOLEAN DEFAULT false;
+-- Ties a workforce_partner login to their existing free-text
+-- leads.assigned_workforce_partner label (e.g. 'Gwen Stocks (SA)') so My
+-- Centres/My Dashboard can default to that person's own portfolio. Not a
+-- foreign key — assigned_workforce_partner has always been a plain label,
+-- not a users.id reference, and changing that now would touch every
+-- existing leads row; matching on the label string is the smaller change.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wfp_label TEXT;
 
 CREATE TABLE IF NOT EXISTS articles (
   id TEXT PRIMARY KEY,
@@ -884,6 +891,23 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 
+-- Links a signed centre (entry_type='centre') to its real RT record, for My
+-- Centres/Centre 360 (health, booking performance, educator relationships —
+-- see services/centreHealthService.js). RT has no field connecting a
+-- centre back to "the lead/centre row that created it", so this has to be
+-- matched after the fact (services/centreMatchService.js), either
+-- automatically (high-confidence name/phone/suburb match) or manually via
+-- Centre 360's "Link this centre" picker when nothing matches confidently.
+-- rt_location_id (RT's clientsLocationId, matches a Booking's locationId —
+-- see the RT API Data Reference page) is the real join key for booking
+-- data, not rt_client_id — one RT client can have multiple locations/
+-- centres, each a separate leads row here.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_client_id BIGINT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_location_id BIGINT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_link_source TEXT; -- 'auto' | 'manual'
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_linked_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_rt_location_id ON leads(rt_location_id) WHERE rt_location_id IS NOT NULL;
+
 -- A running thread rather than a single overwritable field, since more
 -- than one person (a consultant, an admin, eventually a Workforce Partner)
 -- may add notes on the same lead over time — a single field would let one
@@ -898,6 +922,44 @@ CREATE TABLE IF NOT EXISTS lead_notes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lead_notes_lead_id ON lead_notes(lead_id);
+
+-- Structured post-sign visit records — distinct from the single
+-- centre_visited_status/at pair above, which is the one-time pre-sign
+-- pipeline transition ("has this lead been visited yet"). A signed centre
+-- gets many visits over its lifetime as an ongoing account, each with its
+-- own purpose/outcome/next-step, which centre_visited_at (overwritten on
+-- every status change) can't represent.
+--
+-- Keyed by centre_key, not lead_id: "My Centres" is RawTalent's real,
+-- live RT client base (~1,100 clients, most predating this app entirely),
+-- not just the leads that happen to close through this pipeline — RT's
+-- own reporting confirmed 0 leads have ever reached signed_status='signed'
+-- in production, so keying visits to a leads row would leave almost every
+-- real centre unable to have a visit logged at all. centre_key is
+-- 'loc:<clientsLocationId>' for an RT client location, or
+-- 'client:<clientId>' for the rarer client with no locations[] on file —
+-- see services/centreKeyService.js. No FK anywhere, matching this table
+-- family's existing (lack of) referential integrity.
+CREATE TABLE IF NOT EXISTS centre_visits (
+  id TEXT PRIMARY KEY,
+  centre_key TEXT NOT NULL,
+  visit_date TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned', -- 'planned' | 'completed' | 'cancelled'
+  purpose TEXT,
+  pre_visit_brief TEXT,
+  outcome TEXT, -- 'positive' | 'neutral' | 'concern' | 'issue_raised'
+  notes TEXT,
+  next_step TEXT,
+  next_step_due_date DATE,
+  created_by_email CITEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_centre_visits_centre_key ON centre_visits(centre_key);
+-- Backs the "overdue next step" signal both Centre 360 and the My
+-- Dashboard attention queue need to surface.
+CREATE INDEX IF NOT EXISTS idx_centre_visits_next_step_due ON centre_visits(next_step_due_date) WHERE next_step_due_date IS NOT NULL;
 
 -- Google Calendar sync (Workforce Partner scheduling) ──────────────
 -- Links a lead to the calendar event representing its scheduled call or

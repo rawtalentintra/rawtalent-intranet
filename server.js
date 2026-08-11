@@ -62,6 +62,7 @@ app.use('/api/meetings', require('./routes/meetings'));
 app.use('/api/leave-requests', require('./routes/leaveRequests'));
 app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
+app.use('/api/centres', require('./routes/centres'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/calendar-sync', require('./routes/calendarSync'));
 app.use('/api/route-planner', require('./routes/routePlanner'));

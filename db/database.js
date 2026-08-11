@@ -1,7 +1,19 @@
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const bcrypt = require('bcryptjs');
+
+// pg's default DATE (OID 1082) parser builds a JS Date at LOCAL midnight,
+// which then shifts a calendar day backward once anything serializes it
+// via toISOString/JSON (UTC) if the server's local timezone is ahead of
+// UTC — verified live: posting next_step_due_date '2026-07-01' came back
+// as '2026-06-30T14:00:00.000Z'. A DATE column has no timezone at all by
+// definition, so the fix is to stop pg from turning it into a Date object
+// in the first place — return the raw 'YYYY-MM-DD' string Postgres sends,
+// unchanged, for every DATE column app-wide (due_date, start_date,
+// target_date, end_date, next_step_due_date, …), not just the one that
+// happened to surface this.
+types.setTypeParser(1082, val => val);
 
 let pool;
 
