@@ -12364,15 +12364,9 @@
       const container = document.getElementById('detailFeedbackRows');
       if (!container) return;
       const rubric = callRubrics[evalDetailCurrentData?.rubric_type];
-      // A rule-based category (see the 📏 badge) has no AI reasoning behind
-      // it to give feedback on — this dropdown is for correcting the AI's
-      // judgment, and re-grading would just recompute the same mechanical
-      // result from the transcript regardless of what's typed here. If the
-      // check itself is wrong, that's a bug to report, not feedback to give.
-      const ruleBasedKeys = new Set((evalDetailCurrentData?.category_scores || []).filter(c => c.method === 'rule-based').map(c => c.key));
       const allOptions = [
         { key: 'general', label: 'General — applies to every category' },
-        ...(rubric?.categories || []).filter(c => !ruleBasedKeys.has(c.key)).map(c => ({ key: c.key, label: c.label }))
+        ...(rubric?.categories || []).map(c => ({ key: c.key, label: c.label }))
       ];
       container.innerHTML = detailFeedbackRows.map((row, i) => {
         const usedElsewhere = detailFeedbackRows.filter((r, j) => j !== i).map(r => r.categoryKey).filter(Boolean);
@@ -12448,10 +12442,9 @@
           <td style="width:50px;text-align:center;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums">${c.weight}%</td>
           <td style="font-weight:700;color:var(--navy);width:190px">
             ${escHtml(c.category)}${c.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}
-            ${c.method === 'rule-based' ? '<div title="Checked mechanically from the transcript — not AI-graded, so there\'s nothing to give AI feedback on for this category." style="font-size:9.5px;font-weight:700;color:#0e7490;background:#ecfeff;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">📏 Rule-based, not AI</div>' : ''}
             ${def ? `<ul style="margin:6px 0 0;padding-left:14px;font-size:10.5px;color:var(--text-muted);font-weight:400;line-height:1.5">${def.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}</ul>` : ''}
           </td>
-          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6;white-space:pre-line">${escHtml(c.notes) || '<span style="font-style:italic">No notes</span>'}</td>
+          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(c.notes) || '<span style="font-style:italic">No notes</span>'}</td>
           <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${c.score}/5</td>
         </tr>`;
       }).join('');
@@ -12554,9 +12547,8 @@
             <td style="padding:9px 10px;border:1px solid #dde3f0">
               <strong style="color:#0b1d3e">${escHtml(c.category)}</strong>
               ${c.critical ? '<div style="font-size:9px;font-weight:700;color:#c0392b;margin-top:2px">⛔ ZERO-TOLERANCE</div>' : ''}
-              ${c.method === 'rule-based' ? '<div style="font-size:9px;font-weight:700;color:#0e7490;margin-top:2px">📏 RULE-BASED, NOT AI</div>' : ''}
             </td>
-            <td style="padding:9px 10px;border:1px solid #dde3f0;font-size:12px;color:#333;line-height:1.5;white-space:pre-line">${escHtml(c.notes) || '—'}</td>
+            <td style="padding:9px 10px;border:1px solid #dde3f0;font-size:12px;color:#333;line-height:1.5">${escHtml(c.notes) || '—'}</td>
             <td style="padding:9px 10px;border:1px solid #dde3f0;text-align:center;font-weight:800;color:#0b1d3e">${c.score}/5</td>
           </tr>`;
       }).join('');
