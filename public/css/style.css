@@ -679,7 +679,7 @@ body:has(> .navbar) { padding-top: 64px; }
   position: relative;
 }
 .admin-layout.sidebar-collapsed { grid-template-columns: 0 1fr; }
-.admin-layout.sidebar-collapsed .admin-sidebar { padding-left: 0; padding-right: 0; }
+.admin-layout.sidebar-collapsed .admin-sidebar { width: 0; padding-left: 0; padding-right: 0; overflow: hidden; }
 .admin-layout.sidebar-collapsed .admin-sidebar-items { display: none; }
 .admin-layout.sidebar-collapsed .sidebar-collapse-toggle { left: -13px; transform: rotate(180deg); }
 
@@ -687,25 +687,22 @@ body:has(> .navbar) { padding-top: 64px; }
   background: var(--navy);
   padding: 16px 0;
   border-right: 1px solid rgba(255,255,255,.06);
-  position: sticky;
+  /* position:fixed, not sticky — same bug and same fix as .navbar (see
+     that comment for the full explanation): screen-recording proof showed
+     this element's own contents (the nav items) going unpainted, plus
+     unrelated content elsewhere on the page (an article table) rendering
+     only a fraction of its rows, right as this sidebar toggled — all
+     symptoms of the same Chrome sticky+contain:paint corruption, not
+     separate bugs. This element already spans the full remaining viewport
+     height with its own internal scroll (overflow-y:auto), so it never
+     actually needed sticky's "stick after scrolling past" behavior —
+     fixed was always the more accurate choice. */
+  position: fixed;
   top: 64px;
+  left: 0;
+  width: 244px;
   height: calc(100vh - 64px);
   overflow-y: auto;
-  /* Forces its own GPU compositing layer — without this, a known Chrome
-     bug leaves position:sticky elements blank/unpainted after enough DOM
-     mutation happens elsewhere on the page (this app has several sections
-     that periodically replace large table subtrees — Workforce Queue's
-     20s poll, Reports, etc.), since the sticky element and the mutating
-     content can end up sharing a compositing layer that Chrome fails to
-     correctly repaint. Reported live: the sidebar and the navbar (same
-     fix applied there) going fully blank for multiple real users.
-     translateZ(0) alone wasn't enough — still reported blinking/glitching
-     (worse on smaller viewports like 1280x832, where more of the page's
-     periodically-mutating content is on-screen at once). contain:paint is
-     paired with it now — see the matching comment on .navbar for why. */
-  transform: translateZ(0);
-  will-change: transform;
-  contain: paint;
 }
 
 /* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
@@ -781,7 +778,12 @@ body:has(> .navbar) { padding-top: 64px; }
 .admin-nav-item.active { background: rgba(232,114,74,.15); color: var(--orange); }
 .admin-nav-icon { font-size: 16px; width: 20px; text-align: center; }
 
-.admin-content { background: var(--offwhite); padding: 32px; overflow-y: auto; }
+/* grid-column:2 is required, not cosmetic — .admin-sidebar is
+   position:fixed (see its comment) so it no longer occupies a track in
+   .admin-layout's grid. Without this, .admin-content is the only item
+   left in grid flow and auto-placement drops it into column 1 (under/
+   behind the sidebar, at 244px wide) instead of column 2. */
+.admin-content { background: var(--offwhite); padding: 32px; overflow-y: auto; grid-column: 2; }
 
 .admin-section { display: none; }
 .admin-section.active { display: block; }
