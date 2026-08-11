@@ -1524,32 +1524,12 @@
       } catch { alert('Network error — please try again.'); }
     }
 
-    // Forces Chrome to redo compositing/paint for the page without any
-    // visible flash or layout cost (transform never triggers layout, only
-    // compositing) — a standard workaround for a known Chrome GPU
-    // rasterization bug where a layer's content (text/child elements)
-    // silently fails to paint while its background does. Reported live as
-    // the navbar/sidebar/table content intermittently going blank —
-    // confirmed NOT caused by position:sticky (this app no longer uses it
-    // anywhere, the bug persisted regardless) and correlated with viewport
-    // width/DevTools open-vs-closed, both classic signs of this Chrome bug
-    // class rather than an app logic issue. See the matching comment in
-    // admin.html for the full history.
-    function nudgeRepaint(el) {
-      const target = el || document.body;
-      requestAnimationFrame(() => {
-        target.style.transform = 'translateZ(0.01px)';
-        requestAnimationFrame(() => { target.style.transform = ''; });
-      });
-    }
-
     // Desktop sidebar collapse — shared localStorage key with the admin
     // panel, so a user's choice carries over between HeartBeat and Admin.
     function toggleDesktopSidebar() {
       const collapsed = document.getElementById('sidebarNav').classList.toggle('collapsed');
       document.querySelector('.app-shell').classList.toggle('sidebar-collapsed', collapsed);
       localStorage.setItem('hbSidebarCollapsed', collapsed ? '1' : '0');
-      nudgeRepaint();
     }
 
     // Mobile nav drawer — separate from the desktop collapse above (see the
@@ -1649,7 +1629,6 @@
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
       }
-      nudgeRepaint();
     }
 
     // ── Glossary ──────────────────────────────────────────────────
