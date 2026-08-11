@@ -235,7 +235,8 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
-        <div class="admin-nav-item" onclick="showSection('my-centres', this)">
+        <!-- TEMP DIAGNOSTIC: hidden, matching the <template>-wrapped section -->
+        <div class="admin-nav-item" style="display:none" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -245,7 +246,8 @@
           <span class="admin-nav-icon">🧭</span> Smart Routing
         </div>
       </div>
-      <div class="admin-nav-section">
+      <!-- TEMP DIAGNOSTIC: hidden, matching the <template>-wrapped section -->
+      <div class="admin-nav-section" style="display:none">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Compliance</div>
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
@@ -519,6 +521,10 @@
         </div>
       </div>
 
+      <!-- TEMP DIAGNOSTIC: wrapped in <template> so it's parsed but never
+           part of the live DOM (no weight, no paint cost) — not deleted,
+           just inert. Revert by removing the <template>/</template> tags. -->
+      <template id="__disabled_my_centres">
       <!-- My Centres -->
       <div class="admin-section" id="section-my-centres">
         <div class="admin-header">
@@ -584,6 +590,7 @@
           <div id="centre360Body"></div>
         </div>
       </div>
+      </template>
 
       <!-- Leads -->
       <div class="admin-section" id="section-leads">
@@ -855,6 +862,9 @@
         </div>
       </div>
 
+      <!-- TEMP DIAGNOSTIC: wrapped in <template>, see the matching comment
+           on My Centres above. Revert together. -->
+      <template id="__disabled_document_checker">
       <!-- Document Checker — deterministic (no AI credits) validation of
            compliance documents against our actual SOPs (see
            services/documentCheckerService.js). Documents are never
@@ -922,6 +932,7 @@
           <div id="docCheckCandidateDocsWrap"></div>
         </div>
       </div>
+      </template>
 
       <div class="admin-section" id="section-route-planner">
         <div class="admin-header">
