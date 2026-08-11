@@ -53,27 +53,29 @@ button { cursor: pointer; font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  position: sticky;
+  /* position:fixed, not sticky — screen-recording proof showed the bar's
+     right-hand portion (bell/avatar/Settings/Sign Out) going blank the
+     instant the sidebar's width changed (admin-layout's grid columns /
+     sidebar-nav's width), even with that change made instant (no
+     transition). That's a known Chrome bug: contain:paint + translateZ
+     compositing on a position:sticky element gets corrupted when ANY
+     ancestor layout change happens nearby, animated or not. This element
+     only ever needs to sit pinned to the viewport top — it was never
+     using sticky's actual "stick after scrolling past" behavior — so
+     fixed sidesteps the whole bug class instead of patching around it.
+     Needs `body:has(> .navbar) { padding-top: 64px }` below to keep
+     in-flow content from sliding under it. */
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
   box-shadow: 0 2px 16px rgba(0,0,0,.25);
-  /* Own GPU compositing layer — see the matching comment on
-     .admin-sidebar. Reported live: the top-right corner of this bar
-     (notification bell/avatar/Settings/Sign Out) going blank for
-     multiple real users, same root cause as the sidebar.
-     translateZ(0) alone turned out not to be enough — still reported
-     blinking/glitching, worse on smaller viewports (1280x832) where more
-     of the app's periodically-mutating content (Workforce Queue's 20s
-     poll, the newer Reports dated-list tables) is likely on-screen at
-     once. contain:paint is the stronger, more modern fix for this exact
-     Chrome bug class: it tells the browser this box's paint is fully
-     self-contained, so mutations inside .admin-content can no longer
-     invalidate this element's layer at all — not just "hopefully placed
-     on a separate layer" the way translateZ alone is. */
-  transform: translateZ(0);
-  will-change: transform;
-  contain: paint;
 }
+/* Compensates for .navbar leaving normal flow (see above) — only on pages
+   that actually have a navbar, so pages without one (login, 403, etc.)
+   aren't pushed down. */
+body:has(> .navbar) { padding-top: 64px; }
 
 .nav-brand {
   display: flex;
