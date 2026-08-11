@@ -213,7 +213,9 @@
           <span class="admin-nav-icon">🚀</span> Projects Dashboard
         </div>
       </div>
-      <div class="admin-nav-section">
+      <!-- TEMP DIAGNOSTIC: Reports nav hidden — see renderReportSectionsHtml()
+           for the matching temporary disable. Revert together. -->
+      <div class="admin-nav-section" style="display:none">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Reports</div>
         <div class="admin-nav-item" onclick="showSection('report-clients', this)">
           <span class="admin-nav-icon">🏢</span> Clients
@@ -7293,6 +7295,11 @@
     }
 
     function renderReportSectionsHtml() {
+      // TEMP DIAGNOSTIC — skipped entirely, matching the hidden Reports nav
+      // above. Testing whether removing this section's DOM weight changes
+      // the Chrome rendering glitch reported on some MacBooks. Revert
+      // together with the nav change once the test is done.
+      return;
       const container = document.getElementById('reportsSectionsContainer');
       container.innerHTML = Object.entries(REPORT_CONFIG).map(([type, cfg]) => `
         <div class="admin-section" id="section-report-${type}">
