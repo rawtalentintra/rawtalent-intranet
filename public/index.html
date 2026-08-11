@@ -1083,8 +1083,16 @@
       } catch { location.href = '/login.html'; return; }
 
       loadCategories();
+      // Auto-refresh (was every 5 min) paused — reported live as a likely
+      // contributor to the sidebar/navbar blinking bug (shared .navbar/
+      // .admin-sidebar CSS with admin.html — see the comments there). Two
+      // rounds of CSS-only fixes (translateZ, then contain:paint) didn't
+      // fully resolve it, so pausing the actual periodic DOM churn takes
+      // priority over auto-refresh convenience until the real cause is
+      // confirmed. Loads once on page load; opening the bell (see
+      // toggleNotifPanel) re-fetches too, so nothing goes stale for longer
+      // than "next time you check it".
       loadNotifications();
-      setInterval(loadNotifications, 5 * 60 * 1000);
       const tabParam = new URLSearchParams(location.search).get('tab');
       if (tabParam) {
         setMode(tabParam);
@@ -1206,7 +1214,9 @@
     function toggleNotifPanel(event) {
       event?.stopPropagation();
       const panel = document.getElementById('notifPanel');
-      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      const opening = panel.style.display === 'none';
+      panel.style.display = opening ? 'block' : 'none';
+      if (opening) loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
     }
 
     document.addEventListener('click', (e) => {

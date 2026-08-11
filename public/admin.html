@@ -1911,8 +1911,9 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Workforce Queue</div>
-            <div class="admin-page-sub">Live view of who's on a call, in a meeting, or available right now</div>
+            <div class="admin-page-sub">Who's on a call, in a meeting, or available — click Refresh for the latest</div>
           </div>
+          <button class="btn-secondary" id="wfRefreshBtn" onclick="loadWorkforceAgentStatus()">🔄 Refresh</button>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:20px">
           <button class="cat-chip active" id="wf-view-agent-status" onclick="switchWorkforceView('agent-status')">Agent Status</button>
@@ -3192,8 +3193,16 @@
       if (currentUserRole === 'super_admin') { loadUsers(); loadActiveSessions(); }
       loadCategoriesForDatalist();
       loadTagsForDatalist();
+      // Auto-refresh (was every 5 min) paused — this is the only background
+      // function that runs for literally every role on every page, so it's
+      // the prime suspect for the sidebar/navbar blinking reported even on
+      // pages that don't touch Workforce Queue. Two rounds of CSS-only fixes
+      // (translateZ, then contain:paint) didn't fully resolve the bug, so
+      // pausing the actual periodic DOM churn takes priority over auto-
+      // refresh convenience until the real cause is confirmed. Loads once on
+      // page load; opening the bell (see toggleNotifPanel) re-fetches too,
+      // so nothing goes stale for longer than "next time you check it".
       loadNotifications();
-      setInterval(loadNotifications, 5 * 60 * 1000);
 
       // Land back on whichever section was open before the refresh, instead
       // of always resetting to Articles — showSection() keeps this in sync
@@ -3403,7 +3412,9 @@
     function toggleNotifPanel(event) {
       event?.stopPropagation();
       const panel = document.getElementById('notifPanel');
-      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      const opening = panel.style.display === 'none';
+      panel.style.display = opening ? 'block' : 'none';
+      if (opening) loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
     }
 
     document.addEventListener('click', (e) => {
@@ -9559,10 +9570,16 @@
       return `${badge} <span style="color:var(--text-muted);font-size:11.5px">· ${ageLabel}</span>`;
     }
 
+    // Auto-refresh (was every 20s) paused — reported live as a likely
+    // contributor to the sidebar/navbar blinking bug (this was the
+    // originally-suspected trigger, per the comments on loadWorkforceAgentStatus
+    // and the .navbar/.admin-sidebar CSS). Two rounds of CSS-only fixes
+    // (translateZ, then contain:paint) didn't fully resolve it, so pausing
+    // the actual periodic DOM churn takes priority over auto-refresh
+    // convenience until the real cause is confirmed. Loads once on tab open;
+    // the Refresh button (see admin-header above) covers "get me the latest".
     function startWorkforceStatusPolling() {
       loadWorkforceAgentStatus();
-      stopWorkforceStatusPolling();
-      workforceStatusInterval = setInterval(loadWorkforceAgentStatus, 20 * 1000);
     }
 
     function stopWorkforceStatusPolling() {
