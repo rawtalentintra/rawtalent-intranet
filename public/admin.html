@@ -236,6 +236,9 @@
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
+        <div class="admin-nav-item" onclick="showSection('micropods', this)">
+          <span class="admin-nav-icon">🗺️</span> Micropods
+        </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
@@ -596,6 +599,62 @@
         <div id="centre360Screen" style="display:none">
           <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMyCentres()">← Back to My Centres</button>
           <div id="centre360Body"></div>
+        </div>
+      </div>
+      </template>
+
+      <template id="__lazy_micropods">
+      <!-- Micropods -->
+      <div class="admin-section" id="section-micropods">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🗺️ Micropods</div>
+            <div class="admin-page-sub">Where your candidate pool actually clusters geographically — dense pockets worth building a local staffing hub around. Pick a pod to see who's in it.</div>
+          </div>
+        </div>
+
+        <div id="micropodsListScreen">
+          <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+              <div style="display:flex;gap:6px" id="micropodsStateToggle">
+                <button type="button" class="btn-secondary source-action-btn" data-state="VIC" onclick="setMicropodsState('VIC')">Victoria</button>
+                <button type="button" class="btn-secondary source-action-btn" data-state="SA" onclick="setMicropodsState('SA')">South Australia</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                <label for="micropodsMinSize">Minimum pod size</label>
+                <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
+              </div>
+            </div>
+          </div>
+
+          <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
+            <div id="micropodsMap" style="height:420px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
+          </div>
+
+          <div class="admin-table-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
+              <div style="font-weight:700;color:var(--navy);font-size:14px">Pods</div>
+              <div style="font-size:11px;color:var(--text-muted)" id="micropodsSummary"></div>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact" id="micropodsTable">
+                <thead>
+                  <tr>
+                    <th>Area</th>
+                    <th>Candidates</th>
+                  </tr>
+                </thead>
+                <tbody id="micropodsTableBody">
+                  <tr><td colspan="2"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="micropodDetailScreen" style="display:none">
+          <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMicropodsList()">← Back to Micropods</button>
+          <div id="micropodDetailBody"></div>
         </div>
       </div>
       </template>
@@ -3207,6 +3266,7 @@
     let currentUserRole = '';
     let currentUserEmail = '';
     let currentUserCanBuildTraining = false;
+    let currentUserWfpLabel = '';
 
     async function init() {
       // renderReportSectionsHtml() now runs lazily from showSection() on
@@ -3218,6 +3278,7 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
+        currentUserWfpLabel = me.wfpLabel || '';
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
@@ -3287,7 +3348,7 @@
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
     function applyRoleVisibility() {
@@ -4227,6 +4288,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') loadDocumentCheckHistory();
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
+      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
@@ -6013,6 +6075,183 @@
             <span class="attn-meta">${fmtDate(b.bookingDate)}</span>
           </div>`;
       }).join('');
+    }
+
+    // ── Micropods ─────────────────────────────────────────────────
+    // Candidate density clustering — deliberately never fetches a full
+    // candidate list upfront (GET /api/micropods returns pod summaries
+    // only); a pod's actual candidates are only fetched once that pod is
+    // selected, from the map or the list. VIC/SA are kept as separate,
+    // explicit views (not a mixed list) to match how Gwen/Justine actually
+    // split territory.
+    let micropodsState = null; // set on first entry, from wfpLabel if the logged-in user is a Workforce Partner
+    let micropodsPods = [];
+    let micropodsMapInstance = null;
+
+    function initMicropodsSection() {
+      if (!micropodsState) {
+        const label = (currentUserWfpLabel || '').toUpperCase();
+        micropodsState = label.includes('(SA)') ? 'SA' : 'VIC';
+      }
+      updateMicropodsStateToggle();
+      loadMicropods();
+    }
+
+    function setMicropodsState(state) {
+      if (micropodsState === state) return;
+      micropodsState = state;
+      updateMicropodsStateToggle();
+      loadMicropods();
+    }
+
+    function updateMicropodsStateToggle() {
+      document.querySelectorAll('#micropodsStateToggle button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.state === micropodsState);
+      });
+    }
+
+    async function loadMicropods() {
+      const minSize = document.getElementById('micropodsMinSize').value || 15;
+      const tbody = document.getElementById('micropodsTableBody');
+      tbody.innerHTML = '<tr><td colspan="2"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      document.getElementById('micropodsSummary').textContent = '';
+      try {
+        const data = await fetch(`/api/micropods?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
+        if (data.error) throw new Error(data.error);
+        micropodsPods = data.pods;
+        renderMicropodsTable(data);
+        renderMicropodsMap(data);
+      } catch {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load micropods.</td></tr>';
+      }
+    }
+
+    function renderMicropodsTable(data) {
+      const tbody = document.getElementById('micropodsTableBody');
+      document.getElementById('micropodsSummary').textContent = `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
+      if (!data.pods.length) {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.pods.map(p => `
+        <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
+          <td>${escHtml(p.name)}</td>
+          <td>${p.candidateCount}</td>
+        </tr>`).join('');
+    }
+
+    // Bubbles are sized by candidate count, not colored by it — an intentional
+    // "easy on the eyes" choice (per the original ask) that reuses the app's
+    // existing orange/navy palette instead of introducing a new color scale.
+    async function renderMicropodsMap(data) {
+      const mapEl = document.getElementById('micropodsMap');
+      if (!mapboxTokenCache) {
+        try { mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json()); } catch { mapboxTokenCache = { configured: false }; }
+      }
+      if (!mapboxTokenCache.configured || !mapboxTokenCache.token) {
+        mapEl.innerHTML = 'Map view needs Mapbox configured — the pod list above still works without it.';
+        return;
+      }
+      if (!data.pods.length) {
+        mapEl.innerHTML = 'No pods to show on the map — try lowering the minimum pod size.';
+        return;
+      }
+      try {
+        await ensureMapboxGlLoaded();
+      } catch {
+        mapEl.textContent = 'Could not load the map.';
+        return;
+      }
+      mapEl.innerHTML = '';
+      mapboxgl.accessToken = mapboxTokenCache.token;
+      if (micropodsMapInstance) { micropodsMapInstance.remove(); micropodsMapInstance = null; }
+
+      const center = data.pods[0].centroid;
+      micropodsMapInstance = new mapboxgl.Map({
+        container: 'micropodsMap',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [center.lng, center.lat],
+        zoom: 8
+      });
+
+      micropodsMapInstance.on('load', () => {
+        const bounds = new mapboxgl.LngLatBounds();
+        const maxCount = Math.max(...data.pods.map(p => p.candidateCount));
+        data.pods.forEach(p => {
+          const size = Math.round(22 + 42 * Math.sqrt(p.candidateCount / maxCount));
+          const el = document.createElement('div');
+          el.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${Math.max(10, Math.round(size / 4))}px;font-weight:700;color:white;background:var(--orange);border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer`;
+          el.textContent = String(p.candidateCount);
+          el.addEventListener('click', () => openMicropod(p.id));
+
+          // Built as DOM nodes (textContent, not innerHTML) — suburb names
+          // are RT-sourced data, not markup we should ever parse as such.
+          const popupEl = document.createElement('div');
+          popupEl.style.cssText = 'font-size:12.5px;line-height:1.4';
+          const title = document.createElement('div');
+          title.style.cssText = 'font-weight:700;color:var(--navy)';
+          title.textContent = p.name;
+          popupEl.appendChild(title);
+          const sub = document.createElement('div');
+          sub.style.cssText = 'color:var(--text-muted);margin-top:2px';
+          sub.textContent = `${p.candidateCount} candidates`;
+          popupEl.appendChild(sub);
+
+          new mapboxgl.Marker({ element: el }).setLngLat([p.centroid.lng, p.centroid.lat])
+            .setPopup(new mapboxgl.Popup({ offset: Math.round(size / 2) + 4 }).setDOMContent(popupEl))
+            .addTo(micropodsMapInstance);
+          bounds.extend([p.centroid.lng, p.centroid.lat]);
+        });
+        if (data.pods.length > 1) micropodsMapInstance.fitBounds(bounds, { padding: 50, maxZoom: 11 });
+      });
+    }
+
+    // Only reachable once a specific pod is picked (map bubble or list row)
+    // — this is the point where actual candidates first get fetched.
+    async function openMicropod(podId) {
+      document.getElementById('micropodsListScreen').style.display = 'none';
+      document.getElementById('micropodDetailScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
+      const bodyEl = document.getElementById('micropodDetailBody');
+      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const minSize = document.getElementById('micropodsMinSize').value || 15;
+        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
+        if (pod.error) throw new Error(pod.error);
+        bodyEl.innerHTML = renderMicropodDetail(pod);
+      } catch {
+        bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this pod.</div>';
+      }
+    }
+
+    function renderMicropodDetail(pod) {
+      return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(pod.name)}</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${pod.candidateCount} candidates</div>
+        </div>
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact">
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Suburb</th></tr></thead>
+              <tbody>
+                ${pod.candidates.map(c => `
+                  <tr>
+                    <td>${escHtml(c.name)}</td>
+                    <td>${escHtml(c.email || '—')}</td>
+                    <td>${escHtml(c.contactNo || '—')}</td>
+                    <td>${escHtml(c.suburb || '—')}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    function backToMicropodsList() {
+      document.getElementById('micropodDetailScreen').style.display = 'none';
+      document.getElementById('micropodsListScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
     }
 
     // ── Visit logging modal ──────────────────────────────────────────
