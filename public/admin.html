@@ -4184,10 +4184,20 @@
       dropZone.style.display = 'none';
       parseMsg.style.display = 'block';
 
+      // Defense-in-depth against the server hanging instead of erroring
+      // (confirmed cause of "Parsing document…" spinning forever: pdf-parse
+      // has no internal timeout and can hang on certain malformed/scanned
+      // PDFs — routes/admin.js now times that out server-side at 45s, this
+      // just makes sure the UI can't get stuck even if that somehow doesn't
+      // fire, e.g. a fully blocked event loop).
+      const abortController = new AbortController();
+      const clientTimeout = setTimeout(() => abortController.abort(), 60000);
+
       try {
         const formData = new FormData();
         formData.append('document', file);
-        const res = await fetch('/api/admin/parse-document', { method: 'POST', body: formData });
+        const res = await fetch('/api/admin/parse-document', { method: 'POST', body: formData, signal: abortController.signal });
+        clearTimeout(clientTimeout);
         if (!res.ok) {
           let errMsg = 'Parse failed';
           try { errMsg = (await res.json()).error || errMsg; } catch {}
@@ -4229,8 +4239,9 @@
         uploadZone.style.display = 'none';
         toast('Document imported — review and save when ready', 'success');
       } catch (err) {
+        clearTimeout(clientTimeout);
         console.error('Doc upload error:', err);
-        toast('Failed to parse document. Check the file and try again.', 'error');
+        toast(err.name === 'AbortError' ? 'This document took too long to parse — try a smaller file, or paste the content in manually.' : 'Failed to parse document. Check the file and try again.', 'error');
         parseMsg.style.display = 'none';
         dropZone.style.display = 'block';
       }

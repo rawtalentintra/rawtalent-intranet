@@ -22,6 +22,21 @@ function getAnthropicClient() {
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
+// pdf-parse (and to a lesser extent mammoth) can hang for a very long time
+// on certain malformed/scanned PDFs instead of erroring — confirmed as the
+// cause of "Parsing document…" spinning forever on a real SOP upload, with
+// no timeout anywhere in the request to catch it. This doesn't cancel the
+// underlying parse (neither library supports that), but it stops the
+// request — and the user — from waiting indefinitely with no feedback.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(
+      `${label} took too long to parse. It may be a scanned/image-based file with no selectable text, or the file may be corrupted — try converting it to .docx or .txt first, or paste the content in manually.`
+    )), ms))
+  ]);
+}
+
 // ── Articles (view/add/edit + attachments) — admin, super_admin, and ──
 // ── qa_view/workforce_partner, two narrow roles scoped to exactly this ──
 // ── plus FAQ management and call quality. Registered ahead of the blanket ──
@@ -575,7 +590,7 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
     let title = baseName;
 
     if (ext === '.pdf') {
-      const data = await pdfParse(req.file.buffer);
+      const data = await withTimeout(pdfParse(req.file.buffer), 45000, 'PDF parsing');
       const text = data.text;
       const lines = text.split(/\r?\n/);
 
@@ -597,7 +612,7 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
       html = paragraphs.join('\n');
 
     } else if (ext === '.docx') {
-      const result = await mammoth.convertToHtml(
+      const result = await withTimeout(mammoth.convertToHtml(
         { buffer: req.file.buffer },
         {
           styleMap: [
@@ -609,7 +624,7 @@ router.post('/parse-document', upload.single('document'), async (req, res) => {
             "i => em"
           ]
         }
-      );
+      ), 45000, 'DOCX parsing');
       html = result.value;
 
       const headingMatch = html.match(/<h[123][^>]*>([\s\S]*?)<\/h[123]>/i);
