@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireRole } = require('../middleware/authMiddleware');
 const { isConfigured, getAgentStatuses } = require('../services/webexService');
 
-router.use(requireAdmin);
+// qa_view added alongside admin/super_admin so the Workforce Queue nav
+// item (public/admin.html RESTRICTED_ROLE_SECTIONS) actually works for
+// that role instead of nav-visible-but-403.
+router.use(requireRole('admin', 'super_admin', 'qa_view'));
 
 router.get('/agent-status', async (req, res) => {
   try {

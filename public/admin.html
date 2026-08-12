@@ -163,16 +163,6 @@
           🔔
           <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
         </button>
-        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
-          <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
-            <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
-            <div style="display:flex;gap:10px;align-items:center">
-              <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
-              <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
-            </div>
-          </div>
-          <div id="notifPanelBody" style="padding:8px"></div>
-        </div>
       </div>
       <div class="nav-user" style="cursor:pointer" onclick="openPasswordModal()" title="Change your password">
         <div class="nav-avatar" id="navAvatar">J</div>
@@ -181,6 +171,27 @@
       <button class="nav-btn ghost" onclick="logout()">Sign Out</button>
     </div>
   </nav>
+
+  <!-- Rendered outside <nav> (not inside .notif-bell-wrap) deliberately.
+       .navbar has `contain: paint` (see CLAUDE.md — needed to fix a real
+       Chrome GPU compositor bug on scaled MacBook displays), which clips
+       any descendant's paint to the navbar's own ~64px box. This panel is
+       480px tall, so nested inside the navbar it rendered with fully
+       correct DOM/CSS/content but was invisibly clipped — confirmed live
+       (position/size/content all computed correctly, nothing painted).
+       Position is computed in toggleNotifPanel() from the bell button's
+       real screen position instead of a static top/right, since it's no
+       longer a CSS-positioned descendant of .notif-bell-wrap. -->
+  <div id="notifPanel" style="display:none;position:fixed;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
+      <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
+        <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+      </div>
+    </div>
+    <div id="notifPanelBody" style="padding:8px"></div>
+  </div>
 
   <div id="impersonationBanner" style="display:none;background:#fef2f2;border-bottom:1px solid #fecaca;padding:9px 24px;text-align:center;font-size:13.5px;color:#991b1b;font-weight:600">
     <span id="impersonationBannerText"></span>
@@ -3335,9 +3346,11 @@
     // FAQ management (add/edit only — the scan and candidate-review parts
     // of that page are further hidden below), call quality
     // (dashboard/rubrics/evaluator), leads (view-only — see
-    // leadStatusBadge()/openLeadDetail() below), and WFP Dashboard
+    // leadStatusBadge()/openLeadDetail() below), WFP Dashboard
     // (view-only — computed client-side from /api/leads, already readable
-    // by qa_view, so no backend change was needed). workforce_partner:
+    // by qa_view, so no backend change was needed), and Workforce Queue
+    // (view-only presence status — routes/workforce.js gated the same way).
+    // workforce_partner:
     // deliberately given the same base set as qa_view (this is a newer
     // role, still being shaped — expect individual items here to change),
     // plus its own pre-existing extras: leads (view + edit their own
@@ -3347,7 +3360,7 @@
     // localStorage or the URL — the real enforcement is server-side per
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
-      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard'],
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue'],
       workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
@@ -3518,20 +3531,47 @@
       body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
     }
 
+    // Panel lives outside <nav> now (see the HTML comment above #notifPanel
+    // for why — .navbar's `contain: paint` was silently clipping it), so
+    // its position isn't set by CSS relative to the bell button anymore;
+    // computed here from the button's real screen position instead.
+    function positionNotifPanel() {
+      const btn = document.getElementById('notifBellBtn');
+      const panel = document.getElementById('notifPanel');
+      const btnRect = btn.getBoundingClientRect();
+      const gap = 8;
+      let left = btnRect.right - panel.offsetWidth;
+      left = Math.max(8, Math.min(left, window.innerWidth - panel.offsetWidth - 8));
+      panel.style.top = `${btnRect.bottom + gap}px`;
+      panel.style.left = `${left}px`;
+    }
+
     function toggleNotifPanel(event) {
       event?.stopPropagation();
       const panel = document.getElementById('notifPanel');
       const opening = panel.style.display === 'none';
+      // display must be 'block' before measuring offsetWidth below —
+      // a display:none element always reports 0, which would right-pin
+      // the panel flush against the bell button instead of right-aligning
+      // its real 360px width against it.
       panel.style.display = opening ? 'block' : 'none';
-      if (opening) loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
+      if (opening) {
+        positionNotifPanel();
+        loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
+      }
     }
 
     document.addEventListener('click', (e) => {
       const wrap = document.querySelector('.notif-bell-wrap');
       const panel = document.getElementById('notifPanel');
-      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target)) {
+      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target) && !panel.contains(e.target)) {
         panel.style.display = 'none';
       }
+    });
+
+    window.addEventListener('resize', () => {
+      const panel = document.getElementById('notifPanel');
+      if (panel.style.display !== 'none') positionNotifPanel();
     });
 
     let pendingGreeting = null;
@@ -4303,9 +4343,15 @@
     // on the section, so it never touches the per-item inline `display`
     // styles applyRoleVisibility()/qa_view gating already set on individual
     // nav items. Persisted by label text so it survives reloads/re-logins.
+    // Accordion behaviour: opening a section collapses every other one, so
+    // at most one is expanded at a time instead of everything piling up.
     function toggleNavSection(labelEl) {
       const section = labelEl.closest('.admin-nav-section');
       if (!section) return;
+      const opening = section.classList.contains('collapsed');
+      if (opening) {
+        document.querySelectorAll('.admin-nav-section').forEach(s => { if (s !== section) s.classList.add('collapsed'); });
+      }
       section.classList.toggle('collapsed');
       try {
         const collapsed = [...document.querySelectorAll('.admin-nav-section.collapsed .admin-nav-label')].map(l => l.textContent.trim());
@@ -6087,6 +6133,7 @@
     let micropodsState = null; // set on first entry, from wfpLabel if the logged-in user is a Workforce Partner
     let micropodsPods = [];
     let micropodsMapInstance = null;
+    let micropodsHeatmapInstance = null;
 
     function initMicropodsSection() {
       if (!micropodsState) {
@@ -6166,6 +6213,18 @@
       mapboxgl.accessToken = mapboxTokenCache.token;
       if (micropodsMapInstance) { micropodsMapInstance.remove(); micropodsMapInstance = null; }
 
+      // Wait a frame before measuring/creating the map — this container was
+      // just swapped into the live DOM (lazy <template> section, possibly
+      // this exact tick) and doesn't reliably have its real layout size
+      // yet. Confirmed live: creating the map immediately here sized its
+      // canvas at ~80px wide and it never finished loading (no tiles, no
+      // markers, `load` never fired) — a standard Mapbox-in-a-freshly-
+      // shown-container gotcha, unrelated to the Chrome GPU compositor bug
+      // documented in CLAUDE.md (that one is sticky/fixed positioning
+      // paint, not this).
+      await new Promise(requestAnimationFrame);
+      if (mapEl !== document.getElementById('micropodsMap')) return; // section navigated away while we waited
+
       const center = data.pods[0].centroid;
       micropodsMapInstance = new mapboxgl.Map({
         container: 'micropodsMap',
@@ -6173,6 +6232,7 @@
         center: [center.lng, center.lat],
         zoom: 8
       });
+      micropodsMapInstance.resize();
 
       micropodsMapInstance.on('load', () => {
         const bounds = new mapboxgl.LngLatBounds();
@@ -6219,6 +6279,7 @@
         const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
         if (pod.error) throw new Error(pod.error);
         bodyEl.innerHTML = renderMicropodDetail(pod);
+        renderMicropodHeatmap(pod);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this pod.</div>';
       }
@@ -6229,6 +6290,9 @@
         <div style="margin-bottom:16px">
           <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(pod.name)}</div>
           <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${pod.candidateCount} candidates</div>
+        </div>
+        <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
+          <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
         </div>
         <div class="admin-table-card">
           <div style="overflow-x:auto">
@@ -6248,9 +6312,91 @@
         </div>`;
     }
 
+    // A heatmap (density gradient), not bubbles, once you're inside a
+    // single pod — the list view's size-only bubbles are about comparing
+    // pods to each other at a glance; inside one pod there's nothing to
+    // compare, just where within it people actually are, which a heatmap
+    // shows better than one bubble per candidate would.
+    async function renderMicropodHeatmap(pod) {
+      const mapEl = document.getElementById('micropodDetailMap');
+      if (!mapEl) return; // user already navigated away
+      if (!mapboxTokenCache) {
+        try { mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json()); } catch { mapboxTokenCache = { configured: false }; }
+      }
+      if (!mapboxTokenCache.configured || !mapboxTokenCache.token) {
+        mapEl.innerHTML = 'Map view needs Mapbox configured.';
+        return;
+      }
+      const points = pod.candidates.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+      if (!points.length) {
+        mapEl.innerHTML = 'No mapped locations for this pod.';
+        return;
+      }
+      try {
+        await ensureMapboxGlLoaded();
+      } catch {
+        mapEl.textContent = 'Could not load the map.';
+        return;
+      }
+      mapEl.innerHTML = '';
+      mapboxgl.accessToken = mapboxTokenCache.token;
+      if (micropodsHeatmapInstance) { micropodsHeatmapInstance.remove(); micropodsHeatmapInstance = null; }
+
+      // Same just-shown-container timing fix as renderMicropodsMap — see
+      // the comment there.
+      await new Promise(requestAnimationFrame);
+      if (mapEl !== document.getElementById('micropodDetailMap')) return;
+
+      micropodsHeatmapInstance = new mapboxgl.Map({
+        container: 'micropodDetailMap',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [pod.centroid.lng, pod.centroid.lat],
+        zoom: 12
+      });
+      micropodsHeatmapInstance.resize();
+
+      micropodsHeatmapInstance.on('load', () => {
+        micropodsHeatmapInstance.addSource('pod-heat', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: points.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: {} }))
+          }
+        });
+        // Standard Mapbox heatmap recipe (density-interpolated color ramp)
+        // — a heatmap's whole point is a color gradient, unlike the list
+        // view's deliberately size-only bubbles.
+        micropodsHeatmapInstance.addLayer({
+          id: 'pod-heat-layer',
+          type: 'heatmap',
+          source: 'pod-heat',
+          paint: {
+            'heatmap-weight': 1,
+            'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 10, 1, 15, 3],
+            'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 15, 30],
+            'heatmap-opacity': 0.8,
+            'heatmap-color': [
+              'interpolate', ['linear'], ['heatmap-density'],
+              0, 'rgba(33,102,172,0)',
+              0.2, 'rgb(103,169,207)',
+              0.4, 'rgb(209,229,240)',
+              0.6, 'rgb(253,219,199)',
+              0.8, 'rgb(239,138,98)',
+              1, 'rgb(178,24,43)'
+            ]
+          }
+        });
+
+        const bounds = new mapboxgl.LngLatBounds();
+        points.forEach(c => bounds.extend([c.lng, c.lat]));
+        micropodsHeatmapInstance.fitBounds(bounds, { padding: 40, maxZoom: 14 });
+      });
+    }
+
     function backToMicropodsList() {
       document.getElementById('micropodDetailScreen').style.display = 'none';
       document.getElementById('micropodsListScreen').style.display = 'block';
+      if (micropodsHeatmapInstance) { micropodsHeatmapInstance.remove(); micropodsHeatmapInstance = null; }
       window.scrollTo({ top: 0 });
     }
 
@@ -12256,11 +12402,16 @@
             dateLabel: fmtCallDateTime(r.start_time_iso) || '—'
           };
           const gradeReady = !!r.has_transcript;
-          const badge = gradeReady
-            ? { cls: 'badge-published', label: '✓ Ready' }
+          // "Ready" is by far the most common status in this table (calls
+          // sit in Audio/Pending only briefly) — a plain checkmark instead
+          // of a pill for it cuts a lot of visual weight off the table
+          // without losing the two states that actually need a reader's
+          // attention (Audio/Pending still get their badge).
+          const statusCell = gradeReady
+            ? '<span style="color:#15803d;font-size:15px;font-weight:700" title="Ready">✓</span>'
             : r.has_audio
-            ? { cls: 'badge-user', label: '🎧 Audio' }
-            : { cls: 'badge-draft', label: '⏳ Pending' };
+            ? '<span class="badge badge-user">🎧 Audio</span>'
+            : '<span class="badge badge-draft">⏳ Pending</span>';
           return `
           <tr>
             <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || 'Unknown')}</td>
@@ -12268,12 +12419,12 @@
             <td>${escHtml(contact || '—')}</td>
             <td style="color:var(--text-muted);white-space:nowrap">${fmtDuration(r.duration_seconds)}</td>
             <td style="color:var(--text-muted);white-space:nowrap">${escHtml(fmtCallDateTime(r.start_time_iso) || '—')}</td>
-            <td><span class="badge ${badge.cls}">${badge.label}</span></td>
+            <td>${statusCell}</td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end">
                 ${!gradeReady ? `<button class="action-btn edit" onclick="fetchCallContent('${r.id}', this)">⬇️ Fetch Transcription &amp; Audio</button>` : ''}
-                ${r.has_audio ? `<button class="action-btn edit" onclick="playRecording('${r.id}')">▶</button>` : ''}
-                ${r.has_transcript ? `<button class="action-btn edit" onclick="viewTranscript('${r.id}')">📄 Transcript</button>` : ''}
+                ${r.has_audio ? `<button class="action-btn view" title="Play recording" onclick="playRecording('${r.id}')">▶</button>` : ''}
+                ${r.has_transcript ? `<button class="action-btn edit" title="Transcript" onclick="viewTranscript('${r.id}')">🗒️</button>` : ''}
                 <select id="rubric-${escHtml(r.id)}" class="form-control" title="${r.detected_rubric_reasoning ? escHtml(r.detected_rubric_reasoning) : 'Auto-detect reads the transcript to pick Educator vs Centre'}" style="font-size:11px;padding:4px 6px;width:120px">
                   <option value="auto" ${!r.detected_rubric_type ? 'selected' : ''}>🔍 Auto-detect</option>
                   <option value="educator" ${r.detected_rubric_type === 'educator' ? 'selected' : ''}>Educator${r.detected_rubric_type === 'educator' ? ' ✓' : ''}</option>

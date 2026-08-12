@@ -22,8 +22,12 @@ const podsCache = new Map(); // `${state}:${gridKm}:${minPodSize}` -> { result, 
 async function getCandidatePoints() {
   if (candidatesCache.points && Date.now() < candidatesCache.expiresAt) return candidatesCache;
 
+  // is_deleted = true alongside is_active = true is a rare RT data
+  // inconsistency (confirmed live: 1 of 12,950 "active" rows) — excluded
+  // explicitly so "active candidates only" can't have an edge case leak
+  // through just because RT's own isActive/isDeleted flags disagree.
   const totalRes = await getDb().execute({
-    sql: 'SELECT count(*)::int AS n FROM rt_candidates_cache WHERE is_active = true',
+    sql: "SELECT count(*)::int AS n FROM rt_candidates_cache WHERE is_active = true AND is_deleted IS NOT TRUE",
     args: []
   });
   const totalActive = totalRes.rows[0]?.n || 0;
@@ -36,6 +40,7 @@ async function getCandidatePoints() {
             (raw->'addresses'->0->>'longitude')::float8 AS lng
           FROM rt_candidates_cache
           WHERE is_active = true
+            AND is_deleted IS NOT TRUE
             AND raw->'addresses'->0->>'latitude' IS NOT NULL
             AND raw->'addresses'->0->>'longitude' IS NOT NULL`,
     args: []
@@ -125,9 +130,12 @@ router.get('/:podId', async (req, res) => {
 
     const { points } = await getCandidatePoints();
     const memberSet = new Set(pod.memberIds);
+    // lat/lng included here (not in the list-view pod summary) purely to
+    // drive the per-pod heatmap once a pod is actually open — still never
+    // exposed before that point.
     const candidates = points
       .filter(p => memberSet.has(p.userId))
-      .map(({ userId, name, email, contactNo, suburb }) => ({ userId, name, email, contactNo, suburb }))
+      .map(({ userId, name, email, contactNo, suburb, lat, lng }) => ({ userId, name, email, contactNo, suburb, lat, lng }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({ id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount, candidates });
