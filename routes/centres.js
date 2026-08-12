@@ -54,6 +54,14 @@ async function getCentresAndBookings() {
   return cache;
 }
 
+// Tiny table, queried fresh each time rather than cached alongside the RT
+// centre/booking cache above — a "delete" should take effect immediately,
+// not wait out a stale cache window.
+async function getHiddenCentreKeys() {
+  const rows = (await getDb().execute('SELECT centre_key FROM hidden_centres')).rows;
+  return new Set(rows.map(r => r.centre_key));
+}
+
 async function visitsByCentreKey(centreKeys) {
   if (!centreKeys.length) return {};
   const placeholders = centreKeys.map(() => '?').join(',');
@@ -88,8 +96,10 @@ function healthForCentre(centre, bookings, visits) {
 router.get('/', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();
-    const visits = await visitsByCentreKey(centres.map(c => c.centreKey));
-    const withHealth = centres.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
+    const hidden = await getHiddenCentreKeys();
+    const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
+    const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
+    const withHealth = visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
     res.json(withHealth);
   } catch (err) {
     res.status(502).json({ error: err.message });
@@ -106,6 +116,7 @@ router.get('/:centreKey', async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
   try {
+    if ((await getHiddenCentreKeys()).has(req.params.centreKey)) return res.status(404).json({ error: 'Centre not found' });
     const client = await rtApi.fetchById('clients', parsed.type === 'loc'
       ? (await findClientIdForLocation(parsed.id))
       : parsed.id
@@ -119,6 +130,27 @@ router.get('/:centreKey', async (req, res) => {
     res.json(healthForCentre(centre, bookings, visits));
   } catch (err) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+// "Delete" a centre — really just excludes it from every My Centres/WFP
+// Dashboard query from now on (see the hidden_centres comment in
+// db/schema.sql for why this can't be a real delete: a centre is live RT
+// data, not a row we own). admin/super_admin only, matching the visit-
+// delete precedent below.
+router.delete('/:centreKey', requireRole('admin', 'super_admin'), async (req, res) => {
+  const parsed = parseCentreKey(req.params.centreKey);
+  if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
+  try {
+    await getDb().execute({
+      sql: `INSERT INTO hidden_centres (centre_key, reason, hidden_by_email, hidden_by_name)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (centre_key) DO NOTHING`,
+      args: [req.params.centreKey, req.body?.reason || null, req.user.email, req.user.name || req.user.email]
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

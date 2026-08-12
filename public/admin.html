@@ -575,6 +575,11 @@
             </div>
             <div id="myCentresHealthSummary" style="display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
+          <div style="display:flex;gap:10px;margin-bottom:16px">
+            <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setMyCentresStateFilter('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s">🌏 All States</button>
+            <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMyCentresStateFilter('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s">🔷 Victoria — Justine</button>
+            <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMyCentresStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
+          </div>
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div class="leads-filter-bar" style="padding:0;border-bottom:none">
               <input type="text" id="centresFilterSearch" class="form-control" placeholder="Search centre or suburb…" oninput="filterMyCentresTable()">
@@ -619,7 +624,10 @@
         </div>
 
         <div id="centre360Screen" style="display:none">
-          <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMyCentres()">← Back to My Centres</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="backToMyCentres()">← Back to My Centres</button>
+            <button id="deleteCentreBtn" class="action-btn delete" style="display:none;font-size:11.5px;padding:4px 10px" onclick="deleteCurrentCentre()">🗑️ Delete Centre</button>
+          </div>
           <div id="centre360Body"></div>
         </div>
       </div>
@@ -638,9 +646,9 @@
         <div id="micropodsListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-              <div style="display:flex;gap:6px" id="micropodsStateToggle">
-                <button type="button" class="btn-secondary source-action-btn" data-state="VIC" onclick="setMicropodsState('VIC')">Victoria</button>
-                <button type="button" class="btn-secondary source-action-btn" data-state="SA" onclick="setMicropodsState('SA')">South Australia</button>
+              <div style="display:flex;gap:10px" id="micropodsStateToggle">
+                <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMicropodsState('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:1;transition:opacity .15s">🔷 Victoria — Justine</button>
+                <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMicropodsState('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
               </div>
               <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
                 <label for="micropodsMinSize">Minimum pod size</label>
@@ -697,6 +705,12 @@
 
         <div class="leads-stats-bar" id="leadsStatsBar"></div>
 
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setLeadsStateFilter('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s">🌏 All States</button>
+          <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setLeadsStateFilter('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s">🔷 Victoria — Justine</button>
+          <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setLeadsStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
+        </div>
+
         <div class="admin-table-card">
           <div class="leads-filter-bar">
             <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
@@ -747,6 +761,7 @@
                 <tr>
                   <th>Date</th>
                   <th>Centre</th>
+                  <th title="A real, active RT centre that this lead's name/phone/suburb/state confidently matches — likely already exists and may not need re-signing.">Existing Centre? ⓘ</th>
                   <th>Suburb</th>
                   <th>State</th>
                   <th>Agency Usage</th>
@@ -759,7 +774,7 @@
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
-                <tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="12"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -5394,7 +5409,7 @@
       // already-visible table just to refill it with the same data a
       // moment later.
       if (!allLeads.length) {
-        body.innerHTML = '<tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+        body.innerHTML = '<tr><td colspan="12"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       }
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
@@ -5434,9 +5449,22 @@
         if (suburbs.includes(previousSuburb)) suburbSelect.value = previousSuburb;
 
         filterLeadsTable();
+        loadLeadsCentreMatches(); // fired, not awaited — leads render immediately, matches fill in the column once ready
       } catch {
-        body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+        body.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
+    }
+
+    // Kept separate from the leads fetch above rather than blocking on it —
+    // this hits RT's client list (cold-cache ~3-4s the first time; cached
+    // 5 minutes server-side after that), and the leads table shouldn't sit
+    // on a spinner that long just for one column.
+    let leadsCentreMatches = {};
+    async function loadLeadsCentreMatches() {
+      try {
+        leadsCentreMatches = await fetch('/api/leads/existing-centre-matches').then(r => r.json());
+        filterLeadsTable();
+      } catch { /* column just stays blank — not worth a toast for a non-critical enrichment */ }
     }
 
     // Period/Partner/State/stage filters, applied client-side over
@@ -5444,6 +5472,18 @@
     // in-browser). The three stage filters are separate dropdowns rather
     // than one combined list — easier to scan and combine (e.g. "Called"
     // + "To Schedule" visit) than a single grouped dropdown.
+    // Drives the existing State dropdown below rather than adding a
+    // parallel filter concept — leads.state is already a clean short code
+    // ('VIC'/'SA'), so the dropdown's exact-match already does the right
+    // thing; this is just a bigger, eye-catching way to set it.
+    function setLeadsStateFilter(state) {
+      document.getElementById('leadsFilterState').value = state === 'all' ? '' : state;
+      document.querySelectorAll('#section-leads .wfp-state-filter-btn').forEach(btn => {
+        btn.style.opacity = btn.dataset.state === state ? '1' : '.55';
+      });
+      filterLeadsTable();
+    }
+
     function filterLeadsTable() {
       const centreSearch = document.getElementById('leadsFilterCentre').value.trim().toLowerCase();
       const periodKey = document.getElementById('leadsFilterPeriod').value;
@@ -5471,6 +5511,13 @@
       if (centreVisited) filtered = filtered.filter(l => l.centre_visited_status === centreVisited);
       if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
 
+      // Keeps button styling correct even if the State dropdown itself was
+      // changed directly rather than via a button click.
+      const activeBtnState = state || 'all';
+      document.querySelectorAll('#section-leads .wfp-state-filter-btn').forEach(btn => {
+        btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
+      });
+
       renderLeadsStatsBar(filtered);
       renderLeadsTableRows(filtered);
     }
@@ -5492,10 +5539,23 @@
         <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>`;
     }
 
+    // "—" while matches haven't loaded yet or none was found — this is a
+    // confidence-gated match (see centreMatchService.findConfidentMatch),
+    // not "no centre with this name exists anywhere", so a blank result
+    // isn't asserting the centre is new, just that nothing lined up
+    // confidently.
+    function renderLeadExistingCentreCell(leadId) {
+      const match = leadsCentreMatches[leadId];
+      if (!match) return '<span style="color:var(--text-muted)">—</span>';
+      const centreKey = match.rtLocationId ? `loc:${match.rtLocationId}` : `client:${match.rtClientId}`;
+      const title = `${match.clientName} — ${match.locationLabel}\n${match.reasons.join(', ')}`;
+      return `<span class="badge badge-published" style="cursor:pointer" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">✓ Likely exists</span>`;
+    }
+
     function renderLeadsTableRows(list) {
       const body = document.getElementById('leadsTableBody');
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
         return;
       }
       body.innerHTML = list.map(l => `
@@ -5505,6 +5565,7 @@
             ${escHtml(l.centre_name)}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
           </td>
+          <td>${renderLeadExistingCentreCell(l.id)}</td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
@@ -5998,6 +6059,7 @@
 
     let myCentresData = [];
     let currentCentreKey = null;
+    let currentCentreName = '';
 
     async function loadMyCentres() {
       const body = document.getElementById('myCentresTableBody');
@@ -6046,6 +6108,22 @@
       filterMyCentresTable();
     }
 
+    // null = All States. AND'd with the existing Health/State-dropdown/
+    // search filters below rather than replacing them, so the dropdown
+    // still covers the rarer WA/QLD/NSW/ACT centres this quick filter
+    // doesn't. Uses wfpCentreStateBucket (see WFP Dashboard) rather than a
+    // direct === since centre.state is messier than leads.state — mostly
+    // "Victoria"/"South Australia" but a handful of raw "VIC" too.
+    let myCentresStateFilter = null;
+
+    function setMyCentresStateFilter(state) {
+      myCentresStateFilter = state === 'all' ? null : state;
+      document.querySelectorAll('#myCentresListScreen .wfp-state-filter-btn').forEach(btn => {
+        btn.style.opacity = btn.dataset.state === (myCentresStateFilter || 'all') ? '1' : '.55';
+      });
+      filterMyCentresTable();
+    }
+
     function filterMyCentresTable() {
       const q = document.getElementById('centresFilterSearch').value.trim().toLowerCase();
       const health = document.getElementById('centresFilterHealth').value;
@@ -6054,6 +6132,7 @@
       if (q) rows = rows.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
       if (health) rows = rows.filter(c => c.health === health);
       if (state) rows = rows.filter(c => c.state === state);
+      if (myCentresStateFilter) rows = rows.filter(c => wfpCentreStateBucket(c.state) === myCentresStateFilter);
       renderCentresHealthSummary();
       renderMyCentresTable(rows);
     }
@@ -6098,6 +6177,7 @@
       currentCentreKey = centreKey;
       document.getElementById('myCentresListScreen').style.display = 'none';
       document.getElementById('centre360Screen').style.display = 'block';
+      document.getElementById('deleteCentreBtn').style.display = (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? '' : 'none';
       window.scrollTo({ top: 0 });
       const bodyEl = document.getElementById('centre360Body');
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
@@ -6109,9 +6189,30 @@
           fetch(`/api/centres/${enc}/educators`).then(r => r.json()),
           fetch(`/api/centres/${enc}/activity`).then(r => r.json())
         ]);
+        currentCentreName = centre.name || '';
         bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
+      }
+    }
+
+    // "Delete" only excludes this centre from future My Centres/WFP
+    // Dashboard queries (routes/centres.js's hidden_centres table) — it's
+    // live RT data, not a row this app owns, so there's nothing to
+    // actually delete. Reversible from the DB if a centre gets hidden by
+    // mistake.
+    async function deleteCurrentCentre() {
+      if (!currentCentreKey) return;
+      if (!confirm(`Remove "${currentCentreName || currentCentreKey}" from My Centres?\n\nThis hides it from your portfolio going forward. It doesn't affect anything in RT.`)) return;
+      try {
+        const res = await fetch(`/api/centres/${encodeURIComponent(currentCentreKey)}`, { method: 'DELETE' });
+        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Failed to remove centre'); }
+        toast('Centre removed from My Centres', 'success');
+        myCentresData = [];
+        backToMyCentres();
+        loadMyCentres();
+      } catch (err) {
+        toast(err.message, 'error');
       }
     }
 
@@ -6228,7 +6329,7 @@
 
     function updateMicropodsStateToggle() {
       document.querySelectorAll('#micropodsStateToggle button').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.state === micropodsState);
+        btn.style.opacity = btn.dataset.state === micropodsState ? '1' : '.55';
       });
     }
 

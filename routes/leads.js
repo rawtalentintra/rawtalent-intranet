@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth, requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const { syncLeadEventOutbound } = require('../services/leadCalendarSyncService');
+const rtApi = require('../services/rtApiReportService');
+const centreMatchService = require('../services/centreMatchService');
 
 router.use(requireAuth);
 
@@ -81,6 +83,38 @@ router.get('/', leadsViewAccess, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// RT has no field connecting a booking/client back to "the lead that
+// created this centre" (see services/centreMatchService.js), so "does this
+// lead already exist as a real centre" can only be answered by matching
+// name/phone/suburb/state after the fact — computed here rather than
+// client-side since it needs RT's raw client/location data, not the
+// already-flattened shape /api/centres returns. Kept as its own endpoint
+// (not folded into GET /) so the main leads list stays cheap for callers
+// that don't need this.
+let leadsMatchClientsCache = { clients: null, expiresAt: 0 };
+const LEADS_MATCH_CLIENTS_TTL_MS = 5 * 60 * 1000;
+async function getClientsForMatching() {
+  if (leadsMatchClientsCache.clients && Date.now() < leadsMatchClientsCache.expiresAt) return leadsMatchClientsCache.clients;
+  const clients = await rtApi.fetchAllPages('clients', {});
+  leadsMatchClientsCache = { clients, expiresAt: Date.now() + LEADS_MATCH_CLIENTS_TTL_MS };
+  return clients;
+}
+
+router.get('/existing-centre-matches', leadsViewAccess, async (req, res) => {
+  try {
+    const leadsRows = (await getDb().execute('SELECT id, centre_name, centre_phone, suburb, state FROM leads')).rows;
+    const clients = await getClientsForMatching();
+    const matches = {};
+    for (const lead of leadsRows) {
+      const match = centreMatchService.findConfidentMatch(lead, clients);
+      if (match) matches[lead.id] = match;
+    }
+    res.json(matches);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 

@@ -961,6 +961,21 @@ CREATE INDEX IF NOT EXISTS idx_centre_visits_centre_key ON centre_visits(centre_
 -- Dashboard attention queue need to surface.
 CREATE INDEX IF NOT EXISTS idx_centre_visits_next_step_due ON centre_visits(next_step_due_date) WHERE next_step_due_date IS NOT NULL;
 
+-- "Delete centre" on My Centres — a centre isn't a local row, it's RT
+-- client/location data pulled live, so there's nothing in our own DB to
+-- actually delete. Real deletion would mean mutating RT itself, which this
+-- app has no business doing on a "get this junk off my list" click. This
+-- table just excludes a centreKey from every My Centres/WFP Dashboard
+-- query going forward — reversible with a single DELETE from this table,
+-- never destroys anything in RT.
+CREATE TABLE IF NOT EXISTS hidden_centres (
+  centre_key TEXT PRIMARY KEY,
+  reason TEXT,
+  hidden_by_email CITEXT,
+  hidden_by_name TEXT,
+  hidden_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Google Calendar sync (Workforce Partner scheduling) ──────────────
 -- Links a lead to the calendar event representing its scheduled call or
 -- visit, in either direction: 'app' = HeartBeat created/updated the
