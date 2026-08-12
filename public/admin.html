@@ -6444,6 +6444,10 @@
 
     // Only reachable once a specific pod is picked (map bubble or list row)
     // — this is the point where actual candidates first get fetched.
+    let micropodDetailCandidates = [];
+    let micropodDetailPage = 1;
+    const MICROPOD_PAGE_SIZE = 50;
+
     async function openMicropod(podId) {
       document.getElementById('micropodsListScreen').style.display = 'none';
       document.getElementById('micropodDetailScreen').style.display = 'block';
@@ -6454,7 +6458,10 @@
         const minSize = document.getElementById('micropodsMinSize').value || 15;
         const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
         if (pod.error) throw new Error(pod.error);
+        micropodDetailCandidates = pod.candidates;
+        micropodDetailPage = 1;
         bodyEl.innerHTML = renderMicropodDetail(pod);
+        renderMicropodCandidatesPage();
         renderMicropodHeatmap(pod);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this pod.</div>';
@@ -6473,19 +6480,47 @@
         <div class="admin-table-card">
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Suburb</th></tr></thead>
-              <tbody>
-                ${pod.candidates.map(c => `
-                  <tr>
-                    <td>${escHtml(c.name)}</td>
-                    <td>${escHtml(c.email || '—')}</td>
-                    <td>${escHtml(c.contactNo || '—')}</td>
-                    <td>${escHtml(c.suburb || '—')}</td>
-                  </tr>`).join('')}
-              </tbody>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
+              <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
+          <div id="micropodCandidatesPager" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-100)"></div>
         </div>`;
+    }
+
+    // Client-side pagination — the whole pod's candidates are already in
+    // hand from the one fetch in openMicropod (max ~1,400 rows for the
+    // biggest real pod), so there's no reason to round-trip the server
+    // per page. This just keeps a 1,000+ row pod from rendering as one
+    // enormous, hard-to-scan table.
+    function renderMicropodCandidatesPage() {
+      const total = micropodDetailCandidates.length;
+      const totalPages = Math.max(1, Math.ceil(total / MICROPOD_PAGE_SIZE));
+      micropodDetailPage = Math.min(Math.max(1, micropodDetailPage), totalPages);
+      const start = (micropodDetailPage - 1) * MICROPOD_PAGE_SIZE;
+      const pageRows = micropodDetailCandidates.slice(start, start + MICROPOD_PAGE_SIZE);
+
+      document.getElementById('micropodCandidatesBody').innerHTML = pageRows.map(c => `
+        <tr>
+          <td>${escHtml(c.name)}</td>
+          <td>${escHtml(c.email || '—')}</td>
+          <td>${escHtml(c.contactNo || '—')}</td>
+          <td>${escHtml(c.address || c.suburb || '—')}</td>
+        </tr>`).join('');
+
+      document.getElementById('micropodCandidatesPager').innerHTML = `
+        <div style="font-size:11.5px;color:var(--text-muted)">${start + 1}–${Math.min(start + MICROPOD_PAGE_SIZE, total)} of ${total}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeMicropodCandidatesPage(-1)" ${micropodDetailPage === 1 ? 'disabled' : ''}>← Prev</button>
+          <span style="font-size:12px;color:var(--text-muted)">Page ${micropodDetailPage} of ${totalPages}</span>
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeMicropodCandidatesPage(1)" ${micropodDetailPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>`;
+    }
+
+    function changeMicropodCandidatesPage(delta) {
+      micropodDetailPage += delta;
+      renderMicropodCandidatesPage();
+      document.getElementById('micropodCandidatesBody').closest('.admin-table-card').scrollIntoView({ block: 'nearest' });
     }
 
     // A heatmap (density gradient), not bubbles, once you're inside a

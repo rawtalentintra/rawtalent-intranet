@@ -119,6 +119,32 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Street-level address lines aren't in getCandidatePoints() (deliberately
+// lean — that query runs over all ~13k candidates for clustering, no
+// reason to pull raw JSON for every one of them just for an address
+// column). This runs only against one pod's members (tens to low
+// thousands, never the full table), so pulling addressLine1/2 here is
+// cheap.
+async function getAddressLines(userIds) {
+  if (!userIds.length) return {};
+  const placeholders = userIds.map(() => '?').join(',');
+  const rows = (await getDb().execute({
+    sql: `SELECT user_id,
+            raw->'addresses'->0->>'addressLine1' AS address_line1,
+            raw->'addresses'->0->>'addressLine2' AS address_line2,
+            raw->'addresses'->0->>'postCode' AS post_code
+          FROM rt_candidates_cache
+          WHERE user_id IN (${placeholders})`,
+    args: userIds
+  })).rows;
+  const byUserId = {};
+  for (const r of rows) {
+    byUserId[String(r.user_id)] = [r.address_line1, r.address_line2].filter(Boolean).join(' ') || null;
+    byUserId[String(r.user_id) + ':postCode'] = r.post_code || null;
+  }
+  return byUserId;
+}
+
 // One pod's actual candidates — only reachable once that specific pod has
 // been selected (map bubble or list row), never fetched upfront.
 router.get('/:podId', async (req, res) => {
@@ -130,12 +156,17 @@ router.get('/:podId', async (req, res) => {
 
     const { points } = await getCandidatePoints();
     const memberSet = new Set(pod.memberIds);
+    const members = points.filter(p => memberSet.has(p.userId));
+    const addressLines = await getAddressLines(members.map(p => p.userId));
+
     // lat/lng included here (not in the list-view pod summary) purely to
     // drive the per-pod heatmap once a pod is actually open — still never
     // exposed before that point.
-    const candidates = points
-      .filter(p => memberSet.has(p.userId))
-      .map(({ userId, name, email, contactNo, suburb, lat, lng }) => ({ userId, name, email, contactNo, suburb, lat, lng }))
+    const candidates = members
+      .map(({ userId, name, email, contactNo, suburb, lat, lng }) => ({
+        userId, name, email, contactNo, suburb, lat, lng,
+        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({ id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount, candidates });
