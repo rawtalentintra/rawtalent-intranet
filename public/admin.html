@@ -3263,9 +3263,20 @@
     let joditEditor = null;
     let selectedRelated = []; // { id, title }
 
+    // /js/richEditor.js (a `<script type="module">`) had never actually
+    // been committed to git — confirmed live, it 404s in production — so
+    // `window.RichEditor` never existed there and this had no timeout at
+    // all, meaning every await of it (both here and the Project SOP editor
+    // below) hung forever with zero error, no toast, nothing: the content
+    // editor just silently never appeared. The missing file is the real
+    // fix; this timeout is defence-in-depth so a CDN hiccup or future
+    // regression fails loudly instead of hanging silently again.
     function waitForRichEditor() {
       if (window.RichEditor) return Promise.resolve();
-      return new Promise(resolve => window.addEventListener('richeditor-ready', resolve, { once: true }));
+      return new Promise((resolve, reject) => {
+        window.addEventListener('richeditor-ready', resolve, { once: true });
+        setTimeout(() => reject(new Error('The text editor failed to load. Check your connection and refresh the page.')), 15000);
+      });
     }
 
     async function initEditor() {
@@ -4328,7 +4339,7 @@
       // and reloading doesn't dump you back on the Dashboard every time.
       try { localStorage.setItem('adminActiveSection', id); } catch {}
       if (id === 'new-article') {
-        initEditor();
+        initEditor().catch(err => toast(err.message, 'error'));
         if (!editingArticleId) resetArticleForm();
         loadCategoriesForDatalist();
         loadTagsForDatalist();
@@ -9720,7 +9731,12 @@
 
       if (sopEditMode) {
         (async () => {
-          await waitForRichEditor();
+          try {
+            await waitForRichEditor();
+          } catch (err) {
+            toast(err.message, 'error');
+            return;
+          }
           const mount = document.getElementById('projectSopEditor');
           if (!mount) return; // user navigated away before the editor library finished loading
           projectSopEditor = window.RichEditor.create(mount, {
