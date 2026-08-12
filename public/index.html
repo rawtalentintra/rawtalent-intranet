@@ -711,16 +711,6 @@
           🔔
           <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
         </button>
-        <div id="notifPanel" style="display:none;position:absolute;top:44px;right:0;width:min(360px, calc(100vw - 24px));max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
-          <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
-            <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
-            <div style="display:flex;gap:10px;align-items:center">
-              <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
-              <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
-            </div>
-          </div>
-          <div id="notifPanelBody" style="padding:8px"></div>
-        </div>
       </div>
       <div class="nav-user">
         <div class="nav-avatar" id="navAvatar">?</div>
@@ -730,6 +720,28 @@
       <button class="nav-btn admin-btn" id="adminNavBtn" onclick="location.href='/admin'" style="display:none">⚙ Admin</button>
     </div>
   </nav>
+
+  <!-- Rendered outside <nav> (not inside .notif-bell-wrap) deliberately —
+       .navbar has `contain: paint` (see CLAUDE.md — needed to fix a real
+       Chrome GPU compositor bug on scaled MacBook displays), which clips
+       any descendant's paint to the navbar's own ~64px box. This panel is
+       480px tall, so nested inside the navbar it rendered with fully
+       correct DOM/CSS/content but was invisibly clipped — same bug already
+       fixed in admin.html, this is the second, separate copy of the same
+       markup that got missed. Position is computed in toggleNotifPanel()
+       from the bell button's real screen position instead of a static
+       top/right, since it's no longer a CSS-positioned descendant of
+       .notif-bell-wrap. -->
+  <div id="notifPanel" style="display:none;position:fixed;width:min(360px, calc(100vw - 24px));max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
+      <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
+        <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
+      </div>
+    </div>
+    <div id="notifPanelBody" style="padding:8px"></div>
+  </div>
 
   <!-- Quick Links -->
   <div class="quick-links-bar">
@@ -1216,20 +1228,47 @@
       body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
     }
 
+    // Panel lives outside <nav> now (see the HTML comment above #notifPanel
+    // for why — .navbar's `contain: paint` was silently clipping it), so
+    // its position isn't set by CSS relative to the bell button anymore;
+    // computed here from the button's real screen position instead.
+    function positionNotifPanel() {
+      const btn = document.getElementById('notifBellBtn');
+      const panel = document.getElementById('notifPanel');
+      const btnRect = btn.getBoundingClientRect();
+      const gap = 8;
+      let left = btnRect.right - panel.offsetWidth;
+      left = Math.max(8, Math.min(left, window.innerWidth - panel.offsetWidth - 8));
+      panel.style.top = `${btnRect.bottom + gap}px`;
+      panel.style.left = `${left}px`;
+    }
+
     function toggleNotifPanel(event) {
       event?.stopPropagation();
       const panel = document.getElementById('notifPanel');
       const opening = panel.style.display === 'none';
+      // display must be 'block' before measuring offsetWidth below — a
+      // display:none element always reports 0, which would right-pin the
+      // panel flush against the bell button instead of right-aligning its
+      // real width against it.
       panel.style.display = opening ? 'block' : 'none';
-      if (opening) loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
+      if (opening) {
+        positionNotifPanel();
+        loadNotifications(); // auto-refresh is paused — opening the bell is the refresh now
+      }
     }
 
     document.addEventListener('click', (e) => {
       const wrap = document.querySelector('.notif-bell-wrap');
       const panel = document.getElementById('notifPanel');
-      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target)) {
+      if (wrap && panel && panel.style.display !== 'none' && !wrap.contains(e.target) && !panel.contains(e.target)) {
         panel.style.display = 'none';
       }
+    });
+
+    window.addEventListener('resize', () => {
+      const panel = document.getElementById('notifPanel');
+      if (panel.style.display !== 'none') positionNotifPanel();
     });
 
     let pendingGreeting = null;
