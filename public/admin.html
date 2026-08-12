@@ -502,6 +502,17 @@
           </select>
         </div>
 
+        <!-- Bold, distinct fills (not the app's usual light badge tints) —
+             deliberately eye-catching so Gwen (SA) and Justine (VIC) are
+             drawn straight to their own territory instead of the whole
+             pipeline. Filters everything below, not just the funnel/partner
+             cards that already happened to be split by state. -->
+        <div id="wfpStateFilterBar" style="display:flex;gap:10px;margin-bottom:18px">
+          <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setWfpStateFilter('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s">🌏 All States</button>
+          <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setWfpStateFilter('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s">🔷 Victoria — Justine</button>
+          <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setWfpStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
+        </div>
+
         <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(4,1fr)"></div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
@@ -5655,14 +5666,40 @@
 
     function daysSince(dateStr) { return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000); }
 
+    // WFP Dashboard territory filter — null means "All States" (the
+    // original unfiltered view). leads.state is already a clean short code
+    // ('VIC'/'SA', confirmed against real data), but centres.state comes
+    // straight from RT client records and is messier ("Victoria" mostly,
+    // but a handful of raw "VIC" too — confirmed live) so centre-side
+    // comparisons go through wfpCentreStateBucket() instead of a direct ===.
+    let wfpStateFilter = null;
+
+    function wfpCentreStateBucket(rawState) {
+      const s = (rawState || '').trim().toLowerCase();
+      if (s === 'victoria' || s === 'vic') return 'VIC';
+      if (s === 'south australia' || s === 'sa') return 'SA';
+      return null;
+    }
+
+    function setWfpStateFilter(state) {
+      wfpStateFilter = state === 'all' ? null : state;
+      document.querySelectorAll('.wfp-state-filter-btn').forEach(btn => {
+        btn.style.opacity = btn.dataset.state === (wfpStateFilter || 'all') ? '1' : '.55';
+      });
+      renderSalesDashboard();
+    }
+
     // Attention items are computed over the FULL dataset, never scoped to
     // the selected date range — an overdue call from a lead logged two
     // months ago still needs action today regardless of which period the
-    // dashboard happens to be filtered to.
+    // dashboard happens to be filtered to. Territory filter still applies
+    // on top of that, same as everything else on this page.
     function computeAttentionItems() {
       const items = [];
       const now = Date.now();
-      allLeads.forEach(l => {
+      const leadsScope = wfpStateFilter ? allLeads.filter(l => l.state === wfpStateFilter) : allLeads;
+      const centresScope = wfpStateFilter ? myCentresData.filter(c => wfpCentreStateBucket(c.state) === wfpStateFilter) : myCentresData;
+      leadsScope.forEach(l => {
         if (l.lead_called_status === 'scheduled' && l.lead_called_at && new Date(l.lead_called_at).getTime() < now) {
           items.push({ type: 'lead', lead: l, reason: `Call overdue — ${daysSince(l.lead_called_at)}d`, urgency: daysSince(l.lead_called_at), cls: 'attn-overdue' });
         } else if (l.lead_called_status === 'to_schedule' && daysSince(l.created_at) >= 3) {
@@ -5684,7 +5721,7 @@
       // action queue would drown out everything actually urgent. Dormant
       // centres are still fully visible via My Centres' own health filter
       // — just not force-fed into this list.
-      myCentresData.forEach(c => {
+      centresScope.forEach(c => {
         if (c.health === 'declining') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue' });
         } else if (c.health === 'needs_attention') {
@@ -5716,11 +5753,24 @@
     async function loadSalesDashboard() {
       if (!allLeads.length) { try { allLeads = await fetch('/api/leads').then(r => r.json()); } catch { allLeads = []; } }
       await ensureCentresLoaded();
+      renderSalesDashboard();
+    }
+
+    // Split from loadSalesDashboard() so the territory filter buttons
+    // (setWfpStateFilter) can re-render instantly against already-fetched
+    // data instead of re-hitting /api/leads and /api/centres on every click.
+    function renderSalesDashboard() {
       const rangeKey = document.getElementById('salesDashRange').value;
       const { from, to } = salesDashRange(rangeKey);
       const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
-      const current = allLeads.filter(l => inDateRange(l.created_at, from, to));
-      const previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo));
+      let current = allLeads.filter(l => inDateRange(l.created_at, from, to));
+      let previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo));
+      let trendLeads = allLeads;
+      if (wfpStateFilter) {
+        current = current.filter(l => l.state === wfpStateFilter);
+        previous = previous.filter(l => l.state === wfpStateFilter);
+        trendLeads = trendLeads.filter(l => l.state === wfpStateFilter);
+      }
 
       renderSalesKpis(current, previous);
       renderSalesPortfolioSnapshot();
@@ -5728,7 +5778,7 @@
       renderSalesAttentionQueue();
       renderSalesPartnerCards(current);
       renderSalesSourceBreakdown(current);
-      renderSalesMonthlyTrend(allLeads);
+      renderSalesMonthlyTrend(trendLeads);
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
@@ -5737,16 +5787,17 @@
     // already-signed centre book of business.
     function renderSalesPortfolioSnapshot() {
       const box = document.getElementById('salesPortfolioSnapshot');
-      if (!myCentresData.length) {
+      const data = wfpStateFilter ? myCentresData.filter(c => wfpCentreStateBucket(c.state) === wfpStateFilter) : myCentresData;
+      if (!data.length) {
         box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">No centre data available.</div>';
         return;
       }
-      const bookings30d = myCentresData.reduce((sum, c) => sum + c.bookings30dCount, 0);
-      const bookingsPrev30d = myCentresData.reduce((sum, c) => sum + c.bookingsPrev30dCount, 0);
+      const bookings30d = data.reduce((sum, c) => sum + c.bookings30dCount, 0);
+      const bookingsPrev30d = data.reduce((sum, c) => sum + c.bookingsPrev30dCount, 0);
       const counts = {};
-      myCentresData.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      data.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
       const cards = [
-        { label: 'Active centres', value: myCentresData.length },
+        { label: 'Active centres', value: data.length },
         { label: 'Portfolio bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d) },
         { label: '📈 Growing', value: counts.growing || 0 },
         { label: '📉 Declining', value: counts.declining || 0 },
@@ -5781,7 +5832,8 @@
     }
 
     function renderSalesFunnel(leads) {
-      const states = [{ key: 'VIC', label: '📍 VIC — Justine' }, { key: 'SA', label: '📍 SA — Gwen' }];
+      const allStates = [{ key: 'VIC', label: '📍 VIC — Justine' }, { key: 'SA', label: '📍 SA — Gwen' }];
+      const states = wfpStateFilter ? allStates.filter(s => s.key === wfpStateFilter) : allStates;
       document.getElementById('salesFunnelRow').innerHTML = states.map(s => {
         const stateLeads = leads.filter(l => l.state === s.key);
         const c = salesFunnelCounts(stateLeads);
@@ -5842,7 +5894,8 @@
     }
 
     function renderSalesPartnerCards(leads) {
-      const partners = [{ key: 'VIC', short: '📍 VIC — Justine' }, { key: 'SA', short: '📍 SA — Gwen' }];
+      const allPartners = [{ key: 'VIC', short: '📍 VIC — Justine' }, { key: 'SA', short: '📍 SA — Gwen' }];
+      const partners = wfpStateFilter ? allPartners.filter(p => p.key === wfpStateFilter) : allPartners;
       const attention = computeAttentionItems();
       document.getElementById('salesPartnerRow').innerHTML = partners.map(p => {
         const stateLeads = leads.filter(l => l.state === p.key);
