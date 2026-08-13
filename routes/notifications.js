@@ -254,8 +254,23 @@ router.post('/announcements', requireAdmin, async (req, res) => {
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
   try {
+    const db = getDb();
+    // Guards against a duplicate POST (double-click, a second tab, or a
+    // retry firing before the frontend's own disable-while-submitting
+    // guard kicks in) creating two identical broadcasts — confirmed to
+    // have actually happened once, two rows 0.7s apart that then each got
+    // separately shown and acknowledged in the bell.
+    const dupe = await db.execute({
+      sql: `SELECT id FROM announcements
+            WHERE created_by_email = ? AND title = ? AND message = ?
+              AND created_at > now() - interval '15 seconds'
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [req.user.email, title.trim(), message.trim()]
+    });
+    if (dupe.rows[0]) return res.json({ success: true, id: dupe.rows[0].id });
+
     const id = uuidv4();
-    await getDb().execute({
+    await db.execute({
       sql: `INSERT INTO announcements (id, title, message, send_at, created_by_email, created_by_name)
             VALUES (?, ?, ?, COALESCE(?, now()), ?, ?)`,
       args: [id, title.trim(), message.trim(), send_at || null, req.user.email, req.user.name || req.user.email]

@@ -3763,6 +3763,15 @@
       if (!message) { toast('Write a message first', 'error'); return; }
       const sendAtLocal = document.getElementById('announcementSendAt').value;
       const send_at = sendAtLocal ? new Date(sendAtLocal).toISOString() : null;
+      // Disabled for the duration of the request — nothing previously
+      // stopped a fast double-click (or an accidental second tap) from
+      // firing two POSTs and creating two identical announcements, which
+      // is exactly what happened to Sophia's "Child Safety Training –
+      // Portal Update" post (two rows 0.7s apart, both then separately
+      // acknowledged from the bell).
+      const sendBtn = document.querySelector('#announcementModal .btn-add');
+      if (sendBtn.disabled) return;
+      sendBtn.disabled = true;
       try {
         const res = await fetch('/api/notifications/announcements', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3774,6 +3783,7 @@
         closeAnnouncementModal();
         loadNotifications();
       } catch { toast('Network error', 'error'); }
+      finally { sendBtn.disabled = false; }
     }
 
     // ── Announce Changes (article edit → AI summary → real announcement) ──
@@ -3812,6 +3822,10 @@
       if (!lastSavedChangeContext) return;
       const summary = document.getElementById('announceChangesSummary').value.trim();
       if (!summary) { toast('Add a summary before posting', 'error'); return; }
+      // Same double-submit guard as submitAnnouncement() — see its comment.
+      const postBtn = document.getElementById('announceChangesPostBtn');
+      if (postBtn.disabled) return;
+      postBtn.disabled = true;
       try {
         const res = await fetch('/api/notifications/announcements', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3826,6 +3840,7 @@
         lastSavedChangeContext = null;
         loadNotifications();
       } catch { toast('Network error', 'error'); }
+      finally { postBtn.disabled = false; }
     }
 
     function spawnConfetti(container) {
