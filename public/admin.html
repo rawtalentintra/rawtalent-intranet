@@ -5394,10 +5394,10 @@
       const meta = info.meta[status] || info.meta[Object.keys(info.meta)[0]];
       const showsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       const text = showsDate && at ? `${meta.label} ${fmtDate(at)}` : meta.label;
-      // qa_view and workforce_partner can see lead status but not edit it
-      // (PUT /api/leads/:id status/assignment fields are admin/super_admin
-      // only server-side) — skip the click-to-edit popover for both.
-      const editAttr = (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `onclick="openLeadStatusPopover(event,'${leadId}','${field}')"` : '';
+      // qa_view can see lead status but not edit it — workforce_partner can
+      // (PUT /api/leads/:id allows it server-side; assignment is the only
+      // status-adjacent field that stays admin/super_admin only).
+      const editAttr = (currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner') ? `onclick="openLeadStatusPopover(event,'${leadId}','${field}')"` : '';
       return `<span class="lead-badge ${meta.cls}" ${editAttr}>${escHtml(text)}</span>`;
     }
 
@@ -9148,10 +9148,13 @@
       // "done"/"signed" (the completed state) and "scheduled" carry a date;
       // to_schedule/pending/not_interested don't.
       const showsDate = currentStatus === 'done' || currentStatus === 'signed' || currentStatus === 'scheduled';
-      // qa_view and workforce_partner both get a read-only view of these
-      // controls — editing status/assignment is admin/super_admin only
-      // server-side (PUT /api/leads/:id).
-      const readOnly = currentUserRole !== 'admin' && currentUserRole !== 'super_admin';
+      // qa_view gets a read-only view of these controls; workforce_partner
+      // can edit them too (they're the ones actually making the calls/
+      // visits, so locking them out of marking that was the wrong call —
+      // confirmed with Joy 2026-08-13). Assignment (which WFP a lead
+      // belongs to) is separate and stays admin/super_admin only — see
+      // canEditStatus/leadAssigneeSelect below.
+      const readOnly = currentUserRole !== 'admin' && currentUserRole !== 'super_admin' && currentUserRole !== 'workforce_partner';
       return `
         <div class="lead-status-row">
           <span class="lead-status-label">${escHtml(label)}</span>

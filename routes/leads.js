@@ -197,21 +197,25 @@ router.get('/:id', leadsViewAccess, async (req, res) => {
 
 // Contact fields are deliberately left blank on submission now — the
 // Workforce Partner fills them in themselves after they've spoken to the
-// centre, from the Leads list in their own view. workforce_partner is
-// restricted to exactly these 4 columns; admin/super_admin can edit
-// everything (status, assignment, and the original submission fields too,
-// in case something was mistyped).
+// centre, from the Leads list in their own view. workforce_partner also
+// gets the call/visit/sign status+date fields — they're the ones actually
+// making the calls and visits, so locking them out of marking that as
+// done was the wrong call (confirmed with Joy 2026-08-13, in response to
+// a real report from Gwen that she couldn't update Lead Called). Lead
+// *assignment* (which Workforce Partner a lead belongs to) stays a
+// separate, admin/super_admin-only concern below, along with the original
+// submission fields in case something was mistyped.
 const WORKFORCE_PARTNER_FIELDS = {
-  position: 'position', contact_first_name: 'contactFirstName', contact_last_name: 'contactLastName', contact_email: 'contactEmail'
+  position: 'position', contact_first_name: 'contactFirstName', contact_last_name: 'contactLastName', contact_email: 'contactEmail',
+  lead_called_status: 'leadCalledStatus', lead_called_at: 'leadCalledAt',
+  centre_visited_status: 'centreVisitedStatus', centre_visited_at: 'centreVisitedAt',
+  signed_status: 'signedStatus', signed_at: 'signedAt'
 };
 const ADMIN_FIELDS = {
   centre_name: 'centreName', street_address: 'streetAddress', suburb: 'suburb', state: 'state', centre_phone: 'centrePhone',
   educator_name: 'educatorName', agency_name: 'agencyName', number_of_shifts: 'numberOfShifts', agency_usage: 'agencyUsage',
   ...WORKFORCE_PARTNER_FIELDS,
-  assigned_workforce_partner: 'assignedWorkforcePartner',
-  lead_called_status: 'leadCalledStatus', lead_called_at: 'leadCalledAt',
-  centre_visited_status: 'centreVisitedStatus', centre_visited_at: 'centreVisitedAt',
-  signed_status: 'signedStatus', signed_at: 'signedAt'
+  assigned_workforce_partner: 'assignedWorkforcePartner'
 };
 
 router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
