@@ -138,6 +138,27 @@ router.patch('/:id/position', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Persists a manual override for where the horizontal segment of this
+// person's hierarchy-line elbow sits (see drawOrgLines/orgElbowPath in
+// admin.html) — lets super_admin untangle a crowded chart by hand.
+// bend_y: null clears the override, falling back to the auto-computed
+// midpoint again.
+router.patch('/:id/line-bend', requireSuperAdmin, async (req, res) => {
+  const { bend_y } = req.body;
+  if (bend_y !== null && typeof bend_y !== 'number') {
+    return res.status(400).json({ error: 'bend_y must be a number or null' });
+  }
+  try {
+    await getDb().execute({
+      sql: 'UPDATE team_members SET chart_line_bend_y = ?, updated_at = now() WHERE id = ?',
+      args: [bend_y, req.params.id]
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:id/photo', requireSuperAdmin, photoUpload.single('photo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {

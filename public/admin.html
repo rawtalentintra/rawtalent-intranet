@@ -132,6 +132,8 @@
     .org-canvas { position: relative; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     #orgChartLinesSvg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
     .org-line { stroke: var(--gray-400); stroke-width: 1.5; fill: none; stroke-linejoin: round; }
+    .org-line-handle { fill: var(--orange); opacity: .35; cursor: ns-resize; pointer-events: all; transition: opacity .15s; }
+    .org-line-handle:hover { opacity: 1; }
     .org-node {
       position: absolute; width: 148px; box-sizing: border-box; padding: 9px 12px;
       border-radius: 10px; background: white; border: 1.5px solid var(--gray-200);
@@ -371,7 +373,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Our Team</div>
-            <div class="admin-page-sub">Team hierarchy and HR profiles. Click anyone to view their profile — drag a box to rearrange the layout.</div>
+            <div class="admin-page-sub">Team hierarchy and HR profiles. Click anyone to view their profile — drag a box to rearrange the layout.<span class="super-admin-only" style="display:none"> Drag a line's orange dot to adjust it, double-click to reset.</span></div>
           </div>
           <button class="btn-add super-admin-only" id="addTeamMemberBtn" style="display:none" onclick="openTeamMemberModal()">+ Add Team Member</button>
         </div>
@@ -3971,16 +3973,18 @@
     // Classic org-chart "elbow" connector: drop straight down from the
     // manager, cut horizontally, then drop straight down into the child —
     // rather than a diagonal point-to-point line. Bends halfway between
-    // the two boxes, so siblings under the same manager (same default
-    // grid row) share the same bend height and their elbows merge into
-    // one clean horizontal bar, matching a normal org chart's look. Each
-    // edge is still computed independently (no grouping/bus-line pass)
-    // so it stays correct even after a manager or child has been dragged
-    // off-grid.
-    function orgElbowPath(x1, y1, x2, y2) {
+    // the two boxes by default, so siblings under the same manager (same
+    // default grid row) share the same bend height and their elbows merge
+    // into one clean horizontal bar, matching a normal org chart's look —
+    // but that default midpoint can be overridden per-person (chart_line_
+    // bend_y) when the auto layout leaves lines overlapping and a
+    // super_admin drags the bend by hand instead.
+    function orgElbowPath(x1, y1, x2, y2, midY) {
       if (Math.abs(x1 - x2) < 1) return `M${x1},${y1} L${x2},${y2}`;
-      const midY = Math.round(y1 + (y2 - y1) / 2);
       return `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`;
+    }
+    function orgDefaultBendY(y1, y2) {
+      return Math.round(y1 + (y2 - y1) / 2);
     }
 
     // One connector per person with a manager, from the manager's
@@ -3991,22 +3995,86 @@
     // offsetLeft/Top are already relative to .org-canvas (its nearest
     // positioned ancestor), so they line up with the SVG's own coordinate
     // space with no extra math. Called once after every render, then
-    // again on every drag mousemove so lines visually follow a node being
-    // repositioned.
+    // again on every drag mousemove (node drag or line-bend drag) so
+    // lines visually follow along live.
+    //
+    // super_admin also gets a small draggable handle on each bendable
+    // line's horizontal segment — drag it to nudge that one line's bend
+    // height (persisted per-person via chart_line_bend_y), double-click
+    // to reset it back to the auto midpoint. Everyone else just sees the
+    // plain lines.
     function drawOrgLines(container) {
       const canvas = container.querySelector('.org-canvas');
       const svg = canvas && canvas.querySelector('#orgChartLinesSvg');
       if (!svg) return;
       const nodesById = {};
       canvas.querySelectorAll('.org-node').forEach(n => { nodesById[n.dataset.id] = n; });
-      svg.innerHTML = allTeamMembers
+      const canEdit = currentUserRole === 'super_admin';
+      let html = '';
+      allTeamMembers
         .filter(m => m.manager_id && nodesById[m.manager_id] && nodesById[m.id])
-        .map(m => {
+        .forEach(m => {
           const mgr = nodesById[m.manager_id], child = nodesById[m.id];
           const x1 = mgr.offsetLeft + mgr.offsetWidth / 2, y1 = mgr.offsetTop + mgr.offsetHeight;
           const x2 = child.offsetLeft + child.offsetWidth / 2, y2 = child.offsetTop;
-          return `<path class="org-line" d="${orgElbowPath(x1, y1, x2, y2)}" />`;
-        }).join('');
+          const bendable = Math.abs(x1 - x2) >= 1;
+          const midY = bendable ? (m.chart_line_bend_y != null ? m.chart_line_bend_y : orgDefaultBendY(y1, y2)) : y1;
+          html += `<path class="org-line" d="${orgElbowPath(x1, y1, x2, y2, midY)}" />`;
+          if (canEdit && bendable) {
+            html += `<circle class="org-line-handle" data-child-id="${m.id}" cx="${(x1 + x2) / 2}" cy="${midY}" r="5"></circle>`;
+          }
+        });
+      svg.innerHTML = html;
+      if (canEdit) wireOrgLineHandles(svg, container);
+    }
+
+    // Vertical-only drag on a line's bend handle: mousemove updates the
+    // in-memory chart_line_bend_y and redraws live, mouseup persists it.
+    // Double-click clears the override so the line snaps back to the
+    // auto-computed midpoint. Listeners are re-bound every drawOrgLines()
+    // call since the handles are recreated each time (innerHTML rebuild)
+    // — cheap at this scale (well under 20 lines/handles).
+    function wireOrgLineHandles(svg, container) {
+      svg.querySelectorAll('.org-line-handle').forEach(handle => {
+        const childId = handle.dataset.childId;
+        handle.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const m = allTeamMembers.find(x => x.id === childId);
+          if (!m) return;
+          function onMove(e2) {
+            const canvasRect = container.querySelector('.org-canvas').getBoundingClientRect();
+            m.chart_line_bend_y = Math.round(e2.clientY - canvasRect.top);
+            drawOrgLines(container);
+          }
+          async function onUp() {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            try {
+              await fetch(`/api/team/${childId}/line-bend`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bend_y: m.chart_line_bend_y })
+              });
+            } catch { toast('Failed to save line position', 'error'); }
+          }
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+        handle.addEventListener('dblclick', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const m = allTeamMembers.find(x => x.id === childId);
+          if (!m) return;
+          m.chart_line_bend_y = null;
+          drawOrgLines(container);
+          try {
+            await fetch(`/api/team/${childId}/line-bend`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ bend_y: null })
+            });
+          } catch { toast('Failed to reset line position', 'error'); }
+        });
+      });
     }
 
     // Drag-to-reposition: mousedown starts a drag; if the pointer actually

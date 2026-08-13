@@ -380,6 +380,12 @@ CREATE TABLE IF NOT EXISTS team_members (
 -- position in place instead of following the auto-arranged grid default.
 ALTER TABLE team_members ADD COLUMN IF NOT EXISTS chart_x DOUBLE PRECISION;
 ALTER TABLE team_members ADD COLUMN IF NOT EXISTS chart_y DOUBLE PRECISION;
+-- Manual override for where the horizontal segment of this person's
+-- hierarchy-line elbow (from their manager down to them) sits, in org
+-- canvas Y coordinates. NULL until dragged, at which point it overrides
+-- the auto-computed midpoint bend — lets a crowded chart be untangled by
+-- hand instead of relying purely on the automatic layout.
+ALTER TABLE team_members ADD COLUMN IF NOT EXISTS chart_line_bend_y DOUBLE PRECISION;
 
 -- Fun team-culture feature: birthday/work-anniversary greetings between
 -- logged-in users. Upcoming-date reminders themselves are computed live from
