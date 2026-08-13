@@ -3375,14 +3375,30 @@
       // (and re-checks role access) on every navigation. Restricted roles
       // always land on their list's first entry unless the saved section
       // is one they're allowed into.
+      //
+      // Used to gate this on `document.getElementById('section-'+id)`
+      // existing first, but almost every section is lazy-loaded from a
+      // <template> (or, for report-*, built by renderReportSectionsHtml())
+      // and simply doesn't exist in the DOM yet at this point in page
+      // load — so that check failed for nearly everything and silently
+      // fell through to the Articles default on every refresh. showSection()
+      // already no-ops safely on an unrecognised/stale id (it just leaves
+      // Articles active), so it's safe to call it unconditionally here.
       let savedSection = null;
       try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
       const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (allowedSections) {
         const target = (savedSection && allowedSections.includes(savedSection)) ? savedSection : allowedSections[0];
         showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
-      } else if (savedSection && document.getElementById(`section-${savedSection}`)) {
-        const navEl = document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
+      } else if (savedSection) {
+        // New Article's nav item calls newArticle() rather than
+        // showSection('new-article', this) directly, so it can't be found
+        // by the generic onclick-text lookup below — matches how the
+        // app's own newArticle()/loadArticle() call sites pass this same
+        // element explicitly for the same reason.
+        const navEl = savedSection === 'new-article'
+          ? document.getElementById('navNewArticle')
+          : document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
         showSection(savedSection, navEl);
       }
     }
