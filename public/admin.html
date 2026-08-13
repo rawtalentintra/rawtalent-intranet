@@ -122,15 +122,22 @@
     /* Org chart — free-form canvas. Every person is an absolutely-positioned
        box the admin can drag anywhere; position is saved per-person
        (chart_x/chart_y) once dragged, otherwise falls back to an
-       auto-arranged grid default. No hierarchy lines — position is purely
-       visual/spatial, not derived from manager_id. */
+       auto-arranged grid default. Hierarchy lines are drawn from
+       manager_id (already collected via the edit form, previously just
+       never rendered) — a straight line per person to whoever they report
+       to, not an elbow/right-angle connector, since nodes can be dragged
+       to any relative position and a straight line is the only shape that
+       stays sane regardless of where two boxes end up.  */
     #orgChartContainer, #teamChartContainer { overflow: auto; }
     .org-canvas { position: relative; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #orgChartLinesSvg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    .org-line { stroke: var(--gray-400); stroke-width: 1.5; }
     .org-node {
       position: absolute; width: 148px; box-sizing: border-box; padding: 9px 12px;
       border-radius: 10px; background: white; border: 1.5px solid var(--gray-200);
       text-align: center; cursor: grab; user-select: none;
       transition: box-shadow .15s, border-color .15s;
+      z-index: 1;
     }
     .org-node:hover { box-shadow: var(--shadow-sm); border-color: var(--orange); }
     .org-node.dragging { cursor: grabbing; box-shadow: var(--shadow-sm); border-color: var(--orange); z-index: 5; }
@@ -3912,6 +3919,7 @@
         chartEl.innerHTML = renderOrgCanvas(allTeamMembers);
         renderTeamTable(allTeamMembers);
         wireOrgDrag(chartEl);
+        drawOrgLines(chartEl);
       } catch {
         chartEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">Failed to load team.</div>';
       }
@@ -3957,7 +3965,32 @@
       }).join('');
       const canvasW = Math.max(maxX + ORG_NODE_W + 30, 700);
       const canvasH = Math.max(maxY + ORG_NODE_H + 30, 260);
-      return `<div class="org-canvas" style="width:${canvasW}px;height:${canvasH}px">${nodes}</div>`;
+      return `<div class="org-canvas" style="width:${canvasW}px;height:${canvasH}px"><svg id="orgChartLinesSvg"></svg>${nodes}</div>`;
+    }
+
+    // One line per person with a manager, from the manager's bottom-center
+    // to that person's top-center. Reads real DOM offsetLeft/Top/Width/
+    // Height (not the ORG_NODE_H constant) since rendered node height
+    // varies — founder/Team-Manager boxes have an extra "team" badge line
+    // that plain consultant boxes don't. offsetLeft/Top are already
+    // relative to .org-canvas (its nearest positioned ancestor), so they
+    // line up with the SVG's own coordinate space with no extra math.
+    // Called once after every render, then again on every drag mousemove
+    // so lines visually follow a node being repositioned.
+    function drawOrgLines(container) {
+      const canvas = container.querySelector('.org-canvas');
+      const svg = canvas && canvas.querySelector('#orgChartLinesSvg');
+      if (!svg) return;
+      const nodesById = {};
+      canvas.querySelectorAll('.org-node').forEach(n => { nodesById[n.dataset.id] = n; });
+      svg.innerHTML = allTeamMembers
+        .filter(m => m.manager_id && nodesById[m.manager_id] && nodesById[m.id])
+        .map(m => {
+          const mgr = nodesById[m.manager_id], child = nodesById[m.id];
+          const x1 = mgr.offsetLeft + mgr.offsetWidth / 2, y1 = mgr.offsetTop + mgr.offsetHeight;
+          const x2 = child.offsetLeft + child.offsetWidth / 2, y2 = child.offsetTop;
+          return `<line class="org-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+        }).join('');
     }
 
     // Drag-to-reposition: mousedown starts a drag; if the pointer actually
@@ -3985,6 +4018,7 @@
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) { moved = true; node.classList.add('dragging'); }
             node.style.left = Math.max(0, origLeft + dx) + 'px';
             node.style.top = Math.max(0, origTop + dy) + 'px';
+            drawOrgLines(container);
           }
           async function onUp() {
             document.removeEventListener('mousemove', onMove);
