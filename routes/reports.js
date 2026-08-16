@@ -4,6 +4,7 @@ const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddlewar
 const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const rtCandidatesSync = require('../services/rtCandidatesSyncService');
+const engagement = require('../services/educatorEngagementService');
 
 // Admin/super_admin only for now — access for other roles (e.g. Workforce
 // Partners) can be revisited later once this is settled in, per how it
@@ -58,6 +59,21 @@ router.get('/candidates-search', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Which active candidates count as "Actively Engaged" (a real shift in the
+// last 6 months) — see educatorEngagementService.js for the definition.
+// Registered ahead of /candidates/:id below, same reason as
+// /candidates-search and /candidates/sync-status: a literal path segment,
+// not a param, so it must come first or Express would try to treat
+// "engagement" as a candidate id.
+router.get('/candidates/engagement', async (req, res) => {
+  try {
+    const { engagedUserIds, computedAt } = await engagement.getEngagedUserIds();
+    res.json({ engagedUserIds: [...engagedUserIds], computedAt, lookbackMonths: engagement.LOOKBACK_MONTHS });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 

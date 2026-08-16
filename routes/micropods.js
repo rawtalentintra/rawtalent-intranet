@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const { normalizeStateToShort, buildMicropods } = require('../services/micropodService');
+const engagement = require('../services/educatorEngagementService');
 
 // Candidate density clustering ("Micropods") for the Workforce Partners
 // section — computed on read from rt_candidates_cache (nightly-synced), no
@@ -158,6 +159,10 @@ router.get('/:podId', async (req, res) => {
     const memberSet = new Set(pod.memberIds);
     const members = points.filter(p => memberSet.has(p.userId));
     const addressLines = await getAddressLines(members.map(p => p.userId));
+    // Every pod member is already an active candidate (see the is_active
+    // filter in getCandidatePoints) — Actively Engaged vs Active — Not
+    // Engaged per educatorEngagementService.js's 6-month shift definition.
+    const { engagedUserIds } = await engagement.getEngagedUserIds();
 
     // lat/lng included here (not in the list-view pod summary) purely to
     // drive the per-pod heatmap once a pod is actually open — still never
@@ -165,11 +170,16 @@ router.get('/:podId', async (req, res) => {
     const candidates = members
       .map(({ userId, name, email, contactNo, suburb, lat, lng }) => ({
         userId, name, email, contactNo, suburb, lat, lng,
-        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
+        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null,
+        engaged: engagedUserIds.has(String(userId))
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+    const engagedCount = candidates.filter(c => c.engaged).length;
 
-    res.json({ id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount, candidates });
+    res.json({
+      id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount,
+      engagedCount, notEngagedCount: candidates.length - engagedCount, candidates
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -6595,6 +6595,7 @@
     // — this is the point where actual candidates first get fetched.
     let micropodDetailCandidates = [];
     let micropodDetailPage = 1;
+    let micropodDetailEngagementFilter = '';
     const MICROPOD_PAGE_SIZE = 50;
 
     async function openMicropod(podId) {
@@ -6609,6 +6610,7 @@
         if (pod.error) throw new Error(pod.error);
         micropodDetailCandidates = pod.candidates;
         micropodDetailPage = 1;
+        micropodDetailEngagementFilter = '';
         bodyEl.innerHTML = renderMicropodDetail(pod);
         renderMicropodCandidatesPage();
         renderMicropodHeatmap(pod);
@@ -6621,15 +6623,24 @@
       return `
         <div style="margin-bottom:16px">
           <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(pod.name)}</div>
-          <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${pod.candidateCount} candidates</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">
+            ${pod.candidateCount} candidates · ${pod.engagedCount} Actively Engaged · ${pod.notEngagedCount} Active — Not Engaged
+          </div>
         </div>
         <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
           <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
         </div>
         <div class="admin-table-card">
+          <div style="display:flex;justify-content:flex-end;padding:12px 20px 0">
+            <select id="micropodEngagementFilter" class="form-control" style="max-width:220px" onchange="changeMicropodEngagementFilter(this.value)">
+              <option value="">All engagement</option>
+              <option value="engaged">Actively Engaged only</option>
+              <option value="not_engaged">Active — Not Engaged only</option>
+            </select>
+          </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Engagement</th></tr></thead>
               <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
@@ -6637,28 +6648,46 @@
         </div>`;
     }
 
+    function micropodEngagementBadge(engaged) {
+      const meta = engaged ? ENGAGEMENT_META.actively_engaged : ENGAGEMENT_META.active_not_engaged;
+      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
+    }
+
+    function changeMicropodEngagementFilter(value) {
+      micropodDetailEngagementFilter = value;
+      micropodDetailPage = 1;
+      renderMicropodCandidatesPage();
+    }
+
     // Client-side pagination — the whole pod's candidates are already in
     // hand from the one fetch in openMicropod (max ~1,400 rows for the
     // biggest real pod), so there's no reason to round-trip the server
     // per page. This just keeps a 1,000+ row pod from rendering as one
-    // enormous, hard-to-scan table.
+    // enormous, hard-to-scan table. The engagement filter is client-side
+    // too, same reasoning.
     function renderMicropodCandidatesPage() {
-      const total = micropodDetailCandidates.length;
+      const filtered = micropodDetailCandidates.filter(c => {
+        if (micropodDetailEngagementFilter === 'engaged') return c.engaged;
+        if (micropodDetailEngagementFilter === 'not_engaged') return !c.engaged;
+        return true;
+      });
+      const total = filtered.length;
       const totalPages = Math.max(1, Math.ceil(total / MICROPOD_PAGE_SIZE));
       micropodDetailPage = Math.min(Math.max(1, micropodDetailPage), totalPages);
       const start = (micropodDetailPage - 1) * MICROPOD_PAGE_SIZE;
-      const pageRows = micropodDetailCandidates.slice(start, start + MICROPOD_PAGE_SIZE);
+      const pageRows = filtered.slice(start, start + MICROPOD_PAGE_SIZE);
 
-      document.getElementById('micropodCandidatesBody').innerHTML = pageRows.map(c => `
+      document.getElementById('micropodCandidatesBody').innerHTML = pageRows.length ? pageRows.map(c => `
         <tr>
           <td>${escHtml(c.name)}</td>
           <td>${escHtml(c.email || '—')}</td>
           <td>${escHtml(c.contactNo || '—')}</td>
           <td>${escHtml(c.address || c.suburb || '—')}</td>
-        </tr>`).join('');
+          <td>${micropodEngagementBadge(c.engaged)}</td>
+        </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No candidates match this filter</td></tr>`;
 
       document.getElementById('micropodCandidatesPager').innerHTML = `
-        <div style="font-size:11.5px;color:var(--text-muted)">${start + 1}–${Math.min(start + MICROPOD_PAGE_SIZE, total)} of ${total}</div>
+        <div style="font-size:11.5px;color:var(--text-muted)">${total ? `${start + 1}–${Math.min(start + MICROPOD_PAGE_SIZE, total)} of ${total}` : '0 of 0'}</div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeMicropodCandidatesPage(-1)" ${micropodDetailPage === 1 ? 'disabled' : ''}>← Prev</button>
           <span style="font-size:12px;color:var(--text-muted)">Page ${micropodDetailPage} of ${totalPages}</span>
@@ -7743,6 +7772,35 @@
     let candidateNameById = {};
     let locationNameById = {};
 
+    // Actively Engaged (real shift in the last 6 months) vs Active — Not
+    // Engaged — see services/educatorEngagementService.js for the exact
+    // definition. Loaded once per session (the underlying data is a slow
+    // ~6-month booking sweep, cached server-side for 30min already) and
+    // shared by both the Candidates report and Micropods.
+    const ENGAGEMENT_META = {
+      actively_engaged: { label: 'Actively Engaged', bg: '#dcfce7', color: '#15803d' },
+      active_not_engaged: { label: 'Active — Not Engaged', bg: '#fef3c7', color: '#b45309' }
+    };
+    // Mirrors LOOKBACK_MONTHS in services/educatorEngagementService.js —
+    // only used for a hint label here, not for any real computation
+    // (the classification itself always comes from the server).
+    const ENGAGEMENT_LOOKBACK_MONTHS = 6;
+    function engagementBadge(status) {
+      const meta = ENGAGEMENT_META[status];
+      if (!meta) return '<span style="color:var(--text-muted)">—</span>';
+      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
+    }
+    let candidateEngagedUserIdsPromise = null;
+    function ensureCandidateEngagement() {
+      if (!candidateEngagedUserIdsPromise) {
+        candidateEngagedUserIdsPromise = fetch('/api/reports/candidates/engagement')
+          .then(r => r.json())
+          .then(data => new Set(data.engagedUserIds || []))
+          .catch(() => new Set());
+      }
+      return candidateEngagedUserIdsPromise;
+    }
+
     function candidateName(userId) {
       return candidateNameById[userId] || (userId ? `Candidate #${userId}` : '—');
     }
@@ -7865,10 +7923,15 @@
         // synced"/"Sync Now" bar above; opening one candidate is always
         // still live regardless (openReportDetail).
         syncable: true,
+        // Annotates each row with engagementStatus (see loadReportData) —
+        // Actively Engaged / Active — Not Engaged / null for inactive
+        // candidates, per educatorEngagementService.js.
+        needsEngagement: true,
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['firstName', 'lastName', 'userName', 'email'],
         extraFilters: [
-          { id: 'status', label: 'Status', type: 'select', field: 'status' }
+          { id: 'status', label: 'Status', type: 'select', field: 'status' },
+          { id: 'engagement', label: 'Engagement', type: 'select', field: 'engagementStatus', labelMap: { actively_engaged: ENGAGEMENT_META.actively_engaged.label, active_not_engaged: ENGAGEMENT_META.active_not_engaged.label } }
         ],
         // Same sub-view pattern as Clients — a searchable directory over the
         // same already-fetched dataset, plus a Compliance filter since
@@ -7881,7 +7944,8 @@
           suburbFn: candidateSuburbs,
           searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
           extraFilters: [
-            { id: 'expiring', label: 'Expiring/expired docs only', type: 'checkbox', test: r => candidateExpiringDocsCount(r) > 0 }
+            { id: 'expiring', label: 'Expiring/expired docs only', type: 'checkbox', test: r => candidateExpiringDocsCount(r) > 0 },
+            { id: 'activelyEngaged', label: 'Actively Engaged only', type: 'checkbox', test: r => r.engagementStatus === 'actively_engaged' }
           ],
           columns: [
             { header: 'Name', render: r => escHtml([r.firstName, r.lastName].filter(Boolean).join(' ') || '—') },
@@ -7891,6 +7955,7 @@
             { header: 'Email', render: r => escHtml(r.email || '—') },
             { header: 'Quals', render: r => String((r.qualifications || []).length) },
             { header: 'Compliance', render: r => candidateExpiringDocsCount(r) > 0 ? `⚠️ ${candidateExpiringDocsCount(r)} expiring/expired` : '✅ OK' },
+            { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
             { header: 'Active', render: r => r.isActive ? '✅' : '—' }
           ],
           detailTitle: r => [r.firstName, r.lastName].filter(Boolean).join(' ') || r.userName || 'Candidate Details',
@@ -7899,9 +7964,13 @@
         kpis: rows => {
           const active = rows.filter(r => r.isActive).length;
           const missingContact = rows.filter(r => !r.email && !r.contactNo).length;
+          const activelyEngaged = rows.filter(r => r.engagementStatus === 'actively_engaged').length;
+          const activeNotEngaged = rows.filter(r => r.engagementStatus === 'active_not_engaged').length;
           return [
             { label: 'Total Candidates', value: rows.length, hint: 'Matching current filters' },
             { label: 'Active', value: active, hint: `${pct(active, rows.length)}% of total` },
+            { label: 'Actively Engaged', value: activelyEngaged, hint: `Shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activelyEngaged, active)}% of active` },
+            { label: 'Active — Not Engaged', value: activeNotEngaged, hint: `No shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activeNotEngaged, active)}% of active` },
             { label: 'Missing Contact Info', value: missingContact, hint: 'No email or phone on file' },
             { label: 'Distinct Roles', value: new Set(rows.map(r => r.userRoleId)).size, hint: 'Raw role codes in this set' }
           ];
@@ -7918,6 +7987,7 @@
           { header: 'User Type', render: r => escHtml(r.userTypeId ?? '—') },
           { header: 'Role', render: r => escHtml(r.userRoleId ?? '—') },
           { header: 'Status', render: r => escHtml(r.status ?? '—') },
+          { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
           { header: 'Active', render: r => r.isActive ? '✅' : '—' },
           { header: 'Created', render: r => fmtDate(r.createdDate) }
         ]
@@ -8358,6 +8428,12 @@
           cfg.needsLookups ? ensureReportLookups() : Promise.resolve()
         ]);
         if (!Array.isArray(rows)) throw new Error(rows.error || 'Unexpected response');
+        if (cfg.needsEngagement) {
+          const engagedIds = await ensureCandidateEngagement();
+          rows.forEach(r => {
+            r.engagementStatus = r.isActive ? (engagedIds.has(String(r.userId)) ? 'actively_engaged' : 'active_not_engaged') : null;
+          });
+        }
         reportDataCache[type] = rows;
         populateReportExtraFilterOptions(type, rows);
         reportPage[type] = 1;
