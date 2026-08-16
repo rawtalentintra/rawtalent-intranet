@@ -661,7 +661,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
-                  <label for="micropodsEngagementFilter" title="Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months.&#10;Active — Not Engaged: still active in RT, but no shift in the last 6 months.">Candidate Engagement ⓘ</label>
+                  <label for="micropodsEngagementFilter">Candidate Engagement</label>
                   <select id="micropodsEngagementFilter" class="form-control" style="width:190px" onchange="loadMicropods()">
                     <option value="">All candidates</option>
                     <option value="engaged">Actively Engaged</option>
@@ -674,6 +674,7 @@
                 </div>
               </div>
             </div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
           </div>
 
           <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
@@ -6638,6 +6639,7 @@
           <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">
             ${pod.candidateCount} candidates · ${pod.engagedCount} Actively Engaged · ${pod.notEngagedCount} Active — Not Engaged
           </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
         </div>
         <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
           <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
@@ -6652,7 +6654,7 @@
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th title="${escHtml(ENGAGEMENT_TOOLTIP)}">Engagement ⓘ</th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Engagement</th></tr></thead>
               <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
@@ -7940,6 +7942,10 @@
         // Actively Engaged / Active — Not Engaged / null for inactive
         // candidates, per educatorEngagementService.js.
         needsEngagement: true,
+        // Shown as a plain always-visible caption under the filter row
+        // (not a hover title) — a title tooltip here wasn't reliably
+        // discoverable in practice.
+        note: ENGAGEMENT_TOOLTIP,
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['firstName', 'lastName', 'userName', 'email'],
         extraFilters: [
@@ -7968,7 +7974,7 @@
             { header: 'Email', render: r => escHtml(r.email || '—') },
             { header: 'Quals', render: r => String((r.qualifications || []).length) },
             { header: 'Compliance', render: r => candidateExpiringDocsCount(r) > 0 ? `⚠️ ${candidateExpiringDocsCount(r)} expiring/expired` : '✅ OK' },
-            { header: 'Engagement ⓘ', title: ENGAGEMENT_TOOLTIP, render: r => engagementBadge(r.engagementStatus) },
+            { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
             { header: 'Active', render: r => r.isActive ? '✅' : '—' }
           ],
           detailTitle: r => [r.firstName, r.lastName].filter(Boolean).join(' ') || r.userName || 'Candidate Details',
@@ -8272,6 +8278,7 @@
               <input type="text" id="report_${type}_search" class="form-control" placeholder="Search…" style="width:190px;flex:1;min-width:150px" oninput="applyReportFilters('${type}')">
               <span id="report_${type}_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
             </div>
+            ${cfg.note ? `<div style="font-size:11.5px;color:var(--text-muted);white-space:pre-line;margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">${escHtml(cfg.note)}</div>` : ''}
           </div>
 
           <div class="kpi-row" id="report_${type}_kpis"></div>
@@ -8305,7 +8312,7 @@
           <div class="admin-table-card">
             <div style="overflow-x:auto">
               <table class="data-table data-table-compact">
-                <thead><tr>${cfg.columns.map(c => `<th${c.title ? ` title="${escHtml(c.title)}"` : ''}>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                <thead><tr>${cfg.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
                 <tbody id="report_${type}_table">
                   <tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
                 </tbody>
@@ -8363,12 +8370,13 @@
                 `).join('')}
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
               </div>
+              ${cfg.note ? `<div style="font-size:11.5px;color:var(--text-muted);white-space:pre-line;margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">${escHtml(cfg.note)}</div>` : ''}
             </div>
             `}
             <div class="admin-table-card">
               <div style="overflow-x:auto">
                 <table class="data-table data-table-compact">
-                  <thead><tr>${cfg.listView.columns.map(c => `<th${c.title ? ` title="${escHtml(c.title)}"` : ''}>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                  <thead><tr>${cfg.listView.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
                   <tbody id="report_${type}_list_table">
                     <tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
                   </tbody>
