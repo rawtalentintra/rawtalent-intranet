@@ -659,9 +659,19 @@
                 <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMicropodsState('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:1;transition:opacity .15s">🔷 Victoria — Justine</button>
                 <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMicropodsState('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
-                <label for="micropodsMinSize">Minimum pod size</label>
-                <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
+              <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                  <label for="micropodsEngagementFilter" title="Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months.&#10;Active — Not Engaged: still active in RT, but no shift in the last 6 months.">Candidate Engagement ⓘ</label>
+                  <select id="micropodsEngagementFilter" class="form-control" style="width:190px" onchange="loadMicropods()">
+                    <option value="">All candidates</option>
+                    <option value="engaged">Actively Engaged</option>
+                    <option value="not_engaged">Active — Not Engaged</option>
+                  </select>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                  <label for="micropodsMinSize">Minimum pod size</label>
+                  <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
+                </div>
               </div>
             </div>
           </div>
@@ -6484,11 +6494,12 @@
 
     async function loadMicropods() {
       const minSize = document.getElementById('micropodsMinSize').value || 15;
+      const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
       const tbody = document.getElementById('micropodsTableBody');
       tbody.innerHTML = '<tr><td colspan="2"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       document.getElementById('micropodsSummary').textContent = '';
       try {
-        const data = await fetch(`/api/micropods?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
+        const data = await fetch(`/api/micropods?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
         if (data.error) throw new Error(data.error);
         micropodsPods = data.pods;
         renderMicropodsTable(data);
@@ -6606,7 +6617,8 @@
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const minSize = document.getElementById('micropodsMinSize').value || 15;
-        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}`).then(r => r.json());
+        const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
+        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
         if (pod.error) throw new Error(pod.error);
         micropodDetailCandidates = pod.candidates;
         micropodDetailPage = 1;
@@ -6640,7 +6652,7 @@
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Engagement</th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th title="${escHtml(ENGAGEMENT_TOOLTIP)}">Engagement ⓘ</th></tr></thead>
               <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
@@ -7785,6 +7797,7 @@
     // only used for a hint label here, not for any real computation
     // (the classification itself always comes from the server).
     const ENGAGEMENT_LOOKBACK_MONTHS = 6;
+    const ENGAGEMENT_TOOLTIP = 'Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months.\nActive — Not Engaged: still active in RT, but no shift in the last 6 months.';
     function engagementBadge(status) {
       const meta = ENGAGEMENT_META[status];
       if (!meta) return '<span style="color:var(--text-muted)">—</span>';
@@ -7955,7 +7968,7 @@
             { header: 'Email', render: r => escHtml(r.email || '—') },
             { header: 'Quals', render: r => String((r.qualifications || []).length) },
             { header: 'Compliance', render: r => candidateExpiringDocsCount(r) > 0 ? `⚠️ ${candidateExpiringDocsCount(r)} expiring/expired` : '✅ OK' },
-            { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
+            { header: 'Engagement ⓘ', title: ENGAGEMENT_TOOLTIP, render: r => engagementBadge(r.engagementStatus) },
             { header: 'Active', render: r => r.isActive ? '✅' : '—' }
           ],
           detailTitle: r => [r.firstName, r.lastName].filter(Boolean).join(' ') || r.userName || 'Candidate Details',
@@ -8292,7 +8305,7 @@
           <div class="admin-table-card">
             <div style="overflow-x:auto">
               <table class="data-table data-table-compact">
-                <thead><tr>${cfg.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                <thead><tr>${cfg.columns.map(c => `<th${c.title ? ` title="${escHtml(c.title)}"` : ''}>${escHtml(c.header)}</th>`).join('')}</tr></thead>
                 <tbody id="report_${type}_table">
                   <tr><td colspan="${cfg.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
                 </tbody>
@@ -8355,7 +8368,7 @@
             <div class="admin-table-card">
               <div style="overflow-x:auto">
                 <table class="data-table data-table-compact">
-                  <thead><tr>${cfg.listView.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
+                  <thead><tr>${cfg.listView.columns.map(c => `<th${c.title ? ` title="${escHtml(c.title)}"` : ''}>${escHtml(c.header)}</th>`).join('')}</tr></thead>
                   <tbody id="report_${type}_list_table">
                     <tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
                   </tbody>

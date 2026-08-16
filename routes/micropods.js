@@ -47,6 +47,14 @@ async function getCandidatePoints() {
     args: []
   })).rows;
 
+  // Actively Engaged vs Active — Not Engaged (see educatorEngagementService
+  // — a real shift, Assigned/Completed, in the last 6 months). Every row
+  // here is already active-only (see the WHERE above), so this is the same
+  // classification the Candidates report shows, just attached per-point so
+  // the engagement filter below can restrict clustering itself rather than
+  // just labeling candidates after the fact.
+  const { engagedUserIds } = await engagement.getEngagedUserIds();
+
   const points = rows.map(r => ({
     userId: String(r.user_id),
     name: [r.first_name, r.last_name].filter(Boolean).join(' ') || `Candidate #${r.user_id}`,
@@ -55,7 +63,8 @@ async function getCandidatePoints() {
     suburb: r.suburb || null,
     state: normalizeStateToShort(r.addr_state),
     lat: r.lat,
-    lng: r.lng
+    lng: r.lng,
+    engaged: engagedUserIds.has(String(r.user_id))
   })).filter(p =>
     // Exact (0,0) is RT's "never actually geocoded" sentinel ("null
     // island"), not a real address — confirmed against production data
@@ -74,24 +83,62 @@ function clamp(n, min, max, fallback) {
   return Math.min(max, Math.max(min, num));
 }
 
+// '' (all), 'engaged', or 'not_engaged' — anything else falls back to all,
+// same permissive-default pattern as the state/gridKm/minPodSize parsing
+// below rather than 400ing on a stray value.
+function parseEngagementFilter(raw) {
+  return raw === 'engaged' || raw === 'not_engaged' ? raw : '';
+}
+
 async function getPodsForParams(req) {
   const state = normalizeStateToShort(req.query.state);
   if (!state) return { error: 'A valid state query param is required (e.g. VIC or SA)' };
 
   const gridKm = clamp(req.query.gridKm, 2, 10, 2);
   const minPodSize = clamp(req.query.minPodSize, 5, 100, 15);
-  const cacheKey = `${state}:${gridKm}:${minPodSize}`;
+  const engagementFilter = parseEngagementFilter(req.query.engagement);
+  const cacheKey = `${state}:${gridKm}:${minPodSize}:${engagementFilter}`;
 
   const cached = podsCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return { state, gridKm, minPodSize, ...cached.result };
+  if (cached && Date.now() < cached.expiresAt) return { state, gridKm, minPodSize, engagement: engagementFilter, ...cached.result };
 
   const { points, totalActive, totalGeocoded } = await getCandidatePoints();
-  const statePoints = points.filter(p => p.state === state);
-  const { pods, unclusteredCount } = buildMicropods(statePoints, { gridKm, minPodSize });
+  const fullStatePoints = points.filter(p => p.state === state);
+  let statePoints = fullStatePoints;
+  // Filters the actual clustering input, not just a label applied
+  // afterward — "Actively Engaged" genuinely reclusters on just that
+  // subset, so pod boundaries/counts reflect where THOSE candidates are,
+  // not where the full active pool happens to be. Combines with state the
+  // same way state combines with gridKm/minPodSize: as an independent AND.
+  if (engagementFilter === 'engaged') statePoints = statePoints.filter(p => p.engaged);
+  else if (engagementFilter === 'not_engaged') statePoints = statePoints.filter(p => !p.engaged);
+
+  // buildMicropods' coreMinPerCell (how many people a 2km cell needs to
+  // seed a pod) defaults to a fixed 20 — deliberately NOT tied to
+  // minPodSize (see micropodService.js), but that constant was tuned
+  // against the full ~9k-candidate VIC pool. Filtering to e.g. just
+  // Actively Engaged candidates can shrink the pool 30x+ (VIC: ~9,200 ->
+  // ~280), and 20-per-cell never happens in a pool that sparse — every
+  // Micropod call silently returned zero pods regardless of minPodSize
+  // until this was caught live. Scaling the threshold down by how much
+  // THIS filter thinned the state's pool (not by minPodSize — that
+  // coupling was already tried and rejected once) keeps the same
+  // "requires real local density" guard at whatever scale the filtered
+  // pool actually is. Floor of 3 so it never drops low enough to just
+  // merge every occupied cell again. Unfiltered calls (ratio 1) pass
+  // undefined and fall through to buildMicropods' own default, so normal
+  // behaviour is untouched.
+  const coreMinPerCell = engagementFilter && fullStatePoints.length
+    ? Math.max(3, Math.round(20 * (statePoints.length / fullStatePoints.length)))
+    : undefined;
+  const { pods, unclusteredCount } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
 
   // Deterministic centroid-based id — stays stable across recomputation/
   // cache expiry so a stale client-side pod list can never point at the
-  // wrong pod's candidates.
+  // wrong pod's candidates. Rounded centroids can coincide across two
+  // different engagement filters for the same state, but a pod is always
+  // looked up together with the same engagement param that produced its
+  // list, so that's never ambiguous in practice.
   const podsWithId = pods.map(pod => ({
     ...pod,
     id: `${state}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`
@@ -99,7 +146,7 @@ async function getPodsForParams(req) {
 
   const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
-  return { state, gridKm, minPodSize, ...result };
+  return { state, gridKm, minPodSize, engagement: engagementFilter, ...result };
 }
 
 // Pod summaries only — no candidate arrays. This is the "no full list
@@ -159,19 +206,15 @@ router.get('/:podId', async (req, res) => {
     const memberSet = new Set(pod.memberIds);
     const members = points.filter(p => memberSet.has(p.userId));
     const addressLines = await getAddressLines(members.map(p => p.userId));
-    // Every pod member is already an active candidate (see the is_active
-    // filter in getCandidatePoints) — Actively Engaged vs Active — Not
-    // Engaged per educatorEngagementService.js's 6-month shift definition.
-    const { engagedUserIds } = await engagement.getEngagedUserIds();
 
     // lat/lng included here (not in the list-view pod summary) purely to
     // drive the per-pod heatmap once a pod is actually open — still never
-    // exposed before that point.
+    // exposed before that point. `engaged` already comes from
+    // getCandidatePoints() (see educatorEngagementService.js).
     const candidates = members
-      .map(({ userId, name, email, contactNo, suburb, lat, lng }) => ({
-        userId, name, email, contactNo, suburb, lat, lng,
-        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null,
-        engaged: engagedUserIds.has(String(userId))
+      .map(({ userId, name, email, contactNo, suburb, lat, lng, engaged }) => ({
+        userId, name, email, contactNo, suburb, lat, lng, engaged,
+        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     const engagedCount = candidates.filter(c => c.engaged).length;
