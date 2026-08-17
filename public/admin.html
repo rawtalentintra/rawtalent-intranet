@@ -7563,6 +7563,30 @@
       finally { btn.disabled = false; btn.textContent = '🧭 Generate Route'; }
     }
 
+    // Gives each stop the "centre/lead status" context the Workforce
+    // Partner Strategy doc's minimum recommendation card asks for —
+    // Called/Visited/Profile status plus agency usage — using fields
+    // already present on every stop (a full `leads` row) and the same
+    // META objects the Leads table itself renders from, so this can
+    // never drift out of sync with what Leads already shows. Read-only
+    // here (no click-to-edit) — editing status belongs in Leads/lead
+    // detail, not this scheduling view.
+    function routeStopStatusLine(stop) {
+      const parts = [];
+      if (stop.agency_usage) {
+        const cls = LEAD_AGENCY_USAGE_BADGE_CLASS[stop.agency_usage] || '';
+        const label = LEAD_AGENCY_USAGE_SHORT[stop.agency_usage] || stop.agency_usage;
+        parts.push(`<span class="agency-badge ${cls}" style="font-size:10px">${escHtml(label)}</span>`);
+      }
+      const calledMeta = LEAD_CALLED_META[stop.lead_called_status] || LEAD_CALLED_META.to_schedule;
+      const visitedMeta = CENTRE_VISITED_META[stop.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
+      const signedMeta = SIGNED_META[stop.signed_status] || SIGNED_META.pending;
+      parts.push(`<span class="lead-badge ${calledMeta.cls}" style="font-size:10px">Called: ${escHtml(calledMeta.label)}</span>`);
+      parts.push(`<span class="lead-badge ${visitedMeta.cls}" style="font-size:10px">Visited: ${escHtml(visitedMeta.label)}</span>`);
+      parts.push(`<span class="lead-badge ${signedMeta.cls}" style="font-size:10px">${escHtml(signedMeta.label)}</span>`);
+      return `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">${parts.join('')}</div>`;
+    }
+
     function renderRouteResults(data) {
       document.getElementById('routePlannerResults').style.display = 'block';
       const it = data.itinerary;
@@ -7608,6 +7632,7 @@
           <div>
             <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong>${b.waitMinutes > 1 ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400">(rounded to a clean start — ${b.waitMinutes} min wait)</span>` : ''}</div>
             ${fullAddress ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escHtml(fullAddress)}</div>` : ''}
+            ${routeStopStatusLine(b.stop)}
           </div>
         </div>`;
       }).join('');
