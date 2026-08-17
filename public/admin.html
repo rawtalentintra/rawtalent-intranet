@@ -781,6 +781,11 @@
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
             </select>
+            <select id="leadsFilterClosed" onchange="filterLeadsTable()">
+              <option value="active" selected>Active leads</option>
+              <option value="closed">Closed leads</option>
+              <option value="all">All (active + closed)</option>
+            </select>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact" id="leadsTable">
@@ -1234,7 +1239,10 @@
           </div>
           <div class="modal-body" id="leadDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer" style="justify-content:space-between">
-            <button class="action-btn delete" id="leadDetailDeleteBtn" style="display:none" onclick="deleteLeadConfirm()">Delete Lead</button>
+            <div style="display:flex;gap:8px">
+              <button class="action-btn delete" id="leadDetailDeleteBtn" style="display:none" onclick="deleteLeadConfirm()">Delete Lead</button>
+              <button class="btn-secondary" id="leadDetailCloseOutBtn" style="display:none" onclick="toggleLeadClosed()">Close Lead</button>
+            </div>
             <div style="display:flex;gap:8px;margin-left:auto">
               <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
               <button class="btn-add" id="leadDetailSaveBtn" onclick="saveLeadAssignment()">Save</button>
@@ -5552,15 +5560,24 @@
       finally { btn.disabled = false; btn.textContent = 'Add Centre'; }
     }
 
+    // "n_a" is a manual choice (not auto-derived) for when this particular
+    // step genuinely doesn't apply to a given lead — e.g. Profile Created
+    // already happened without a separate logged call/visit. It's offered
+    // as a picker option here (LEAD_STATUS_FIELDS has no `options` override
+    // for these two fields, so every meta key becomes a choice) but
+    // deliberately left off SIGNED_META below — Profile Created is the
+    // actual goal state, not a step that can be skipped.
     const LEAD_CALLED_META = {
       done: { label: 'Called', cls: 'lead-badge-done' },
       scheduled: { label: 'Scheduled', cls: 'lead-badge-sched' },
-      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' }
+      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' },
+      n_a: { label: 'N/A', cls: 'lead-badge-todo' }
     };
     const CENTRE_VISITED_META = {
       done: { label: 'Visited', cls: 'lead-badge-done' },
       scheduled: { label: 'Scheduled', cls: 'lead-badge-sched' },
-      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' }
+      to_schedule: { label: 'To Schedule', cls: 'lead-badge-todo' },
+      n_a: { label: 'N/A', cls: 'lead-badge-todo' }
     };
     // "not_interested" is kept here (not deleted) purely so any lead that
     // already carries that value still renders a sensible badge — it's no
@@ -5694,8 +5711,14 @@
       const leadCalled = document.getElementById('leadsFilterLeadCalled').value;
       const centreVisited = document.getElementById('leadsFilterCentreVisited').value;
       const profileCreated = document.getElementById('leadsFilterProfileCreated').value;
+      const closedFilter = document.getElementById('leadsFilterClosed').value;
 
       let filtered = allLeads;
+      // Closed leads default OUT of the pipeline view — they're done or
+      // dead, not something to action — but stay reachable via this filter
+      // rather than actually being hidden data.
+      if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
+      else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
       if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
       if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
@@ -5758,11 +5781,12 @@
         return;
       }
       body.innerHTML = list.map(l => `
-        <tr style="cursor:pointer" onclick="openLeadDetail('${l.id}')">
+        <tr style="cursor:pointer${l.closed_at ? ';opacity:.5' : ''}" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
           <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">
             ${escHtml(l.centre_name)}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
+            ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
           </td>
           <td>${renderLeadExistingCentreCell(l.id)}</td>
           <td>${escHtml(l.suburb || '—')}</td>
@@ -9475,6 +9499,13 @@
       document.getElementById('leadDetailTitle').innerHTML = escHtml(lead.centre_name) +
         (lead.entry_type === 'centre' ? ' <span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : '');
       document.getElementById('leadDetailDeleteBtn').style.display = currentUserRole === 'super_admin' ? '' : 'none';
+      // Same access level as editing the status fields — the people
+      // actually managing a lead day to day should be able to close it,
+      // not just admin/super_admin.
+      const canCloseLead = currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner';
+      const closeOutBtn = document.getElementById('leadDetailCloseOutBtn');
+      closeOutBtn.style.display = canCloseLead ? '' : 'none';
+      closeOutBtn.textContent = lead.closed_at ? 'Reopen Lead' : 'Close Lead';
       const row = (label, value) => `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
           <span style="color:var(--text-muted)">${escHtml(label)}</span>
@@ -9636,6 +9667,27 @@
           const d = await res.json();
           toast(d.error || 'Delete failed', 'error');
         }
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // Reversible (unlike Delete), so no confirm dialog — reopening a
+    // mis-closed lead is one click away, not a support request.
+    async function toggleLeadClosed() {
+      if (!currentLeadDetailId) return;
+      const lead = allLeads.find(l => l.id === currentLeadDetailId);
+      if (!lead) return;
+      const closing = !lead.closed_at;
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/closed`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ closed: closing })
+        });
+        const updated = await res.json();
+        if (!res.ok) { toast(updated.error || 'Failed to update', 'error'); return; }
+        Object.assign(lead, updated);
+        toast(closing ? 'Lead closed' : 'Lead reopened', 'success');
+        document.getElementById('leadDetailCloseOutBtn').textContent = lead.closed_at ? 'Reopen Lead' : 'Close Lead';
+        filterLeadsTable();
       } catch { toast('Network error', 'error'); }
     }
 

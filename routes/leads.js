@@ -253,6 +253,29 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
   }
 });
 
+// "Close out" a lead — covers both "fully done, Profile Created, nothing
+// left to track" and "this one's dead, stop chasing it". Kept as its own
+// endpoint rather than folded into the generic field-mapping PUT above,
+// since closed_at/closed_by_email need to come from the server session,
+// not a client-supplied value. Reopening (closed: false) just clears
+// both columns — nothing else about the lead is touched either way.
+router.patch('/:id/closed', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  const { closed } = req.body;
+  if (typeof closed !== 'boolean') return res.status(400).json({ error: 'closed must be a boolean' });
+  try {
+    const existing = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+    await getDb().execute({
+      sql: 'UPDATE leads SET closed_at = ?, closed_by_email = ?, updated_at = now() WHERE id = ?',
+      args: [closed ? new Date().toISOString() : null, closed ? req.user.email : null, req.params.id]
+    });
+    const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Deleting a lead outright (not just marking a status) is destructive and
 // affects Sales Dashboard/WFP Dashboard totals, so it's kept to the single
 // super_admin account rather than opened to all admins.

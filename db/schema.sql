@@ -914,6 +914,15 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_link_source TEXT; -- 'auto' | 'man
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS rt_linked_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_rt_location_id ON leads(rt_location_id) WHERE rt_location_id IS NOT NULL;
 
+-- "Close out" a lead independently of the Lead Called/Centre Visited/
+-- Profile Created pipeline — covers both "fully done, nothing left to
+-- track" and "this one's dead, stop chasing it". NULL = still active
+-- (the default, shown in the pipeline); set = hidden from the default
+-- view but still visible/reopenable via the Closed filter. Deliberately
+-- not a boolean — closed_at doubles as "when", closed_by_email as "who".
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_by_email TEXT;
+
 -- A running thread rather than a single overwritable field, since more
 -- than one person (a consultant, an admin, eventually a Workforce Partner)
 -- may add notes on the same lead over time — a single field would let one
