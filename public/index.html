@@ -887,11 +887,11 @@
     </div>
   </div>
 
-  <!-- New Announcement Modal (admin/super_admin) -->
+  <!-- New/Edit Announcement Modal (admin/super_admin) -->
   <div class="modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
     <div class="modal" style="max-width:460px">
       <div class="modal-header">
-        <div class="modal-title">New Announcement</div>
+        <div class="modal-title" id="announcementModalTitle">New Announcement</div>
         <button class="modal-close" onclick="closeAnnouncementModal()">×</button>
       </div>
       <div class="modal-body">
@@ -907,14 +907,14 @@
           <label class="form-label-modal">Notify everyone <span class="optional">(leave blank to send now)</span></label>
           <input type="datetime-local" id="announcementSendAt" class="form-control">
         </div>
-        <div class="form-group-modal">
+        <div class="form-group-modal" id="announcementFileGroup">
           <label class="form-label-modal">Attach a visual or file <span class="optional">(optional)</span></label>
           <input type="file" id="announcementFile" class="form-control">
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeAnnouncementModal()">Cancel</button>
-        <button class="btn-add" onclick="submitAnnouncement()">Send Announcement</button>
+        <button class="btn-add" id="announcementSubmitBtn" onclick="submitAnnouncement()">Send Announcement</button>
       </div>
     </div>
   </div>
@@ -1384,13 +1384,40 @@
       setTimeout(() => { card.style.backgroundColor = original; }, 1800);
     }
 
+    // null = creating a new announcement; a real id = editing that one in
+    // place (title/message/reschedule only — file attachments stay
+    // managed the way they already are, not part of this edit flow).
+    let editingAnnouncementId = null;
+
     function openAnnouncementModal() {
+      editingAnnouncementId = null;
+      document.getElementById('announcementModalTitle').textContent = 'New Announcement';
+      document.getElementById('announcementSubmitBtn').textContent = 'Send Announcement';
+      document.getElementById('announcementFileGroup').style.display = '';
       document.getElementById('announcementTitle').value = '';
       document.getElementById('announcementMessage').value = '';
       document.getElementById('announcementSendAt').value = '';
       document.getElementById('announcementFile').value = '';
       document.getElementById('announcementModal').classList.add('open');
       document.getElementById('notifPanel').style.display = 'none';
+    }
+    // toLocalDatetimeInputValue: send_at comes back as a UTC ISO string;
+    // <input type="datetime-local"> needs "YYYY-MM-DDTHH:mm" in the
+    // viewer's own local time, or the prefilled value silently shifts.
+    function openEditAnnouncementModal(id) {
+      const a = allAnnouncements.find(x => x.id === id);
+      if (!a) return;
+      editingAnnouncementId = id;
+      document.getElementById('announcementModalTitle').textContent = 'Edit Announcement';
+      document.getElementById('announcementSubmitBtn').textContent = 'Save Changes';
+      document.getElementById('announcementFileGroup').style.display = 'none';
+      document.getElementById('announcementTitle').value = a.title || '';
+      document.getElementById('announcementMessage').value = a.message || '';
+      const d = new Date(a.send_at);
+      document.getElementById('announcementSendAt').value = isNaN(d.getTime()) ? '' :
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      document.getElementById('announcementFile').value = '';
+      document.getElementById('announcementModal').classList.add('open');
     }
     function closeAnnouncementModal() {
       document.getElementById('announcementModal').classList.remove('open');
@@ -1403,10 +1430,11 @@
       const sendAtLocal = document.getElementById('announcementSendAt').value;
       const send_at = sendAtLocal ? new Date(sendAtLocal).toISOString() : null;
       const fileInput = document.getElementById('announcementFile');
-      const file = fileInput.files[0];
+      const file = editingAnnouncementId ? null : fileInput.files[0];
       try {
-        const res = await fetch('/api/notifications/announcements', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const url = editingAnnouncementId ? `/api/notifications/announcements/${editingAnnouncementId}` : '/api/notifications/announcements';
+        const res = await fetch(url, {
+          method: editingAnnouncementId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title, message, send_at })
         });
         const data = await res.json();
@@ -1421,10 +1449,21 @@
           if (!fileRes.ok) toast('Announcement sent, but the attachment failed to upload', 'error');
         }
 
-        toast(send_at ? 'Announcement scheduled' : 'Announcement sent', 'success');
+        toast(editingAnnouncementId ? 'Announcement updated' : (send_at ? 'Announcement scheduled' : 'Announcement sent'), 'success');
         closeAnnouncementModal();
         loadNotifications();
         if (currentMode === 'announcements') loadAnnouncementsView();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function deleteAnnouncement(id) {
+      if (!confirm('Delete this announcement? This removes it for everyone and cannot be undone.')) return;
+      try {
+        const res = await fetch(`/api/notifications/announcements/${id}`, { method: 'DELETE' });
+        if (!res.ok) { const data = await res.json().catch(() => ({})); toast(data.error || 'Failed to delete', 'error'); return; }
+        toast('Announcement deleted', 'success');
+        loadNotifications();
+        loadAnnouncementsView();
       } catch { toast('Network error', 'error'); }
     }
 
@@ -1477,12 +1516,16 @@
             </label>
           </div>`);
         const reportHtml = isAdmin ? `<span class="announce-report-link" onclick="openAnnouncementReport('${a.id}')">📊 Acknowledgment report</span>` : '';
+        const editDeleteHtml = isAdmin ? `
+          <span class="announce-report-link" onclick="openEditAnnouncementModal('${a.id}')">✏️ Edit</span>
+          <span class="announce-report-link" style="color:#c0392b" onclick="deleteAnnouncement('${a.id}')">🗑️ Delete</span>` : '';
         return `
           <div class="announce-item ${!a.is_acked && !isFuture ? 'unacked' : ''}" id="announcement-${a.id}">
             <div class="announce-meta">
               <span>📢 ${escHtml(a.created_by_name || 'Admin')}</span>
               <span>·</span>
               <span>${isFuture ? `Scheduled for ${fmtDate(a.send_at)}` : fmtDate(a.send_at)}</span>
+              ${editDeleteHtml}
               ${reportHtml}
             </div>
             ${a.title ? `<div style="font-weight:700;color:var(--navy);font-size:15px;margin:4px 0 6px">${escHtml(a.title)}</div>` : ''}

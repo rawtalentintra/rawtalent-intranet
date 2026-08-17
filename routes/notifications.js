@@ -281,6 +281,50 @@ router.post('/announcements', requireAdmin, async (req, res) => {
   }
 });
 
+// Edits an existing announcement's title/message/send_at in place —
+// deliberately does NOT touch announcement_reads or notification_
+// dismissals, so a typo fix doesn't reset who's already acknowledged it
+// or clear it back into everyone's bell.
+router.put('/announcements/:id', requireAdmin, async (req, res) => {
+  const { title, message, send_at } = req.body;
+  if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
+  if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
+  try {
+    const result = await getDb().execute({
+      sql: 'UPDATE announcements SET title = ?, message = ?, send_at = COALESCE(?, send_at) WHERE id = ?',
+      args: [title.trim(), message.trim(), send_at || null, req.params.id]
+    });
+    if (!result.rowsAffected) return res.status(404).json({ error: 'Announcement not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Deletes an announcement and everything hanging off it — attached files
+// (DB row + the actual Storage object, same as DELETE /announcements/
+// files/:id below), acknowledgments, and bell dismissals — so nothing
+// orphaned is left behind referencing an id that no longer exists.
+router.delete('/announcements/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const filesRes = await db.execute({ sql: 'SELECT storage_path FROM announcement_files WHERE announcement_id = ?', args: [req.params.id] });
+    for (const f of filesRes.rows) {
+      if (f.storage_path) {
+        try { await removeFile(BUCKETS.announcementFiles, f.storage_path); } catch { /* orphaned storage object, non-fatal */ }
+      }
+    }
+    await db.execute({ sql: 'DELETE FROM announcement_files WHERE announcement_id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM announcement_reads WHERE announcement_id = ?', args: [req.params.id] });
+    await db.execute({ sql: "DELETE FROM notification_dismissals WHERE notification_key = 'announcement:' || ?", args: [req.params.id] });
+    const result = await db.execute({ sql: 'DELETE FROM announcements WHERE id = ?', args: [req.params.id] });
+    if (!result.rowsAffected) return res.status(404).json({ error: 'Announcement not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Full archive — every announcement ever sent, like the article list.
 // Admins/super_admins also see not-yet-sent (scheduled) ones; everyone else
 // only sees announcements whose send_at has passed.
