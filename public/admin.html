@@ -656,7 +656,8 @@
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
               <div style="display:flex;gap:10px" id="micropodsStateToggle">
-                <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMicropodsState('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:1;transition:opacity .15s">🔷 Victoria — Justine</button>
+                <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setMicropodsState('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s">🌏 All States</button>
+                <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMicropodsState('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s">🔷 Victoria — Justine</button>
                 <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMicropodsState('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
               </div>
               <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
@@ -6461,22 +6462,24 @@
     // Candidate density clustering — deliberately never fetches a full
     // candidate list upfront (GET /api/micropods returns pod summaries
     // only); a pod's actual candidates are only fetched once that pod is
-    // selected, from the map or the list. VIC/SA are kept as separate,
-    // explicit views (not a mixed list) to match how Gwen/Justine actually
-    // split territory.
+    // selected, from the map or the list. State is a filter like any
+    // other (All States/VIC/SA), matching the same three-button pattern
+    // as WFP Dashboard/My Centres/Leads — 'all' means no state constraint
+    // at all (handled server-side, see parseStateFilter in
+    // routes/micropods.js), not "VIC+SA combined only".
     // Used to default a Workforce Partner straight to their own state
     // (SA for Gwen, VIC for Justine) via wfpLabel — dropped so first load
     // looks and behaves identically for every role, admin included (Joy:
     // "all views on the Workforce Partners section... should have the
     // same view as the Workforce Partner view"). Everyone now starts on
-    // VIC and switches manually, same as admin always did.
+    // All States and switches manually, same as the other three pages.
     let micropodsState = null;
     let micropodsPods = [];
     let micropodsMapInstance = null;
     let micropodsHeatmapInstance = null;
 
     function initMicropodsSection() {
-      if (!micropodsState) micropodsState = 'VIC';
+      if (!micropodsState) micropodsState = 'all';
       updateMicropodsStateToggle();
       loadMicropods();
     }

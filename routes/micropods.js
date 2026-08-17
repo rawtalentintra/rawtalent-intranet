@@ -90,20 +90,36 @@ function parseEngagementFilter(raw) {
   return raw === 'engaged' || raw === 'not_engaged' ? raw : '';
 }
 
+// '', 'all' (case-insensitive), or missing all mean no state filter —
+// every geocoded active candidate goes into clustering together. Grid
+// cells are purely geographic, and VIC/SA are hundreds of km apart, so
+// this produces the same pods as running each state separately and
+// combining the lists — just in one pass. Anything else must resolve to
+// a real state or it's a genuine bad request, unlike the empty/'all'
+// case which is a deliberate, valid selection (matches "All States" on
+// WFP Dashboard/My Centres/Leads — no state constraint at all, not
+// narrowed to just VIC+SA).
+function parseStateFilter(raw) {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'all') return { state: null, error: null };
+  const normalized = normalizeStateToShort(trimmed);
+  return normalized ? { state: normalized, error: null } : { state: null, error: `Unrecognised state "${trimmed}" — try VIC, SA, or leave blank for all states` };
+}
+
 async function getPodsForParams(req) {
-  const state = normalizeStateToShort(req.query.state);
-  if (!state) return { error: 'A valid state query param is required (e.g. VIC or SA)' };
+  const { state, error: stateError } = parseStateFilter(req.query.state);
+  if (stateError) return { error: stateError };
 
   const gridKm = clamp(req.query.gridKm, 2, 10, 2);
   const minPodSize = clamp(req.query.minPodSize, 5, 100, 15);
   const engagementFilter = parseEngagementFilter(req.query.engagement);
-  const cacheKey = `${state}:${gridKm}:${minPodSize}:${engagementFilter}`;
+  const cacheKey = `${state || 'ALL'}:${gridKm}:${minPodSize}:${engagementFilter}`;
 
   const cached = podsCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return { state, gridKm, minPodSize, engagement: engagementFilter, ...cached.result };
+  if (cached && Date.now() < cached.expiresAt) return { state: state || '', gridKm, minPodSize, engagement: engagementFilter, ...cached.result };
 
   const { points, totalActive, totalGeocoded } = await getCandidatePoints();
-  const fullStatePoints = points.filter(p => p.state === state);
+  const fullStatePoints = state ? points.filter(p => p.state === state) : points;
   let statePoints = fullStatePoints;
   // Filters the actual clustering input, not just a label applied
   // afterward — "Actively Engaged" genuinely reclusters on just that
@@ -141,12 +157,12 @@ async function getPodsForParams(req) {
   // list, so that's never ambiguous in practice.
   const podsWithId = pods.map(pod => ({
     ...pod,
-    id: `${state}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`
+    id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`
   }));
 
   const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
-  return { state, gridKm, minPodSize, engagement: engagementFilter, ...result };
+  return { state: state || '', gridKm, minPodSize, engagement: engagementFilter, ...result };
 }
 
 // Pod summaries only — no candidate arrays. This is the "no full list
