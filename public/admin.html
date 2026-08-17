@@ -2463,7 +2463,7 @@
                   <th style="width:130px">Contact</th>
                   <th style="width:42px">Dur.</th>
                   <th style="width:190px">Date (Melbourne)</th>
-                  <th style="width:110px">Status</th>
+                  <th style="width:160px">Status</th>
                   <th style="width:460px"></th>
                 </tr>
               </thead>
@@ -2490,9 +2490,41 @@
               <span id="callEvalHistoryCount" style="font-size:13px;color:var(--text-muted)"></span>
             </div>
           </div>
-          <div id="callEvalHistoryList" style="padding:8px 0">
-            <div class="loading-spinner"><div class="spinner"></div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
+            <input type="date" id="evalFilterFrom" class="form-control" style="width:150px" onchange="filterEvals()">
+            <input type="date" id="evalFilterTo" class="form-control" style="width:150px" onchange="filterEvals()">
+            <select id="evalFilterEvaluator" class="form-control" style="width:170px" onchange="filterEvals()">
+              <option value="">All Evaluators</option>
+            </select>
+            <select id="evalFilterRubricType" class="form-control" style="width:170px" onchange="filterEvals()">
+              <option value="">Educator + Centre</option>
+              <option value="educator">Educator-Facing</option>
+              <option value="centre">Centre-Facing</option>
+            </select>
+            <select id="evalFilterOutcome" class="form-control" style="width:180px" onchange="filterEvals()">
+              <option value="">All Statuses</option>
+            </select>
           </div>
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact" id="callEvalHistoryTable">
+              <thead>
+                <tr>
+                  <th style="width:100px">Date</th>
+                  <th>Rep</th>
+                  <th style="width:90px">Type</th>
+                  <th style="width:70px">Source</th>
+                  <th style="width:170px">Evaluator</th>
+                  <th style="width:60px">Score</th>
+                  <th style="width:190px">Status</th>
+                  <th style="width:60px"></th>
+                </tr>
+              </thead>
+              <tbody id="callEvalHistoryList">
+                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="callEvalHistoryPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
         </div>
       </div>
       </template>
@@ -11948,7 +11980,7 @@
         loadSyncStatus();
       }
       loadCallsList();
-      loadEvaluationHistory();
+      initEvalFilters().then(loadEvaluationHistory);
       // callRubrics is needed here too (rubric labels/criteria shown in eval
       // results and the manual grading modal) even though the reference
       // table itself now lives on its own Call Grading Rubrics section.
@@ -12874,13 +12906,13 @@
     // Numbered page buttons, current page centered in a window of ~10, with
     // "…" jumps to the very first/last page when there are more pages than
     // fit in the window — plain Prev/Next alone doesn't scale to 80+ pages.
-    function renderPageNumbers(current, total, windowSize = 10) {
+    function renderPageNumbers(current, total, windowSize = 10, gotoFn = 'goToCallsPage') {
       if (total <= 1) return '';
       let start = Math.max(1, current - Math.floor(windowSize / 2));
       let end = Math.min(total, start + windowSize - 1);
       start = Math.max(1, end - windowSize + 1);
 
-      const pageBtn = p => `<button class="btn-secondary" style="padding:5px 11px;font-size:12px;${p === current ? 'background:var(--navy);color:white;border-color:var(--navy)' : ''}" onclick="goToCallsPage(${p})" ${p === current ? 'disabled' : ''}>${p}</button>`;
+      const pageBtn = p => `<button class="btn-secondary" style="padding:5px 11px;font-size:12px;${p === current ? 'background:var(--navy);color:white;border-color:var(--navy)' : ''}" onclick="${gotoFn}(${p})" ${p === current ? 'disabled' : ''}>${p}</button>`;
       let html = '';
       if (start > 1) {
         html += pageBtn(1);
@@ -12943,11 +12975,12 @@
           // of a pill for it cuts a lot of visual weight off the table
           // without losing the two states that actually need a reader's
           // attention (Audio/Pending still get their badge).
-          const statusCell = gradeReady
+          const statusCell = (gradeReady
             ? '<span style="color:#15803d;font-size:15px;font-weight:700" title="Ready">✓</span>'
             : r.has_audio
             ? '<span class="badge badge-user">🎧 Audio</span>'
-            : '<span class="badge badge-draft">⏳ Pending</span>';
+            : '<span class="badge badge-draft">⏳ Pending</span>')
+            + (r.evaluated ? ' <span class="badge badge-published" style="font-size:9.5px" title="Already evaluated — see Recent Evaluations below">✅ Evaluated</span>' : '');
           return `
           <tr>
             <td style="font-weight:600;color:var(--navy)">${escHtml(r.rep_name || 'Unknown')}</td>
@@ -13191,31 +13224,84 @@
       finally { btn.disabled = false; btn.textContent = 'Save Evaluation'; }
     }
 
+    let evalFiltersLoaded = false;
+    let evalCurrentPage = 1;
+
+    // Outcome options mirror outcomeMeta (defined above) so the filter list
+    // can never drift from what the Status column itself actually shows.
+    // Evaluator options come from real data (currently just email
+    // addresses — see /evaluated-by) rather than a hardcoded team list.
+    async function initEvalFilters() {
+      if (evalFiltersLoaded) return;
+      evalFiltersLoaded = true;
+      const outcomeSelect = document.getElementById('evalFilterOutcome');
+      Object.entries(outcomeMeta).forEach(([key, meta]) => {
+        const opt = document.createElement('option');
+        opt.value = key; opt.textContent = meta.label;
+        outcomeSelect.appendChild(opt);
+      });
+      try {
+        const evaluators = await fetch('/api/calls/evaluated-by').then(r => r.json());
+        const evalSelect = document.getElementById('evalFilterEvaluator');
+        evaluators.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name;
+          evalSelect.appendChild(opt);
+        });
+      } catch {}
+    }
+
+    function filterEvals() { evalCurrentPage = 1; loadEvaluationHistory(); }
+    function changeEvalPage(delta) { evalCurrentPage += delta; loadEvaluationHistory(); }
+    function goToEvalPage(page) { evalCurrentPage = page; loadEvaluationHistory(); }
+
     async function loadEvaluationHistory() {
       const list = document.getElementById('callEvalHistoryList');
+      list.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
-        const evals = await fetch('/api/calls/evaluations').then(r => r.json());
-        document.getElementById('callEvalHistoryCount').textContent = `${evals.length} saved`;
+        const params = new URLSearchParams({ page: evalCurrentPage, pageSize: 20 });
+        const from = document.getElementById('evalFilterFrom').value;
+        const to = document.getElementById('evalFilterTo').value;
+        const evaluator = document.getElementById('evalFilterEvaluator').value;
+        const rubricType = document.getElementById('evalFilterRubricType').value;
+        const outcome = document.getElementById('evalFilterOutcome').value;
+        if (from) params.set('dateFrom', from);
+        if (to) params.set('dateTo', to);
+        if (evaluator) params.set('evaluatedBy', evaluator);
+        if (rubricType) params.set('rubricType', rubricType);
+        if (outcome) params.set('outcome', outcome);
+
+        const data = await fetch(`/api/calls/evaluations?${params}`).then(r => r.json());
+        if (data.error) throw new Error(data.error);
+        const evals = data.evaluations || [];
+        document.getElementById('callEvalHistoryCount').textContent = `${data.total} saved`;
+
+        const pager = document.getElementById('callEvalHistoryPagination');
+        const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
+        pager.innerHTML = totalPages > 1 ? `
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeEvalPage(-1)" ${evalCurrentPage === 1 ? 'disabled' : ''}>← Prev</button>
+          ${renderPageNumbers(evalCurrentPage, totalPages, 10, 'goToEvalPage')}
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeEvalPage(1)" ${evalCurrentPage === totalPages ? 'disabled' : ''}>Next →</button>` : '';
+
         if (evals.length === 0) {
-          list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No evaluations yet.</div>';
+          list.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No evaluations match these filters.</td></tr>';
           return;
         }
         list.innerHTML = evals.map(e => {
           const meta = outcomeMeta[e.outcome] || { label: e.outcome, badge: 'badge-user' };
           return `
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--gray-100)">
-            <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;cursor:pointer" onclick="openEvalDetail('${e.id}')">
-              <span class="badge ${meta.badge}" style="flex-shrink:0">${meta.label}</span>
-              <div style="flex:1;min-width:0">
-                <div style="font-weight:600;font-size:13px;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')} <span style="font-weight:400;color:var(--text-muted)">· ${e.rubric_type === 'educator' ? 'Educator-Facing' : 'Centre-Facing'}</span> ${e.source === 'human' ? '<span style="font-size:10px;font-weight:700;color:var(--text-muted)">🧑 manual</span>' : '<span style="font-size:10px;font-weight:700;color:var(--text-muted)">🤖 AI</span>'}</div>
-                <div style="font-size:11.5px;color:var(--text-muted)">${fmtDate(e.created_at)} · evaluated by ${escHtml(e.evaluated_by || '—')}</div>
-              </div>
-              <div style="font-size:16px;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums;flex-shrink:0">${e.overall_score}%</div>
-            </div>
-            ${currentUserRole === 'super_admin' ? `<button class="action-btn edit" style="flex-shrink:0" title="Analyse this call's transcript for reusable FAQ material" onclick="extractFaqCandidatesFromEval('${e.recording_id}', this)">📋 Extract FAQ Candidates</button>` : ''}
-          </div>`;
+          <tr style="cursor:pointer" onclick="openEvalDetail('${e.id}')">
+            <td style="white-space:nowrap;color:var(--text-muted)">${escHtml(fmtDate(e.created_at))}</td>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')}</td>
+            <td>${e.rubric_type === 'educator' ? 'Educator' : 'Centre'}</td>
+            <td>${e.source === 'human' ? '🧑 Manual' : '🤖 AI'}</td>
+            <td style="color:var(--text-muted)">${escHtml(e.evaluated_by || '—')}</td>
+            <td style="font-weight:700;color:var(--orange);font-variant-numeric:tabular-nums">${e.overall_score}%</td>
+            <td><span class="badge ${meta.badge}">${meta.label}</span></td>
+            <td>${currentUserRole === 'super_admin' ? `<button class="action-btn edit" style="font-size:10.5px;padding:3px 6px" title="Analyse this call's transcript for reusable FAQ material" onclick="event.stopPropagation();extractFaqCandidatesFromEval('${e.recording_id}', this)">📋 FAQ</button>` : ''}</td>
+          </tr>`;
         }).join('');
-      } catch { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Failed to load evaluations.</div>'; }
+      } catch { list.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">Failed to load evaluations.</td></tr>'; }
     }
 
     async function extractFaqCandidatesFromEval(recordingId, btn) {

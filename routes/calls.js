@@ -127,7 +127,8 @@ router.get('/local', async (req, res) => {
         sql: `SELECT id, to_number, from_number, to_label, from_label, rep_name, call_type, duration_seconds,
                      start_time, start_time_iso, status, sentiment_score, has_audio, content_synced, synced_at,
                      detected_rubric_type, detected_rubric_reasoning,
-                     (transcript IS NOT NULL AND transcript != '') AS has_transcript
+                     (transcript IS NOT NULL AND transcript != '') AS has_transcript,
+                     EXISTS(SELECT 1 FROM call_evaluations ce WHERE ce.recording_id = call_recordings.id) AS evaluated
               FROM call_recordings ${where} ORDER BY start_time_iso DESC LIMIT ? OFFSET ?`,
         args: [...args, Number(pageSize), offset]
       }),
@@ -568,10 +569,43 @@ router.post('/:recordingId/evaluate-manual', async (req, res) => {
   }
 });
 
+// Recent Evaluations list on the Call Quality Evaluator page — paginated
+// and filterable (date/evaluator/rubric type/outcome), same shape as
+// GET /local's page/pageSize/total contract. dateFrom/dateTo compare the
+// Melbourne calendar date the evaluation was created on, matching every
+// other date filter in this file (see MELBOURNE_TZ above).
 router.get('/evaluations', async (req, res) => {
   try {
-    const result = await getDb().execute('SELECT * FROM call_evaluations ORDER BY created_at DESC LIMIT 200');
-    res.json(result.rows);
+    const { page = 1, pageSize = 20, dateFrom, dateTo, evaluatedBy, rubricType, outcome } = req.query;
+    const conditions = [];
+    const args = [];
+    if (dateFrom) { conditions.push(`(created_at AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
+    if (dateTo) { conditions.push(`(created_at AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
+    if (evaluatedBy) { conditions.push('evaluated_by = ?'); args.push(evaluatedBy); }
+    if (rubricType && RUBRICS[rubricType]) { conditions.push('rubric_type = ?'); args.push(rubricType); }
+    if (outcome) { conditions.push('outcome = ?'); args.push(outcome); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const offset = (Math.max(1, Number(page)) - 1) * Number(pageSize);
+    const db = getDb();
+    const [rows, countRes] = await Promise.all([
+      db.execute({ sql: `SELECT * FROM call_evaluations ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`, args: [...args, Number(pageSize), offset] }),
+      db.execute({ sql: `SELECT COUNT(*) AS n FROM call_evaluations ${where}`, args })
+    ]);
+    res.json({ evaluations: rows.rows, total: Number(countRes.rows[0].n), page: Number(page), pageSize: Number(pageSize) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Distinct evaluated_by values (real data is currently email addresses,
+// e.g. joy@rawtalent.com.au — no separate display-name mapping exists for
+// this field) for the Recent Evaluations Evaluator filter dropdown, same
+// pattern as /rep-names above.
+router.get('/evaluated-by', async (req, res) => {
+  try {
+    const result = await getDb().execute("SELECT DISTINCT evaluated_by FROM call_evaluations WHERE evaluated_by IS NOT NULL ORDER BY evaluated_by");
+    res.json(result.rows.map(r => r.evaluated_by));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
