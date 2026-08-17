@@ -425,7 +425,13 @@
           <button class="btn-add" onclick="openProjectFormModal()">+ New Project</button>
         </div>
 
-        <div id="projectStatusFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px">
+          <div id="projectStatusFilters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+            <label for="projectOwnerFilter">Owner</label>
+            <select id="projectOwnerFilter" class="form-control" style="width:180px" onchange="setProjectOwnerFilter(this.value)"></select>
+          </div>
+        </div>
 
         <div class="admin-table-card">
           <div style="overflow-x:auto">
@@ -3334,6 +3340,7 @@
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
     let currentUserEmail = '';
+    let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
 
     async function init() {
@@ -3349,6 +3356,7 @@
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
+        currentUserFirstName = firstName;
         document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on Admin View.`;
         document.getElementById('viewBanner').style.display = 'block';
         if (me.impersonating) {
@@ -9766,6 +9774,36 @@
     let currentProjectDetail = null;
     let projectSopEditor = null;
     let projectStatusFilter = 'all';
+    // 'all' means every owner; any other value is one person's name as it
+    // appears in owner_name (see splitOwnerNames). Defaults to whoever's
+    // logged in, once, the first time their own name turns out to be one
+    // of the project owners — set by loadProjects() below, then left
+    // alone so a manual change to "All Owners" (or anyone else) sticks
+    // across re-loads within the session.
+    let projectOwnerFilter = 'all';
+    let projectOwnerFilterDefaulted = false;
+
+    // owner_name is free text like "Joy & Adzi" or "Yuv, Gwen, Justine,
+    // Sophia & Joy" — split on the separators actually used in real data
+    // (&, comma, " and ") rather than assuming a single delimiter.
+    function splitOwnerNames(ownerName) {
+      return (ownerName || '').split(/\s*(?:&|,| and )\s*/i).map(s => s.trim()).filter(Boolean);
+    }
+
+    // Matches the logged-in user against however they're named in
+    // owner_name — team_members.name is the nickname projects actually
+    // use ("Yuv", not "Yuvraj"), matched via email since that's the one
+    // reliable join key between users and team_members. Falls back to the
+    // account's own first name for the rare case a team_members row has
+    // no email on file (confirmed live: Prince, Yuv).
+    async function resolveMyOwnerName() {
+      try {
+        const team = await fetch('/api/team').then(r => r.json());
+        const mine = (team || []).find(m => m.email && currentUserEmail && m.email.toLowerCase() === currentUserEmail.toLowerCase());
+        if (mine?.name) return mine.name;
+      } catch { /* falls through to the account name below */ }
+      return currentUserFirstName || null;
+    }
 
     const PROJECT_STATUS_META = {
       planning:   { label: 'Planning',   color: '#6b7280', bg: 'rgba(107,114,128,.12)' },
@@ -9779,7 +9817,19 @@
     async function loadProjects() {
       try {
         allProjects = await fetch('/api/projects').then(r => r.json());
+        // Default the Owner filter to "my projects" the first time this
+        // loads, but only if the logged-in user is actually listed as an
+        // owner on something — otherwise "All Owners" is the more useful
+        // default than an empty grid. Never overrides a filter the user
+        // already picked (e.g. a re-load after adding a project).
+        if (!projectOwnerFilterDefaulted) {
+          projectOwnerFilterDefaulted = true;
+          const myName = await resolveMyOwnerName();
+          const allOwnerNames = new Set(allProjects.flatMap(p => splitOwnerNames(p.owner_name)));
+          if (myName && allOwnerNames.has(myName)) projectOwnerFilter = myName;
+        }
         renderProjectStatusFilters();
+        renderProjectOwnerFilter();
         renderProjectsGrid();
       } catch { toast('Failed to load projects', 'error'); }
     }
@@ -9798,6 +9848,22 @@
     function setProjectStatusFilter(key) {
       projectStatusFilter = key;
       renderProjectStatusFilters();
+      renderProjectsGrid();
+    }
+
+    function renderProjectOwnerFilter() {
+      const sel = document.getElementById('projectOwnerFilter');
+      const owners = [...new Set(allProjects.flatMap(p => splitOwnerNames(p.owner_name)))].sort((a, b) => a.localeCompare(b));
+      // If the current filter value (e.g. from the default-to-mine logic
+      // above) isn't among today's real owners, fall back to "all" rather
+      // than silently rendering a selected option that doesn't exist.
+      if (projectOwnerFilter !== 'all' && !owners.includes(projectOwnerFilter)) projectOwnerFilter = 'all';
+      sel.innerHTML = `<option value="all">All Owners</option>` + owners.map(o => `<option value="${escHtml(o)}">${escHtml(o)}</option>`).join('');
+      sel.value = projectOwnerFilter;
+    }
+
+    function setProjectOwnerFilter(value) {
+      projectOwnerFilter = value;
       renderProjectsGrid();
     }
 
@@ -9992,7 +10058,8 @@
 
     function renderProjectsGrid() {
       const body = document.getElementById('projectsTableBody');
-      const filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
+      let filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
+      if (projectOwnerFilter !== 'all') filtered = filtered.filter(p => splitOwnerNames(p.owner_name).includes(projectOwnerFilter));
       if (!filtered.length) {
         body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
         return;
