@@ -3334,7 +3334,6 @@
     let currentUserRole = '';
     let currentUserEmail = '';
     let currentUserCanBuildTraining = false;
-    let currentUserWfpLabel = '';
 
     async function init() {
       // renderReportSectionsHtml() now runs lazily from showSection() on
@@ -3346,7 +3345,6 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
-        currentUserWfpLabel = me.wfpLabel || '';
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
@@ -6466,16 +6464,19 @@
     // selected, from the map or the list. VIC/SA are kept as separate,
     // explicit views (not a mixed list) to match how Gwen/Justine actually
     // split territory.
-    let micropodsState = null; // set on first entry, from wfpLabel if the logged-in user is a Workforce Partner
+    // Used to default a Workforce Partner straight to their own state
+    // (SA for Gwen, VIC for Justine) via wfpLabel — dropped so first load
+    // looks and behaves identically for every role, admin included (Joy:
+    // "all views on the Workforce Partners section... should have the
+    // same view as the Workforce Partner view"). Everyone now starts on
+    // VIC and switches manually, same as admin always did.
+    let micropodsState = null;
     let micropodsPods = [];
     let micropodsMapInstance = null;
     let micropodsHeatmapInstance = null;
 
     function initMicropodsSection() {
-      if (!micropodsState) {
-        const label = (currentUserWfpLabel || '').toUpperCase();
-        micropodsState = label.includes('(SA)') ? 'SA' : 'VIC';
-      }
+      if (!micropodsState) micropodsState = 'VIC';
       updateMicropodsStateToggle();
       loadMicropods();
     }
