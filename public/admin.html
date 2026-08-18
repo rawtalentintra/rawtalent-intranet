@@ -10311,7 +10311,10 @@
 
     function renderProjectStatusFilters() {
       const el = document.getElementById('projectStatusFilters');
-      const counts = { all: allProjects.length };
+      // "All Projects" means "everything still active" — a finished
+      // project shouldn't keep cluttering the default view forever, only
+      // its own Completed filter. Matches renderProjectsGrid's filtering.
+      const counts = { all: allProjects.filter(p => p.status !== 'completed').length };
       allProjects.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
       const pill = (key, label) => {
         const active = projectStatusFilter === key;
@@ -10533,7 +10536,11 @@
 
     function renderProjectsGrid() {
       const body = document.getElementById('projectsTableBody');
-      let filtered = projectStatusFilter === 'all' ? allProjects : allProjects.filter(p => p.status === projectStatusFilter);
+      // Completed projects only show under their own filter, not in "All
+      // Projects" — otherwise finished work never leaves the default view.
+      let filtered = projectStatusFilter === 'all'
+        ? allProjects.filter(p => p.status !== 'completed')
+        : allProjects.filter(p => p.status === projectStatusFilter);
       if (projectOwnerFilter !== 'all') filtered = filtered.filter(p => splitOwnerNames(p.owner_name).includes(projectOwnerFilter));
       if (!filtered.length) {
         body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
