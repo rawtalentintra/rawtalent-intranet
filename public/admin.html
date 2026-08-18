@@ -2780,7 +2780,7 @@
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description</label>
-          <textarea id="projectDescription" class="form-control textarea" placeholder="One or two sentences on what this project covers…" style="min-height:60px"></textarea>
+          <div id="projectDescriptionEditor"></div>
         </div>
         <div style="display:flex;gap:12px">
           <div class="form-group-modal" style="flex:1">
@@ -2817,7 +2817,7 @@
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">What does success look like?</label>
-          <textarea id="projectSuccessCriteria" class="form-control textarea" placeholder="e.g. 90%+ of calls scored 4/5 or above, evaluated within 24 hours of the call…" style="min-height:80px"></textarea>
+          <div id="projectSuccessCriteriaEditor"></div>
           <div class="form-hint">This is shown on the project card and in its detail view</div>
         </div>
       </div>
@@ -10248,6 +10248,19 @@
     let currentProjectId = null;
     let currentProjectDetail = null;
     let projectSopEditor = null;
+    let projectDescRTE = null;
+    let projectSuccessRTE = null;
+
+    // Description/success_criteria are now stored as rich-text HTML (see
+    // openProjectFormModal) — the compact grid row previews are plain-text
+    // truncated snippets, not a place to render real markup, so this strips
+    // tags back down to visible text (e.g. "<p>Increase bookings</p>" ->
+    // "Increase bookings") rather than leaking raw HTML into the cell.
+    function stripHtmlToText(html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html || '';
+      return (tmp.textContent || '').trim();
+    }
     let projectStatusFilter = 'all';
     // 'all' means every owner; any other value is one person's name as it
     // appears in owner_name (see splitOwnerNames). Defaults to whoever's
@@ -10561,7 +10574,7 @@
               <span style="font-size:16px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
               <div style="min-width:0">
                 <div style="font-weight:700;color:var(--navy);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
-                <div style="font-size:10.5px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.description || 'No description yet')}</div>
+                <div style="font-size:10.5px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(stripHtmlToText(p.description) || 'No description yet')}</div>
               </div>
             </div>
           </td>
@@ -10570,7 +10583,7 @@
           <td>${renderProgressCell(p)}</td>
           <td>${timelineHtml}</td>
           <td style="font-size:11.5px;color:var(--text-muted);max-width:230px">
-            <div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4">${p.success_criteria ? escHtml(p.success_criteria) : '<span style="color:var(--gray-400)">Not defined yet</span>'}</div>
+            <div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4">${p.success_criteria ? escHtml(stripHtmlToText(p.success_criteria)) : '<span style="color:var(--gray-400)">Not defined yet</span>'}</div>
           </td>
           <td style="text-align:center"><span style="font-size:15px;color:${p.file_count > 0 ? 'var(--orange)' : 'var(--gray-200)'}" title="${p.file_count} SOP file${p.file_count != 1 ? 's' : ''}">📎</span></td>
           <td style="color:var(--orange);font-weight:700;font-size:14px;text-align:center">›</td>
@@ -10631,7 +10644,7 @@
           </div>
         </div>
 
-        ${p.description ? `<div style="font-size:13.5px;color:var(--text);line-height:1.6;margin-bottom:22px">${escHtml(p.description)}</div>` : ''}
+        ${p.description ? `<div class="rte-display" style="font-size:13.5px;color:var(--text);line-height:1.6;margin-bottom:22px">${DOMPurify.sanitize(p.description)}</div>` : ''}
 
         <div style="margin-bottom:22px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -10643,7 +10656,7 @@
 
         <div style="background:var(--orange-glow);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:22px">
           <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:6px">🎯 What does success look like?</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.6;white-space:pre-wrap">${p.success_criteria ? escHtml(p.success_criteria) : 'Not defined yet — click Edit to add success criteria for this project.'}</div>
+          <div class="rte-display" style="font-size:13px;color:var(--text);line-height:1.6">${p.success_criteria ? DOMPurify.sanitize(p.success_criteria) : 'Not defined yet — click Edit to add success criteria for this project.'}</div>
         </div>
 
         <div style="margin-bottom:22px">
@@ -10655,7 +10668,7 @@
           </div>
           ${sopEditMode
             ? `<div id="projectSopEditor"></div>`
-            : `<div style="border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:16px 20px;font-size:13.5px;color:var(--text);line-height:1.7;min-height:60px">${p.sop_content && p.sop_content.trim() ? DOMPurify.sanitize(p.sop_content, { ADD_TAGS: ['table','thead','tbody','tr','th','td'] }) : '<span style="color:var(--gray-400)">No SOP written yet — click Edit SOP to document how this project should be run.</span>'}</div>`}
+            : `<div class="rte-display" style="border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:16px 20px;font-size:13.5px;color:var(--text);line-height:1.7;min-height:60px">${p.sop_content && p.sop_content.trim() ? DOMPurify.sanitize(p.sop_content, { ADD_TAGS: ['table','thead','tbody','tr','th','td'] }) : '<span style="color:var(--gray-400)">No SOP written yet — click Edit SOP to document how this project should be run.</span>'}</div>`}
         </div>
 
         <div>
@@ -10746,21 +10759,42 @@
     }
 
     // ── Project Create/Edit Modal ──
-    function openProjectFormModal(id) {
+    async function openProjectFormModal(id) {
       document.getElementById('editProjectId').value = id || '';
       document.getElementById('projectFormModalTitle').textContent = id ? 'Edit Project' : 'New Project';
       const p = id ? allProjects.find(x => x.id === id) : null;
       document.getElementById('projectIcon').value = p?.icon || '🚀';
       document.getElementById('projectColor').value = p?.color || '#3d6fff';
       document.getElementById('projectName').value = p?.name || '';
-      document.getElementById('projectDescription').value = p?.description || '';
       document.getElementById('projectStatus').value = p?.status || 'planning';
       document.getElementById('projectOwnerName').value = p?.owner_name || '';
       document.getElementById('projectOwnerEmail').value = p?.owner_email || '';
       document.getElementById('projectStartDate').value = p?.start_date ? String(p.start_date).slice(0, 10) : '';
       document.getElementById('projectTargetDate').value = p?.target_date ? String(p.target_date).slice(0, 10) : '';
-      document.getElementById('projectSuccessCriteria').value = p?.success_criteria || '';
       document.getElementById('projectFormModal').classList.add('open');
+
+      // Rich text (bold/italic/lists/paste-formatting, stored as sanitized
+      // HTML — see renderProjectDetailBody) instead of the plain textareas
+      // these used to be. A pasted job-description-style block of text used
+      // to lose all its paragraph breaks and formatting once escHtml'd back
+      // out as a single unbroken wall of text.
+      try {
+        await waitForRichEditor();
+      } catch (err) {
+        toast(err.message, 'error');
+        return;
+      }
+      if (!document.getElementById('projectFormModal').classList.contains('open')) return; // closed while the library was loading
+      projectDescRTE = window.RichEditor.create(document.getElementById('projectDescriptionEditor'), {
+        preset: 'compact',
+        placeholder: 'What this project covers…'
+      });
+      projectDescRTE.value = p?.description || '';
+      projectSuccessRTE = window.RichEditor.create(document.getElementById('projectSuccessCriteriaEditor'), {
+        preset: 'compact',
+        placeholder: 'e.g. 90%+ of calls scored 4/5 or above, evaluated within 24 hours of the call…'
+      });
+      projectSuccessRTE.value = p?.success_criteria || '';
     }
 
     function editProjectFromDetail() {
@@ -10774,6 +10808,8 @@
 
     function closeProjectFormModal() {
       document.getElementById('projectFormModal').classList.remove('open');
+      if (projectDescRTE) { projectDescRTE.destroy(); projectDescRTE = null; }
+      if (projectSuccessRTE) { projectSuccessRTE.destroy(); projectSuccessRTE = null; }
     }
 
     async function saveProject() {
@@ -10784,13 +10820,13 @@
         name,
         icon: document.getElementById('projectIcon').value.trim() || '🚀',
         color: document.getElementById('projectColor').value,
-        description: document.getElementById('projectDescription').value.trim(),
+        description: projectDescRTE ? projectDescRTE.value : '',
         status: document.getElementById('projectStatus').value,
         ownerName: document.getElementById('projectOwnerName').value.trim(),
         ownerEmail: document.getElementById('projectOwnerEmail').value.trim(),
         startDate: document.getElementById('projectStartDate').value || null,
         targetDate: document.getElementById('projectTargetDate').value || null,
-        successCriteria: document.getElementById('projectSuccessCriteria').value.trim()
+        successCriteria: projectSuccessRTE ? projectSuccessRTE.value : ''
       };
       const url = id ? `/api/projects/${id}` : '/api/projects';
       try {
