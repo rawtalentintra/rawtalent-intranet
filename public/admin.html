@@ -528,7 +528,12 @@
           <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setWfpStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
         </div>
 
-        <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(4,1fr)"></div>
+        <!-- 3 columns (wraps to 2 rows for 6 cards), not 6 across — this
+             row previously had a real 1280px-viewport squeeze bug when its
+             cards got too narrow, fixed by hardcoding a column count
+             instead of leaving it to auto-fit. Keeping cards at this width
+             avoids reintroducing that. -->
+        <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(3,1fr)"></div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Portfolio Snapshot — existing centres</div>
@@ -6386,17 +6391,27 @@
     function renderSalesKpis(current, previous) {
       const c = salesFunnelCounts(current);
       const p = salesFunnelCounts(previous);
+      const booking = signedCentreBookingCounts();
       const cards = [
         { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
         { label: 'Called Rate', value: pct(c.called, c.total) + '%', trend: trendArrow(pct(c.called, c.total), pct(p.called, p.total)), hint: `${c.called} of ${c.total} leads called` },
-        { label: 'Visited Rate', value: pct(c.visited, c.called) + '%', trend: trendArrow(pct(c.visited, c.called), pct(p.visited, p.called)), hint: `${c.visited} of ${c.called} called leads visited` },
-        { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` }
+        // % of total leads, not % of called — visited leads aren't a strict
+        // subset of called ones (an N/A'd or skipped call still lets a
+        // centre reach Visited/Signed), so visited/called could read over
+        // 100% and never meant "conversion from called" in the first place.
+        { label: 'Visited Rate', value: pct(c.visited, c.total) + '%', trend: trendArrow(pct(c.visited, c.total), pct(p.visited, p.total)), hint: `${c.visited} of ${c.total} leads visited` },
+        { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
+        // Not period-bound like the four cards above — a centre signed
+        // months ago that only just started booking is still worth
+        // surfacing today (see signedCentreBookingCounts).
+        { label: '📕 Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
+        { label: '🎉 Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
       ];
       document.getElementById('salesKpiRow').innerHTML = cards.map(k => `
         <div class="kpi-card">
           <div class="kpi-label">${escHtml(k.label)}</div>
           <div class="kpi-value">${k.value}</div>
-          <div class="kpi-foot">${k.trend}</div>
+          <div class="kpi-foot">${k.trend || ''}</div>
           <div class="kpi-hint">${escHtml(k.hint)}</div>
         </div>`).join('');
     }
@@ -6485,7 +6500,24 @@
         const data = await fetch('/api/leads/retention').then(r => r.json());
         clientRetentionData = Array.isArray(data) ? data : [];
       } catch { clientRetentionData = []; }
-      renderClientRetention();
+      // Full re-render, not just renderClientRetention() — the KPI row's
+      // Pre-booking/With Bookings cards (renderSalesKpis) read this same
+      // data and need to pick up the real numbers once this arrives too,
+      // not just the Client Retention list further down the page.
+      renderSalesDashboard();
+    }
+
+    // Signed leads bucketed by whether their matched RT centre has actually
+    // started booking yet — same bookingsSinceSigned figure the Client
+    // Retention panel and Leads table's Pre-booking/Booked badge use.
+    // State-scoped like the rest of this dashboard, but NOT date-range
+    // scoped: a centre signed 3 months ago that only just got its first
+    // booking is still worth surfacing today, the same reasoning
+    // computeAttentionItems already uses for why it ignores the date range.
+    function signedCentreBookingCounts() {
+      const scoped = wfpStateFilter ? clientRetentionData.filter(r => r.state === wfpStateFilter) : clientRetentionData;
+      const withBookings = scoped.filter(r => r.matched && r.bookingsSinceSigned > 0).length;
+      return { preBooking: scoped.length - withBookings, withBookings, total: scoped.length };
     }
 
     function renderClientRetention() {
