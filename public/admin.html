@@ -686,8 +686,18 @@
                   <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
                 </div>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--navy);font-weight:600;cursor:pointer">
-                  <input type="checkbox" id="micropodsTerritoryToggle" onchange="loadMicropods()"> 🧭 Territory Strategy
+                  <input type="checkbox" id="micropodsTerritoryToggle" onchange="onMicropodsTerritoryToggleChange()"> 🧭 Territory Strategy
                 </label>
+                <div id="micropodsTerritoryFilterWrap" style="display:none;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                  <label for="micropodsTerritoryFilter">Strategy</label>
+                  <select id="micropodsTerritoryFilter" class="form-control" style="width:180px" onchange="renderMicropodsTable(micropodsLastData, true)">
+                    <option value="">All strategies</option>
+                    <option value="recruit">🎯 Recruit</option>
+                    <option value="develop_business">📈 Develop Business</option>
+                    <option value="grow">🌱 Grow</option>
+                    <option value="monitor">👀 Monitor</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
@@ -5821,10 +5831,21 @@
     // not "no centre with this name exists anywhere", so a blank result
     // isn't asserting the centre is new, just that nothing lined up
     // confidently.
-    function renderLeadExistingCentreCell(leadId) {
-      const match = leadsCentreMatches[leadId];
+    //
+    // A lead whose Stage is already Profile Created will always match
+    // itself here (it IS the RT centre it created), which reads as "might
+    // be a pre-existing duplicate" — wrong meaning entirely for a lead we
+    // ourselves converted. Those get a distinct "Lead Converted" badge
+    // instead of "Likely exists", so the duplicate-risk badge stays
+    // reserved for leads that haven't gone through the pipeline yet.
+    function renderLeadExistingCentreCell(lead) {
+      const match = leadsCentreMatches[lead.id];
       if (!match) return '<span style="color:var(--text-muted)">—</span>';
       const centreKey = match.rtLocationId ? `loc:${match.rtLocationId}` : `client:${match.rtClientId}`;
+      if (lead.signed_status === 'signed') {
+        const title = `${match.clientName} — ${match.locationLabel}\nThis is the RT centre created from this lead's own Profile Created conversion — not a pre-existing duplicate.`;
+        return `<span class="badge" style="cursor:pointer;background:#fef3c7;color:#b45309" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">⭐ Lead Converted</span>`;
+      }
       const title = `${match.clientName} — ${match.locationLabel}\n${match.reasons.join(', ')}`;
       return `<span class="badge badge-published" style="cursor:pointer" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">✓ Likely exists</span>`;
     }
@@ -5843,7 +5864,7 @@
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
             ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
           </td>
-          <td>${renderLeadExistingCentreCell(l.id)}</td>
+          <td>${renderLeadExistingCentreCell(l)}</td>
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
@@ -6748,6 +6769,19 @@
       grow: '#15803d', recruit: '#b91c1c', develop_business: '#b45309', monitor: '#64748b'
     };
 
+    // Cached so the Strategy filter dropdown can re-render instantly
+    // against already-fetched pods instead of re-hitting the (geocode-
+    // dependent, potentially several-second) territory-strategy endpoint
+    // on every filter change.
+    let micropodsLastData = null;
+
+    function onMicropodsTerritoryToggleChange() {
+      const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
+      document.getElementById('micropodsTerritoryFilterWrap').style.display = territoryMode ? 'flex' : 'none';
+      if (!territoryMode) document.getElementById('micropodsTerritoryFilter').value = '';
+      loadMicropods();
+    }
+
     async function loadMicropods() {
       const minSize = document.getElementById('micropodsMinSize').value || 15;
       const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
@@ -6763,6 +6797,7 @@
         const data = await fetch(`${endpoint}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
         if (data.error) throw new Error(data.error);
         micropodsPods = data.pods;
+        micropodsLastData = data;
         renderMicropodsTable(data, territoryMode);
         renderMicropodsMap(data);
       } catch {
@@ -6778,13 +6813,14 @@
 
     function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
-      document.getElementById('micropodsSummary').textContent = `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
       const colspan = territoryMode ? 4 : 2;
-      if (!data.pods.length) {
+      if (!data || !data.pods.length) {
+        document.getElementById('micropodsSummary').textContent = data ? `0 pods · ${data.unclusteredCount} candidates outside any pod` : '';
         tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>`;
         return;
       }
       if (!territoryMode) {
+        document.getElementById('micropodsSummary').textContent = `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
         tbody.innerHTML = data.pods.map(p => `
           <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
             <td>${escHtml(p.name)}</td>
@@ -6792,7 +6828,16 @@
           </tr>`).join('');
         return;
       }
-      tbody.innerHTML = data.pods.map(p => `
+      const quadrantFilter = document.getElementById('micropodsTerritoryFilter').value;
+      const pods = quadrantFilter ? data.pods.filter(p => p.quadrant === quadrantFilter) : data.pods;
+      document.getElementById('micropodsSummary').textContent = quadrantFilter
+        ? `${pods.length} of ${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`
+        : `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
+      if (!pods.length) {
+        tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods match this strategy right now.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = pods.map(p => `
         <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
           <td>${escHtml(p.name)}</td>
           <td>${p.supply} <span style="color:var(--text-muted);font-size:11px">engaged / ${p.candidateCount} total</span></td>
