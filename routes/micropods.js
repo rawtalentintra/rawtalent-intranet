@@ -4,6 +4,9 @@ const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const { normalizeStateToShort, buildMicropods } = require('../services/micropodService');
 const engagement = require('../services/educatorEngagementService');
+const centreGeoService = require('../services/centreGeoService');
+const { computeTerritoryStrategy } = require('../services/territoryStrategyService');
+const { getCentresAndBookings } = require('./centres');
 
 // Candidate density clustering ("Micropods") for the Workforce Partners
 // section — computed on read from rt_candidates_cache (nightly-synced), no
@@ -155,9 +158,15 @@ async function getPodsForParams(req) {
   // different engagement filters for the same state, but a pod is always
   // looked up together with the same engagement param that produced its
   // list, so that's never ambiguous in practice.
+  // engagedCount per pod (not just candidateCount) so callers needing the
+  // "Actively Engaged" supply figure — the Territory Strategy demand
+  // overlay below, and the list view's own display — don't each have to
+  // re-derive it from memberIds themselves.
+  const engagedIdSet = new Set(statePoints.filter(p => p.engaged).map(p => p.userId));
   const podsWithId = pods.map(pod => ({
     ...pod,
-    id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`
+    id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`,
+    engagedCount: pod.memberIds.filter(id => engagedIdSet.has(id)).length
   }));
 
   const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
@@ -173,10 +182,48 @@ router.get('/', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     const { pods, unclusteredCount, totalActive, totalGeocoded } = result;
     res.json({
-      pods: pods.map(({ id, name, centroid, candidateCount }) => ({ id, name, centroid, candidateCount })),
+      pods: pods.map(({ id, name, centroid, candidateCount, engagedCount }) => ({ id, name, centroid, candidateCount, engagedCount })),
       unclusteredCount,
       totalActive,
       totalGeocoded
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Territory Strategy — overlays demand (nearby RT centres' recent booking
+// activity) onto Micropods' existing supply-side pods, answering the
+// Workforce Partner Strategy Meeting doc's three framing questions in one
+// view: where supply outstrips demand, where demand outstrips supply, and
+// (via the recommendation text) what to do about it today. Registered as a
+// literal path ahead of '/:podId' below — express matches routes in
+// registration order, so this has to come first or '/:podId' would treat
+// "territory-strategy" as a pod id and 404. Reuses routes/centres.js's own
+// RT clients+bookings cache rather than re-fetching.
+router.get('/territory-strategy', async (req, res) => {
+  try {
+    const result = await getPodsForParams(req);
+    if (result.error) return res.status(400).json({ error: result.error });
+    const radiusKm = clamp(req.query.radiusKm, 3, 50, 15);
+
+    const { centres, bookings } = await getCentresAndBookings();
+    const geocodes = await centreGeoService.getGeocodesForCentres(centres);
+    const centresWithGeo = centres
+      .filter(c => geocodes[c.centreKey])
+      .map(c => ({ ...c, lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng }));
+
+    const pods = computeTerritoryStrategy(result.pods, centresWithGeo, bookings, { radiusKm });
+
+    res.json({
+      pods: pods.map(({ id, name, centroid, candidateCount, engagedCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action }) =>
+        ({ id, name, centroid, candidateCount, engagedCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action })),
+      unclusteredCount: result.unclusteredCount,
+      totalActive: result.totalActive,
+      totalGeocoded: result.totalGeocoded,
+      radiusKm,
+      geocodedCentreCount: centresWithGeo.length,
+      totalCentreCount: centres.length
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

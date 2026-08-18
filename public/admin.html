@@ -679,9 +679,13 @@
                   <label for="micropodsMinSize">Minimum pod size</label>
                   <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
                 </div>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--navy);font-weight:600;cursor:pointer">
+                  <input type="checkbox" id="micropodsTerritoryToggle" onchange="loadMicropods()"> 🧭 Territory Strategy
+                </label>
               </div>
             </div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
+            <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)">🧭 <strong>Territory Strategy</strong> compares each pod's Actively Engaged educator supply against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
           </div>
 
           <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
@@ -695,7 +699,7 @@
             </div>
             <div style="overflow-x:auto">
               <table class="data-table data-table-compact" id="micropodsTable">
-                <thead>
+                <thead id="micropodsTableHead">
                   <tr>
                     <th>Area</th>
                     <th>Candidates</th>
@@ -6570,34 +6574,60 @@
       });
     }
 
+    const MICROPODS_QUADRANT_COLOR = {
+      grow: '#15803d', recruit: '#b91c1c', develop_business: '#b45309', monitor: '#64748b'
+    };
+
     async function loadMicropods() {
       const minSize = document.getElementById('micropodsMinSize').value || 15;
       const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
+      const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
+      document.getElementById('micropodsTerritoryNote').style.display = territoryMode ? 'block' : 'none';
+      const colspan = territoryMode ? 4 : 2;
       const tbody = document.getElementById('micropodsTableBody');
-      tbody.innerHTML = '<tr><td colspan="2"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       document.getElementById('micropodsSummary').textContent = '';
+      renderMicropodsTableHead(territoryMode);
       try {
-        const data = await fetch(`/api/micropods?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
+        const endpoint = territoryMode ? '/api/micropods/territory-strategy' : '/api/micropods';
+        const data = await fetch(`${endpoint}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
         if (data.error) throw new Error(data.error);
         micropodsPods = data.pods;
-        renderMicropodsTable(data);
+        renderMicropodsTable(data, territoryMode);
         renderMicropodsMap(data);
       } catch {
-        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load micropods.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load micropods.</td></tr>`;
       }
     }
 
-    function renderMicropodsTable(data) {
+    function renderMicropodsTableHead(territoryMode) {
+      document.getElementById('micropodsTableHead').innerHTML = territoryMode
+        ? '<tr><th>Area</th><th>Educator Supply</th><th>Nearby Demand (30d)</th><th>Strategy</th></tr>'
+        : '<tr><th>Area</th><th>Candidates</th></tr>';
+    }
+
+    function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
       document.getElementById('micropodsSummary').textContent = `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
+      const colspan = territoryMode ? 4 : 2;
       if (!data.pods.length) {
-        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>`;
+        return;
+      }
+      if (!territoryMode) {
+        tbody.innerHTML = data.pods.map(p => `
+          <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
+            <td>${escHtml(p.name)}</td>
+            <td>${p.candidateCount}</td>
+          </tr>`).join('');
         return;
       }
       tbody.innerHTML = data.pods.map(p => `
         <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
           <td>${escHtml(p.name)}</td>
-          <td>${p.candidateCount}</td>
+          <td>${p.supply} <span style="color:var(--text-muted);font-size:11px">engaged / ${p.candidateCount} total</span></td>
+          <td>${p.demandBookings30d} <span style="color:var(--text-muted);font-size:11px">across ${p.nearbyCentreCount} centres</span></td>
+          <td><span style="font-weight:700;color:${MICROPODS_QUADRANT_COLOR[p.quadrant] || 'var(--text-muted)'}">${p.icon} ${escHtml(p.label)}</span><div style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:280px">${escHtml(p.action)}</div></td>
         </tr>`).join('');
     }
 

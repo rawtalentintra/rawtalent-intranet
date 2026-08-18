@@ -991,6 +991,20 @@ CREATE TABLE IF NOT EXISTS hidden_centres (
   hidden_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Territory Strategy (Micropods demand overlay) — RT client/location
+-- records have no lat/lng of their own (unlike rt_candidates_cache's
+-- addresses, which RT pre-geocodes — see routes/micropods.js), so centres
+-- get geocoded here via Mapbox the same way routePlanner.js caches
+-- leads.latitude/longitude. A real street address rarely moves, so this is
+-- a permanent cache keyed by centreKey, topped up lazily for any centre
+-- not yet seen rather than a batch job.
+CREATE TABLE IF NOT EXISTS centre_geocodes (
+  centre_key TEXT PRIMARY KEY,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  geocoded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Google Calendar sync (Workforce Partner scheduling) ──────────────
 -- Links a lead to the calendar event representing its scheduled call or
 -- visit, in either direction: 'app' = HeartBeat created/updated the

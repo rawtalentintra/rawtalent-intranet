@@ -319,3 +319,8 @@ router.get('/:centreKey/activity', async (req, res) => {
 });
 
 module.exports = router;
+// Attached rather than re-fetched: Territory Strategy (routes/micropods.js)
+// needs the same live RT clients+bookings pull this file already caches —
+// exporting the function lets it share the one in-memory cache instead of
+// doubling the RT API calls on every load.
+module.exports.getCentresAndBookings = getCentresAndBookings;
