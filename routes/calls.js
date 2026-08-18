@@ -659,11 +659,13 @@ router.get('/rep-names', async (req, res) => {
 // set of evaluations (joined to call_recordings for a reliable ISO date to
 // filter on) as their evidence base.
 async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType }) {
-  // "calibration_only" evaluations are deliberately excluded from every
-  // quality-score/aggregate view (Dashboard report, Q&A, and any future
-  // rep-facing dashboard that reuses this) — they exist purely to review
-  // calls and train the AI grader, and must never count against a rep.
-  const conditions = ["e.outcome != 'calibration_only'"];
+  // "calibration_only"/"calibration_done" evaluations are deliberately
+  // excluded from every quality-score/aggregate view (Dashboard report,
+  // Q&A, and any future rep-facing dashboard that reuses this) — they
+  // exist purely to review calls and train the AI grader, and must never
+  // count against a rep. "Done" is just the reviewed/processed state of
+  // the same calibration-only status, not a real quality outcome.
+  const conditions = ["e.outcome NOT IN ('calibration_only', 'calibration_done')"];
   const args = [];
   // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
   if (dateFrom) { conditions.push(`(r.start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
@@ -832,11 +834,12 @@ router.get('/evaluations/:id', async (req, res) => {
 });
 
 // Lets a reviewer override the recommendation an evaluation landed on —
-// including flagging it "calibration_only", which excludes it from every
-// rep-facing/aggregate quality view (see fetchFilteredEvaluations) without
-// deleting the evaluation itself, since it's still useful for training the
-// AI grader.
-const RECOMMENDATION_OUTCOMES = ['pass', 'coaching', 'escalate', 'calibration_only'];
+// including flagging it "calibration_only" (or, once reviewed,
+// "calibration_done"), both of which exclude it from every rep-facing/
+// aggregate quality view (see fetchFilteredEvaluations) without deleting
+// the evaluation itself, since it's still useful for training the AI
+// grader.
+const RECOMMENDATION_OUTCOMES = ['pass', 'coaching', 'escalate', 'calibration_only', 'calibration_done'];
 router.put('/evaluations/:id/outcome', async (req, res) => {
   const { outcome } = req.body;
   if (!RECOMMENDATION_OUTCOMES.includes(outcome)) {
