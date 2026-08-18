@@ -5714,11 +5714,6 @@
       const closedFilter = document.getElementById('leadsFilterClosed').value;
 
       let filtered = allLeads;
-      // Closed leads default OUT of the pipeline view — they're done or
-      // dead, not something to action — but stay reachable via this filter
-      // rather than actually being hidden data.
-      if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
-      else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
       if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
       if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
@@ -5740,7 +5735,17 @@
         btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
       });
 
+      // Called/Visited/Signed in the stats bar are achievement counts —
+      // "how many leads reached this stage", not "how many are still open"
+      // — so they're computed before the closed filter, off every OTHER
+      // filter. Closing a lead (most often because it succeeded and its
+      // profile was created) was silently dropping it out of the Signed
+      // count, which undercounted real wins. The table itself still
+      // applies the closed filter, since that one genuinely is about
+      // which rows to show, not what happened historically.
       renderLeadsStatsBar(filtered);
+      if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
+      else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
       renderLeadsTableRows(filtered);
     }
 
