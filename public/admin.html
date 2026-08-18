@@ -2370,6 +2370,10 @@
           </div>
         </div>
 
+        <div style="margin-bottom:16px;font-size:12.5px;color:#92600a;background:#fef9f0;border-radius:var(--radius);padding:10px 14px">
+          ⚖️ <strong>No double-dinging:</strong> if one issue in a call justifies a lower score in a category, that's the only category it should lower — don't also cite the same issue to justify marking down a different category. Pick the one category it belongs to most and score it there once. This applies to manual feedback/re-grades and overrides too, not just the AI's first pass.
+        </div>
+
         <div class="admin-table-card" style="margin-bottom:20px">
           <div class="admin-table-header">
             <span style="font-weight:600;font-size:14px;color:var(--navy)">📖 Grading Rubric Reference</span>
@@ -3297,7 +3301,7 @@
           <div id="detailFeedbackBox" style="display:none;margin-top:12px">
             <label class="form-label-modal">Pick a category and add your comment below it. A new dropdown appears for the next category once you've made a selection.</label>
             <div id="detailFeedbackRows" style="margin-top:8px"></div>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, updating the categories you've selected while keeping every other category's result exactly as it is — and is also saved as a standing rule the AI applies to every future evaluation of this rubric. You can give feedback as many times, on as many categories, as you like — each round builds on the last, it never starts over.</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades this call now, updating the categories you've selected while keeping every other category's result exactly as it is — and is also saved as a standing rule the AI applies to every future evaluation of this rubric. You can give feedback as many times, on as many categories, as you like — each round builds on the last, it never starts over. No double-dinging: if one issue drove a lower score in a category already, don't also mark down a different category for that same issue.</div>
             <button class="btn-add" style="margin-top:10px" id="detailFeedbackSubmitBtn" onclick="submitDetailFeedbackRegrade()">Re-grade with This Feedback</button>
           </div>
         </div>

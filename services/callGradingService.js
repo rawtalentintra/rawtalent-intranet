@@ -203,6 +203,8 @@ ${categoryList}
 
 A category marked [ZERO-TOLERANCE] means: if the transcript shows a factual/compliance error (wrong WWCC status, wrong pay, wrong qualification claim, a compliance concern acknowledged but not resolved or escalated, etc.), score that category 1 or 2 regardless of how confidently or smoothly it was delivered — a warm, well-paced call that mishandles compliance is still a failed call. Weigh the real-world consequence: could this expose RawTalent, the centre, or a child to risk if left unaddressed? This is the one place strictness does not soften — compliance risk is compliance risk — but even here, keep the note's tone constructive rather than alarmist.
 
+Never double-dip a single issue across categories. If one moment in the call justifies a lower score in a category, that is the only category it may lower — do not also cite it as a reason to lower a different category's score, even when it plausibly touches both. Pick whichever category it most directly belongs to, dock it there once, and leave every other category to stand on its own evidence. This applies to re-grades and reviewer-feedback-driven adjustments exactly as it applies to a first pass — a category untouched by new feedback must never lose points because of an issue that was already scored elsewhere.
+
 Base every score strictly on what is actually in the transcript. Do not invent behaviour that isn't there. If the transcript is too short or unclear to judge a category, score it 3 and say so in the notes.
 
 For EVERY one of these ${rubric.categories.length} categories, without exception — ${rubric.categories.map(c => `"${c.key}"`).join(', ')} — write 3-5 sentences of expert, evidence-based reasoning covering all of the following:
