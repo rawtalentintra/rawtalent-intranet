@@ -1056,6 +1056,14 @@ body:has(> .navbar) { padding-top: 64px; }
 .attn-supply-badge { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
 .attn-supply-good { background: #dcfce7; color: #15803d; }
 .attn-supply-low { background: #fef2f2; color: #c0392b; }
+
+/* Nearby-educators modal (openSupplyEducatorsPopover) — name list with a
+   per-row expandable contact-info panel. */
+.supply-educator-row { border-bottom: 1px solid var(--gray-100); padding: 8px 2px; }
+.supply-educator-row:last-of-type { border-bottom: none; }
+.supply-educator-name { cursor: pointer; font-weight: 600; color: var(--navy); font-size: 13px; }
+.supply-educator-name:hover { color: var(--orange); }
+.supply-educator-info { margin-top: 6px; padding-left: 22px; font-size: 12px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
 .attn-more { padding: 10px 4px 2px; font-size: 12px; color: var(--text-muted); text-align: center; }
 
 .partner-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }

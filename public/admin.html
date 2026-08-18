@@ -617,6 +617,9 @@
               <select id="centresFilterState" onchange="filterMyCentresTable()">
                 <option value="">State: any</option>
               </select>
+              <select id="centresFilterSuburb" onchange="filterMyCentresTable()">
+                <option value="">Suburb: any</option>
+              </select>
             </div>
           </div>
           <div class="admin-table-card">
@@ -641,6 +644,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="myCentresPager" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px"></div>
           </div>
         </div>
 
@@ -1282,6 +1286,25 @@
           <div class="modal-body" id="reportDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeReportDetailModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nearby educator supply — opened from Priority Today's supply badge
+           (see nearestSupplyContext/openSupplyEducatorsPopover). Names only
+           by default, click one to reveal contact info — same fields
+           Micropods' own pod-detail candidate list already shows, kept at
+           that same access tier rather than the heavier admin-only
+           Candidates report detail. -->
+      <div class="modal-overlay" id="supplyEducatorsModal" onclick="if(event.target===this)closeSupplyEducatorsModal()">
+        <div class="modal" style="max-width:480px">
+          <div class="modal-header">
+            <div class="modal-title" id="supplyEducatorsModalTitle">Educators nearby</div>
+            <button class="modal-close" onclick="closeSupplyEducatorsModal()">×</button>
+          </div>
+          <div class="modal-body" id="supplyEducatorsModalBody" style="max-height:60vh;overflow-y:auto"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeSupplyEducatorsModal()">Close</button>
           </div>
         </div>
       </div>
@@ -6097,9 +6120,54 @@
       let best = null;
       for (const pod of attentionSupplyPods) {
         const km = haversineKmClient({ lat, lng }, pod.centroid);
-        if (km <= maxKm && (!best || km < best.distanceKm)) best = { podName: pod.name, engagedCount: pod.engagedCount, candidateCount: pod.candidateCount, distanceKm: km };
+        if (km <= maxKm && (!best || km < best.distanceKm)) best = { podId: pod.id, podName: pod.name, engagedCount: pod.engagedCount, candidateCount: pod.candidateCount, distanceKm: km };
       }
       return best;
+    }
+
+    // Who's actually behind a Priority Today supply badge — reuses
+    // Micropods' own pod-detail endpoint (same params ensureSupplyLoaded
+    // used to build attentionSupplyPods) rather than the heavier,
+    // admin-only Candidates report, so this stays reachable for
+    // workforce_partner exactly like the rest of Priority Today already is.
+    // Names shown first, contact info revealed per-name on click — a flat
+    // list of 30-60+ names with every field expanded up front would be more
+    // noise than the badge's "who's nearby" question needs.
+    async function openSupplyEducatorsPopover(podId) {
+      const pod = attentionSupplyPods.find(p => p.id === podId);
+      document.getElementById('supplyEducatorsModalTitle').textContent = pod ? `Educators near ${pod.name}` : 'Educators nearby';
+      const body = document.getElementById('supplyEducatorsModalBody');
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      document.getElementById('supplyEducatorsModal').classList.add('open');
+      try {
+        const detail = await fetch(`/api/micropods/${podId}?state=all&minPodSize=15`).then(r => r.json());
+        if (detail.error) throw new Error(detail.error);
+        const engaged = (detail.candidates || []).filter(c => c.engaged).sort((a, b) => a.name.localeCompare(b.name));
+        if (!engaged.length) {
+          body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12.5px">No Actively Engaged educators found in this pod right now.</div>';
+          return;
+        }
+        body.innerHTML = engaged.map(c => `
+          <div class="supply-educator-row">
+            <div class="supply-educator-name" onclick="toggleSupplyEducatorInfo('${c.userId}')">👤 ${escHtml(c.name)}</div>
+            <div class="supply-educator-info" id="supplyEducatorInfo-${c.userId}" style="display:none">
+              <div>📧 ${escHtml(c.email || 'No email on file')}</div>
+              <div>📞 ${escHtml(c.contactNo || 'No phone on file')}</div>
+              <div>📍 ${escHtml(c.address || c.suburb || 'No address on file')}</div>
+            </div>
+          </div>`).join('');
+      } catch {
+        body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12.5px">Failed to load educators for this area.</div>';
+      }
+    }
+
+    function toggleSupplyEducatorInfo(userId) {
+      const el = document.getElementById(`supplyEducatorInfo-${userId}`);
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function closeSupplyEducatorsModal() {
+      document.getElementById('supplyEducatorsModal').classList.remove('open');
     }
 
     function leadAttentionOutcome(reasonKind) {
@@ -6333,7 +6401,7 @@
             <div class="attn-outcome">
               <span>👉 ${escHtml(it.outcome)}</span>
               ${it.supply
-                ? `<span class="attn-supply-badge attn-supply-good">🧑‍🏫 ${it.supply.engagedCount} educators within ${Math.round(it.supply.distanceKm)}km</span>`
+                ? `<span class="attn-supply-badge attn-supply-good" style="cursor:pointer" title="Click to see who's nearby" onclick="event.stopPropagation();openSupplyEducatorsPopover('${it.supply.podId}')">🧑‍🏫 ${it.supply.engagedCount} educators within ${Math.round(it.supply.distanceKm)}km</span>`
                 : `<span class="attn-supply-badge attn-supply-low">⚠️ No nearby educator supply found</span>`}
             </div>
           </div>`).join('')}
@@ -6493,10 +6561,19 @@
       try {
         myCentresData = await fetch('/api/centres').then(r => r.json());
         populateCentresStateFilter();
+        populateCentresSuburbFilter();
         filterMyCentresTable();
       } catch {
         body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load centres.</td></tr>';
       }
+    }
+
+    function populateCentresSuburbFilter() {
+      const select = document.getElementById('centresFilterSuburb');
+      const current = select.value;
+      const suburbs = [...new Set(myCentresData.map(c => c.suburb).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      select.innerHTML = '<option value="">Suburb: any</option>' + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+      if (suburbs.includes(current)) select.value = current;
     }
 
     function populateCentresStateFilter() {
@@ -6555,27 +6632,49 @@
       const q = document.getElementById('centresFilterSearch').value.trim().toLowerCase();
       const health = document.getElementById('centresFilterHealth').value;
       const state = document.getElementById('centresFilterState').value;
+      const suburb = document.getElementById('centresFilterSuburb').value;
       let rows = myCentresData;
       if (q) rows = rows.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
       if (health) rows = rows.filter(c => c.health === health);
       if (state) rows = rows.filter(c => c.state === state);
+      if (suburb) rows = rows.filter(c => c.suburb === suburb);
       if (myCentresStateFilter) rows = rows.filter(c => wfpCentreStateBucket(c.state) === myCentresStateFilter);
       renderCentresHealthSummary();
+      myCentresPage = 1;
       renderMyCentresTable(rows);
     }
 
+    // Client-side pagination, same pattern as Micropod detail's candidate
+    // list (renderMicropodCandidatesPage) — the whole filtered set is
+    // already in hand from the one /api/centres fetch, so paging is just a
+    // slice, no server round-trip.
+    const MY_CENTRES_PAGE_SIZE = 25;
+    let myCentresPage = 1;
+    let myCentresFilteredRows = [];
+
     function renderMyCentresTable(rows) {
-      const body = document.getElementById('myCentresTableBody');
-      document.getElementById('myCentresCount').textContent = `${rows.length} of ${myCentresData.length}`;
-      if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No centres match these filters.</td></tr>';
-        return;
-      }
-      const sorted = rows.slice().sort((a, b) => {
+      myCentresFilteredRows = rows.slice().sort((a, b) => {
         const orderDiff = CENTRE_HEALTH_ORDER.indexOf(a.health) - CENTRE_HEALTH_ORDER.indexOf(b.health);
         return orderDiff !== 0 ? orderDiff : (a.name || '').localeCompare(b.name || '');
       });
-      body.innerHTML = sorted.map(c => {
+      document.getElementById('myCentresCount').textContent = `${rows.length} of ${myCentresData.length}`;
+      renderMyCentresPage();
+    }
+
+    function renderMyCentresPage() {
+      const body = document.getElementById('myCentresTableBody');
+      const total = myCentresFilteredRows.length;
+      if (!total) {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No centres match these filters.</td></tr>';
+        document.getElementById('myCentresPager').innerHTML = '';
+        return;
+      }
+      const totalPages = Math.max(1, Math.ceil(total / MY_CENTRES_PAGE_SIZE));
+      myCentresPage = Math.min(Math.max(1, myCentresPage), totalPages);
+      const start = (myCentresPage - 1) * MY_CENTRES_PAGE_SIZE;
+      const pageRows = myCentresFilteredRows.slice(start, start + MY_CENTRES_PAGE_SIZE);
+
+      body.innerHTML = pageRows.map(c => {
         const trend = c.bookingsPrev30dCount > 0
           ? `${c.bookings30dCount > c.bookingsPrev30dCount ? '▲' : c.bookings30dCount < c.bookingsPrev30dCount ? '▼' : '—'} ${c.bookingsPrev30dCount} → ${c.bookings30dCount}`
           : (c.bookings30dCount > 0 ? `${c.bookings30dCount} (new)` : '—');
@@ -6589,6 +6688,20 @@
           <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
         </tr>`;
       }).join('');
+
+      document.getElementById('myCentresPager').innerHTML = `
+        <div style="font-size:11.5px;color:var(--text-muted)">${start + 1}–${Math.min(start + MY_CENTRES_PAGE_SIZE, total)} of ${total}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeMyCentresPage(-1)" ${myCentresPage === 1 ? 'disabled' : ''}>← Prev</button>
+          <span style="font-size:12px;color:var(--text-muted)">Page ${myCentresPage} of ${totalPages}</span>
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeMyCentresPage(1)" ${myCentresPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>`;
+    }
+
+    function changeMyCentresPage(delta) {
+      myCentresPage += delta;
+      renderMyCentresPage();
+      document.getElementById('myCentresTableBody').closest('.admin-table-card').scrollIntoView({ block: 'nearest' });
     }
 
     // Jumps here from outside My Centres (e.g. the WFP Dashboard's
