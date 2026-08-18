@@ -1032,8 +1032,9 @@ body:has(> .navbar) { padding-top: 64px; }
 
 .attn-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   padding: 9px 4px;
   border-bottom: 1px solid var(--gray-100);
   cursor: pointer;
@@ -1041,12 +1042,20 @@ body:has(> .navbar) { padding-top: 64px; }
 }
 .attn-row:hover { background: var(--offwhite); }
 .attn-row:last-of-type { border-bottom: none; }
+.attn-row-top { display: flex; align-items: center; gap: 12px; }
 .attn-chip { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .attn-overdue { background: #fef2f2; color: #c0392b; }
 .attn-stale { background: #fef3c7; color: #b45309; }
 .attn-waiting { background: #eef2ff; color: #3730a3; }
 .attn-centre { font-weight: 600; color: var(--navy); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attn-meta { color: var(--text-muted); flex-shrink: 0; }
+/* Outcome subtext line — "why this matters, what to pursue" underneath the
+   scannable chip/name/meta row, plus an optional educator-supply badge for
+   lead items (see nearestSupplyContext in the WFP Dashboard JS). */
+.attn-outcome { display: flex; align-items: center; gap: 8px; padding-left: 2px; color: var(--text-muted); font-size: 11.5px; flex-wrap: wrap; }
+.attn-supply-badge { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.attn-supply-good { background: #dcfce7; color: #15803d; }
+.attn-supply-low { background: #fef2f2; color: #c0392b; }
 .attn-more { padding: 10px 4px 2px; font-size: 12px; color: var(--text-muted); text-align: center; }
 
 .partner-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }

@@ -6,6 +6,9 @@ const { getDb } = require('../db/database');
 const { syncLeadEventOutbound } = require('../services/leadCalendarSyncService');
 const rtApi = require('../services/rtApiReportService');
 const centreMatchService = require('../services/centreMatchService');
+const { keyForLocation, keyForClient } = require('../services/centreKeyService');
+const { MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
+const { visitsByCentreKey } = require('./centres');
 
 router.use(requireAuth);
 
@@ -113,6 +116,77 @@ router.get('/existing-centre-matches', leadsViewAccess, async (req, res) => {
       if (match) matches[lead.id] = match;
     }
     res.json(matches);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Client Retention — "did our actions lead to activation, booking growth
+// and retention" for every lead that actually signed. A signed lead has no
+// persisted link to its real RT client/location (leads.rt_client_id/
+// rt_location_id exist in the schema but nothing writes them today — see
+// db/schema.sql), so this uses the same best-effort name/phone/suburb
+// match as the "Existing Centre?" column (centreMatchService) rather than
+// requiring that link to exist first. A lead that doesn't clear the
+// confidence bar is reported as unmatched, never given fabricated numbers.
+router.get('/retention', leadsViewAccess, async (req, res) => {
+  try {
+    const signedLeads = (await getDb().execute("SELECT * FROM leads WHERE signed_status = 'signed' ORDER BY signed_at DESC")).rows;
+    if (!signedLeads.length) return res.json([]);
+
+    const clients = await getClientsForMatching();
+    const matched = signedLeads.map(lead => ({ lead, match: centreMatchService.findConfidentMatch(lead, clients) }));
+
+    // RT has no per-client booking filter (see routes/centres.js), so
+    // fetching "since the oldest signed lead" is one bulk pull regardless
+    // of how many signed leads exist — capped so one very old signed
+    // centre can't force pulling years of RT booking history.
+    const RETENTION_LOOKBACK_CAP_DAYS = 730;
+    const oldestSignedAt = matched.reduce((min, m) => new Date(m.lead.signed_at) < min ? new Date(m.lead.signed_at) : min, new Date());
+    const daysBack = Math.min(RETENTION_LOOKBACK_CAP_DAYS, Math.ceil((Date.now() - oldestSignedAt.getTime()) / 86400000) + 5);
+    const startDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const bookings = await rtApi.fetchAllPages('bookings', { startDate });
+
+    const centreKeys = matched.filter(m => m.match).map(m => m.match.rtLocationId ? keyForLocation(m.match.rtLocationId) : keyForClient(m.match.rtClientId));
+    const visits = await visitsByCentreKey(centreKeys);
+
+    const now = Date.now();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const results = matched.map(({ lead, match }) => {
+      const base = { leadId: lead.id, centreName: lead.centre_name, suburb: lead.suburb, state: lead.state, signedAt: lead.signed_at };
+      if (!match) return { ...base, matched: false };
+
+      const centreKey = match.rtLocationId ? keyForLocation(match.rtLocationId) : keyForClient(match.rtClientId);
+      const centreBookings = bookings.filter(b =>
+        MEANINGFUL_BOOKING_STATUSES.has(b.statusId) && b.bookingDate &&
+        (match.rtLocationId ? b.locationId === match.rtLocationId : b.clientId === match.rtClientId)
+      );
+      const signedAtMs = new Date(lead.signed_at).getTime();
+      const bookingsSinceSigned = centreBookings.filter(b => new Date(b.bookingDate).getTime() >= signedAtMs).length;
+      const bookings30d = centreBookings.filter(b => now - new Date(b.bookingDate).getTime() <= 30 * DAY_MS).length;
+      const bookingsPrev30d = centreBookings.filter(b => {
+        const age = now - new Date(b.bookingDate).getTime();
+        return age > 30 * DAY_MS && age <= 60 * DAY_MS;
+      }).length;
+      const centreVisits = visits[centreKey] || []; // already DESC by visit_date
+      const lastVisit = centreVisits[0]?.visit_date || null;
+      const nextStepDueDate = centreVisits.find(v => v.next_step_due_date)?.next_step_due_date || null;
+
+      return {
+        ...base,
+        matched: true,
+        matchedClientName: match.clientName,
+        centreKey,
+        retainedDays: Math.floor((now - signedAtMs) / DAY_MS),
+        bookingsSinceSigned,
+        bookings30d,
+        bookingsPrev30d,
+        lastVisitDate: lastVisit,
+        nextStepDueDate
+      };
+    });
+
+    res.json(results);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

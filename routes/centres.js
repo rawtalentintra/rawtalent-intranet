@@ -324,3 +324,6 @@ module.exports = router;
 // exporting the function lets it share the one in-memory cache instead of
 // doubling the RT API calls on every load.
 module.exports.getCentresAndBookings = getCentresAndBookings;
+// Client Retention (routes/leads.js) needs the same centre_visits lookup
+// this file already has — exported rather than duplicated.
+module.exports.visitsByCentreKey = visitsByCentreKey;
