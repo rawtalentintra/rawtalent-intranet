@@ -1,10 +1,28 @@
 const express = require('express');
 const router = express.Router();
-const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const rtCandidatesSync = require('../services/rtCandidatesSyncService');
 const engagement = require('../services/educatorEngagementService');
+
+// One candidate's full RT profile, opened for workforce_partner too — not
+// just admin/super_admin like the rest of Reports. Priority Today's "who's
+// nearby" educator popover (public/admin.html, openSupplyEducatorsPopover)
+// opens this same detail for Gwen/Justine, who need the full profile just
+// as much as an admin does when deciding who to call. Registered ahead of
+// router.use(requireAdmin) below so it isn't swept into that broader gate —
+// the REPORT_TYPES loop further down registers a plain requireAdmin
+// '/candidates/:id' too, but Express's first-match-wins means this wider
+// one always handles it first.
+router.get('/candidates/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const item = await rtApi.fetchById('candidates', req.params.id);
+    res.json(item);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // Admin/super_admin only for now — access for other roles (e.g. Workforce
 // Partners) can be revisited later once this is settled in, per how it

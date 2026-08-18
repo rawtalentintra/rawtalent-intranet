@@ -6127,12 +6127,14 @@
 
     // Who's actually behind a Priority Today supply badge — reuses
     // Micropods' own pod-detail endpoint (same params ensureSupplyLoaded
-    // used to build attentionSupplyPods) rather than the heavier,
-    // admin-only Candidates report, so this stays reachable for
-    // workforce_partner exactly like the rest of Priority Today already is.
-    // Names shown first, contact info revealed per-name on click — a flat
-    // list of 30-60+ names with every field expanded up front would be more
-    // noise than the badge's "who's nearby" question needs.
+    // used to build attentionSupplyPods) for the name list itself, since
+    // that stays reachable for workforce_partner exactly like the rest of
+    // Priority Today already is. Clicking a name opens the same full
+    // Educator Profile modal the Candidates report uses (openReportDetail
+    // -> GET /api/reports/candidates/:id) — that one route was widened to
+    // also allow workforce_partner (routes/reports.js), specifically so
+    // this could open the real profile instead of a stripped-down repeat
+    // of the same fields.
     async function openSupplyEducatorsPopover(podId) {
       const pod = attentionSupplyPods.find(p => p.id === podId);
       document.getElementById('supplyEducatorsModalTitle').textContent = pod ? `Educators near ${pod.name}` : 'Educators nearby';
@@ -6149,21 +6151,18 @@
         }
         body.innerHTML = engaged.map(c => `
           <div class="supply-educator-row">
-            <div class="supply-educator-name" onclick="toggleSupplyEducatorInfo('${c.userId}')">👤 ${escHtml(c.name)}</div>
-            <div class="supply-educator-info" id="supplyEducatorInfo-${c.userId}" style="display:none">
-              <div>📧 ${escHtml(c.email || 'No email on file')}</div>
-              <div>📞 ${escHtml(c.contactNo || 'No phone on file')}</div>
-              <div>📍 ${escHtml(c.address || c.suburb || 'No address on file')}</div>
-            </div>
+            <div class="supply-educator-name" onclick="openEducatorProfileFromSupply(${c.userId})">👤 ${escHtml(c.name)}</div>
           </div>`).join('');
       } catch {
         body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12.5px">Failed to load educators for this area.</div>';
       }
     }
 
-    function toggleSupplyEducatorInfo(userId) {
-      const el = document.getElementById(`supplyEducatorInfo-${userId}`);
-      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    // Closes the name-list modal first so only one modal is ever visible at
+    // once, then opens the full profile in its place.
+    function openEducatorProfileFromSupply(userId) {
+      closeSupplyEducatorsModal();
+      openReportDetail('candidates', userId);
     }
 
     function closeSupplyEducatorsModal() {
