@@ -801,16 +801,14 @@
                   <th>Suburb</th>
                   <th>State</th>
                   <th>Agency Usage</th>
-                  <th>Lead Called</th>
-                  <th>Centre Visited</th>
-                  <th>Profile Created</th>
+                  <th title="One combined view of the Called → Visited → Profile Created pipeline — shows whichever step is next.">Stage ⓘ</th>
                   <th>WF Partner</th>
                   <th style="white-space:normal;max-width:56px">Last Called</th>
                   <th style="white-space:normal;max-width:56px">Last Visited</th>
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
-                <tr><td colspan="12"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="10"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -5625,6 +5623,44 @@
       return `<span class="lead-badge ${meta.cls}" ${editAttr}>${escHtml(text)}</span>`;
     }
 
+    // Collapses Lead Called → Centre Visited → Profile Created into the one
+    // step that actually matters right now, in pipeline order. 'done' and
+    // 'n_a' both mean "this step is out of the way" for progression
+    // purposes — n_a is the manual "doesn't apply" choice (e.g. Profile
+    // Created already happened without a logged call/visit, see
+    // LEAD_CALLED_META above), so a lead marked N/A through a step should
+    // fall straight to whichever step comes next, same as if it were done.
+    function leadStageInfo(lead) {
+      if (lead.signed_status === 'signed') return { icon: '🎉', label: 'Profile Created', cls: 'lead-badge-done', field: 'signed' };
+      if (lead.signed_status === 'not_interested') return { icon: '🚫', label: 'Not Interested', cls: 'lead-badge-not', field: 'signed' };
+
+      const called = lead.lead_called_status || 'to_schedule';
+      if (called === 'to_schedule') return { icon: '📞', label: 'To Schedule', cls: 'lead-badge-todo', field: 'lead_called' };
+      if (called === 'scheduled') return { icon: '📞', label: 'Call Scheduled', cls: 'lead-badge-sched', field: 'lead_called' };
+
+      const visited = lead.centre_visited_status || 'to_schedule';
+      if (visited === 'to_schedule') return { icon: '🚗', label: 'Visit To Schedule', cls: 'lead-badge-todo', field: 'centre_visited' };
+      if (visited === 'scheduled') return { icon: '🚗', label: 'Visit Scheduled', cls: 'lead-badge-sched', field: 'centre_visited' };
+
+      return { icon: '📋', label: 'Profile Pending', cls: 'lead-badge-sched', field: 'signed' };
+    }
+
+    // Full Called/Visited/Profile breakdown for the Stage badge's tooltip —
+    // the combined badge only shows the one active step, but a hover still
+    // gives the complete picture without opening the lead detail modal.
+    function leadStageTooltip(lead) {
+      const called = LEAD_CALLED_META[lead.lead_called_status] || LEAD_CALLED_META.to_schedule;
+      const visited = CENTRE_VISITED_META[lead.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
+      const profile = SIGNED_META[lead.signed_status] || SIGNED_META.pending;
+      return `Lead Called: ${called.label} · Centre Visited: ${visited.label} · Profile Created: ${profile.label}`;
+    }
+
+    function leadStageBadge(lead) {
+      const info = leadStageInfo(lead);
+      const editAttr = (currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner') ? `onclick="openLeadStatusPopover(event,'${lead.id}','${info.field}')"` : '';
+      return `<span class="lead-badge ${info.cls}" title="${escHtml(leadStageTooltip(lead))}" ${editAttr}>${info.icon} ${escHtml(info.label)}</span>`;
+    }
+
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
       // Only flash the spinner on the very first load — allLeads is often
@@ -5633,7 +5669,7 @@
       // already-visible table just to refill it with the same data a
       // moment later.
       if (!allLeads.length) {
-        body.innerHTML = '<tr><td colspan="12"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+        body.innerHTML = '<tr><td colspan="10"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       }
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
@@ -5675,7 +5711,7 @@
         filterLeadsTable();
         loadLeadsCentreMatches(); // fired, not awaited — leads render immediately, matches fill in the column once ready
       } catch {
-        body.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
     }
 
@@ -5790,7 +5826,7 @@
     function renderLeadsTableRows(list) {
       const body = document.getElementById('leadsTableBody');
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
         return;
       }
       body.innerHTML = list.map(l => `
@@ -5805,9 +5841,7 @@
           <td>${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
-          <td>${leadStatusBadge(l.id, 'lead_called')}</td>
-          <td>${leadStatusBadge(l.id, 'centre_visited')}</td>
-          <td>${leadStatusBadge(l.id, 'signed')}</td>
+          <td>${leadStageBadge(l)}</td>
           <td class="td-truncate" style="max-width:44px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.lead_called_at)}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.centre_visited_at)}</td>
