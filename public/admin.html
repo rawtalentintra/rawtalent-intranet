@@ -902,6 +902,16 @@
               <label class="form-label-modal">Notes for Workforce Partner <span class="optional">(optional)</span></label>
               <textarea id="centreLeadNotesForPartner" class="form-control" rows="3" placeholder="Anything that might help them when they follow up — best time to call, who to ask for, anything the educator mentioned…"></textarea>
             </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Status</label>
+              <select id="centreLeadStatus" class="form-control">
+                <option value="to_schedule">📞 To Schedule</option>
+                <option value="called">📞 Called</option>
+                <option value="visited">🚗 Visited</option>
+                <option value="signed" selected>🎉 Profile Created</option>
+              </select>
+              <div class="form-hint">Adding a centre here usually means it's already a real client — defaults to Profile Created (Called/Visited marked N/A) rather than starting it back at the top of the pipeline. Change this if you're adding an earlier-stage prospect instead.</div>
+            </div>
           </div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeAddCentreModal()">Cancel</button>
@@ -5498,6 +5508,7 @@
       ].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('centreLeadState').value = '';
       document.getElementById('centreLeadAgencyUsage').value = '';
+      document.getElementById('centreLeadStatus').value = 'signed';
       document.getElementById('centreLeadExcludedWarning').style.display = 'none';
       hideCentreLeadDupWarning('centre');
       hideCentreLeadDupWarning('address');
@@ -5556,6 +5567,24 @@
       box.style.display = 'block';
     }
 
+    // What the Add Centre modal's Status dropdown actually sets, in terms
+    // of the same three pipeline fields the Stage badge (leadStageInfo)
+    // reads. 'to_schedule' needs no follow-up PUT — that's already what a
+    // freshly-created lead defaults to in the DB. 'signed' marks Called/
+    // Visited N/A rather than leaving them 'to_schedule', matching the
+    // existing "profile already created, call/visit don't apply" pattern
+    // (see LEAD_CALLED_META/CENTRE_VISITED_META) rather than a centre that
+    // already has a live profile still nagging Priority Today to call it.
+    function centreLeadStatusPresets() {
+      const now = new Date().toISOString();
+      return {
+        to_schedule: null,
+        called: { leadCalledStatus: 'done', leadCalledAt: now, centreVisitedStatus: 'to_schedule', signedStatus: 'pending' },
+        visited: { leadCalledStatus: 'done', leadCalledAt: now, centreVisitedStatus: 'done', centreVisitedAt: now, signedStatus: 'pending' },
+        signed: { leadCalledStatus: 'n_a', centreVisitedStatus: 'n_a', signedStatus: 'signed', signedAt: now }
+      };
+    }
+
     async function submitCentreLead() {
       const centreName = document.getElementById('centreLeadCentreName').value.trim();
       const streetAddress = document.getElementById('centreLeadStreetAddress').value.trim();
@@ -5597,6 +5626,19 @@
               body: JSON.stringify({ note: notesForPartner })
             });
           } catch {}
+        }
+        // A new lead always starts 'to_schedule'/'to_schedule'/'pending' —
+        // POST /api/leads has no fields for the pipeline stages themselves,
+        // so reaching anything past that is a follow-up PUT, same call the
+        // Stage badge's inline editor already uses.
+        const statusPreset = centreLeadStatusPresets()[document.getElementById('centreLeadStatus').value];
+        if (statusPreset) {
+          try {
+            await fetch(`/api/leads/${data.id}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(statusPreset)
+            });
+          } catch { toast('Centre added, but its status couldn\'t be set — edit it manually', 'error'); }
         }
         toast('Centre added', 'success');
         closeAddCentreModal();
