@@ -6067,6 +6067,11 @@
     // area yet. Revisit if lead volume grows enough to matter.
     function salesDashRange(rangeKey) {
       const now = new Date();
+      if (rangeKey === 'today') {
+        const from = new Date(now); from.setHours(0, 0, 0, 0);
+        const to = new Date(from); to.setDate(to.getDate() + 1);
+        return { from, to };
+      }
       if (rangeKey === 'week') {
         const day = now.getDay(); // 0 = Sunday
         const diffToMonday = (day + 6) % 7;
@@ -8583,6 +8588,7 @@
         allTimeSuperAdminOnly: true,
         needsLookups: true,
         extendedPeriod: true,
+        showTodayOption: true,
         searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
         extraFilters: [
           { id: 'status', label: 'Status', type: 'select', field: 'statusId', labelMap: BOOKING_STATUS_LABELS }
@@ -8806,6 +8812,7 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <select id="report_${type}_period" class="form-control" style="width:135px" onchange="onReportPeriodChange('${type}')">
                 <option value="all" ${!cfg.defaultPeriod ? 'selected' : ''} ${cfg.allTimeSuperAdminOnly ? 'data-super-admin-only="true"' : ''}>All Time</option>
+                ${cfg.showTodayOption ? `<option value="today" ${cfg.defaultPeriod === 'today' ? 'selected' : ''}>Today</option>` : ''}
                 <option value="week" ${cfg.defaultPeriod === 'week' ? 'selected' : ''}>This Week</option>
                 <option value="month" ${cfg.defaultPeriod === 'month' ? 'selected' : ''}>This Month</option>
                 <option value="quarter" ${cfg.defaultPeriod === 'quarter' ? 'selected' : ''}>This Quarter</option>
