@@ -136,6 +136,20 @@
     .leads-stat-num { font-size: 17px; font-weight: 800; color: var(--navy); }
     .leads-stat-label { font-size: 10.5px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
 
+    /* Open/Closed Leads tabs — an underline style rather than the state
+       toggle's solid pills, so the two filter axes (territory vs. lead
+       status) read as visually distinct rather than a longer row of the
+       same control. */
+    .leads-closed-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--gray-200); margin-bottom: 16px; }
+    .leads-closed-tab {
+      border: none; background: none; cursor: pointer; font-family: inherit;
+      font-size: 13px; font-weight: 700; color: var(--text-muted);
+      padding: 9px 16px; margin-bottom: -2px; border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .leads-closed-tab:hover { color: var(--navy); }
+    .leads-closed-tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+
     /* Org chart — free-form canvas. Every person is an absolutely-positioned
        box the admin can drag anywhere; position is saved per-person
        (chart_x/chart_y) once dragged, otherwise falls back to an
@@ -786,6 +800,17 @@
           <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setLeadsStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 South Australia — Gwen</button>
         </div>
 
+        <!-- Open vs Closed as tabs, not a dropdown buried in the filter bar
+             — a lead reaching Profile Created now auto-closes (see PUT
+             /api/leads/:id), so this is the primary way the list stays
+             focused on what's still actionable, and needs to be obvious,
+             not a small select easy to miss. -->
+        <div class="leads-closed-tabs" id="leadsClosedTabs">
+          <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsClosedFilter('active')">📂 Open Leads</button>
+          <button type="button" class="leads-closed-tab" data-value="closed" onclick="setLeadsClosedFilter('closed')">✅ Closed Leads</button>
+          <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
+        </div>
+
         <div class="admin-table-card">
           <div class="leads-filter-bar">
             <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
@@ -828,11 +853,6 @@
               <option value="">Profile: any</option>
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
-            </select>
-            <select id="leadsFilterClosed" onchange="filterLeadsTable()">
-              <option value="active" selected>Active leads</option>
-              <option value="closed">Closed leads</option>
-              <option value="all">All (active + closed)</option>
             </select>
           </div>
           <div style="overflow-x:auto">
@@ -5565,6 +5585,15 @@
     // ── Leads ─────────────────────────────────────────────────────
     let allLeads = [];
     let leadsStateFilterDefaulted = false;
+    let leadsClosedFilter = 'active';
+
+    function setLeadsClosedFilter(value) {
+      leadsClosedFilter = value;
+      document.querySelectorAll('#leadsClosedTabs .leads-closed-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === value);
+      });
+      filterLeadsTable();
+    }
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const LEAD_AGENCY_USAGE_BADGE_CLASS = { target_temp: 'agency-badge-target', high_agency_user: 'agency-badge-high' };
     // Shortened for the dense Leads table badge only — filters and the lead
@@ -5950,7 +5979,7 @@
       const leadCalled = document.getElementById('leadsFilterLeadCalled').value;
       const centreVisited = document.getElementById('leadsFilterCentreVisited').value;
       const profileCreated = document.getElementById('leadsFilterProfileCreated').value;
-      const closedFilter = document.getElementById('leadsFilterClosed').value;
+      const closedFilter = leadsClosedFilter;
 
       let filtered = allLeads;
       if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));

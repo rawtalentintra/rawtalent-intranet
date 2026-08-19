@@ -306,6 +306,17 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
         args.push(req.body[bodyKey] || null);
       }
     }
+    // A lead reaching Profile Created is done, full stop — auto-close it
+    // the same way the manual "Close Lead" button already does, instead of
+    // leaving every signed lead sitting in the active list forever until
+    // someone remembers to close it by hand. Never overwrites an existing
+    // closed_at (e.g. a lead someone already closed for an unrelated
+    // reason before later marking it signed) — this only fires the first
+    // time signing happens.
+    if (req.body.signedStatus === 'signed' && !existing.rows[0].closed_at) {
+      sets.push('closed_at = ?', 'closed_by_email = ?');
+      args.push(new Date().toISOString(), req.user.email);
+    }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     args.push(req.params.id);
     await getDb().execute({ sql: `UPDATE leads SET ${sets.join(', ')}, updated_at = now() WHERE id = ?`, args });
