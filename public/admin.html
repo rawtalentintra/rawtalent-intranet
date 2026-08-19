@@ -3459,6 +3459,24 @@
     let currentUserEmail = '';
     let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
+    let currentUserWfpLabel = null;
+
+    // WFP Dashboard/My Centres/Leads/Micropods all share the same VIC/SA
+    // state-toggle pattern. Used to default straight to VIC/SA (SA for
+    // Gwen, VIC for Justine) via wfp_label — briefly removed in favour of
+    // everyone starting on "All States" per an explicit ask to make every
+    // role's view identical, then reinstated (per a later, more specific
+    // ask) because a Workforce Partner landing on the other partner's
+    // territory by default was causing missed follow-ups and muddying
+    // their own performance numbers with the other partner's leads/
+    // centres. admin/super_admin/qa_view have no "own" territory, so they
+    // still default to All States regardless.
+    function defaultStateForCurrentUser() {
+      if (currentUserRole !== 'workforce_partner' || !currentUserWfpLabel) return null;
+      if (currentUserWfpLabel.includes('(SA)')) return 'SA';
+      if (currentUserWfpLabel.includes('(VIC)')) return 'VIC';
+      return null;
+    }
 
     async function init() {
       // renderReportSectionsHtml() now runs lazily from showSection() on
@@ -3470,6 +3488,7 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
+        currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
@@ -5501,6 +5520,7 @@
 
     // ── Leads ─────────────────────────────────────────────────────
     let allLeads = [];
+    let leadsStateFilterDefaulted = false;
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const LEAD_AGENCY_USAGE_BADGE_CLASS = { target_temp: 'agency-badge-target', high_agency_user: 'agency-badge-high' };
     // Shortened for the dense Leads table badge only — filters and the lead
@@ -5811,6 +5831,14 @@
           suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
         if (suburbs.includes(previousSuburb)) suburbSelect.value = previousSuburb;
 
+        // Defaults a Workforce Partner to their own territory on first
+        // visit only — see loadSalesDashboard's identical pattern.
+        if (!leadsStateFilterDefaulted) {
+          leadsStateFilterDefaulted = true;
+          const ownState = defaultStateForCurrentUser();
+          if (ownState) { document.getElementById('leadsFilterState').value = ownState; updateLeadsStateToggleButtons(ownState); }
+        }
+
         filterLeadsTable();
         loadLeadsCentreMatches(); // fired, not awaited — leads render immediately, matches fill in the column once ready
         loadLeadsRetentionForBadges(); // same pattern — booking counts for the Lead Converted/Booked badges fill in once ready
@@ -5855,11 +5883,15 @@
     // parallel filter concept — leads.state is already a clean short code
     // ('VIC'/'SA'), so the dropdown's exact-match already does the right
     // thing; this is just a bigger, eye-catching way to set it.
-    function setLeadsStateFilter(state) {
-      document.getElementById('leadsFilterState').value = state === 'all' ? '' : state;
+    function updateLeadsStateToggleButtons(state) {
       document.querySelectorAll('#section-leads .wfp-state-filter-btn').forEach(btn => {
         btn.style.opacity = btn.dataset.state === state ? '1' : '.55';
       });
+    }
+
+    function setLeadsStateFilter(state) {
+      document.getElementById('leadsFilterState').value = state === 'all' ? '' : state;
+      updateLeadsStateToggleButtons(state);
       filterLeadsTable();
     }
 
@@ -6159,6 +6191,7 @@
     // but a handful of raw "VIC" too — confirmed live) so centre-side
     // comparisons go through wfpCentreStateBucket() instead of a direct ===.
     let wfpStateFilter = null;
+    let wfpStateFilterDefaulted = false;
 
     function wfpCentreStateBucket(rawState) {
       const s = (rawState || '').trim().toLowerCase();
@@ -6167,11 +6200,15 @@
       return null;
     }
 
-    function setWfpStateFilter(state) {
-      wfpStateFilter = state === 'all' ? null : state;
+    function updateWfpStateToggleButtons() {
       document.querySelectorAll('.wfp-state-filter-btn').forEach(btn => {
         btn.style.opacity = btn.dataset.state === (wfpStateFilter || 'all') ? '1' : '.55';
       });
+    }
+
+    function setWfpStateFilter(state) {
+      wfpStateFilter = state === 'all' ? null : state;
+      updateWfpStateToggleButtons();
       renderSalesDashboard();
     }
 
@@ -6348,6 +6385,14 @@
       if (!allLeads.length) { try { allLeads = await fetch('/api/leads').then(r => r.json()); } catch { allLeads = []; } }
       await ensureCentresLoaded();
       await ensureSupplyLoaded();
+      // Defaults a Workforce Partner to their own territory on first visit
+      // only — never overrides a filter they've already picked (e.g. a
+      // reload after adding a lead, or having manually switched states).
+      if (!wfpStateFilterDefaulted) {
+        wfpStateFilterDefaulted = true;
+        const ownState = defaultStateForCurrentUser();
+        if (ownState) { wfpStateFilter = ownState; updateWfpStateToggleButtons(); }
+      }
       renderSalesDashboard();
       loadClientRetention(); // fired, not awaited — dashboard renders immediately, retention panel fills in once ready
     }
@@ -6682,6 +6727,13 @@
         myCentresData = await fetch('/api/centres').then(r => r.json());
         populateCentresStateFilter();
         populateCentresSuburbFilter();
+        // Defaults a Workforce Partner to their own territory on first
+        // visit only — see loadSalesDashboard's identical pattern.
+        if (!myCentresStateFilterDefaulted) {
+          myCentresStateFilterDefaulted = true;
+          const ownState = defaultStateForCurrentUser();
+          if (ownState) { myCentresStateFilter = ownState; updateMyCentresStateToggleButtons(); }
+        }
         filterMyCentresTable();
       } catch {
         body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load centres.</td></tr>';
@@ -6739,12 +6791,17 @@
     // direct === since centre.state is messier than leads.state — mostly
     // "Victoria"/"South Australia" but a handful of raw "VIC" too.
     let myCentresStateFilter = null;
+    let myCentresStateFilterDefaulted = false;
 
-    function setMyCentresStateFilter(state) {
-      myCentresStateFilter = state === 'all' ? null : state;
+    function updateMyCentresStateToggleButtons() {
       document.querySelectorAll('#myCentresListScreen .wfp-state-filter-btn').forEach(btn => {
         btn.style.opacity = btn.dataset.state === (myCentresStateFilter || 'all') ? '1' : '.55';
       });
+    }
+
+    function setMyCentresStateFilter(state) {
+      myCentresStateFilter = state === 'all' ? null : state;
+      updateMyCentresStateToggleButtons();
       filterMyCentresTable();
     }
 
@@ -6968,19 +7025,17 @@
     // as WFP Dashboard/My Centres/Leads — 'all' means no state constraint
     // at all (handled server-side, see parseStateFilter in
     // routes/micropods.js), not "VIC+SA combined only".
-    // Used to default a Workforce Partner straight to their own state
-    // (SA for Gwen, VIC for Justine) via wfpLabel — dropped so first load
-    // looks and behaves identically for every role, admin included (Joy:
-    // "all views on the Workforce Partners section... should have the
-    // same view as the Workforce Partner view"). Everyone now starts on
-    // All States and switches manually, same as the other three pages.
+    // Defaults a Workforce Partner straight to their own state (SA for
+    // Gwen, VIC for Justine) via defaultStateForCurrentUser() — see that
+    // function's comment for why this was briefly removed and then
+    // reinstated. admin/super_admin/qa_view still land on All States.
     let micropodsState = null;
     let micropodsPods = [];
     let micropodsMapInstance = null;
     let micropodsHeatmapInstance = null;
 
     function initMicropodsSection() {
-      if (!micropodsState) micropodsState = 'all';
+      if (!micropodsState) micropodsState = defaultStateForCurrentUser() || 'all';
       updateMicropodsStateToggle();
       loadMicropods();
     }
