@@ -6995,7 +6995,10 @@
       document.getElementById('deleteCentreBtn').style.display = (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? '' : 'none';
       window.scrollTo({ top: 0 });
       const bodyEl = document.getElementById('centre360Body');
-      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      // Always a live RT fetch (4 requests, see below), never served from
+      // the My Centres list cache — worth a friendly word on why it takes
+      // a moment, not just a bare spinner.
+      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Pulling up this centre\'s live details from RT…</div>';
       try {
         const enc = encodeURIComponent(centreKey);
         const [centre, bookingsRes, educators, activity] = await Promise.all([
