@@ -3597,6 +3597,14 @@
           : document.querySelector(`[onclick*="showSection('${target}'"]`);
         showSection(target, navEl);
       }
+
+      // "View this centre in My Centres" (Lead Detail modal's existing-
+      // centre match banner) opens in a new tab via this query param
+      // instead of navigating in place, so a Workforce Partner never loses
+      // their spot in the Leads modal they came from. Overrides whichever
+      // section the block above just landed on.
+      const openCentreKey = new URLSearchParams(location.search).get('openCentre');
+      if (openCentreKey) goToCentre360(openCentreKey);
     }
 
     // The small set of admin-panel sections each restricted role can
@@ -10277,11 +10285,12 @@
       // not just noticing a green pill. Not shown once signed — that
       // badge already explains itself (it's the centre THIS lead created).
       const existingMatch = leadsCentreMatches[lead.id];
+      const existingMatchCentreKey = existingMatch ? (existingMatch.rtLocationId ? `loc:${existingMatch.rtLocationId}` : `client:${existingMatch.rtClientId}`) : null;
       const existingMatchBanner = (existingMatch && lead.signed_status !== 'signed') ? `
         <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92600a">
           ⚠️ <strong>This might already be an existing centre:</strong> ${escHtml(existingMatch.clientName)} — ${escHtml(existingMatch.locationLabel)}.
           <div style="margin-top:4px">Why: ${escHtml(existingMatch.reasons.join(', '))}</div>
-          <span style="cursor:pointer;color:var(--orange);font-weight:600;text-decoration:underline" onclick="goToCentre360('${existingMatch.rtLocationId ? `loc:${existingMatch.rtLocationId}` : `client:${existingMatch.rtClientId}`}')">View this centre in My Centres →</span>
+          <a href="/admin.html?openCentre=${encodeURIComponent(existingMatchCentreKey)}" target="_blank" rel="noopener" style="color:var(--orange);font-weight:600;text-decoration:underline">View this centre in My Centres (opens in a new tab) →</a>
         </div>` : '';
 
       document.getElementById('leadDetailBody').innerHTML = `
@@ -10342,6 +10351,14 @@
           </select>
         </div>
 
+        <div class="lead-group-label" style="margin-top:14px">Site Visit Recordings</div>
+        ${canEditContact ? `
+          <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px;margin-bottom:10px">🎙️ Upload Recording<input type="file" style="display:none" onchange="uploadLeadRecording(this)"></label>
+        ` : ''}
+        <div id="leadRecordingsList" style="margin-bottom:10px">
+          <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading recordings…</div>
+        </div>
+
         <div class="lead-group-label" style="margin-top:14px">Notes</div>
         <div id="leadNotesList" style="margin-bottom:10px">
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading notes…</div>
@@ -10355,6 +10372,7 @@
         `}`;
       document.getElementById('leadDetailModal').classList.add('open');
       loadLeadNotes(id);
+      loadLeadRecordings(id);
     }
 
     // ── Lead notes thread ────────────────────────────────────────
@@ -10381,6 +10399,61 @@
       } catch {
         list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Failed to load notes.</div>`;
       }
+    }
+
+    // ── Lead recordings (site visits) ────────────────────────────
+    // Any file format — same upload-then-list pattern as Project SOP
+    // files (uploadProjectFile/deleteProjectFile), just scoped to a lead
+    // instead of a project.
+    async function loadLeadRecordings(leadId) {
+      const list = document.getElementById('leadRecordingsList');
+      if (!list) return;
+      try {
+        const recordings = await fetch(`/api/leads/${leadId}/recordings`).then(r => r.json());
+        if (currentLeadDetailId !== leadId) return; // modal moved on while this was in flight
+        if (!recordings.length) {
+          list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">No recordings uploaded yet.</div>`;
+          return;
+        }
+        const canDelete = currentUserRole !== 'qa_view';
+        list.innerHTML = recordings.map(r => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px">
+            <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/leads/recordings/${r.id}/download','_blank')">🎙️ ${escHtml(r.filename)} <span style="color:var(--gray-400)">(${formatFileSize(r.filesize)})</span></span>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">${escHtml(r.uploaded_by_name || r.uploaded_by_email || '')} · ${fmtDateShort(r.created_at)}</span>
+              ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteLeadRecording(${r.id})">Remove</button>` : ''}
+            </div>
+          </div>`).join('');
+      } catch {
+        list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Failed to load recordings.</div>`;
+      }
+    }
+
+    async function uploadLeadRecording(input) {
+      if (!input.files?.[0] || !currentLeadDetailId) return;
+      const fd = new FormData();
+      fd.append('file', input.files[0]);
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/recordings`, { method: 'POST', body: fd });
+        if (!res.ok) { const data = await res.json(); toast(data.error || 'Upload failed', 'error'); return; }
+        toast('Recording uploaded', 'success');
+        loadLeadRecordings(currentLeadDetailId);
+      } catch { toast('Upload failed', 'error'); }
+      input.value = '';
+    }
+
+    function deleteLeadRecording(recordingId) {
+      document.getElementById('confirmTitle').textContent = 'Remove Recording';
+      document.getElementById('confirmMsg').textContent = 'Remove this recording? This cannot be undone.';
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          await fetch(`/api/leads/recordings/${recordingId}`, { method: 'DELETE' });
+          toast('Recording removed', 'success');
+          loadLeadRecordings(currentLeadDetailId);
+        } catch { toast('Remove failed', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
     }
 
     async function addLeadNote() {

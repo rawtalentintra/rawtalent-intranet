@@ -1026,6 +1026,23 @@ CREATE TABLE IF NOT EXISTS lead_calendar_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_calendar_events_google_id ON lead_calendar_events(google_event_id, calendar_owner_email);
 CREATE INDEX IF NOT EXISTS idx_lead_calendar_events_lead_id ON lead_calendar_events(lead_id);
 
+-- Site-visit recordings a Workforce Partner attaches to a lead — any file
+-- format (audio, video, whatever they actually captured), stored the same
+-- way project_files stores SOP attachments: metadata row here, real bytes
+-- in Supabase Storage (BUCKETS.leadRecordings, see storageService.js).
+CREATE TABLE IF NOT EXISTS lead_recordings (
+  id SERIAL PRIMARY KEY,
+  lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  uploaded_by_email CITEXT,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_recordings_lead_id ON lead_recordings(lead_id);
+
 -- One row per Workforce Partner calendar being watched — the sync_token
 -- is the incremental-fetch cursor Google's events.list returns, so a
 -- push notification only has to ask "what changed since sync_token",

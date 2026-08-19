@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth, requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
@@ -9,8 +10,15 @@ const centreMatchService = require('../services/centreMatchService');
 const { keyForLocation, keyForClient } = require('../services/centreKeyService');
 const { MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
 const { visitsByCentreKey } = require('./centres');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
 
 router.use(requireAuth);
+
+// Any format — a site-visit recording could be a phone-app voice memo, a
+// Zoom/Teams export, whatever the Workforce Partner actually captured, so
+// no mimetype allowlist. 200MB covers a real video export; well above the
+// 20MB project-file cap since this is often audio/video, not a document.
+const leadRecordingUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 
 // qa_view gets read-only access to the admin Leads list/detail (not the
 // Sales Dashboard, which reuses this same data client-side but is kept
@@ -431,6 +439,74 @@ router.post('/:id/notes', async (req, res) => {
 router.delete('/:id/notes/:noteId', requireAdmin, async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM lead_notes WHERE id = ? AND lead_id = ?', args: [req.params.noteId, req.params.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Site-visit recordings — same access shape as notes (readable by anyone
+// with leads view access, uploadable/deletable by the people actually
+// managing a lead day to day). Any file format, see leadRecordingUpload.
+router.get('/:id/recordings', leadsViewAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: 'SELECT id, filename, mimetype, filesize, uploaded_by_name, uploaded_by_email, created_at FROM lead_recordings WHERE lead_id = ? ORDER BY created_at DESC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/recordings', requireRole('admin', 'super_admin', 'workforce_partner'), leadRecordingUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const db = getDb();
+    const lead = await db.execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+
+    const result = await db.execute({
+      sql: `INSERT INTO lead_recordings (lead_id, filename, mimetype, filesize, uploaded_by_email, uploaded_by_name)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.user.email, req.user.name || req.user.email]
+    });
+    const recordingId = result.rows[0].id;
+    const storagePath = `${req.params.id}/${recordingId}.${extForMimetype(req.file.mimetype)}`;
+    await ensureBucket(BUCKETS.leadRecordings);
+    await uploadBuffer(BUCKETS.leadRecordings, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE lead_recordings SET storage_path = ? WHERE id = ?', args: [storagePath, recordingId] });
+
+    res.json({ success: true, id: recordingId, filename: req.file.originalname, filesize: req.file.size });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/recordings/:recordingId/download', leadsViewAccess, async (req, res) => {
+  try {
+    const file = (await getDb().execute({ sql: 'SELECT * FROM lead_recordings WHERE id = ?', args: [req.params.recordingId] })).rows[0];
+    if (!file) return res.status(404).json({ error: 'Recording not found' });
+    if (!file.storage_path) return res.status(404).json({ error: 'This recording has no stored content' });
+    const buffer = await downloadAsBuffer(BUCKETS.leadRecordings, file.storage_path);
+    res.setHeader('Content-Type', file.mimetype);
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.filename)}"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/recordings/:recordingId', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT storage_path FROM lead_recordings WHERE id = ?', args: [req.params.recordingId] });
+    await db.execute({ sql: 'DELETE FROM lead_recordings WHERE id = ?', args: [req.params.recordingId] });
+    if (existing.rows[0]?.storage_path) {
+      try { await removeFile(BUCKETS.leadRecordings, existing.rows[0].storage_path); } catch { /* orphaned storage object, non-fatal */ }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
