@@ -997,15 +997,36 @@ body:has(> .navbar) { padding-top: 64px; }
 .lead-status-row select { font-size: 12.5px; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--gray-200); font-family: inherit; }
 .lead-status-row input[type="datetime-local"] { font-size: 12px; padding: 5px 6px; border-radius: var(--radius); border: 1px solid var(--gray-200); font-family: inherit; }
 
+/* A flat, edge-to-edge bar (not a rounded pill) spanning the full modal
+   width via negative margins matching .modal-body's own padding — makes
+   each section boundary unmistakable at a glance, which is the point:
+   this modal mixes read-only history, WFP-editable fields, and
+   admin-only controls in one long scroll, and it wasn't obvious where
+   one section ended and the next began. */
 .lead-group-label {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  margin: 16px 0 4px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  margin: 18px -26px 10px;
+  padding: 8px 26px;
 }
-.lead-group-label:first-child { margin-top: 0; }
+/* Lead Source is the one bar that's actually clickable (an accordion, not
+   a static header) — a stronger colour, a real cursor/hover affordance,
+   and an explicit "tap to expand/collapse" hint make that obvious instead
+   of it looking like every other static section title. */
+.lead-group-label-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  background: #bfdbfe;
+  user-select: none;
+}
+.lead-group-label-toggle:hover { background: #93c5fd; }
+.lead-group-label:first-child { margin-top: -24px; }
 
 /* ─── Sales Dashboard ─────────────────────────────────────────── */
 /* auto-fit/minmax instead of a fixed column count + a single viewport-

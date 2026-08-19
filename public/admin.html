@@ -284,14 +284,14 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
+        <div class="admin-nav-item" onclick="showSection('leads', this)">
+          <span class="admin-nav-icon">📋</span> Leads
+        </div>
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
         <div class="admin-nav-item" onclick="showSection('micropods', this)">
           <span class="admin-nav-icon">🗺️</span> Micropods
-        </div>
-        <div class="admin-nav-item" onclick="showSection('leads', this)">
-          <span class="admin-nav-icon">📋</span> Leads
         </div>
         <div class="admin-nav-item" onclick="showSection('route-planner', this)">
           <span class="admin-nav-icon">🧭</span> Smart Routing
@@ -10123,7 +10123,11 @@
     const LEAD_STATUS_SELECT_COLORS = {
       'lead-badge-done': { bg: '#dcfce7', color: '#15803d' },
       'lead-badge-sched': { bg: '#fef3c7', color: '#b45309' },
-      'lead-badge-todo': { bg: 'var(--gray-100)', color: 'var(--text-muted)' },
+      // Indigo, not plain grey — To Schedule/Pending is a real state to
+      // notice (nothing's happened yet), not a disabled/inert one, and
+      // grey read as unstyled. A different hue from the section-header
+      // blue above it on purpose, so a dropdown never reads as a header.
+      'lead-badge-todo': { bg: '#e0e7ff', color: '#4338ca' },
       'lead-badge-not': { bg: '#fef2f2', color: '#c0392b' }
     };
     // Looked up by fieldKey in onLeadStatusChange so the colour can update
@@ -10173,6 +10177,19 @@
       dateInput.style.display = needsDate ? '' : 'none';
       const statusOptions = LEAD_STATUS_EDITOR_META[fieldKey];
       if (statusOptions) select.style.cssText = leadStatusSelectStyle(statusOptions, status);
+
+      // Mirrors the server-side auto-N/A rule in PUT /api/leads/:id (see
+      // routes/leads.js) right in the editor, not just after a save+
+      // reload round trip — marking a visit done should visibly settle
+      // Lead Called immediately, not leave it looking untouched until
+      // the modal is closed and reopened.
+      if (fieldKey === 'centre_visited' && status === 'done') {
+        const calledSelect = document.getElementById('lead_lead_called_status');
+        if (calledSelect && calledSelect.value === 'to_schedule') {
+          calledSelect.value = 'n_a';
+          onLeadStatusChange('lead_called');
+        }
+      }
     }
 
     // Shared by both the "already has a contact" and "just added one" render
@@ -10211,9 +10228,11 @@
     function toggleLeadSourceDetails() {
       const details = document.getElementById('leadSourceDetails');
       const arrow = document.getElementById('leadSourceToggleArrow');
+      const hint = document.getElementById('leadSourceToggleHint');
       const opening = details.style.display === 'none';
       details.style.display = opening ? 'block' : 'none';
       arrow.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+      if (hint) hint.textContent = opening ? 'tap to collapse' : 'tap to expand';
     }
 
     function showWfpAssigneeSelect() {
@@ -10271,8 +10290,11 @@
         ${row('Address', formatLeadAddress(lead))}
         ${row('Phone', lead.centre_phone)}
 
-        <div class="lead-group-label" style="cursor:pointer;display:flex;align-items:center;gap:5px" onclick="toggleLeadSourceDetails()">
-          <span id="leadSourceToggleArrow" style="display:inline-block;transition:transform .15s">▸</span> Lead Source
+        <div class="lead-group-label lead-group-label-toggle" onclick="toggleLeadSourceDetails()">
+          <span style="display:flex;align-items:center;gap:6px">
+            <span id="leadSourceToggleArrow" style="display:inline-block;font-size:13px;transition:transform .15s">▶</span> Lead Source
+          </span>
+          <span id="leadSourceToggleHint" style="font-weight:600;text-transform:none;letter-spacing:normal;font-size:11px;opacity:.8">tap to expand</span>
         </div>
         <div id="leadSourceDetails" style="display:none">
           <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:4px">From the vetting call this lead was logged from — read-only.</div>
@@ -10290,7 +10312,7 @@
           ${row('Position', lead.position)}
           ${row('Contact Email', lead.contact_email)}
         ` : !hasContact ? `
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Add a centre contact once you've called or visited the centre — no rush before then.</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Add a centre contact once you've called or visited the centre.</div>
           <button type="button" class="btn-secondary" id="leadAddContactBtn" style="padding:6px 14px;font-size:12.5px" onclick="showLeadContactFields()">➕ Add Contact</button>
           <div id="leadContactFields" style="display:none;margin-top:10px">
             ${leadContactFieldsHtml(lead)}
@@ -10311,7 +10333,7 @@
           ${canEditStatus && hasAssignment ? `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
               <span id="leadAssigneeReadout" style="font-weight:600;color:var(--navy);font-size:13.5px">${escHtml(lead.assigned_workforce_partner)}</span>
-              <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:12px" onclick="showWfpAssigneeSelect()">✏️ Change</span>
+              <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:15px" onclick="showWfpAssigneeSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">✏️</span>
             </div>
           ` : ''}
           <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'} style="${canEditStatus && hasAssignment ? 'display:none;margin-top:8px' : ''}">
@@ -10326,8 +10348,8 @@
         </div>
         ${currentUserRole === 'qa_view' ? '' : `
           <div class="form-group-modal">
-            ${currentUserRole === 'workforce_partner' ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:5px">These are your own notes on this centre — add as many as you'd like, any time something's worth remembering.</div>` : ''}
-            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add notes for the Workforce Partner — anything helpful for their visit or follow-up…'}"></textarea>
+            ${currentUserRole === 'workforce_partner' ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:5px">These are your own notes on this centre — add as many as you can, any time something's worth remembering.</div>` : ''}
+            <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add notes — anything helpful for centre calls, visits, or follow-up. You can add as many notes as you can.'}"></textarea>
             <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
           </div>
         `}`;
