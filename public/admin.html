@@ -378,6 +378,8 @@
       // for a frame before JS catches up.
       if (localStorage.getItem('hbSidebarCollapsed') === '1') {
         document.querySelector('.admin-layout').classList.add('sidebar-collapsed');
+        const toggleBtn = document.getElementById('sidebarCollapseToggle');
+        if (toggleBtn) { toggleBtn.title = 'Show navigation menu'; toggleBtn.setAttribute('aria-label', 'Show navigation menu'); }
       }
     </script>
 
@@ -3544,16 +3546,23 @@
       if (allowedSections) {
         const target = (savedSection && allowedSections.includes(savedSection)) ? savedSection : allowedSections[0];
         showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
-      } else if (savedSection) {
+      } else {
+        // Falls back to 'articles' rather than skipping this call when
+        // there's no saved section yet (a brand-new session) — showSection
+        // is what collapses every other nav group down to just the current
+        // one (see expandNavSectionFor), so without this call a first-ever
+        // visit left all 14 nav sections expanded at once instead of just
+        // the relevant one.
+        const target = savedSection || 'articles';
         // New Article's nav item calls newArticle() rather than
         // showSection('new-article', this) directly, so it can't be found
         // by the generic onclick-text lookup below — matches how the
         // app's own newArticle()/loadArticle() call sites pass this same
         // element explicitly for the same reason.
-        const navEl = savedSection === 'new-article'
+        const navEl = target === 'new-article'
           ? document.getElementById('navNewArticle')
-          : document.querySelector(`[onclick*="showSection('${savedSection}'"]`);
-        showSection(savedSection, navEl);
+          : document.querySelector(`[onclick*="showSection('${target}'"]`);
+        showSection(target, navEl);
       }
     }
 
@@ -4653,6 +4662,7 @@
       document.querySelectorAll('.admin-nav-item').forEach(n => n.classList.remove('active'));
       sectionEl.classList.add('active');
       if (el) el.classList.add('active');
+      expandNavSectionFor(el);
       // Remembered across refreshes/re-logins (see init()) so navigating away
       // and reloading doesn't dump you back on the Dashboard every time.
       try { localStorage.setItem('adminActiveSection', id); } catch {}
@@ -4696,6 +4706,13 @@
     // nav items. Persisted by label text so it survives reloads/re-logins.
     // Accordion behaviour: opening a section collapses every other one, so
     // at most one is expanded at a time instead of everything piling up.
+    function persistCollapsedNavSections() {
+      try {
+        const collapsed = [...document.querySelectorAll('.admin-nav-section.collapsed .admin-nav-label')].map(l => l.textContent.trim());
+        localStorage.setItem('adminCollapsedNavSections', JSON.stringify(collapsed));
+      } catch {}
+    }
+
     function toggleNavSection(labelEl) {
       const section = labelEl.closest('.admin-nav-section');
       if (!section) return;
@@ -4704,10 +4721,23 @@
         document.querySelectorAll('.admin-nav-section').forEach(s => { if (s !== section) s.classList.add('collapsed'); });
       }
       section.classList.toggle('collapsed');
-      try {
-        const collapsed = [...document.querySelectorAll('.admin-nav-section.collapsed .admin-nav-label')].map(l => l.textContent.trim());
-        localStorage.setItem('adminCollapsedNavSections', JSON.stringify(collapsed));
-      } catch {}
+      persistCollapsedNavSections();
+    }
+
+    // Same accordion rule as toggleNavSection above, but definitive rather
+    // than a toggle — every real navigation (showSection) collapses every
+    // OTHER nav group down to just the one the current page lives in,
+    // instead of leaving whichever groups happened to be open still open.
+    // Without this, a first-ever session (nothing collapsed yet in
+    // localStorage) showed all ~14 nav groups expanded at once — a long
+    // list a user could easily scroll past without realising the item
+    // they wanted was further down, which read as "the nav is missing
+    // things" rather than "just scroll".
+    function expandNavSectionFor(el) {
+      const section = el && el.closest('.admin-nav-section');
+      if (!section) return;
+      document.querySelectorAll('.admin-nav-section').forEach(s => s.classList.toggle('collapsed', s !== section));
+      persistCollapsedNavSections();
     }
 
     function applyCollapsedNavSections() {
@@ -4731,10 +4761,24 @@
 
     // Desktop sidebar collapse — separate from the mobile drawer above.
     // Shared localStorage key with the public site sidebar, so a user's
-    // choice carries over between HeartBeat and the admin panel.
+    // choice carries over between HeartBeat and the admin panel. Collapsed
+    // is sticky across visits (see the synchronous restore script right
+    // after the sidebar markup), so the toggle's own label/title has to
+    // stay in sync with actual state — a stale "Collapse sidebar" title on
+    // a button that would actually expand it is exactly the kind of thing
+    // that made this feel broken rather than just toggled off.
+    function updateSidebarToggleLabel(collapsed) {
+      const btn = document.getElementById('sidebarCollapseToggle');
+      if (!btn) return;
+      const label = collapsed ? 'Show navigation menu' : 'Hide navigation menu';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+    }
+
     function toggleDesktopSidebar() {
       const collapsed = document.querySelector('.admin-layout').classList.toggle('sidebar-collapsed');
       localStorage.setItem('hbSidebarCollapsed', collapsed ? '1' : '0');
+      updateSidebarToggleLabel(collapsed);
     }
 
     // ── Articles ──────────────────────────────────────────────────

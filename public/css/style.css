@@ -742,7 +742,11 @@ body:has(> .navbar) { padding-top: 64px; }
 .admin-layout.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .admin-layout.sidebar-collapsed .admin-sidebar { width: 0; padding-left: 0; padding-right: 0; overflow: hidden; }
 .admin-layout.sidebar-collapsed .admin-sidebar-items { display: none; }
-.admin-layout.sidebar-collapsed .sidebar-collapse-toggle { left: -13px; transform: rotate(180deg); }
+/* Was left:-13px, half the button's own 26px width — clipped it off the
+   left edge of the viewport entirely. With the sidebar itself gone, that
+   made this button the ONLY way back, and it was nearly invisible: a
+   sliver of white on white. Kept fully on-screen here instead. */
+.admin-layout.sidebar-collapsed .sidebar-collapse-toggle { left: 10px; transform: rotate(180deg); }
 
 .admin-sidebar {
   background: var(--navy);
@@ -780,22 +784,28 @@ body:has(> .navbar) { padding-top: 64px; }
   position: absolute;
   top: 76px;
   left: 231px;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: white;
-  border: 1px solid var(--gray-200);
-  box-shadow: var(--shadow-sm);
+  /* Navy + white icon, not white-on-white — this button sits over the
+     light main-content background in both states (it straddles the
+     sidebar's edge), and a plain white circle with a thin gray border
+     read as barely-there, especially once collapsed left it as the only
+     way to bring the nav back. */
+  background: var(--navy);
+  border: 2px solid white;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 30;
-  font-size: 13px;
-  color: var(--navy);
-  transition: left .22s ease, transform .22s ease;
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+  transition: left .22s ease, transform .22s ease, background .15s ease;
 }
-.sidebar-collapse-toggle:hover { background: var(--gray-100); }
+.sidebar-collapse-toggle:hover { background: var(--orange); }
 @media (max-width: 900px) {
   .sidebar-collapse-toggle { display: none; }
 }
