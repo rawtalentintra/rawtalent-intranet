@@ -28,6 +28,23 @@
     .rte-dropdown { position: relative; }
     .rte-popover { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; min-width: 160px; }
     .rte-popover.open { display: block; }
+    /* Small connector notch pointing back at the toolbar button that opened
+       this — without it the popover is correctly positioned but reads as a
+       stray floating box disconnected from anything, since it sits over
+       the editor's content area with no visual link to its trigger. */
+    .rte-popover::before {
+      content: '';
+      position: absolute;
+      top: -5px;
+      left: 10px;
+      width: 9px;
+      height: 9px;
+      background: #fff;
+      border-left: 1px solid var(--gray-200);
+      border-top: 1px solid var(--gray-200);
+      border-radius: 2px 0 0 0;
+      transform: rotate(45deg);
+    }
     .rte-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border: none; background: none; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 13px; color: var(--text); white-space: nowrap; }
     .rte-menu-item:hover { background: var(--gray-100); color: var(--orange); }
     .rte-popover-swatches { display: flex; flex-wrap: wrap; gap: 6px; min-width: auto; width: 116px; padding: 8px; }
