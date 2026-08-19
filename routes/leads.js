@@ -297,6 +297,20 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
     const existing = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
 
+    // Lead Called is optional — visiting a centre without a prior logged
+    // call is a valid path, so a visit being marked done shouldn't leave
+    // Lead Called sitting at its default To Schedule looking like an
+    // outstanding task. Only kicks in when Lead Called hasn't been
+    // engaged with at all (still To Schedule, whether that's the existing
+    // value or this same request is itself trying to set it there) —
+    // never overrides Called/Scheduled/N/A a person actually chose.
+    // Injected into req.body before the field loop below so it's picked
+    // up the normal way, same as every other field.
+    if (req.body.centreVisitedStatus === 'done') {
+      const wouldBeCalledStatus = 'leadCalledStatus' in req.body ? req.body.leadCalledStatus : existing.rows[0].lead_called_status;
+      if (wouldBeCalledStatus === 'to_schedule') req.body.leadCalledStatus = 'n_a';
+    }
+
     const fields = req.user.role === 'workforce_partner' ? WORKFORCE_PARTNER_FIELDS : ADMIN_FIELDS;
     const sets = [];
     const args = [];

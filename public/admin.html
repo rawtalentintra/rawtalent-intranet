@@ -10116,7 +10116,28 @@
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
+    // Same background/text colours as the lead-badge-* classes the Leads
+    // table and Stage badge already use — reused here (not a new palette)
+    // so a WFP sees the same "green means done" language in the editor
+    // that they already see everywhere else in Leads.
+    const LEAD_STATUS_SELECT_COLORS = {
+      'lead-badge-done': { bg: '#dcfce7', color: '#15803d' },
+      'lead-badge-sched': { bg: '#fef3c7', color: '#b45309' },
+      'lead-badge-todo': { bg: 'var(--gray-100)', color: 'var(--text-muted)' },
+      'lead-badge-not': { bg: '#fef2f2', color: '#c0392b' }
+    };
+    // Looked up by fieldKey in onLeadStatusChange so the colour can update
+    // on change, not just at initial render.
+    const LEAD_STATUS_EDITOR_META = { lead_called: null, centre_visited: null, signed: null };
+
+    function leadStatusSelectStyle(statusOptions, status) {
+      const cls = (statusOptions[status] || {}).cls;
+      const c = LEAD_STATUS_SELECT_COLORS[cls];
+      return c ? `background:${c.bg};color:${c.color};border-color:transparent;font-weight:700` : '';
+    }
+
     function leadStatusEditorRow(fieldKey, label, statusOptions, currentStatus, currentAt, optionKeys) {
+      LEAD_STATUS_EDITOR_META[fieldKey] = statusOptions;
       const keys = optionKeys || Object.keys(statusOptions);
       // "done"/"signed" (the completed state) and "scheduled" carry a date;
       // to_schedule/pending/not_interested don't.
@@ -10134,7 +10155,7 @@
           <div class="lead-status-controls">
             <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}" ${readOnly ? 'disabled' : ''}
               style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
-            <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''}>
+            <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''} style="${leadStatusSelectStyle(statusOptions, currentStatus)}">
               ${keys.map(val => `<option value="${val}" ${currentStatus === val ? 'selected' : ''}>${escHtml(statusOptions[val].label)}</option>`).join('')}
             </select>
           </div>
@@ -10145,10 +10166,60 @@
     // and "scheduled" states — hide it for to_schedule/pending/not_interested
     // so there's nothing to fill in for a stage that hasn't started.
     function onLeadStatusChange(fieldKey) {
-      const status = document.getElementById(`lead_${fieldKey}_status`).value;
+      const select = document.getElementById(`lead_${fieldKey}_status`);
+      const status = select.value;
       const dateInput = document.getElementById(`lead_${fieldKey}_at`);
       const needsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       dateInput.style.display = needsDate ? '' : 'none';
+      const statusOptions = LEAD_STATUS_EDITOR_META[fieldKey];
+      if (statusOptions) select.style.cssText = leadStatusSelectStyle(statusOptions, status);
+    }
+
+    // Shared by both the "already has a contact" and "just added one" render
+    // paths in openLeadDetail below, so the fields themselves are defined
+    // once regardless of which state the section opens in.
+    function leadContactFieldsHtml(lead) {
+      return `
+        <div class="form-group-modal">
+          <label class="form-label-modal">Position</label>
+          <select id="leadContactPosition" class="form-control">
+            <option value="">Select…</option>
+            ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}" ${lead.position === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group-modal">
+            <label class="form-label-modal">First Name</label>
+            <input type="text" id="leadContactFirstName" class="form-control" value="${escHtml(lead.contact_first_name || '')}">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Last Name</label>
+            <input type="text" id="leadContactLastName" class="form-control" value="${escHtml(lead.contact_last_name || '')}">
+          </div>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Email</label>
+          <input type="email" id="leadContactEmail" class="form-control" value="${escHtml(lead.contact_email || '')}">
+        </div>`;
+    }
+
+    function showLeadContactFields() {
+      document.getElementById('leadAddContactBtn').style.display = 'none';
+      document.getElementById('leadContactFields').style.display = 'block';
+    }
+
+    function toggleLeadSourceDetails() {
+      const details = document.getElementById('leadSourceDetails');
+      const arrow = document.getElementById('leadSourceToggleArrow');
+      const opening = details.style.display === 'none';
+      details.style.display = opening ? 'block' : 'none';
+      arrow.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+    }
+
+    function showWfpAssigneeSelect() {
+      const readout = document.getElementById('leadAssigneeReadout');
+      if (readout) readout.closest('div').style.display = 'none';
+      document.getElementById('leadAssigneeSelect').style.display = '';
     }
 
     function openLeadDetail(id) {
@@ -10177,56 +10248,73 @@
       // assignment stay admin/super_admin only regardless.
       const canEditContact = currentUserRole !== 'qa_view';
       const canEditStatus = currentUserRole === 'admin' || currentUserRole === 'super_admin';
+      const hasContact = !!(lead.position || lead.contact_first_name || lead.contact_last_name || lead.contact_email);
+      const hasAssignment = !!lead.assigned_workforce_partner;
+
+      // Same confidence-gated match the "Existing Centre?" column badges —
+      // surfaced here too (not just a hover tooltip on a badge easy to
+      // miss) since acting on a lead that might already be a real client
+      // is the kind of thing worth a Workforce Partner actually reading,
+      // not just noticing a green pill. Not shown once signed — that
+      // badge already explains itself (it's the centre THIS lead created).
+      const existingMatch = leadsCentreMatches[lead.id];
+      const existingMatchBanner = (existingMatch && lead.signed_status !== 'signed') ? `
+        <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92600a">
+          ⚠️ <strong>This might already be an existing centre:</strong> ${escHtml(existingMatch.clientName)} — ${escHtml(existingMatch.locationLabel)}.
+          <div style="margin-top:4px">Why: ${escHtml(existingMatch.reasons.join(', '))}</div>
+          <span style="cursor:pointer;color:var(--orange);font-weight:600;text-decoration:underline" onclick="goToCentre360('${existingMatch.rtLocationId ? `loc:${existingMatch.rtLocationId}` : `client:${existingMatch.rtClientId}`}')">View this centre in My Centres →</span>
+        </div>` : '';
+
       document.getElementById('leadDetailBody').innerHTML = `
+        ${existingMatchBanner}
         <div class="lead-group-label">Centre</div>
         ${row('Address', formatLeadAddress(lead))}
         ${row('Phone', lead.centre_phone)}
 
-        <div class="lead-group-label">Contact</div>
-        ${canEditContact ? `
-          <div class="form-group-modal">
-            <label class="form-label-modal">Position</label>
-            <select id="leadContactPosition" class="form-control">
-              <option value="">Select…</option>
-              ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}" ${lead.position === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
-            </select>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div class="form-group-modal">
-              <label class="form-label-modal">First Name</label>
-              <input type="text" id="leadContactFirstName" class="form-control" value="${escHtml(lead.contact_first_name || '')}">
-            </div>
-            <div class="form-group-modal">
-              <label class="form-label-modal">Last Name</label>
-              <input type="text" id="leadContactLastName" class="form-control" value="${escHtml(lead.contact_last_name || '')}">
-            </div>
-          </div>
-          <div class="form-group-modal">
-            <label class="form-label-modal">Email</label>
-            <input type="email" id="leadContactEmail" class="form-control" value="${escHtml(lead.contact_email || '')}">
-          </div>
-        ` : `
+        <div class="lead-group-label" style="cursor:pointer;display:flex;align-items:center;gap:5px" onclick="toggleLeadSourceDetails()">
+          <span id="leadSourceToggleArrow" style="display:inline-block;transition:transform .15s">▸</span> Lead Source
+        </div>
+        <div id="leadSourceDetails" style="display:none">
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:4px">From the vetting call this lead was logged from — read-only.</div>
+          ${row('Submitted by', lead.submitted_by_name || lead.submitted_by_email)}
+          ${row('Submitted', fmtDate(lead.created_at))}
+          ${row('Educator', lead.educator_name)}
+          ${row('Shifts worked', lead.number_of_shifts)}
+          ${row('Agency name', lead.agency_name)}
+          ${row('Agency usage', LEAD_AGENCY_USAGE_LABELS[lead.agency_usage] || lead.agency_usage)}
+        </div>
+
+        <div class="lead-group-label" style="margin-top:14px">Contact</div>
+        ${!canEditContact ? `
           ${row('Contact', [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '))}
           ${row('Position', lead.position)}
           ${row('Contact Email', lead.contact_email)}
+        ` : !hasContact ? `
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Add a centre contact once you've called or visited the centre — no rush before then.</div>
+          <button type="button" class="btn-secondary" id="leadAddContactBtn" style="padding:6px 14px;font-size:12.5px" onclick="showLeadContactFields()">➕ Add Contact</button>
+          <div id="leadContactFields" style="display:none;margin-top:10px">
+            ${leadContactFieldsHtml(lead)}
+          </div>
+        ` : `
+          <div id="leadContactFields">
+            ${leadContactFieldsHtml(lead)}
+          </div>
         `}
 
-        <div class="lead-group-label">Lead source</div>
-        ${row('Submitted by', lead.submitted_by_name || lead.submitted_by_email)}
-        ${row('Submitted', fmtDate(lead.created_at))}
-        ${row('Educator', lead.educator_name)}
-        ${row('Shifts worked', lead.number_of_shifts)}
-        ${row('Agency name', lead.agency_name)}
-        ${row('Agency usage', LEAD_AGENCY_USAGE_LABELS[lead.agency_usage] || lead.agency_usage)}
-
-        <div class="lead-group-label">Follow-up</div>
+        <div class="lead-group-label" style="margin-top:14px">Follow-up</div>
         ${leadStatusEditorRow('lead_called', 'Lead Called', LEAD_CALLED_META, lead.lead_called_status || 'to_schedule', lead.lead_called_at)}
         ${leadStatusEditorRow('centre_visited', 'Centre Visited', CENTRE_VISITED_META, lead.centre_visited_status || 'to_schedule', lead.centre_visited_at)}
         ${leadStatusEditorRow('signed', 'Profile Created', SIGNED_META, lead.signed_status || 'pending', lead.signed_at, ['pending', 'signed'])}
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>
-          <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'}>
+          ${canEditStatus && hasAssignment ? `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span id="leadAssigneeReadout" style="font-weight:600;color:var(--navy);font-size:13.5px">${escHtml(lead.assigned_workforce_partner)}</span>
+              <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:12px" onclick="showWfpAssigneeSelect()">✏️ Change</span>
+            </div>
+          ` : ''}
+          <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'} style="${canEditStatus && hasAssignment ? 'display:none;margin-top:8px' : ''}">
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
@@ -10238,6 +10326,7 @@
         </div>
         ${currentUserRole === 'qa_view' ? '' : `
           <div class="form-group-modal">
+            ${currentUserRole === 'workforce_partner' ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:5px">These are your own notes on this centre — add as many as you'd like, any time something's worth remembering.</div>` : ''}
             <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add notes for the Workforce Partner — anything helpful for their visit or follow-up…'}"></textarea>
             <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
           </div>
