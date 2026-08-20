@@ -6873,10 +6873,10 @@
     // Needs attention/Declining/Dormant centres") asked for exactly this,
     // and without it the only way to see the shape of the portfolio was
     // to scroll a 357-row table.
-    function renderCentresHealthSummary() {
+    function renderCentresHealthSummary(rows) {
       const box = document.getElementById('myCentresHealthSummary');
       const counts = {};
-      myCentresData.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      rows.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
       const activeFilter = document.getElementById('centresFilterHealth').value;
       box.innerHTML = CENTRE_HEALTH_ORDER.map(key => {
         const meta = CENTRE_HEALTH_META[key];
@@ -6924,11 +6924,17 @@
       const suburb = document.getElementById('centresFilterSuburb').value;
       let rows = myCentresData;
       if (q) rows = rows.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
-      if (health) rows = rows.filter(c => c.health === health);
       if (state) rows = rows.filter(c => c.state === state);
       if (suburb) rows = rows.filter(c => c.suburb === suburb);
       if (myCentresStateFilter) rows = rows.filter(c => wfpCentreStateBucket(c.state) === myCentresStateFilter);
-      renderCentresHealthSummary();
+      // Counts reflect search/state/suburb (and the state-toggle) so the
+      // Portfolio Health boxes track whatever slice of the portfolio is
+      // currently in view — but NOT the health filter itself, since these
+      // boxes double as that filter's picker (toggleCentresHealthFilter)
+      // and need every category's count still visible to click between,
+      // not just the one currently selected.
+      renderCentresHealthSummary(rows);
+      if (health) rows = rows.filter(c => c.health === health);
       myCentresPage = 1;
       renderMyCentresTable(rows);
     }
