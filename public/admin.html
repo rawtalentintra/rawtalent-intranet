@@ -981,12 +981,27 @@
       <!-- Visit logging — Centre 360's "+ Log Visit" and re-opening a past
            visit from the activity timeline share this one modal. -->
       <div class="modal-overlay" id="visitLogModal" onclick="if(event.target===this)closeVisitLogModal()">
-        <div class="modal" style="max-width:520px">
+        <div class="modal" style="max-width:560px">
           <div class="modal-header">
-            <div class="modal-title" id="visitLogModalTitle">Log a Visit</div>
+            <div class="modal-title" id="visitLogModalTitle">Log a Call/Visit</div>
             <button class="modal-close" onclick="closeVisitLogModal()">×</button>
           </div>
-          <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+          <div class="modal-body" style="max-height:78vh;overflow-y:auto">
+            <div class="form-group-modal">
+              <label class="form-label-modal">Pre-visit brief <span class="optional">(optional)</span></label>
+              <textarea id="visitLogBrief" class="form-control" rows="2" placeholder="What to cover, recent context…"></textarea>
+            </div>
+
+            <div id="visitLogUploadWrap" ondragover="handleVisitLogRecordingDragOver(event)" ondragleave="handleVisitLogRecordingDragLeave(event)" ondrop="handleVisitLogRecordingDrop(event)" style="border-radius:var(--radius);border:1.5px dashed transparent;transition:border-color .15s,background-color .15s">
+              <div class="lead-group-label" style="margin-top:14px;margin-bottom:0">Upload Recording/Transcript</div>
+              <div style="background:white;padding:14px 16px;text-align:center">
+                <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Upload Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadVisitLogRecordingFiles(this.files);this.value=''"></label>
+                <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Attach/drag your call recording or transcript here.</div>
+                <div id="visitLogRecordingsList" style="margin-top:8px;text-align:left"></div>
+              </div>
+            </div>
+
+            <div class="lead-group-label" style="margin-top:14px">Details</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Visit date</label>
@@ -996,18 +1011,10 @@
                 <label class="form-label-modal">Status</label>
                 <select id="visitLogStatus" class="form-control">
                   <option value="planned">Planned</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
+                  <option value="completed">Called / Visited</option>
+                  <option value="rescheduled">Rescheduled</option>
                 </select>
               </div>
-            </div>
-            <div class="form-group-modal">
-              <label class="form-label-modal">Purpose</label>
-              <input type="text" id="visitLogPurpose" class="form-control" placeholder="e.g. Welcome visit, check-in, service follow-up…">
-            </div>
-            <div class="form-group-modal">
-              <label class="form-label-modal">Pre-visit brief <span class="optional">(optional)</span></label>
-              <textarea id="visitLogBrief" class="form-control" rows="2" placeholder="What to cover, recent context…"></textarea>
             </div>
             <div class="form-group-modal">
               <label class="form-label-modal">Outcome</label>
@@ -1023,16 +1030,24 @@
               <label class="form-label-modal">Notes <span class="optional">(optional)</span></label>
               <textarea id="visitLogNotes" class="form-control" rows="3" placeholder="What happened…"></textarea>
             </div>
+
+            <div class="lead-group-label" style="margin-top:14px">Next Steps</div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Next step <span class="optional">(optional)</span></label>
-                <input type="text" id="visitLogNextStep" class="form-control" placeholder="e.g. Check in after second booking">
+                <select id="visitLogNextStep" class="form-control" onchange="onVisitLogNextStepChange()">
+                  <option value="">— None —</option>
+                  <option value="Follow-up Call">Follow-up Call</option>
+                  <option value="Follow-up Visit">Follow-up Visit</option>
+                  <option value="Check-in after Booking">Check-in after Booking</option>
+                </select>
               </div>
               <div class="form-group-modal">
                 <label class="form-label-modal">Due</label>
                 <input type="date" id="visitLogNextStepDue" class="form-control">
               </div>
             </div>
+            <div style="font-size:11.5px;color:var(--text-muted)">Last Booking Date of Centre: <span id="visitLogLastBookingDate" style="font-weight:600;color:var(--text)">—</span></div>
           </div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeVisitLogModal()">Cancel</button>
@@ -6944,7 +6959,10 @@
           <td>${escHtml(lastContact)}</td>
           <td>${fmtDate(n.dueDate)} <span style="color:var(--text-muted);font-size:11px">(${deadlineNote})</span></td>
           <td><span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span></td>
-          <td><button class="btn-add" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">+ Log Visit</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn-add" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">+ Log Call/Visit</button>
+            <button class="btn-secondary" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">📎 Upload Recording/Transcript</button>
+          </td>
         </tr>`;
     }
 
@@ -7163,12 +7181,11 @@
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Pulling up this centre\'s live details from RT…</div>';
       try {
         const enc = encodeURIComponent(centreKey);
-        const [centre, bookingsRes, educators, activity, recordings] = await Promise.all([
+        const [centre, bookingsRes, educators, activity] = await Promise.all([
           fetch(`/api/centres/${enc}`).then(r => r.json()),
           fetch(`/api/centres/${enc}/bookings`).then(r => r.json()),
           fetch(`/api/centres/${enc}/educators`).then(r => r.json()),
-          fetch(`/api/centres/${enc}/activity`).then(r => r.json()),
-          fetch(`/api/centres/${enc}/recordings`).then(r => r.json())
+          fetch(`/api/centres/${enc}/activity`).then(r => r.json())
         ]);
         currentCentreName = centre.name || '';
         // Seeds the same clientNameById/locationNameById/candidateNameById
@@ -7183,7 +7200,7 @@
         educators.forEach(e => { candidateNameById[e.userId] = e.name; });
         currentCentre360Bookings = {};
         activity.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
-        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity, recordings);
+        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
       }
@@ -7231,7 +7248,7 @@
       window.scrollTo({ top: 0 });
     }
 
-    function renderCentre360(c, bookingsRes, educators, activity, recordings) {
+    function renderCentre360(c, bookingsRes, educators, activity) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
       const healthMeta = CENTRE_HEALTH_META[c.health] || { label: c.health, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
       return `
@@ -7269,14 +7286,6 @@
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--text)">
               ${c.healthReasons.map(r => `<div>• ${escHtml(r)}</div>`).join('')}
             </div>` : ''}
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;flex-wrap:wrap">
-            <button class="btn-add" style="padding:6px 14px;font-size:12.5px;flex-shrink:0" onclick="openVisitLogModal('${c.centreKey}')">+ Log Visit</button>
-            <div class="file-dropzone" style="margin-bottom:0;flex:1;min-width:240px" ondragover="handleCentreRecordingDragOver(event)" ondragleave="handleCentreRecordingDragLeave(event)" ondrop="handleCentreRecordingDrop(event,'${c.centreKey}')">
-              <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Attach Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadCentreRecordingFiles('${c.centreKey}',this.files);this.value=''"></label>
-              <div class="file-dropzone-hint">or drag files here — any format, multiple at once. We'll recognise the centre as called/visited automatically, using any date/time found in a transcript.</div>
-            </div>
-          </div>
-          <div id="centreRecordingsList" style="margin-top:10px">${renderCentreRecordingsListHtml(recordings, c.centreKey)}</div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
@@ -7332,8 +7341,8 @@
           const v = ev.data;
           return `
             <div class="attn-row" style="cursor:pointer" onclick="openVisitLogModal('${v.centre_key}','${v.id}')">
-              <span class="attn-chip lead-badge-sched">🚗 ${escHtml(v.status === 'planned' ? 'Planned Visit' : v.status === 'cancelled' ? 'Cancelled Visit' : 'Visit')}</span>
-              <span class="attn-centre">${escHtml(v.purpose || 'Visit')}${v.outcome ? ` · ${escHtml(v.outcome.replace('_', ' '))}` : ''}</span>
+              <span class="attn-chip lead-badge-sched">🚗 ${escHtml(v.status === 'planned' ? 'Planned' : v.status === 'rescheduled' ? 'Rescheduled' : 'Called / Visited')}</span>
+              <span class="attn-centre">${v.outcome ? escHtml(v.outcome.replace('_', ' ')) : (v.notes ? escHtml(v.notes.slice(0, 60)) : 'Call/Visit')}</span>
               <span class="attn-meta">${fmtDate(v.visit_date)}</span>
             </div>`;
         }
@@ -7361,14 +7370,15 @@
       document.getElementById('reportDetailModal').classList.add('open');
     }
 
-    // ── Centre Recordings/Transcripts ────────────────────────────────
-    // Attaching one of these is itself what recognises the centre as
-    // called/visited — see POST /:centreKey/recordings in routes/
-    // centres.js, which auto-creates a centre_visits row for the whole
-    // upload batch. detected_at (parsed out of a transcript's own content)
-    // is shown here so it's obvious when that date came from the file
-    // itself vs. just falling back to upload time.
-    function renderCentreRecordingsListHtml(recordings, centreKey) {
+    // ── Log a Call/Visit — Recording/Transcript upload ─────────────────
+    // Lives inside the visit-log modal now, not a standalone Overview
+    // dropzone — attaching a file here only records evidence (detected
+    // timestamp + AI outcome/notes); it's linked to a real centre_visits
+    // row only once the modal is actually saved (routes/centres.js's
+    // linkRecordingsToVisit), never auto-created behind the scenes. No
+    // standalone recordings list exists anywhere else — a recording is
+    // only ever reachable by opening the specific visit it's attached to.
+    function renderVisitLogRecordingsListHtml(recordings) {
       if (!recordings || !recordings.length) return '';
       const canDelete = currentUserRole !== 'qa_view';
       return recordings.map(r => `
@@ -7379,51 +7389,82 @@
               ${escHtml(r.uploaded_by_name || r.uploaded_by_email || '')} · ${fmtDateShort(r.created_at)}
               ${r.detected_at ? `<span style="color:#15803d" title="Date/time detected from this file's own content">· 🕐 ${fmtDateShort(r.detected_at)}</span>` : ''}
             </span>
-            ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteCentreRecording(${r.id},'${centreKey}')">Remove</button>` : ''}
+            ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteVisitLogRecording(${r.id})">Remove</button>` : ''}
           </div>
         </div>`).join('');
     }
 
-    async function uploadCentreRecordingFiles(centreKey, fileList) {
+    async function uploadVisitLogRecordingFiles(fileList) {
       const files = Array.from(fileList || []);
-      if (!files.length) return;
+      if (!files.length || !visitLogCentreKey) return;
       const fd = new FormData();
       files.forEach(f => fd.append('files', f));
       try {
-        const res = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/recordings`, { method: 'POST', body: fd });
+        const res = await fetch(`/api/centres/${encodeURIComponent(visitLogCentreKey)}/recordings`, { method: 'POST', body: fd });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Upload failed', 'error'); return; }
-        toast(files.length > 1 ? `${files.length} files uploaded — logged as a visit` : 'Uploaded — logged as a visit', 'success');
-        if (currentCentreKey === centreKey) openCentre360(centreKey);
+
+        visitLogPendingRecordingIds.push(...data.recordings.map(r => r.id));
+        // A file was attached at all — contact happened, regardless of
+        // whether a date could be read out of it.
+        document.getElementById('visitLogStatus').value = 'completed';
+        if (data.detectedAt) document.getElementById('visitLogDate').value = toDateInputValue(data.detectedAt);
+        if (data.outcome) document.getElementById('visitLogOutcome').value = data.outcome;
+        if (data.notesSummary) document.getElementById('visitLogNotes').value = data.notesSummary;
+        renderVisitLogAttachedRecordings();
+        toast(files.length > 1 ? `${files.length} files attached` : 'File attached', 'success');
       } catch { toast('Upload failed', 'error'); }
     }
 
-    // Drag-and-drop onto the whole dropzone box, same pattern as the Leads
-    // Site Visit Recordings dropzone — preventDefault on dragover or the
-    // browser refuses the drop and just navigates to/opens the file.
-    function handleCentreRecordingDragOver(e) {
+    // Re-fetches this centre's recordings and shows only the ones relevant
+    // to the visit currently open in the modal — its already-saved
+    // recordings (visit_id === visitLogEditingId) plus anything just
+    // uploaded this session and still pending a save (visitLogPendingRecordingIds).
+    async function renderVisitLogAttachedRecordings() {
+      const wrap = document.getElementById('visitLogRecordingsList');
+      if (!wrap || !visitLogCentreKey) return;
+      try {
+        const all = await fetch(`/api/centres/${encodeURIComponent(visitLogCentreKey)}/recordings`).then(r => r.json());
+        const relevant = all.filter(r => r.visit_id === visitLogEditingId || visitLogPendingRecordingIds.includes(r.id));
+        wrap.innerHTML = renderVisitLogRecordingsListHtml(relevant);
+      } catch { /* non-fatal — the upload itself already succeeded or failed with its own toast */ }
+    }
+
+    // Drag-and-drop onto the whole upload section (header bar included, not
+    // just the white dropzone box below it) — preventDefault on dragover or
+    // the browser refuses the drop and just navigates to/opens the file.
+    // The wrapper spans both the blue "Upload Recording/Transcript" header
+    // and the white dropzone below it (so dropping on either works, per
+    // the ask) — it has none of .file-dropzone's own styling, so the
+    // highlight is a plain inline-style toggle instead of the .drag-over
+    // class those other dropzones use.
+    function handleVisitLogRecordingDragOver(e) {
       e.preventDefault();
-      e.currentTarget.classList.add('drag-over');
+      e.currentTarget.style.borderColor = 'var(--orange)';
+      e.currentTarget.style.backgroundColor = 'var(--orange-glow)';
     }
 
-    function handleCentreRecordingDragLeave(e) {
-      e.currentTarget.classList.remove('drag-over');
+    function handleVisitLogRecordingDragLeave(e) {
+      e.currentTarget.style.borderColor = 'transparent';
+      e.currentTarget.style.backgroundColor = '';
     }
 
-    async function handleCentreRecordingDrop(e, centreKey) {
+    async function handleVisitLogRecordingDrop(e) {
       e.preventDefault();
-      e.currentTarget.classList.remove('drag-over');
-      await uploadCentreRecordingFiles(centreKey, e.dataTransfer?.files);
+      e.currentTarget.style.borderColor = 'transparent';
+      e.currentTarget.style.backgroundColor = '';
+      await uploadVisitLogRecordingFiles(e.dataTransfer?.files);
     }
 
-    function deleteCentreRecording(recordingId, centreKey) {
+    function deleteVisitLogRecording(recordingId) {
       document.getElementById('confirmTitle').textContent = 'Remove Recording';
-      document.getElementById('confirmMsg').textContent = 'Remove this recording? The visit it was logged under stays on the timeline. This cannot be undone.';
+      document.getElementById('confirmMsg').textContent = 'Remove this recording? This cannot be undone.';
       document.getElementById('confirmOkBtn').onclick = async () => {
         try {
           await fetch(`/api/centres/recordings/${recordingId}`, { method: 'DELETE' });
+          visitLogPendingRecordingIds = visitLogPendingRecordingIds.filter(id => id !== recordingId);
           toast('Recording removed', 'success');
-          if (currentCentreKey === centreKey) openCentre360(centreKey);
+          renderVisitLogAttachedRecordings();
         } catch { toast('Remove failed', 'error'); }
         closeConfirm();
       };
@@ -7830,20 +7871,71 @@
     // ── Visit logging modal ──────────────────────────────────────────
     let visitLogCentreKey = null;
     let visitLogEditingId = null;
+    // Recording ids uploaded during this modal session that aren't linked
+    // to a real visit yet (routes/centres.js's centre_recordings rows sit
+    // with visit_id = NULL until Save Visit actually runs) — sent along
+    // with the save so they get attached to whichever visit this turns
+    // into. Never auto-saved on its own; closing the modal without saving
+    // just leaves these unlinked (never shown anywhere, since nothing
+    // reads a recording with no visit_id).
+    let visitLogPendingRecordingIds = [];
+    // Most recent MEANINGFUL (Assigned/Completed, matching
+    // MEANINGFUL_BOOKING_STATUSES server-side) booking dated today or
+    // earlier for the centre currently open in this modal — drives both
+    // the "Last Booking Date of Centre" readout and the Check-in-after-
+    // Booking next-step rule. null when there isn't one.
+    let visitLogLastBookingDate = null;
 
+    // Reads LOCAL date components rather than round-tripping through
+    // toISOString() (which converts to UTC) — RT's own bookingDate comes
+    // back with no timezone suffix at all (e.g. "2026-07-14T00:00:00"),
+    // which the spec parses as local time, not UTC. Going via
+    // toISOString() would then re-express that local midnight in UTC and
+    // could shift it onto the previous calendar day. Reading local
+    // components instead is safe for every date this app ever produces
+    // (a AU-positive-offset team, and every other date here is always
+    // UTC-midnight-encoded from a plain "YYYY-MM-DD" input, which local
+    // components read back correctly too).
     function toDateInputValue(d) {
       if (!d) return '';
-      return new Date(d).toISOString().slice(0, 10);
+      const date = new Date(d);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function addDaysToDateInputValue(dateStr, days) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      d.setDate(d.getDate() + days);
+      return toDateInputValue(d);
     }
 
     async function openVisitLogModal(centreKey, visitId) {
       visitLogCentreKey = centreKey;
       visitLogEditingId = visitId || null;
-      document.getElementById('visitLogModalTitle').textContent = visitId ? 'Edit Visit' : 'Log a Visit';
-      ['visitLogPurpose', 'visitLogBrief', 'visitLogNotes', 'visitLogNextStep', 'visitLogNextStepDue'].forEach(id => { document.getElementById(id).value = ''; });
+      visitLogPendingRecordingIds = [];
+      document.getElementById('visitLogModalTitle').textContent = visitId ? 'Edit Call/Visit' : 'Log a Call/Visit';
+      ['visitLogBrief', 'visitLogNotes'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('visitLogStatus').value = 'planned';
       document.getElementById('visitLogOutcome').value = '';
+      document.getElementById('visitLogNextStep').value = '';
+      document.getElementById('visitLogNextStepDue').value = '';
       document.getElementById('visitLogDate').value = toDateInputValue(new Date());
+      document.getElementById('visitLogRecordingsList').innerHTML = '';
+      document.getElementById('visitLogLastBookingDate').textContent = '…';
+      visitLogLastBookingDate = null;
+
+      // Fire-and-forget alongside the visit fetch below — Last Booking
+      // Date/the Check-in-after-Booking rule need this regardless of
+      // whether an existing visit is also being loaded.
+      fetch(`/api/centres/${encodeURIComponent(centreKey)}/bookings`).then(r => r.json()).then(res => {
+        const meaningful = (res.bookings || []).filter(b => (b.statusId === 3 || b.statusId === 5) && b.bookingDate && new Date(b.bookingDate) <= new Date());
+        const latest = meaningful.sort((a, b) => new Date(b.bookingDate) - new Date(a.bookingDate))[0];
+        visitLogLastBookingDate = latest ? latest.bookingDate : null;
+        document.getElementById('visitLogLastBookingDate').textContent = latest ? fmtDate(latest.bookingDate) : 'No bookings on file';
+      }).catch(() => { document.getElementById('visitLogLastBookingDate').textContent = 'No bookings on file'; });
 
       if (visitId) {
         try {
@@ -7852,7 +7944,6 @@
           if (v) {
             document.getElementById('visitLogDate').value = toDateInputValue(v.visit_date);
             document.getElementById('visitLogStatus').value = v.status;
-            document.getElementById('visitLogPurpose').value = v.purpose || '';
             document.getElementById('visitLogBrief').value = v.pre_visit_brief || '';
             document.getElementById('visitLogOutcome').value = v.outcome || '';
             document.getElementById('visitLogNotes').value = v.notes || '';
@@ -7861,6 +7952,7 @@
           }
         } catch { /* fall back to a blank form rather than blocking the modal */ }
       }
+      renderVisitLogAttachedRecordings();
       document.getElementById('visitLogModal').classList.add('open');
     }
 
@@ -7868,6 +7960,18 @@
       document.getElementById('visitLogModal').classList.remove('open');
       visitLogCentreKey = null;
       visitLogEditingId = null;
+      visitLogPendingRecordingIds = [];
+    }
+
+    // Next Step dropdown -> due date auto-population. Still editable
+    // afterward, this is a starting point, not a lock.
+    function onVisitLogNextStepChange() {
+      const step = document.getElementById('visitLogNextStep').value;
+      const visitDate = document.getElementById('visitLogDate').value;
+      const dueInput = document.getElementById('visitLogNextStepDue');
+      if (step === 'Follow-up Call' && visitDate) dueInput.value = addDaysToDateInputValue(visitDate, 7);
+      else if (step === 'Follow-up Visit' && visitDate) dueInput.value = addDaysToDateInputValue(visitDate, 14);
+      else if (step === 'Check-in after Booking' && visitLogLastBookingDate) dueInput.value = addDaysToDateInputValue(toDateInputValue(visitLogLastBookingDate), 1);
     }
 
     async function submitVisitLog() {
@@ -7876,12 +7980,12 @@
       const body = {
         visitDate: new Date(visitDate).toISOString(),
         status: document.getElementById('visitLogStatus').value,
-        purpose: document.getElementById('visitLogPurpose').value.trim() || null,
         preVisitBrief: document.getElementById('visitLogBrief').value.trim() || null,
         outcome: document.getElementById('visitLogOutcome').value || null,
         notes: document.getElementById('visitLogNotes').value.trim() || null,
-        nextStep: document.getElementById('visitLogNextStep').value.trim() || null,
-        nextStepDueDate: document.getElementById('visitLogNextStepDue').value || null
+        nextStep: document.getElementById('visitLogNextStep').value || null,
+        nextStepDueDate: document.getElementById('visitLogNextStepDue').value || null,
+        recordingIds: visitLogPendingRecordingIds
       };
       const btn = document.getElementById('visitLogSubmitBtn');
       btn.disabled = true;

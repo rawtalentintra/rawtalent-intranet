@@ -11,6 +11,7 @@ const { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSE
 const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
+const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
@@ -383,22 +384,38 @@ router.get('/:centreKey/visits', async (req, res) => {
   }
 });
 
+// Attaches any recordings uploaded during this modal session (still
+// visit_id = NULL at that point — see POST /:centreKey/recordings) to the
+// visit that was just actually saved. Only fires once a person explicitly
+// clicks Save, not the moment a file lands in the dropzone — matches
+// "reachable by opening the specific visit they're attached to", never a
+// standalone list.
+async function linkRecordingsToVisit(centreKey, visitId, recordingIds) {
+  if (!Array.isArray(recordingIds) || !recordingIds.length) return;
+  const placeholders = recordingIds.map(() => '?').join(',');
+  await getDb().execute({
+    sql: `UPDATE centre_recordings SET visit_id = ? WHERE centre_key = ? AND id IN (${placeholders})`,
+    args: [visitId, centreKey, ...recordingIds]
+  });
+}
+
 router.post('/:centreKey/visits', async (req, res) => {
-  const { visitDate, status, purpose, preVisitBrief, outcome, notes, nextStep, nextStepDueDate } = req.body;
+  const { visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds } = req.body;
   if (!visitDate) return res.status(400).json({ error: 'visitDate is required' });
   try {
     const id = uuidv4();
     await getDb().execute({
       sql: `INSERT INTO centre_visits (
-              id, centre_key, visit_date, status, purpose, pre_visit_brief, outcome, notes,
+              id, centre_key, visit_date, status, pre_visit_brief, outcome, notes,
               next_step, next_step_due_date, created_by_email, created_by_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        id, req.params.centreKey, visitDate, status || 'planned', purpose || null, preVisitBrief || null,
+        id, req.params.centreKey, visitDate, status || 'planned', preVisitBrief || null,
         outcome || null, notes || null, nextStep || null, nextStepDueDate || null,
         req.user.email, req.user.name || req.user.email
       ]
     });
+    await linkRecordingsToVisit(req.params.centreKey, id, recordingIds);
     const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [id] })).rows[0];
     res.json(row);
   } catch (err) {
@@ -407,20 +424,21 @@ router.post('/:centreKey/visits', async (req, res) => {
 });
 
 router.put('/:centreKey/visits/:visitId', async (req, res) => {
-  const { visitDate, status, purpose, preVisitBrief, outcome, notes, nextStep, nextStepDueDate } = req.body;
+  const { visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds } = req.body;
   try {
     const result = await getDb().execute({
       sql: `UPDATE centre_visits SET
-              visit_date = coalesce(?, visit_date), status = coalesce(?, status), purpose = ?,
+              visit_date = coalesce(?, visit_date), status = coalesce(?, status),
               pre_visit_brief = ?, outcome = ?, notes = ?, next_step = ?, next_step_due_date = ?,
               updated_at = now()
             WHERE id = ? AND centre_key = ?`,
       args: [
-        visitDate || null, status || null, purpose || null, preVisitBrief || null, outcome || null,
+        visitDate || null, status || null, preVisitBrief || null, outcome || null,
         notes || null, nextStep || null, nextStepDueDate || null, req.params.visitId, req.params.centreKey
       ]
     });
     if (result.rowsAffected === 0) return res.status(404).json({ error: 'Visit not found' });
+    await linkRecordingsToVisit(req.params.centreKey, req.params.visitId, recordingIds);
     const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [req.params.visitId] })).rows[0];
     res.json(row);
   } catch (err) {
@@ -464,58 +482,49 @@ router.get('/:centreKey/recordings', async (req, res) => {
   }
 });
 
-// One implied centre_visits row per upload batch, not per file —
-// dragging a recording and its transcript together documents ONE call/
-// visit, not two. This is the actual "recognition that the centre was
-// called or visited" the feature exists for: attaching evidence of
-// contact is what logs it, rather than requiring a separate manual +Log
-// Visit on top. Uses the earliest transcript-detected timestamp found
-// across the batch when one exists; otherwise falls back to upload time,
-// same as a person logging a visit for "today" would.
+// Stores the file(s) and returns what could be detected from them —
+// timestamp, plus (new) an AI outcome/notes summary from whichever file
+// yielded usable text — but does NOT create or touch any centre_visits row
+// itself. Linking to a real visit only happens once the Log a Call/Visit
+// modal is actually saved (see linkRecordingsToVisit above), so an upload
+// is never silently attached to nothing the user reviewed.
 router.post('/:centreKey/recordings', requireRole('admin', 'super_admin', 'workforce_partner'), centreRecordingUpload.array('files', 10), async (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files provided' });
   try {
     const db = getDb();
-    const detections = await Promise.all(files.map(async file => ({
-      file,
-      detectedAt: detectTimestampFromText(await extractTextForDetection(file))
-    })));
+    const detections = await Promise.all(files.map(async file => {
+      const text = await extractTextForDetection(file);
+      return { file, text, detectedAt: detectTimestampFromText(text) };
+    }));
     const detectedTimestamps = detections.map(d => d.detectedAt).filter(Boolean).sort();
-    const usedDetection = detectedTimestamps.length > 0;
-    const visitDate = detectedTimestamps[0] || new Date().toISOString();
-    const filenames = files.map(f => f.originalname).join(', ');
+    const detectedAt = detectedTimestamps[0] || null;
 
-    const visitResult = await db.execute({
-      sql: `INSERT INTO centre_visits (
-              id, centre_key, visit_date, status, purpose, notes, created_by_email, created_by_name
-            ) VALUES (?, ?, ?, 'completed', ?, ?, ?, ?) RETURNING id`,
-      args: [
-        uuidv4(), req.params.centreKey, visitDate, 'Recording/transcript attached',
-        `Automatically logged from an attached recording/transcript (${filenames}).` +
-          (usedDetection ? ' Date/time detected from the file content.' : ' No timestamp found in the file(s) — using the upload time.'),
-        req.user.email, req.user.name || req.user.email
-      ]
-    });
-    const visitId = visitResult.rows[0].id;
+    // First file with usable text drives the AI summary — same "best
+    // effort, never blocks the upload" posture as timestamp detection.
+    const { centres } = await getCentresAndBookings();
+    const centre = centres.find(c => c.centreKey === req.params.centreKey);
+    const firstTextFile = detections.find(d => d.text && d.text.trim().length >= 20);
+    const { outcome, notesSummary } = firstTextFile
+      ? await analyzeVisitFromTranscript(firstTextFile.text, centre?.name)
+      : { outcome: null, notesSummary: null };
 
     await ensureBucket(BUCKETS.centreRecordings);
     const saved = [];
-    for (const { file, detectedAt } of detections) {
+    for (const { file, detectedAt: fileDetectedAt } of detections) {
       const result = await db.execute({
-        sql: `INSERT INTO centre_recordings (centre_key, filename, mimetype, filesize, detected_at, visit_id, uploaded_by_email, uploaded_by_name)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        args: [req.params.centreKey, file.originalname, file.mimetype, file.size, detectedAt, visitId, req.user.email, req.user.name || req.user.email]
+        sql: `INSERT INTO centre_recordings (centre_key, filename, mimetype, filesize, detected_at, uploaded_by_email, uploaded_by_name)
+              VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        args: [req.params.centreKey, file.originalname, file.mimetype, file.size, fileDetectedAt, req.user.email, req.user.name || req.user.email]
       });
       const recordingId = result.rows[0].id;
       const storagePath = `${req.params.centreKey}/${recordingId}.${extForMimetype(file.mimetype)}`;
       await uploadBuffer(BUCKETS.centreRecordings, storagePath, file.buffer, file.mimetype);
       await db.execute({ sql: 'UPDATE centre_recordings SET storage_path = ? WHERE id = ?', args: [storagePath, recordingId] });
-      saved.push({ id: recordingId, filename: file.originalname, detectedAt });
+      saved.push({ id: recordingId, filename: file.originalname, detectedAt: fileDetectedAt });
     }
 
-    const visitRow = (await db.execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [visitId] })).rows[0];
-    res.json({ recordings: saved, visit: visitRow });
+    res.json({ recordings: saved, detectedAt, outcome, notesSummary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -982,7 +982,7 @@ CREATE TABLE IF NOT EXISTS centre_visits (
   id TEXT PRIMARY KEY,
   centre_key TEXT NOT NULL,
   visit_date TIMESTAMPTZ NOT NULL,
-  status TEXT NOT NULL DEFAULT 'planned', -- 'planned' | 'completed' | 'cancelled'
+  status TEXT NOT NULL DEFAULT 'planned', -- 'planned' | 'completed' | 'rescheduled' — shown to users as "Planned"/"Called / Visited"/"Rescheduled"; 'completed' keeps its original DB value (still an accurate internal name) even though its label changed
   purpose TEXT,
   pre_visit_brief TEXT,
   outcome TEXT, -- 'positive' | 'neutral' | 'concern' | 'issue_raised'
