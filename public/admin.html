@@ -10191,10 +10191,10 @@
 
       // Mirrors the server-side auto-N/A rule in PUT /api/leads/:id (see
       // routes/leads.js) right in the editor, not just after a save+
-      // reload round trip — marking a visit done should visibly settle
-      // Lead Called immediately, not leave it looking untouched until
-      // the modal is closed and reopened.
-      if (fieldKey === 'centre_visited' && status === 'done') {
+      // reload round trip — a visit that's done OR already scheduled
+      // should visibly settle Lead Called immediately, not leave it
+      // looking untouched until the modal is closed and reopened.
+      if (fieldKey === 'centre_visited' && (status === 'done' || status === 'scheduled')) {
         const calledSelect = document.getElementById('lead_lead_called_status');
         if (calledSelect && calledSelect.value === 'to_schedule') {
           calledSelect.value = 'n_a';
