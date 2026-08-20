@@ -92,6 +92,14 @@ function scoreCandidate(lead, client, location) {
     rtLocationId: location.clientsLocationId,
     clientName: client.name || client.nickName || 'Unnamed client',
     locationLabel: [location.suburb, location.state].filter(Boolean).join(', ') || 'No address on file',
+    // Locations don't carry their own creation date in RT's API (verified
+    // against real data) — only the parent Client does. Used by
+    // leadAutoSignService to tell "this RT centre was created because this
+    // lead just converted" (client.createdDate after the lead's own
+    // created_at) apart from "this lead just happens to match a
+    // pre-existing centre" (createdDate predates the lead) — the latter
+    // stays a manual "Likely exists" warning, never auto-signed.
+    createdDate: client.createdDate || null,
     score,
     confident,
     reasons

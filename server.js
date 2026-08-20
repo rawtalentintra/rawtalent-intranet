@@ -13,6 +13,7 @@ const dubberService = require('./services/dubberService');
 const calendarSync = require('./services/leadCalendarSyncService');
 const rtCandidatesSync = require('./services/rtCandidatesSyncService');
 const rtApiService = require('./services/rtApiReportService');
+const leadAutoSignService = require('./services/leadAutoSignService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -184,6 +185,17 @@ async function start() {
     setInterval(() => {
       maybeRunNightlyCandidatesSync().catch(err => console.error('Nightly RT candidates sync check error:', err.message));
     }, 30 * 60 * 1000);
+
+    // Catches a lead the moment its centre actually gets created in RT
+    // (a Workforce Partner converting it) instead of waiting on someone to
+    // remember to flip Profile Created by hand. Runs once on boot too, not
+    // just the interval, so a deploy doesn't leave a same-day conversion
+    // waiting up to 15 minutes for the first tick.
+    const runLeadAutoSignCheck = () => leadAutoSignService.checkAndAutoSignLeads()
+      .then(({ checked, signed }) => { if (signed) console.log(`Lead auto-sign: ${signed} of ${checked} pending leads matched a newly-created RT centre.`); })
+      .catch(err => console.error('Lead auto-sign check error:', err.message));
+    runLeadAutoSignCheck();
+    setInterval(runLeadAutoSignCheck, 15 * 60 * 1000);
   }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
