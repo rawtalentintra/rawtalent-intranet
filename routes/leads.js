@@ -384,6 +384,29 @@ router.patch('/:id/closed', requireRole('admin', 'super_admin', 'workforce_partn
   }
 });
 
+// Clears the "needs review" state on an auto-signed lead once a Workforce
+// Partner has actually looked at it and followed up (or confirmed there's
+// nothing left to do) — auto_signed itself stays true forever as a record
+// of how the lead was signed, this just tracks that a human has seen it.
+// Own endpoint rather than folded into the generic PUT above since
+// reviewed_at/by need to come from the server session, same reasoning as
+// closed_at/closed_by_email on PATCH /:id/closed.
+router.patch('/:id/acknowledge-auto-sign', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const existing = await getDb().execute({ sql: 'SELECT id, auto_signed FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+    if (!existing.rows[0].auto_signed) return res.status(400).json({ error: 'This lead was not auto-signed' });
+    await getDb().execute({
+      sql: 'UPDATE leads SET auto_signed_reviewed_at = now(), auto_signed_reviewed_by = ?, updated_at = now() WHERE id = ?',
+      args: [req.user.email, req.params.id]
+    });
+    const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Deleting a lead outright (not just marking a status) is destructive and
 // affects Sales Dashboard/WFP Dashboard totals, so it's kept to the single
 // super_admin account rather than opened to all admins.

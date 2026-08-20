@@ -923,6 +923,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_rt_location_id ON leads(rt_location_
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_by_email TEXT;
 
+-- Set by services/leadAutoSignService.js when it signs a lead on its own,
+-- from an RT centre creation, with nobody having touched the lead. Drives
+-- a banner/badge in the UI telling the Workforce Partner this was a
+-- machine-detected win, not something they logged themselves — they still
+-- need to go fill in Lead Called/Centre Visited/recording/notes for real,
+-- since the auto-signer only ever sets those to N/A as a safe default, not
+-- because a call or visit genuinely didn't happen. auto_signed itself is
+-- permanent (the badge always shows how a lead was signed); the
+-- reviewed_at/by pair is what clears the "needs attention" state once a
+-- Workforce Partner has actually looked at it.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS auto_signed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS auto_signed_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS auto_signed_reviewed_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS auto_signed_reviewed_by CITEXT;
+
 -- A running thread rather than a single overwritable field, since more
 -- than one person (a consultant, an admin, eventually a Workforce Partner)
 -- may add notes on the same lead over time — a single field would let one

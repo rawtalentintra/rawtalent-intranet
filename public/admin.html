@@ -6101,6 +6101,7 @@
             ${escHtml(l.centre_name)}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
             ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
+            ${l.auto_signed && !l.auto_signed_reviewed_at ? `<span title="HeartBeat automatically marked this Profile Created from RT data — open it to review and fill in Lead Called/Centre Visited/recording/notes" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#047857;background:#d1fae5;padding:1px 6px;border-radius:20px;vertical-align:middle">🤖 NEEDS REVIEW</span>` : ''}
           </td>
           <td>${renderLeadExistingCentreCell(l)}</td>
           <td>${escHtml(l.suburb || '—')}</td>
@@ -10252,6 +10253,24 @@
       document.getElementById('leadAssigneeSelect').style.display = '';
     }
 
+    // Clears the auto-signed "needs review" banner/table badge once a
+    // Workforce Partner has actually looked at the lead — auto_signed
+    // itself stays true forever (the banner still shows how it was
+    // signed), only reviewed_at/by change, so the history is never lost.
+    async function acknowledgeAutoSignedLead() {
+      if (!currentLeadDetailId) return;
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/acknowledge-auto-sign`, { method: 'PATCH' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+        const idx = allLeads.findIndex(l => l.id === currentLeadDetailId);
+        if (idx !== -1) allLeads[idx] = data;
+        toast('Marked as reviewed', 'success');
+        openLeadDetail(currentLeadDetailId);
+        filterLeadsTable();
+      } catch { toast('Network error', 'error'); }
+    }
+
     function openLeadDetail(id) {
       const lead = allLeads.find(l => l.id === id);
       if (!lead) return;
@@ -10296,7 +10315,27 @@
           <a href="/admin.html?openCentre=${encodeURIComponent(existingMatchCentreKey)}" target="_blank" rel="noopener" style="color:var(--orange);font-weight:600;text-decoration:underline">View this centre in My Centres (opens in a new tab) →</a>
         </div>` : '';
 
+      // HeartBeat signed this lead on its own (leadAutoSignService), from
+      // spotting a matching centre appear in RT — nobody logged this as a
+      // win by hand. auto_signed stays true forever as a record of how it
+      // was signed; only reviewed_at/by change once a Workforce Partner
+      // has actually looked. The auto-signer only ever sets Lead
+      // Called/Centre Visited to N/A as a safe placeholder, never because
+      // a call or visit genuinely happened, so this always nudges toward
+      // filling those in for real, plus a recording/notes, not just
+      // toward looking at the lead.
+      const autoSignedBanner = !lead.auto_signed ? '' : lead.auto_signed_reviewed_at ? `
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:#166534">
+          🤖 <strong>Auto-detected as signed</strong> ${lead.auto_signed_at ? 'on ' + escHtml(fmtDate(lead.auto_signed_at)) + ' ' : ''}— HeartBeat matched this centre's creation in RT. Reviewed by ${escHtml(lead.auto_signed_reviewed_by || 'a teammate')} on ${escHtml(fmtDate(lead.auto_signed_reviewed_at))}.
+        </div>` : `
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#166534">
+          <div>🤖🎉 <strong>Auto-detected as signed — nice work!</strong> HeartBeat found a matching centre created in RT${lead.auto_signed_at ? ' on ' + escHtml(fmtDate(lead.auto_signed_at)) : ''} and marked Profile Created automatically. Nobody's logged this win by hand yet.</div>
+          <div style="margin-top:6px">Please still check and fill in: Lead Called, Centre Visited, a site visit recording, and notes — those were only auto-set to N/A as a placeholder, not because they actually happened.</div>
+          <button type="button" class="btn-secondary" style="margin-top:8px;padding:5px 12px;font-size:12px" onclick="acknowledgeAutoSignedLead()">✅ Mark as reviewed</button>
+        </div>`;
+
       document.getElementById('leadDetailBody').innerHTML = `
+        ${autoSignedBanner}
         ${existingMatchBanner}
         <div class="lead-group-label">Centre</div>
         ${row('Address', formatLeadAddress(lead))}

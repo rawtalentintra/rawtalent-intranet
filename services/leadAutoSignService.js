@@ -47,6 +47,7 @@ async function checkAndAutoSignLeads() {
               lead_called_status = CASE WHEN lead_called_status = 'to_schedule' THEN 'n_a' ELSE lead_called_status END,
               centre_visited_status = CASE WHEN centre_visited_status = 'to_schedule' THEN 'n_a' ELSE centre_visited_status END,
               closed_at = COALESCE(closed_at, ?), closed_by_email = COALESCE(closed_by_email, ?),
+              auto_signed = true, auto_signed_at = now(),
               updated_at = now()
             WHERE id = ?`,
       args: [signedAtIso, signedAtIso, 'system-auto-detect@rawtalent.com.au', lead.id]
