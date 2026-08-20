@@ -13,6 +13,7 @@ const projectFileUpload = multer({ storage: multer.memoryStorage(), limits: { fi
 router.use(requireAdmin);
 
 const STATUSES = new Set(['planning', 'on_track', 'at_risk', 'off_track', 'on_hold', 'completed']);
+const PRIORITY_OVERRIDES = new Set(['top', 'high', 'normal', 'low']);
 
 router.get('/', async (req, res) => {
   try {
@@ -156,12 +157,16 @@ const PROJECT_FIELD_COLUMNS = {
   name: 'name', icon: 'icon', color: 'color', description: 'description',
   status: 'status', ownerName: 'owner_name', ownerEmail: 'owner_email',
   startDate: 'start_date', targetDate: 'target_date',
-  successCriteria: 'success_criteria', sopContent: 'sop_content'
+  successCriteria: 'success_criteria', sopContent: 'sop_content',
+  priorityOverride: 'priority_override'
 };
 
 router.put('/:id', async (req, res) => {
   const body = req.body || {};
   if (body.status && !STATUSES.has(body.status)) return res.status(400).json({ error: 'Invalid status' });
+  // priorityOverride is nullable (null/'' clears back to auto), so only
+  // validate when a non-empty value was actually sent.
+  if (body.priorityOverride && !PRIORITY_OVERRIDES.has(body.priorityOverride)) return res.status(400).json({ error: 'Invalid priority' });
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT id FROM projects WHERE id = ?', args: [req.params.id] });

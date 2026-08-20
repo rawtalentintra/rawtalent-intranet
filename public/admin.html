@@ -1319,6 +1319,24 @@
         </div>
       </div>
 
+      <!-- Project Priority Popover — same lightweight pattern as the Lead
+           Status Popover above, triggered by clicking a project's priority
+           badge instead of opening the full edit form for one field. -->
+      <div id="projectPriorityPopover" class="status-popover" style="display:none">
+        <div class="status-popover-label">Priority</div>
+        <select id="projectPriorityPopoverSelect" class="form-control">
+          <option value="">Auto (by deadline)</option>
+          <option value="top">🔥 Top Priority</option>
+          <option value="high">🟠 High Priority</option>
+          <option value="normal">Normal</option>
+          <option value="low">🔽 Low Priority</option>
+        </select>
+        <div class="status-popover-actions">
+          <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="closeProjectPriorityPopover()">Cancel</button>
+          <button class="btn-add" style="padding:3px 9px;font-size:10.5px" onclick="saveProjectPriorityPopover()">Save</button>
+        </div>
+      </div>
+
       <!-- Lead Detail Modal -->
       <div class="modal-overlay" id="leadDetailModal" onclick="if(event.target===this)closeLeadDetailModal()">
         <div class="modal" style="max-width:560px">
@@ -2860,6 +2878,17 @@
               <option value="on_hold">On Hold</option>
               <option value="completed">Completed</option>
             </select>
+          </div>
+          <div class="form-group-modal" style="flex:1">
+            <label class="form-label-modal">Priority</label>
+            <select id="projectPriority" class="form-control">
+              <option value="">Auto (by deadline)</option>
+              <option value="top">🔥 Top Priority</option>
+              <option value="high">🟠 High Priority</option>
+              <option value="normal">Normal</option>
+              <option value="low">🔽 Low Priority</option>
+            </select>
+            <div class="form-hint">Overrides the dashboard's deadline-based badge — leave on Auto unless this needs to jump (or drop) the queue.</div>
           </div>
         </div>
         <div style="display:flex;gap:12px">
@@ -6214,6 +6243,57 @@
       const pop = document.getElementById('leadStatusPopover');
       if (pop && pop.style.display === 'block' && !pop.contains(evt.target) && !evt.target.classList.contains('lead-badge')) {
         closeLeadStatusPopover();
+      }
+    });
+
+    let projectPriorityPopoverId = null;
+
+    function openProjectPriorityPopover(evt, projectId) {
+      evt.stopPropagation();
+      const p = allProjects.find(x => x.id === projectId);
+      if (!p) return;
+      projectPriorityPopoverId = projectId;
+      document.getElementById('projectPriorityPopoverSelect').value = p.priority_override || '';
+      const pop = document.getElementById('projectPriorityPopover');
+      pop.style.display = 'block';
+      const rect = evt.currentTarget.getBoundingClientRect();
+      // Same .status-popover-inside-.admin-layout positioning math as
+      // openLeadStatusPopover — see its comment for why window.scrollX/Y
+      // would double-count the layout's own offset from the viewport top.
+      const containerRect = document.querySelector('.admin-layout').getBoundingClientRect();
+      const top = rect.bottom - containerRect.top + 4;
+      let left = rect.left - containerRect.left;
+      const maxLeft = containerRect.width - 184;
+      if (left > maxLeft) left = maxLeft;
+      pop.style.top = top + 'px';
+      pop.style.left = left + 'px';
+    }
+
+    function closeProjectPriorityPopover() {
+      document.getElementById('projectPriorityPopover').style.display = 'none';
+      projectPriorityPopoverId = null;
+    }
+
+    async function saveProjectPriorityPopover() {
+      if (!projectPriorityPopoverId) return;
+      const value = document.getElementById('projectPriorityPopoverSelect').value;
+      try {
+        const res = await fetch(`/api/projects/${projectPriorityPopoverId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ priorityOverride: value || null })
+        });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Failed to update priority', 'error'); return; }
+        const idx = allProjects.findIndex(p => p.id === projectPriorityPopoverId);
+        if (idx !== -1) allProjects[idx].priority_override = value || null;
+        closeProjectPriorityPopover();
+        renderProjectsGrid();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    document.addEventListener('click', (evt) => {
+      const pop = document.getElementById('projectPriorityPopover');
+      if (pop && pop.style.display === 'block' && !pop.contains(evt.target) && !evt.target.classList.contains('project-priority-badge')) {
+        closeProjectPriorityPopover();
       }
     });
 
@@ -11070,18 +11150,26 @@
       if (e.target === e.currentTarget) closeMilestoneFormModal();
     });
 
-    // Deadline-driven priority, not a manually-set field — the ask was
-    // literally "sort by end date, earliest first, with an indicator on
-    // which to prioritise", so rank is derived straight from target_date
-    // rather than adding a field someone has to remember to maintain.
-    // Only projects still actually in flight are eligible (completed/
-    // on_hold shouldn't show up as "urgent"), and only among whatever's
-    // currently visible under the active status/owner filters — ranking
-    // against projects you've filtered out wouldn't mean anything to what
-    // you're looking at.
+    // Deadline-driven by default (sort by end date, earliest first), but
+    // editable per project via priority_override — click the badge (or set
+    // it in the project form) to pin a project's priority regardless of
+    // what its deadline alone would suggest. NULL/'auto' keeps the old
+    // behaviour exactly.
+    const PROJECT_PRIORITY_META = {
+      top:    { label: '🔥 Top Priority',  bg: '#fef3c7', color: '#b45309' },
+      high:   { label: '🟠 High Priority', bg: 'rgba(245,158,11,.12)', color: '#b45309' },
+      low:    { label: '🔽 Low Priority',  bg: 'var(--gray-100)', color: 'var(--gray-500)' }
+    };
+    const PROJECT_PRIORITY_OVERDUE_META = { label: '⚠️ Overdue', bg: '#fef2f2', color: '#c0392b' };
+
+    // Auto rank only considers projects still actually in flight (not
+    // completed/on_hold) AND not already manually overridden — an
+    // overridden project has already had its priority decided by a
+    // person, so it shouldn't also consume/skew the auto ranking that
+    // decides everyone else's badge.
     function computeProjectPriorityRanks(list) {
       const eligible = list
-        .filter(p => p.target_date && p.status !== 'completed' && p.status !== 'on_hold')
+        .filter(p => p.target_date && p.status !== 'completed' && p.status !== 'on_hold' && !p.priority_override)
         .slice()
         .sort((a, b) => new Date(a.target_date) - new Date(b.target_date));
       const rankById = new Map();
@@ -11089,19 +11177,22 @@
       return rankById;
     }
 
-    function projectPriorityBadge(p, rank) {
+    // tier: 0 = most urgent .. 3 = least, used for both sort order and
+    // which badge (if any) shows. meta: null means no badge — deliberately
+    // "normal" (manual) or nothing notable (auto, mid-pack or no date).
+    function effectiveProjectPriority(p, autoRank) {
+      const ov = p.priority_override;
+      if (ov === 'top')    return { tier: 0, meta: PROJECT_PRIORITY_META.top,  manual: true };
+      if (ov === 'high')   return { tier: 1, meta: PROJECT_PRIORITY_META.high, manual: true };
+      if (ov === 'low')    return { tier: 3, meta: PROJECT_PRIORITY_META.low,  manual: true };
+      if (ov === 'normal') return { tier: 2, meta: null, manual: true };
+      if (p.status === 'completed' || p.status === 'on_hold') return { tier: 2, meta: null, manual: false };
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-      const isOverdue = p.target_date && p.status !== 'completed' && p.status !== 'on_hold' && new Date(p.target_date) < todayStart;
-      if (isOverdue) {
-        return `<span style="font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fef2f2;color:#c0392b;white-space:nowrap" title="Target date has already passed">⚠️ Overdue</span>`;
-      }
-      if (rank === 0) {
-        return `<span style="font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fef3c7;color:#b45309;white-space:nowrap" title="Earliest target date of any active project">🔥 Top Priority</span>`;
-      }
-      if (rank === 1 || rank === 2) {
-        return `<span style="font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(245,158,11,.12);color:#b45309;white-space:nowrap" title="One of the next-soonest target dates">🟠 High Priority</span>`;
-      }
-      return '';
+      if (p.target_date && new Date(p.target_date) < todayStart) return { tier: 0, meta: PROJECT_PRIORITY_OVERDUE_META, manual: false };
+      if (autoRank === 0) return { tier: 0, meta: PROJECT_PRIORITY_META.top, manual: false };
+      if (autoRank === 1 || autoRank === 2) return { tier: 1, meta: PROJECT_PRIORITY_META.high, manual: false };
+      if (!p.target_date) return { tier: 3, meta: null, manual: false };
+      return { tier: 2, meta: null, manual: false };
     }
 
     function renderProjectsGrid() {
@@ -11116,15 +11207,19 @@
         body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
         return;
       }
-      // Earliest target date first — projects with no target date sink to
-      // the bottom (nothing to be urgent about) rather than sorting as
-      // "soonest" by defaulting to some fake date.
+      const priorityRanks = computeProjectPriorityRanks(filtered);
+      const effectiveById = new Map(filtered.map(p => [p.id, effectiveProjectPriority(p, priorityRanks.get(p.id))]));
+      // Priority tier first (a manual/auto Top or Overdue project always
+      // beats a merely-soon one), earliest target date as the tiebreaker
+      // within a tier — projects with no target date sink to the bottom of
+      // their tier rather than sorting as "soonest" via a fake date.
       filtered = filtered.slice().sort((a, b) => {
+        const ta = effectiveById.get(a.id).tier, tb = effectiveById.get(b.id).tier;
+        if (ta !== tb) return ta - tb;
         const aT = a.target_date ? new Date(a.target_date).getTime() : Infinity;
         const bT = b.target_date ? new Date(b.target_date).getTime() : Infinity;
         return aT - bT;
       });
-      const priorityRanks = computeProjectPriorityRanks(filtered);
       body.innerHTML = filtered.map(p => {
         const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
         const pct = projectTimelineProgress(p);
@@ -11132,7 +11227,13 @@
           ? `<div style="margin-bottom:3px;display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--gray-400)"><span>${fmtDate(p.start_date)}</span><span>${fmtDate(p.target_date)}</span></div>
              <div style="height:4px;background:var(--gray-100);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${meta.color};border-radius:2px"></div></div>`
           : `<span style="font-size:11px;color:var(--gray-400)">Not set</span>`;
-        const priorityBadgeHtml = projectPriorityBadge(p, priorityRanks.get(p.id));
+        const eff = effectiveById.get(p.id);
+        // Every row's priority is clickable, even ones with no badge right
+        // now — that's the only way to discover you *can* set one, not
+        // just read what got auto-computed.
+        const priorityBadgeHtml = eff.meta
+          ? `<span class="project-priority-badge" onclick="event.stopPropagation();openProjectPriorityPopover(event,'${p.id}')" style="cursor:pointer;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:${eff.meta.bg};color:${eff.meta.color};white-space:nowrap" title="${eff.manual ? 'Set manually — click to change' : 'Click to override'}">${eff.meta.label}</span>`
+          : `<span class="project-priority-badge" onclick="event.stopPropagation();openProjectPriorityPopover(event,'${p.id}')" style="cursor:pointer;font-size:9.5px;font-weight:600;padding:2px 7px;border-radius:20px;color:var(--gray-300);border:1px dashed var(--gray-200);white-space:nowrap" title="Set priority">+ Priority</span>`;
         return `
         <tr style="cursor:pointer" onclick="openProjectDetail('${p.id}')">
           <td>
@@ -11141,7 +11242,7 @@
               <span style="font-size:16px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
               <div style="min-width:0">
                 <div style="display:flex;align-items:center;gap:6px">
-                  <div style="font-weight:700;color:var(--navy);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:${priorityBadgeHtml ? 190 : 280}px" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
+                  <div style="font-weight:700;color:var(--navy);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:${eff.meta ? 190 : 240}px" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
                   ${priorityBadgeHtml}
                 </div>
                 <div style="font-size:10.5px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(stripHtmlToText(p.description) || 'No description yet')}</div>
@@ -11337,6 +11438,7 @@
       document.getElementById('projectColor').value = p?.color || '#3d6fff';
       document.getElementById('projectName').value = p?.name || '';
       document.getElementById('projectStatus').value = p?.status || 'planning';
+      document.getElementById('projectPriority').value = p?.priority_override || '';
       document.getElementById('projectOwnerName').value = p?.owner_name || '';
       document.getElementById('projectOwnerEmail').value = p?.owner_email || '';
       document.getElementById('projectStartDate').value = p?.start_date ? String(p.start_date).slice(0, 10) : '';
@@ -11392,6 +11494,7 @@
         color: document.getElementById('projectColor').value,
         description: projectDescRTE ? projectDescRTE.value : '',
         status: document.getElementById('projectStatus').value,
+        priorityOverride: document.getElementById('projectPriority').value || null,
         ownerName: document.getElementById('projectOwnerName').value.trim(),
         ownerEmail: document.getElementById('projectOwnerEmail').value.trim(),
         startDate: document.getElementById('projectStartDate').value || null,

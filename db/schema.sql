@@ -591,6 +591,14 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Manual override for the Projects dashboard's priority badge/sort, which
+-- otherwise computes purely from target_date (soonest deadline = most
+-- urgent). NULL = auto; 'top'/'high'/'normal'/'low' pins the badge (and
+-- sort position) regardless of what the deadline alone would suggest —
+-- e.g. a project with no near-term deadline that still needs to jump the
+-- queue, or a soon-due one that's actually fine to leave be.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS priority_override TEXT;
+
 CREATE TABLE IF NOT EXISTS project_files (
   id SERIAL PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
