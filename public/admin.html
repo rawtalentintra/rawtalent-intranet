@@ -3604,7 +3604,20 @@
       // their spot in the Leads modal they came from. Overrides whichever
       // section the block above just landed on.
       const openCentreKey = new URLSearchParams(location.search).get('openCentre');
-      if (openCentreKey) goToCentre360(openCentreKey);
+      if (openCentreKey) {
+        goToCentre360(openCentreKey);
+        // Strip the param right after consuming it — otherwise it stays in
+        // this tab's URL forever (this is a plain reload, not client-side
+        // routing, so nothing else ever clears it), and every subsequent
+        // refresh of this same tab would re-force My Centres/this centre
+        // again regardless of whatever section you'd actually navigated to
+        // since. That was reported live as "refresh keeps sending me to
+        // another page" — goToCentre360() also persists 'my-centres' as
+        // the saved section (same as any normal navigation there), so
+        // without this the very first visit to a deep-linked centre
+        // permanently hijacked every future refresh of that tab.
+        history.replaceState(null, '', location.pathname);
+      }
     }
 
     // The small set of admin-panel sections each restricted role can
