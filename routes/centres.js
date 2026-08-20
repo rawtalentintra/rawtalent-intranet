@@ -78,6 +78,16 @@ async function getHiddenCentreKeys() {
   return new Set(rows.map(r => r.centre_key));
 }
 
+// Same "tiny table, queried fresh each time" reasoning as getHiddenCentreKeys
+// above — a manual reassignment should be reflected immediately, not wait
+// out a cache window.
+async function getCentrePartnerAssignments() {
+  const rows = (await getDb().execute('SELECT centre_key, workforce_partner FROM centre_partner_assignments')).rows;
+  const byKey = {};
+  for (const row of rows) byKey[row.centre_key] = row.workforce_partner;
+  return byKey;
+}
+
 async function visitsByCentreKey(centreKeys) {
   if (!centreKeys.length) return {};
   const placeholders = centreKeys.map(() => '?').join(',');
@@ -187,7 +197,11 @@ router.get('/', async (req, res) => {
     const hidden = await getHiddenCentreKeys();
     const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
-    const withHealth = visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
+    const assignments = await getCentrePartnerAssignments();
+    const withHealth = visible.map(c => ({
+      ...healthForCentre(c, bookings, visits[c.centreKey] || []),
+      assignedWorkforcePartner: assignments[c.centreKey] || null
+    }));
     res.json(withHealth);
   } catch (err) {
     res.status(502).json({ error: err.message });
@@ -232,7 +246,11 @@ router.get('/:centreKey', async (req, res) => {
 
     const { bookings } = await getCentresAndBookings();
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
-    res.json(healthForCentre(centre, bookings, visits));
+    const assignments = await getCentrePartnerAssignments();
+    res.json({
+      ...healthForCentre(centre, bookings, visits),
+      assignedWorkforcePartner: assignments[centre.centreKey] || null
+    });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -254,6 +272,32 @@ router.delete('/:centreKey', requireRole('admin', 'super_admin'), async (req, re
       args: [req.params.centreKey, req.body?.reason || null, req.user.email, req.user.name || req.user.email]
     });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual per-centre Workforce Partner assignment — same admin/super_admin
+// gate Leads' own "Change Workforce Partner" control already uses. Body
+// `{ workforcePartner }` — omit/null to unassign back to "everyone sees
+// it" (My Centres' default, unfiltered-by-partner view).
+router.put('/:centreKey/assign-partner', requireRole('admin', 'super_admin'), async (req, res) => {
+  const parsed = parseCentreKey(req.params.centreKey);
+  if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
+  try {
+    const partner = req.body?.workforcePartner || null;
+    if (partner) {
+      await getDb().execute({
+        sql: `INSERT INTO centre_partner_assignments (centre_key, workforce_partner, assigned_by_email, assigned_by_name)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT (centre_key) DO UPDATE SET workforce_partner = excluded.workforce_partner,
+                assigned_by_email = excluded.assigned_by_email, assigned_by_name = excluded.assigned_by_name, assigned_at = now()`,
+        args: [req.params.centreKey, partner, req.user.email, req.user.name || req.user.email]
+      });
+    } else {
+      await getDb().execute({ sql: 'DELETE FROM centre_partner_assignments WHERE centre_key = ?', args: [req.params.centreKey] });
+    }
+    res.json({ success: true, assignedWorkforcePartner: partner });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

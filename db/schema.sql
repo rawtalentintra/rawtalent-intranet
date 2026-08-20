@@ -1041,6 +1041,23 @@ CREATE TABLE IF NOT EXISTS hidden_centres (
   hidden_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Manual per-centre assignment to a Workforce Partner — My Centres isn't
+-- split by territory otherwise (see the comment on that section's page
+-- header in admin.html), but Liam (RawTalent's owner, no login of his own)
+-- wanted his own filtered view of centres he personally visits, alongside
+-- Justine/Gwen's existing state-based VIC/SA toggle. Modeled directly on
+-- hidden_centres above — tiny, queried fresh each time, reversible.
+-- workforce_partner is free text, same permissive convention as
+-- leads.assigned_workforce_partner — the frontend dropdown (built from
+-- WORKFORCE_PARTNER_OPTIONS) is what actually constrains the choices.
+CREATE TABLE IF NOT EXISTS centre_partner_assignments (
+  centre_key TEXT PRIMARY KEY,
+  workforce_partner TEXT NOT NULL,
+  assigned_by_email CITEXT,
+  assigned_by_name TEXT,
+  assigned_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Territory Strategy (Micropods demand overlay) — RT client/location
 -- records have no lat/lng of their own (unlike rt_candidates_cache's
 -- addresses, which RT pre-geocodes — see routes/micropods.js), so centres
