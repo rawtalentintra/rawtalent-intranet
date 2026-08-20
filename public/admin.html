@@ -10370,7 +10370,7 @@
           <div class="form-group-modal">
             ${currentUserRole === 'workforce_partner' ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:5px">These are your own notes on this centre — add as many as you can, any time something's worth remembering.</div>` : ''}
             <textarea id="leadNoteInput" class="form-control" rows="2" placeholder="${currentUserRole === 'workforce_partner' ? 'Add your own notes — anything worth having on hand for your next visit…' : 'Add notes — anything helpful for centre calls, visits, or follow-up. You can add as many notes as you can.'}"></textarea>
-            <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote()">+ Add Note</button>
+            <button class="btn-secondary" style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="addLeadNote(this)">+ Add Note</button>
           </div>
         `}`;
       document.getElementById('leadDetailModal').classList.add('open');
@@ -10459,11 +10459,19 @@
       document.getElementById('confirmModal').classList.add('open');
     }
 
-    async function addLeadNote() {
+    // Two real bugs confirmed live before this fix: (1) success was
+    // completely silent — no toast, and the new note lands ABOVE the
+    // textarea a person is looking at, so there was no visible sign the
+    // click did anything; (2) nothing disabled the button while the
+    // request was in flight, so a rapid double-click (the exact thing an
+    // unresponsive-looking button invites) created two identical notes —
+    // reproduced this directly, confirmed as real duplicate rows.
+    async function addLeadNote(btn) {
       if (!currentLeadDetailId) return;
       const input = document.getElementById('leadNoteInput');
       const note = input.value.trim();
       if (!note) return;
+      if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
       try {
         const res = await fetch(`/api/leads/${currentLeadDetailId}/notes`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -10472,8 +10480,10 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
         input.value = '';
+        toast('Note added', 'success');
         loadLeadNotes(currentLeadDetailId);
       } catch { toast('Network error', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = '+ Add Note'; } }
     }
 
     async function deleteLeadNote(noteId) {
