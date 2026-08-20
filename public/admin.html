@@ -1235,7 +1235,10 @@
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
             </select>
-            <span id="routeSelectedCount" style="margin-left:auto;font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);margin-left:auto;align-self:center">
+              <input type="checkbox" id="routeIncludeDueCentres" checked onchange="filterRoutePlannerLeads()"> Include due centres
+            </label>
+            <span id="routeSelectedCount" style="font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
@@ -7984,7 +7987,8 @@
     // Smart Routing (centre visit route planner)
     // ══════════════════════════════════════════════════════════════
     let routePlannerLeads = [];
-    let routeSelectedOrder = []; // lead ids, in the order they were checked
+    let routePlannerCentres = []; // due-centre stops, from GET /api/centres/due-for-routing
+    let routeSelectedOrder = []; // lead/centre ids, in the order they were checked
     let currentRouteResult = null; // last /optimize response
     let mapboxTokenCache = null; // { configured, token } — fetched once per session
     let routeMapInstance = null;
@@ -8312,13 +8316,14 @@
       const body = document.getElementById('routePlannerLeadsBody');
       try {
         if (!routePlannerLeads.length) routePlannerLeads = await fetch('/api/leads').then(r => r.json());
+        if (!routePlannerCentres.length) routePlannerCentres = await fetch('/api/centres/due-for-routing').then(r => r.json());
 
         const stateSelect = document.getElementById('routeFilterState');
         if (stateSelect.options.length === 1) {
           stateSelect.insertAdjacentHTML('beforeend', AU_STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
         }
         const suburbSelect = document.getElementById('routeFilterSuburb');
-        const suburbs = Array.from(new Set(routePlannerLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const suburbs = Array.from(new Set([...routePlannerLeads, ...routePlannerCentres].map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
         suburbSelect.innerHTML = '<option value="">Suburb: any</option>' + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
 
         const partnerSelect = document.getElementById('routeFilterPartner');
@@ -8348,21 +8353,30 @@
       const leadCalled = document.getElementById('routeFilterLeadCalled').value;
       const visited = document.getElementById('routeFilterVisited').value;
       const profileCreated = document.getElementById('routeFilterProfileCreated').value;
+      const includeCentres = document.getElementById('routeIncludeDueCentres').checked;
 
-      let filtered = routePlannerLeads;
+      let pool = routePlannerLeads.map(l => ({ ...l, type: 'lead' }));
+      if (includeCentres) pool = pool.concat(routePlannerCentres);
+
+      let filtered = pool;
       if (routeGeofenceLeadIds) filtered = filtered.filter(l => routeGeofenceLeadIds.has(l.id));
       if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
+      // The remaining filters are lead-pipeline-specific fields a centre
+      // stop doesn't carry — rather than silently dropping every centre
+      // row the moment any one of these is touched, centres pass through
+      // them unfiltered (a Workforce Partner filtering "Called: to
+      // schedule" is asking about leads specifically).
       if (periodKey !== 'all') {
         const { from, to } = salesDashRange(periodKey);
-        filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
+        filtered = filtered.filter(l => l.type === 'centre' || inDateRange(l.created_at, from, to));
       }
-      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
+      if (partner) filtered = filtered.filter(l => l.type === 'centre' || l.assigned_workforce_partner === partner);
       if (state) filtered = filtered.filter(l => l.state === state);
       if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
-      if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
-      if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
-      if (visited) filtered = filtered.filter(l => l.centre_visited_status === visited);
-      if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
+      if (agencyUsage) filtered = filtered.filter(l => l.type === 'centre' || l.agency_usage === agencyUsage);
+      if (leadCalled) filtered = filtered.filter(l => l.type === 'centre' || l.lead_called_status === leadCalled);
+      if (visited) filtered = filtered.filter(l => l.type === 'centre' || l.centre_visited_status === visited);
+      if (profileCreated) filtered = filtered.filter(l => l.type === 'centre' || l.signed_status === profileCreated);
       if (routeGeofenceLeadIds) filtered = filtered.slice().sort((a, b) => (routeGeofenceDistances.get(a.id) ?? 0) - (routeGeofenceDistances.get(b.id) ?? 0));
       renderRoutePlannerLeadsTable(filtered);
     }
@@ -8414,15 +8428,29 @@
         body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
         return;
       }
-      body.innerHTML = list.map(l => {
-        const checked = routeSelectedOrder.includes(l.id);
+      body.innerHTML = list.map(row => {
+        const checked = routeSelectedOrder.includes(row.id);
+        const geofenceDist = routeGeofenceDistances.get(row.id);
+        const centreLabel = geofenceDist != null
+          ? `${escHtml(row.centre_name)} <span style="color:var(--text-muted);font-weight:500;font-size:11.5px">· ${geofenceDist.toFixed(1)}km from route</span>`
+          : escHtml(row.centre_name);
+
+        if (row.type === 'centre') {
+          const nMeta = NURTURE_STATUS_META[row.nurture?.status] || { label: row.nurture?.status || '—', cls: 'attn-waiting' };
+          return `<tr>
+            <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${row.id}', this)"></td>
+            <td style="font-weight:600;color:var(--navy)" title="${escHtml(row.centre_name)}"><span class="badge" style="font-size:9.5px;margin-right:5px">Centre</span>${centreLabel}</td>
+            <td title="${escHtml(row.suburb || '')}">${escHtml(row.suburb || '—')}</td>
+            <td>${escHtml(row.state || '—')}</td>
+            <td colspan="3"><span class="attn-chip ${nMeta.cls}">${escHtml(nMeta.label)}</span></td>
+            <td>—</td>
+          </tr>`;
+        }
+
+        const l = row;
         const calledMeta = LEAD_CALLED_META[l.lead_called_status] || LEAD_CALLED_META.to_schedule;
         const visitedMeta = CENTRE_VISITED_META[l.centre_visited_status] || CENTRE_VISITED_META.to_schedule;
         const profileMeta = SIGNED_META[l.signed_status] || SIGNED_META.pending;
-        const geofenceDist = routeGeofenceDistances.get(l.id);
-        const centreLabel = geofenceDist != null
-          ? `${escHtml(l.centre_name)} <span style="color:var(--text-muted);font-weight:500;font-size:11.5px">· ${geofenceDist.toFixed(1)}km from route</span>`
-          : escHtml(l.centre_name);
         return `<tr>
           <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleRouteStop('${l.id}', this)"></td>
           <td style="font-weight:600;color:var(--navy)" title="${escHtml(l.centre_name)}">${centreLabel}</td>
@@ -8494,6 +8522,10 @@
     // here (no click-to-edit) — editing status belongs in Leads/lead
     // detail, not this scheduling view.
     function routeStopStatusLine(stop) {
+      if (stop.type === 'centre') {
+        const meta = NURTURE_STATUS_META[stop.nurture?.status] || { label: stop.nurture?.status || 'Unknown', cls: 'attn-waiting' };
+        return `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px"><span class="attn-chip ${meta.cls}" style="font-size:10px">${escHtml(meta.label)}</span></div>`;
+      }
       const parts = [];
       if (stop.agency_usage) {
         const cls = LEAD_AGENCY_USAGE_BADGE_CLASS[stop.agency_usage] || '';
@@ -8676,6 +8708,7 @@
         if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
         statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:12.5px">✓ Synced ${data.created.length} event${data.created.length === 1 ? '' : 's'} to ${escHtml(data.partnerEmail)}'s calendar</div>`;
         routePlannerLeads = []; // force a refresh — visited statuses just changed
+        routePlannerCentres = []; // force a refresh — a synced centre may no longer be due
       } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">Network error.</div>'; }
       finally { btn.disabled = false; btn.textContent = '🗓️ Sync Route to Google Calendar'; }
     }

@@ -129,4 +129,4 @@ function findConfidentMatch(lead, clients) {
   return matches.length && matches[0].confident ? matches[0] : null;
 }
 
-module.exports = { findMatches, findConfidentMatch, scoreCandidate };
+module.exports = { findMatches, findConfidentMatch, scoreCandidate, shortState };

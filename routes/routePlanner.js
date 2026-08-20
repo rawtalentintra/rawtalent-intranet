@@ -5,6 +5,8 @@ const { getDb } = require('../db/database');
 const mapboxService = require('../services/mapboxService');
 const { optimizeRoute, buildItinerary } = require('../services/routeOptimizerService');
 const { emailForPartner, syncRouteToCalendar } = require('../services/leadCalendarSyncService');
+const { parseCentreKey } = require('../services/centreKeyService');
+const { getDueCentreStops, getCentreStopsByKeys } = require('./centres');
 
 router.use(requireRole('admin', 'super_admin', 'workforce_partner'));
 
@@ -29,13 +31,39 @@ router.post('/optimize', async (req, res) => {
     if (!departureTime) return res.status(400).json({ error: 'Departure time is required' });
 
     const db = getDb();
-    const placeholders = leadIds.map(() => '?').join(',');
-    const leadsRes = await db.execute({ sql: `SELECT * FROM leads WHERE id IN (${placeholders})`, args: leadIds });
+    // A centreKey ('loc:123'/'client:456') and a lead's UUID id are
+    // trivially distinguishable via parseCentreKey (returns null for
+    // anything that isn't centreKey-shaped, zero collision risk) — lets
+    // the wire payload stay one flat id list instead of needing {id,type}
+    // pairs from the client.
+    const centreIds = leadIds.filter(id => parseCentreKey(id));
+    const leadOnlyIds = leadIds.filter(id => !parseCentreKey(id));
+
+    let leadStops = [];
+    if (leadOnlyIds.length) {
+      const placeholders = leadOnlyIds.map(() => '?').join(',');
+      const leadsRes = await db.execute({ sql: `SELECT * FROM leads WHERE id IN (${placeholders})`, args: leadOnlyIds });
+      leadStops = leadOnlyIds.map(id => leadsRes.rows.find(l => l.id === id)).filter(Boolean).map(l => ({ ...l, type: 'lead' }));
+      if (leadStops.length !== leadOnlyIds.length) return res.status(404).json({ error: 'One or more selected leads no longer exist' });
+    }
+
+    let centreStops = [];
+    if (centreIds.length) {
+      // Already geocoded (or confirmed unresolvable) by getCentreStopsByKeys
+      // via centreGeoService's own cache — never re-geocoded below, and
+      // never written to the leads table. Doesn't re-check due-status: once
+      // picked, this trusts the selection the same way a lead's pipeline
+      // status is never re-validated here either.
+      centreStops = await getCentreStopsByKeys(centreIds);
+      if (centreStops.length !== centreIds.length) return res.status(404).json({ error: 'One or more selected centres no longer exist' });
+    }
+
     // Preserve the order the caller selected them in (not whatever order
-    // the DB happens to return) — that's the fallback "manual" order used
-    // when Mapbox isn't configured.
-    const stops = leadIds.map(id => leadsRes.rows.find(l => l.id === id)).filter(Boolean);
-    if (stops.length !== leadIds.length) return res.status(404).json({ error: 'One or more selected leads no longer exist' });
+    // the DB/RT happens to return) — that's the fallback "manual" order
+    // used when Mapbox isn't configured.
+    const stopsById = new Map([...leadStops, ...centreStops].map(s => [s.id, s]));
+    const stops = leadIds.map(id => stopsById.get(id)).filter(Boolean);
+    if (stops.length !== leadIds.length) return res.status(404).json({ error: 'One or more selected stops no longer exist' });
 
     if (!mapboxService.isConfigured()) {
       const itinerary = buildItinerary({
@@ -50,9 +78,14 @@ router.post('/optimize', async (req, res) => {
 
     // Geocode is cached on the lead (latitude/longitude columns) — most
     // repeat routes won't need to re-geocode centres they've routed before.
+    // Centre stops are skipped entirely here — getCentreStopsByKeys above
+    // already resolved (or failed to resolve) their coordinates via
+    // centreGeoService's own cache, which is keyed by centreKey, not a
+    // leads row.
     const geocodeFailures = [];
     for (const stop of stops) {
       if (stop.latitude != null && stop.longitude != null) continue;
+      if (stop.type === 'centre') { geocodeFailures.push(stop.centre_name); continue; }
       const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ') || stop.centre_name;
       const coord = await mapboxService.geocodeAddress(address);
       if (!coord) { geocodeFailures.push(stop.centre_name); continue; }
@@ -124,11 +157,21 @@ router.post('/sync-calendar', async (req, res) => {
     if (!Array.isArray(blocks) || !blocks.length) return res.status(400).json({ error: 'No itinerary blocks to sync' });
     const firstVisit = blocks.find(b => b.type === 'visit');
     if (!firstVisit) return res.status(400).json({ error: 'Itinerary has no centre visits to sync' });
-    const partnerEmail = emailForPartner(firstVisit.stop.assigned_workforce_partner);
-    if (!partnerEmail) {
-      return res.status(422).json({ error: `No calendar mapped for ${firstVisit.stop.assigned_workforce_partner || 'this partner'} — check CALENDAR_PARTNER_MAP` });
+    let partnerEmail = emailForPartner(firstVisit.stop.assigned_workforce_partner);
+    // A centre stop has no assigned_workforce_partner at all (My Centres
+    // isn't split by territory yet — see routes/centres.js's comment), and
+    // some leads don't either. Fall back to the logged-in partner's own
+    // calendar, since Smart Routing is normally that partner planning
+    // their own day — degrades to the existing 422 below rather than
+    // guessing when there's still no match (e.g. an admin building a
+    // centre-only route with no partner context).
+    if (!partnerEmail && req.user.role === 'workforce_partner' && req.user.wfp_label) {
+      partnerEmail = emailForPartner(req.user.wfp_label);
     }
-    const created = await syncRouteToCalendar(partnerEmail, blocks);
+    if (!partnerEmail) {
+      return res.status(422).json({ error: `No calendar mapped for ${firstVisit.stop.assigned_workforce_partner || req.user.wfp_label || 'this route'} — check CALENDAR_PARTNER_MAP` });
+    }
+    const created = await syncRouteToCalendar(partnerEmail, blocks, { email: req.user.email, name: req.user.name || req.user.email });
     res.json({ success: true, created, partnerEmail });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -193,11 +236,25 @@ router.post('/geofence', async (req, res) => {
       await db.execute({ sql: 'UPDATE leads SET latitude = ?, longitude = ? WHERE id = ?', args: [coord.lat, coord.lng, lead.id] });
     }
 
-    const matches = leads
+    const leadMatches = leads
       .filter(l => l.latitude != null && l.longitude != null)
-      .map(l => ({ id: l.id, distanceKm: mapboxService.distanceToSegmentKm({ lat: l.latitude, lng: l.longitude }, startCoord, endCoord) }))
-      .filter(m => m.distanceKm <= radius)
-      .sort((a, b) => a.distanceKm - b.distanceKm);
+      .map(l => ({ id: l.id, type: 'lead', distanceKm: mapboxService.distanceToSegmentKm({ lat: l.latitude, lng: l.longitude }, startCoord, endCoord) }))
+      .filter(m => m.distanceKm <= radius);
+
+    // Due centres are already geocoded (centreGeoService's own permanent
+    // cache) — no per-search geocode loop needed here the way leads above
+    // still has one. Recomputes health+nurture for the live centre list on
+    // every search (same "recomputed on every read, never a stored value
+    // that can drift" posture as centreHealthService itself); everything
+    // it reads is already cached (getCentresAndBookings ~5min,
+    // centre_geocodes permanently), so this stays fast in practice.
+    const dueCentres = await getDueCentreStops();
+    const centreMatches = dueCentres
+      .filter(c => c.latitude != null && c.longitude != null)
+      .map(c => ({ id: c.id, type: 'centre', distanceKm: mapboxService.distanceToSegmentKm({ lat: c.latitude, lng: c.longitude }, startCoord, endCoord) }))
+      .filter(m => m.distanceKm <= radius);
+
+    const matches = [...leadMatches, ...centreMatches].sort((a, b) => a.distanceKm - b.distanceKm);
 
     res.json({ matches, startCoord, endCoord, radiusKm: radius, geocodeSkipped });
   } catch (err) {

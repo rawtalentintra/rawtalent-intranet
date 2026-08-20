@@ -12,6 +12,8 @@ const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { getGeocodesForCentres } = require('../services/centreGeoService');
+const { shortState } = require('../services/centreMatchService');
 
 // Any format — a site-visit recording could be a phone-app voice memo, a
 // Zoom/Teams export, a plain-text transcript, whatever the Workforce
@@ -106,6 +108,75 @@ function healthForCentre(centre, bookings, visits) {
   };
 }
 
+// Shared by the due-centres endpoint below and Smart Routing's /optimize
+// centre lookup (routes/routePlanner.js) — computes health+nurture for a
+// subset (or all) of the live centre list without a second RT fetch
+// (getCentresAndBookings is already cached ~5min). `filterKeys`, when
+// given, narrows to just those centreKeys before the (cheaper) visits
+// lookup and health computation — no extra RT call either way.
+async function centresWithNurture(filterKeys) {
+  const { centres, bookings } = await getCentresAndBookings();
+  const hidden = await getHiddenCentreKeys();
+  let visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
+  if (filterKeys) {
+    const keySet = new Set(filterKeys);
+    visible = visible.filter(c => keySet.has(c.centreKey));
+  }
+  const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
+  return visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
+}
+
+// Normalizes a healthForCentre(...) result into the exact "stop" field
+// names Smart Routing's leads already use (id/centre_name/street_address/
+// suburb/state/latitude/longitude) — see routes/routePlanner.js and
+// public/admin.html's buildItinerary/drag-reorder/Google Maps export, all
+// of which only read those fields regardless of what kind of stop it is.
+// state is normalised to the short code (shortState) here, once, so
+// nothing downstream (frontend state filter, formatLeadAddress) has to
+// think about RT's full-name form again.
+function toRouteStop(centreWithHealth, geocodes) {
+  const coord = geocodes[centreWithHealth.centreKey];
+  return {
+    id: centreWithHealth.centreKey,
+    type: 'centre',
+    centre_name: centreWithHealth.name,
+    street_address: centreWithHealth.streetAddress,
+    suburb: centreWithHealth.suburb,
+    state: shortState(centreWithHealth.state),
+    latitude: coord ? coord.lat : null,
+    longitude: coord ? coord.lng : null,
+    rtClientId: centreWithHealth.rtClientId,
+    rtLocationId: centreWithHealth.rtLocationId,
+    nurture: centreWithHealth.nurture,
+    health: centreWithHealth.health
+  };
+}
+
+// Every centre currently due for a call/visit (nurture.status !== 'on_track'),
+// normalized to routing-stop shape and geocoded via the SAME cache
+// Territory Strategy uses (centre_geocodes table) — never the leads
+// geocode loop. Consumed directly by Smart Routing's /geofence (no HTTP
+// round-trip — same in-process reuse pattern as getCentresAndBookings/
+// visitsByCentreKey, already exported for micropods.js/leads.js) and via
+// GET /due-for-routing below for the picker.
+async function getDueCentreStops() {
+  const withHealth = await centresWithNurture();
+  const due = withHealth.filter(c => c.nurture.status !== 'on_track');
+  const geocodes = await getGeocodesForCentres(due);
+  return due.map(c => toRouteStop(c, geocodes));
+}
+
+// Resolves specific centres by key, WITHOUT re-filtering by due-status —
+// once a Workforce Partner has picked a centre in Smart Routing, /optimize
+// trusts that selection the same way it already trusts a selected lead's
+// DB row (never re-validates the lead's pipeline status either).
+async function getCentreStopsByKeys(centreKeys) {
+  if (!centreKeys.length) return [];
+  const withHealth = await centresWithNurture(centreKeys);
+  const geocodes = await getGeocodesForCentres(withHealth);
+  return withHealth.map(c => toRouteStop(c, geocodes));
+}
+
 // The full My Centres portfolio — matches the pattern of other full-
 // dataset list endpoints in this app (Leads, Reports): compute everything
 // once server-side, let the frontend filter/sort/search client-side
@@ -118,6 +189,23 @@ router.get('/', async (req, res) => {
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
     const withHealth = visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
     res.json(withHealth);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Smart Routing's due-centres pool — see routes/routePlanner.js and
+// public/admin.html's Smart Routing section. Deliberately a separate
+// endpoint from GET /, not a `?due=true` query param on it: that route's
+// consumers (My Centres, WFP Dashboard) expect the flattened-centre shape
+// (name/streetAddress/contactName/...); this one returns routing-stop
+// shape (centre_name/street_address/...) so Smart Routing needs no
+// translation layer of its own. Registered ahead of GET /:centreKey below
+// — otherwise that route would swallow this literal path segment as an
+// (invalid) centreKey.
+router.get('/due-for-routing', async (req, res) => {
+  try {
+    res.json(await getDueCentreStops());
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -457,3 +545,7 @@ module.exports.getCentresAndBookings = getCentresAndBookings;
 // Client Retention (routes/leads.js) needs the same centre_visits lookup
 // this file already has — exported rather than duplicated.
 module.exports.visitsByCentreKey = visitsByCentreKey;
+// Smart Routing (routes/routePlanner.js) needs the exact same due/not-due
+// classification Centre 360 shows, never a second inconsistent definition.
+module.exports.getDueCentreStops = getDueCentreStops;
+module.exports.getCentreStopsByKeys = getCentreStopsByKeys;

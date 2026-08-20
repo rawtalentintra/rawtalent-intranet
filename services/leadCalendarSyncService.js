@@ -327,39 +327,69 @@ async function renewWatchesNearingExpiry() {
 // Pushes a Smart Routing itinerary (see services/routeOptimizerService.js)
 // onto one partner's calendar: one [Centre Visit] event per stop (also
 // flips that lead's centre-visited status to 'scheduled', same as the
-// single-lead outbound sync) plus one plain event for the lunch break.
+// single-lead outbound sync — or logs a 'planned' centre_visits row for a
+// My Centres stop, see below) plus one plain event for the lunch break.
 // `blocks` are the itinerary blocks from buildItinerary() — 'visit' blocks
-// carry the full lead row as `stop`, 'lunch' blocks don't touch any lead.
-async function syncRouteToCalendar(ownerEmail, blocks) {
+// carry the full stop object (a lead row OR a routes/centres.js routing-
+// stop, tagged `type`) as `stop`, 'lunch' blocks don't touch either.
+// `actor` ({email, name} = req.user) attributes a centre_visits row to
+// whoever actually built the route, same convention as every other
+// centre_visits write in the app (e.g. Centre 360's Log Visit).
+async function syncRouteToCalendar(ownerEmail, blocks, actor) {
   if (!calendarConfigured()) throw new Error('Google Calendar is not configured');
   const calendar = getCalendarClientFor(ownerEmail);
   if (!calendar) throw new Error(`Could not build a calendar client for ${ownerEmail}`);
 
   const db = getDb();
   const created = [];
+  const actorEmail = actor?.email || ownerEmail;
+  const actorName = actor?.name || actorEmail;
 
   for (const block of blocks) {
     if (block.type === 'visit') {
-      const lead = block.stop;
+      const stop = block.stop;
+      const isCentre = stop.type === 'centre';
       const requestBody = {
-        summary: buildEventTitle('visit', lead.centre_name),
-        location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', '),
-        description: `Smart Routing visit — HeartBeat lead: ${process.env.APP_URL || ''}/admin?lead=${lead.id}`,
+        summary: buildEventTitle('visit', stop.centre_name),
+        location: [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', '),
+        description: isCentre
+          ? `Smart Routing visit — HeartBeat centre: ${process.env.APP_URL || ''}/admin?centre=${encodeURIComponent(stop.id)}`
+          : `Smart Routing visit — HeartBeat lead: ${process.env.APP_URL || ''}/admin?lead=${stop.id}`,
         start: { dateTime: new Date(block.start).toISOString() },
         end: { dateTime: new Date(block.end).toISOString() },
-        extendedProperties: { private: { rawtalentLeadId: lead.id, rawtalentEventType: 'visit' } }
+        extendedProperties: {
+          private: isCentre
+            ? { rawtalentCentreKey: stop.id, rawtalentEventType: 'visit' }
+            : { rawtalentLeadId: stop.id, rawtalentEventType: 'visit' }
+        }
       };
       const res = await calendar.events.insert({ calendarId: 'primary', requestBody });
-      await db.execute({
-        sql: `INSERT INTO lead_calendar_events (id, lead_id, event_type, google_event_id, calendar_owner_email, source)
-              VALUES (?, ?, 'visit', ?, ?, 'app')`,
-        args: [uuidv4(), lead.id, res.data.id, ownerEmail]
-      });
-      await db.execute({
-        sql: `UPDATE leads SET centre_visited_status = 'scheduled', centre_visited_at = ?, updated_at = now() WHERE id = ?`,
-        args: [new Date(block.start).toISOString(), lead.id]
-      });
-      created.push({ leadId: lead.id, eventId: res.data.id, type: 'visit' });
+
+      if (isCentre) {
+        // Logged as PLANNED, not completed — lastVisitDate() (see
+        // centreHealthService.js) only counts status==='completed', so
+        // scheduling this on a calendar deliberately does NOT flip the
+        // centre's nurture status to on_track by itself; that only
+        // happens once someone marks the actual visit done (Centre 360's
+        // existing Log Visit flow, or a recording/transcript upload).
+        await db.execute({
+          sql: `INSERT INTO centre_visits (id, centre_key, visit_date, status, purpose, notes, created_by_email, created_by_name)
+                VALUES (?, ?, ?, 'planned', 'Smart Routing visit', ?, ?, ?)`,
+          args: [uuidv4(), stop.id, new Date(block.start).toISOString(), 'Scheduled via Smart Routing.', actorEmail, actorName]
+        });
+        created.push({ centreKey: stop.id, eventId: res.data.id, type: 'visit' });
+      } else {
+        await db.execute({
+          sql: `INSERT INTO lead_calendar_events (id, lead_id, event_type, google_event_id, calendar_owner_email, source)
+                VALUES (?, ?, 'visit', ?, ?, 'app')`,
+          args: [uuidv4(), stop.id, res.data.id, ownerEmail]
+        });
+        await db.execute({
+          sql: `UPDATE leads SET centre_visited_status = 'scheduled', centre_visited_at = ?, updated_at = now() WHERE id = ?`,
+          args: [new Date(block.start).toISOString(), stop.id]
+        });
+        created.push({ leadId: stop.id, eventId: res.data.id, type: 'visit' });
+      }
     } else if (block.type === 'lunch') {
       const requestBody = {
         summary: block.label || 'Lunch & Admin Break',
