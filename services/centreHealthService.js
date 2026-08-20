@@ -136,4 +136,4 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
   return { category: 'healthy', reasons };
 }
 
-module.exports = { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSES };
+module.exports = { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSES, lastVisitDate };

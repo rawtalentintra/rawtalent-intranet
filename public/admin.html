@@ -6909,9 +6909,61 @@
       return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap"${title}>${meta.label}</span>`;
     }
 
+    // services/centreNurtureService.js computes this live from centre_visits
+    // + the health category — see that file for the cadence config and the
+    // "never contacted" launch-date-anchor reasoning. Reuses the WFP
+    // Dashboard attention queue's existing .attn-chip/.attn-overdue/
+    // .attn-waiting/.attn-supply-good CSS rather than new classes.
+    const NURTURE_STATUS_META = {
+      needs_first_contact: { label: 'Needs First Contact', cls: 'attn-waiting' },
+      first_contact_overdue: { label: 'First Contact Overdue', cls: 'attn-overdue' },
+      on_track: { label: 'On Track', cls: 'attn-supply-good' },
+      recurring_overdue: { label: 'Follow-up Overdue', cls: 'attn-overdue' }
+    };
+
+    // One row, not a fabricated history — a centre is either waiting on
+    // its first contact or already tracking a recurring cadence, never
+    // both, so a second row would just be decorative. This recomputes
+    // live every time Centre 360 re-fetches (already happens after every
+    // Log Visit / recording upload), so "whether it's been done" is
+    // carried by the Status column itself, not a separate checkbox that
+    // could drift out of sync.
+    function renderNurtureActionRow(n, centreKey) {
+      if (!n) return '';
+      const meta = NURTURE_STATUS_META[n.status] || { label: n.status, cls: 'attn-waiting' };
+      const actionLabel = n.lastContactDate ? 'Recurring follow-up (call or visit)' : 'First contact (call or visit)';
+      const lastContact = n.lastContactDate ? fmtDate(n.lastContactDate) : 'Never contacted yet';
+      const deadlineNote = n.daysOverdue != null ? `${n.daysOverdue}d overdue` : `in ${n.daysUntilDue}d`;
+      return `
+        <tr>
+          <td>${escHtml(actionLabel)}</td>
+          <td>${escHtml(lastContact)}</td>
+          <td>${fmtDate(n.dueDate)} <span style="color:var(--text-muted);font-size:11px">(${deadlineNote})</span></td>
+          <td><span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span></td>
+          <td><button class="btn-add" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">+ Log Visit</button></td>
+        </tr>`;
+    }
+
+    // Generic click-header-to-expand toggle for Centre 360's collapsible
+    // cards — same style.display toggle as toggleDocFindings, keyed by
+    // name so one function covers both Educator Relationships and
+    // Relationship History.
+    function toggleCentre360Collapse(key) {
+      const body = document.getElementById(`centre360-${key}-body`);
+      const caret = document.getElementById(`centre360-${key}-caret`);
+      if (!body) return;
+      const opening = body.style.display === 'none';
+      body.style.display = opening ? 'block' : 'none';
+      if (caret) caret.textContent = opening ? '▾' : '▸';
+    }
+
     let myCentresData = [];
     let currentCentreKey = null;
     let currentCentreName = '';
+    // clientBookingId -> raw booking object, from Centre 360's own
+    // /activity fetch — lets a booking row in Relationship History open
+    // the shared booking-detail popup without a second fetch.
+    let currentCentre360Bookings = {};
 
     async function loadMyCentres() {
       const body = document.getElementById('myCentresTableBody');
@@ -7109,6 +7161,18 @@
           fetch(`/api/centres/${enc}/recordings`).then(r => r.json())
         ]);
         currentCentreName = centre.name || '';
+        // Seeds the same clientNameById/locationNameById/candidateNameById
+        // caches bookingDetailHtml() reads, from data this screen already
+        // has permission to fetch — NOT ensureReportLookups(), which hits
+        // /api/reports/clients+candidates behind requireAdmin. workforce_
+        // partner (the primary audience for My Centres) would 403 on that
+        // and every booking popup here would silently fall back to
+        // "Client #123"/"Candidate #123" instead of real names.
+        if (centre.rtClientId) clientNameById[centre.rtClientId] = centre.name;
+        if (centre.rtLocationId) locationNameById[centre.rtLocationId] = centre.name;
+        educators.forEach(e => { candidateNameById[e.userId] = e.name; });
+        currentCentre360Bookings = {};
+        activity.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
         bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity, recordings);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -7144,6 +7208,7 @@
 
     function renderCentre360(c, bookingsRes, educators, activity, recordings) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
+      const healthMeta = CENTRE_HEALTH_META[c.health] || { label: c.health, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
       return `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px">
           <div>
@@ -7151,6 +7216,11 @@
             <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${escHtml([c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file')}</div>
           </div>
           ${centreHealthBadge(c.health)}
+        </div>
+
+        <div style="padding:14px 20px;margin-bottom:16px;background:${healthMeta.bg};border-left:4px solid ${healthMeta.color};border-radius:var(--radius)">
+          <div style="font-size:12px;font-weight:700;color:${healthMeta.color};text-transform:uppercase;letter-spacing:.4px">${healthMeta.label}</div>
+          <div style="font-size:15px;font-weight:600;color:var(--navy);margin-top:4px">${escHtml((c.healthReasons && c.healthReasons[0]) || 'No specific reason recorded.')}</div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
@@ -7186,20 +7256,38 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title">Educator Relationships</div>
-          <div class="sd-card-sub">Ranked by shifts worked, last 100 days</div>
-          ${educators.length ? `
-            <div style="margin-top:10px">
-              ${educators.slice(0, 10).map(e => `
+          <div class="sd-card-title">Nurture Cadence</div>
+          <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
+          <div style="overflow-x:auto;margin-top:10px">
+            <table class="data-table data-table-compact">
+              <thead><tr><th>Action Needed</th><th>Last Contact</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
+              <tbody>${renderNurtureActionRow(c.nurture, c.centreKey)}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('educators')">
+            <div>
+              <div class="sd-card-title">Educator Relationships</div>
+              <div class="sd-card-sub">Ranked by shifts worked, last 100 days${educators.length ? ` — ${educators.length} educator${educators.length === 1 ? '' : 's'}` : ''}</div>
+            </div>
+            <span id="centre360-educators-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
+          </div>
+          <div id="centre360-educators-body" style="display:none;margin-top:10px">
+            ${educators.length ? educators.slice(0, 10).map(e => `
                 <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12.5px">
                   <span>${escHtml(e.name)}</span><span style="color:var(--text-muted)">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'}</span>
-                </div>`).join('')}
-            </div>` : '<div style="font-size:12.5px;color:var(--text-muted);margin-top:10px">No filled bookings in this window.</div>'}
+                </div>`).join('') : '<div style="font-size:12.5px;color:var(--text-muted)">No filled bookings in this window.</div>'}
+          </div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px">
-          <div class="sd-card-title">Relationship History</div>
-          <div style="margin-top:10px">${renderCentreActivityTimeline(activity)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('history')">
+            <div class="sd-card-title">Relationship History</div>
+            <span id="centre360-history-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
+          </div>
+          <div id="centre360-history-body" style="display:none;margin-top:10px">${renderCentreActivityTimeline(activity)}</div>
         </div>`;
     }
 
@@ -7217,12 +7305,26 @@
         }
         const b = ev.data;
         return `
-          <div class="attn-row">
+          <div class="attn-row" style="cursor:pointer" onclick="openCentreBookingDetail(${b.clientBookingId})">
             <span class="attn-chip badge-workforce">📅 ${escHtml(bookingStatusLabel(b.statusId))}</span>
             <span class="attn-centre">Booking</span>
             <span class="attn-meta">${fmtDate(b.bookingDate)}</span>
           </div>`;
       }).join('');
+    }
+
+    // Reuses the shared #reportDetailModal/#reportDetailBody +
+    // bookingDetailHtml() the Reports section's Bookings List already
+    // uses, called directly with the raw booking object already in hand
+    // from Centre 360's own /activity fetch (currentCentre360Bookings) —
+    // not routed through reportDataCache/openReportDetail(type,id), which
+    // exists for Reports' own cached list lookups this screen doesn't need.
+    function openCentreBookingDetail(clientBookingId) {
+      const b = currentCentre360Bookings[clientBookingId];
+      if (!b) return;
+      document.getElementById('reportDetailTitle').textContent = `Booking — ${fmtDate(b.bookingDate)}`;
+      document.getElementById('reportDetailBody').innerHTML = bookingDetailHtml(b);
+      document.getElementById('reportDetailModal').classList.add('open');
     }
 
     // ── Centre Recordings/Transcripts ────────────────────────────────

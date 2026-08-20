@@ -8,6 +8,7 @@ const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const { flattenCentres, parseCentreKey } = require('../services/centreKeyService');
 const { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
+const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
@@ -90,12 +91,15 @@ async function visitsByCentreKey(centreKeys) {
 }
 
 function healthForCentre(centre, bookings, visits) {
+  const now = new Date();
   const buckets = bucketBookingsForCentre(bookings, { rtLocationId: centre.rtLocationId, rtClientId: centre.rtClientId });
-  const health = computeCentreHealth(centre, { visits, ...buckets });
+  const health = computeCentreHealth(centre, { visits, ...buckets }, now);
+  const nurture = computeCentreNurture(centre, visits, health.category, now);
   return {
     ...centre,
     health: health.category,
     healthReasons: health.reasons,
+    nurture,
     bookings30dCount: buckets.bookings30d.length,
     bookingsPrev30dCount: buckets.bookingsPrev30d.length,
     bookings90dCount: buckets.bookings90d.length
