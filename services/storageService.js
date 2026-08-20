@@ -17,7 +17,8 @@ const BUCKETS = {
   announcementFiles: 'announcement-files',
   projectFiles: 'project-files',
   ideaFiles: 'idea-files',
-  leadRecordings: 'lead-recordings'
+  leadRecordings: 'lead-recordings',
+  centreRecordings: 'centre-recordings'
 };
 
 // Every other bucket above was provisioned manually in Supabase ahead of

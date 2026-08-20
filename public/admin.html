@@ -7101,14 +7101,15 @@
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Pulling up this centre\'s live details from RT…</div>';
       try {
         const enc = encodeURIComponent(centreKey);
-        const [centre, bookingsRes, educators, activity] = await Promise.all([
+        const [centre, bookingsRes, educators, activity, recordings] = await Promise.all([
           fetch(`/api/centres/${enc}`).then(r => r.json()),
           fetch(`/api/centres/${enc}/bookings`).then(r => r.json()),
           fetch(`/api/centres/${enc}/educators`).then(r => r.json()),
-          fetch(`/api/centres/${enc}/activity`).then(r => r.json())
+          fetch(`/api/centres/${enc}/activity`).then(r => r.json()),
+          fetch(`/api/centres/${enc}/recordings`).then(r => r.json())
         ]);
         currentCentreName = centre.name || '';
-        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
+        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity, recordings);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
       }
@@ -7141,7 +7142,7 @@
       window.scrollTo({ top: 0 });
     }
 
-    function renderCentre360(c, bookingsRes, educators, activity) {
+    function renderCentre360(c, bookingsRes, educators, activity, recordings) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
       return `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px">
@@ -7164,7 +7165,14 @@
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--text)">
               ${c.healthReasons.map(r => `<div>• ${escHtml(r)}</div>`).join('')}
             </div>` : ''}
-          <button class="btn-add" style="margin-top:14px;padding:6px 14px;font-size:12.5px" onclick="openVisitLogModal('${c.centreKey}')">+ Log Visit</button>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;flex-wrap:wrap">
+            <button class="btn-add" style="padding:6px 14px;font-size:12.5px;flex-shrink:0" onclick="openVisitLogModal('${c.centreKey}')">+ Log Visit</button>
+            <div class="file-dropzone" style="margin-bottom:0;flex:1;min-width:240px" ondragover="handleCentreRecordingDragOver(event)" ondragleave="handleCentreRecordingDragLeave(event)" ondrop="handleCentreRecordingDrop(event,'${c.centreKey}')">
+              <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Attach Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadCentreRecordingFiles('${c.centreKey}',this.files);this.value=''"></label>
+              <div class="file-dropzone-hint">or drag files here — any format, multiple at once. We'll recognise the centre as called/visited automatically, using any date/time found in a transcript.</div>
+            </div>
+          </div>
+          <div id="centreRecordingsList" style="margin-top:10px">${renderCentreRecordingsListHtml(recordings, c.centreKey)}</div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
@@ -7215,6 +7223,75 @@
             <span class="attn-meta">${fmtDate(b.bookingDate)}</span>
           </div>`;
       }).join('');
+    }
+
+    // ── Centre Recordings/Transcripts ────────────────────────────────
+    // Attaching one of these is itself what recognises the centre as
+    // called/visited — see POST /:centreKey/recordings in routes/
+    // centres.js, which auto-creates a centre_visits row for the whole
+    // upload batch. detected_at (parsed out of a transcript's own content)
+    // is shown here so it's obvious when that date came from the file
+    // itself vs. just falling back to upload time.
+    function renderCentreRecordingsListHtml(recordings, centreKey) {
+      if (!recordings || !recordings.length) return '';
+      const canDelete = currentUserRole !== 'qa_view';
+      return recordings.map(r => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px">
+          <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/centres/recordings/${r.id}/download','_blank')">🎙️ ${escHtml(r.filename)} <span style="color:var(--gray-400)">(${formatFileSize(r.filesize)})</span></span>
+          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">
+              ${escHtml(r.uploaded_by_name || r.uploaded_by_email || '')} · ${fmtDateShort(r.created_at)}
+              ${r.detected_at ? `<span style="color:#15803d" title="Date/time detected from this file's own content">· 🕐 ${fmtDateShort(r.detected_at)}</span>` : ''}
+            </span>
+            ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteCentreRecording(${r.id},'${centreKey}')">Remove</button>` : ''}
+          </div>
+        </div>`).join('');
+    }
+
+    async function uploadCentreRecordingFiles(centreKey, fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const fd = new FormData();
+      files.forEach(f => fd.append('files', f));
+      try {
+        const res = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/recordings`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Upload failed', 'error'); return; }
+        toast(files.length > 1 ? `${files.length} files uploaded — logged as a visit` : 'Uploaded — logged as a visit', 'success');
+        if (currentCentreKey === centreKey) openCentre360(centreKey);
+      } catch { toast('Upload failed', 'error'); }
+    }
+
+    // Drag-and-drop onto the whole dropzone box, same pattern as the Leads
+    // Site Visit Recordings dropzone — preventDefault on dragover or the
+    // browser refuses the drop and just navigates to/opens the file.
+    function handleCentreRecordingDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    }
+
+    function handleCentreRecordingDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+    }
+
+    async function handleCentreRecordingDrop(e, centreKey) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      await uploadCentreRecordingFiles(centreKey, e.dataTransfer?.files);
+    }
+
+    function deleteCentreRecording(recordingId, centreKey) {
+      document.getElementById('confirmTitle').textContent = 'Remove Recording';
+      document.getElementById('confirmMsg').textContent = 'Remove this recording? The visit it was logged under stays on the timeline. This cannot be undone.';
+      document.getElementById('confirmOkBtn').onclick = async () => {
+        try {
+          await fetch(`/api/centres/recordings/${recordingId}`, { method: 'DELETE' });
+          toast('Recording removed', 'success');
+          if (currentCentreKey === centreKey) openCentre360(centreKey);
+        } catch { toast('Remove failed', 'error'); }
+        closeConfirm();
+      };
+      document.getElementById('confirmModal').classList.add('open');
     }
 
     // ── Micropods ─────────────────────────────────────────────────

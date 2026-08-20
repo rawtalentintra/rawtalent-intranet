@@ -1,11 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const { flattenCentres, parseCentreKey } = require('../services/centreKeyService');
 const { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
+const { detectTimestampFromText } = require('../services/transcriptDateService');
+const { extractPlainText } = require('../services/documentTextExtractor');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+
+// Any format — a site-visit recording could be a phone-app voice memo, a
+// Zoom/Teams export, a plain-text transcript, whatever the Workforce
+// Partner actually captured, so no mimetype allowlist. Same 200MB cap as
+// leadRecordingUpload (routes/leads.js) for the same reason (often audio/
+// video, not a small document). Capped at 10 files per drop — plenty for
+// "a recording plus its transcript", not meant for bulk archiving.
+const centreRecordingUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 
 // RT resets assignedUserId to 0 (not null) on a cancelled booking that had
 // someone assigned before it was pulled — verified against real data
@@ -282,6 +295,119 @@ router.put('/:centreKey/visits/:visitId', async (req, res) => {
 router.delete('/:centreKey/visits/:visitId', requireRole('admin', 'super_admin'), async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM centre_visits WHERE id = ?', args: [req.params.visitId] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Recordings/transcripts ─────────────────────────────────────────
+// Best-effort text extraction, used only to look for a real-world
+// timestamp inside the file (transcriptDateService) — never blocks the
+// upload itself if extraction fails or the format isn't text-based (audio/
+// video just get no detected date, falling back to upload time below).
+async function extractTextForDetection(file) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  try {
+    if (ext === '.txt' || ext === '.vtt' || ext === '.srt') return file.buffer.toString('utf8');
+    if (ext === '.pdf' || ext === '.docx') return await extractPlainText(file.buffer, file.originalname);
+  } catch { /* unreadable/corrupt file — treat as no text available */ }
+  return null;
+}
+
+router.get('/:centreKey/recordings', async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: `SELECT id, filename, mimetype, filesize, detected_at, visit_id, uploaded_by_name, uploaded_by_email, created_at
+            FROM centre_recordings WHERE centre_key = ? ORDER BY created_at DESC`,
+      args: [req.params.centreKey]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One implied centre_visits row per upload batch, not per file —
+// dragging a recording and its transcript together documents ONE call/
+// visit, not two. This is the actual "recognition that the centre was
+// called or visited" the feature exists for: attaching evidence of
+// contact is what logs it, rather than requiring a separate manual +Log
+// Visit on top. Uses the earliest transcript-detected timestamp found
+// across the batch when one exists; otherwise falls back to upload time,
+// same as a person logging a visit for "today" would.
+router.post('/:centreKey/recordings', requireRole('admin', 'super_admin', 'workforce_partner'), centreRecordingUpload.array('files', 10), async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'No files provided' });
+  try {
+    const db = getDb();
+    const detections = await Promise.all(files.map(async file => ({
+      file,
+      detectedAt: detectTimestampFromText(await extractTextForDetection(file))
+    })));
+    const detectedTimestamps = detections.map(d => d.detectedAt).filter(Boolean).sort();
+    const usedDetection = detectedTimestamps.length > 0;
+    const visitDate = detectedTimestamps[0] || new Date().toISOString();
+    const filenames = files.map(f => f.originalname).join(', ');
+
+    const visitResult = await db.execute({
+      sql: `INSERT INTO centre_visits (
+              id, centre_key, visit_date, status, purpose, notes, created_by_email, created_by_name
+            ) VALUES (?, ?, ?, 'completed', ?, ?, ?, ?) RETURNING id`,
+      args: [
+        uuidv4(), req.params.centreKey, visitDate, 'Recording/transcript attached',
+        `Automatically logged from an attached recording/transcript (${filenames}).` +
+          (usedDetection ? ' Date/time detected from the file content.' : ' No timestamp found in the file(s) — using the upload time.'),
+        req.user.email, req.user.name || req.user.email
+      ]
+    });
+    const visitId = visitResult.rows[0].id;
+
+    await ensureBucket(BUCKETS.centreRecordings);
+    const saved = [];
+    for (const { file, detectedAt } of detections) {
+      const result = await db.execute({
+        sql: `INSERT INTO centre_recordings (centre_key, filename, mimetype, filesize, detected_at, visit_id, uploaded_by_email, uploaded_by_name)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        args: [req.params.centreKey, file.originalname, file.mimetype, file.size, detectedAt, visitId, req.user.email, req.user.name || req.user.email]
+      });
+      const recordingId = result.rows[0].id;
+      const storagePath = `${req.params.centreKey}/${recordingId}.${extForMimetype(file.mimetype)}`;
+      await uploadBuffer(BUCKETS.centreRecordings, storagePath, file.buffer, file.mimetype);
+      await db.execute({ sql: 'UPDATE centre_recordings SET storage_path = ? WHERE id = ?', args: [storagePath, recordingId] });
+      saved.push({ id: recordingId, filename: file.originalname, detectedAt });
+    }
+
+    const visitRow = (await db.execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [visitId] })).rows[0];
+    res.json({ recordings: saved, visit: visitRow });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/recordings/:recordingId/download', async (req, res) => {
+  try {
+    const file = (await getDb().execute({ sql: 'SELECT * FROM centre_recordings WHERE id = ?', args: [req.params.recordingId] })).rows[0];
+    if (!file) return res.status(404).json({ error: 'Recording not found' });
+    if (!file.storage_path) return res.status(404).json({ error: 'This recording has no stored content' });
+    const buffer = await downloadAsBuffer(BUCKETS.centreRecordings, file.storage_path);
+    res.setHeader('Content-Type', file.mimetype);
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.filename)}"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/recordings/:recordingId', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT storage_path FROM centre_recordings WHERE id = ?', args: [req.params.recordingId] });
+    await db.execute({ sql: 'DELETE FROM centre_recordings WHERE id = ?', args: [req.params.recordingId] });
+    if (existing.rows[0]?.storage_path) {
+      try { await removeFile(BUCKETS.centreRecordings, existing.rows[0].storage_path); } catch { /* orphaned storage object, non-fatal */ }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -999,6 +999,33 @@ CREATE INDEX IF NOT EXISTS idx_centre_visits_centre_key ON centre_visits(centre_
 -- Dashboard attention queue need to surface.
 CREATE INDEX IF NOT EXISTS idx_centre_visits_next_step_due ON centre_visits(next_step_due_date) WHERE next_step_due_date IS NOT NULL;
 
+-- Site-visit/call recordings & transcripts attached from Centre 360 — same
+-- shape as lead_recordings, keyed by centre_key instead of a lead id (see
+-- the centre_visits comment above for why centres can't be keyed to a
+-- leads row). visit_id links a recording back to the centre_visits row
+-- services/centreRecordingService.js auto-creates for it (one visit per
+-- upload batch, not per file — dropping a recording and its transcript
+-- together documents ONE call/visit) so attaching evidence of contact is
+-- itself what gets a centre recognized as called/visited, not a separate
+-- manual step. detected_at is the timestamp parsed out of the transcript
+-- content when one was found (see transcriptDateService.js) — null means
+-- no confident date was found in the file, so the visit fell back to
+-- upload time instead.
+CREATE TABLE IF NOT EXISTS centre_recordings (
+  id SERIAL PRIMARY KEY,
+  centre_key TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  detected_at TIMESTAMPTZ,
+  visit_id TEXT,
+  uploaded_by_email CITEXT,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_centre_recordings_centre_key ON centre_recordings(centre_key);
+
 -- "Delete centre" on My Centres — a centre isn't a local row, it's RT
 -- client/location data pulled live, so there's nothing in our own DB to
 -- actually delete. Real deletion would mean mutating RT itself, which this
