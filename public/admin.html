@@ -10494,7 +10494,10 @@
 
         <div class="lead-group-label" style="margin-top:14px">Site Visit Recordings</div>
         ${canEditContact ? `
-          <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px;margin-bottom:10px">🎙️ Upload Recording<input type="file" style="display:none" onchange="uploadLeadRecording(this)"></label>
+          <div class="file-dropzone" ondragover="handleLeadRecordingDragOver(event)" ondragleave="handleLeadRecordingDragLeave(event)" ondrop="handleLeadRecordingDrop(event)">
+            <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">🎙️ Upload Recording<input type="file" style="display:none" onchange="uploadLeadRecording(this)"></label>
+            <div class="file-dropzone-hint">or drag a file here — any format</div>
+          </div>
         ` : ''}
         <div id="leadRecordingsList" style="margin-bottom:10px">
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading recordings…</div>
@@ -10570,17 +10573,41 @@
       }
     }
 
-    async function uploadLeadRecording(input) {
-      if (!input.files?.[0] || !currentLeadDetailId) return;
+    async function uploadLeadRecordingFile(file) {
+      if (!file || !currentLeadDetailId) return;
       const fd = new FormData();
-      fd.append('file', input.files[0]);
+      fd.append('file', file);
       try {
         const res = await fetch(`/api/leads/${currentLeadDetailId}/recordings`, { method: 'POST', body: fd });
         if (!res.ok) { const data = await res.json(); toast(data.error || 'Upload failed', 'error'); return; }
         toast('Recording uploaded', 'success');
         loadLeadRecordings(currentLeadDetailId);
       } catch { toast('Upload failed', 'error'); }
+    }
+
+    async function uploadLeadRecording(input) {
+      if (!input.files?.[0]) return;
+      await uploadLeadRecordingFile(input.files[0]);
       input.value = '';
+    }
+
+    // Drag-and-drop onto the whole dropzone box (not just the file-picker
+    // button) — dragover must preventDefault or the browser refuses the
+    // drop entirely and just navigates to/opens the file instead.
+    function handleLeadRecordingDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    }
+
+    function handleLeadRecordingDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+    }
+
+    async function handleLeadRecordingDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer?.files || []);
+      for (const file of files) await uploadLeadRecordingFile(file);
     }
 
     function deleteLeadRecording(recordingId) {

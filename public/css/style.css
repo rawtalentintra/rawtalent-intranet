@@ -1159,6 +1159,23 @@ body:has(> .navbar) { padding-top: 64px; }
 .status-popover select, .status-popover input { width: 100%; font-size: 11px; padding: 4px 6px; }
 .status-popover-actions { display: flex; justify-content: flex-end; gap: 5px; margin-top: 6px; }
 
+/* File-upload drop target — wraps an existing "Upload X" button/label so a
+   dragged file anywhere in the box uploads it, not just via the file
+   picker. .drag-over is toggled by the section's own dragover/dragleave
+   handlers (see e.g. handleLeadRecordingDragOver in admin.html). */
+.file-dropzone {
+  border: 1.5px dashed var(--gray-200);
+  border-radius: var(--radius);
+  padding: 10px 12px 8px;
+  margin-bottom: 10px;
+  transition: border-color .15s, background-color .15s;
+}
+.file-dropzone.drag-over {
+  border-color: var(--orange);
+  background: var(--orange-glow);
+}
+.file-dropzone-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
 /* ─── Admin Table ─────────────────────────────────────────────── */
 .admin-table-card {
   background: white;
