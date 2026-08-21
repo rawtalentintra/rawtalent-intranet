@@ -7341,7 +7341,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title">Overview</div>
+          <div class="sd-card-title" style="color:var(--orange)">🗂️ Overview</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px">
             <div><span style="color:var(--text-muted)">Contact:</span> ${escHtml(c.contactName || '—')}</div>
             <div><span style="color:var(--text-muted)">Phone:</span> ${escHtml(c.contactNo || '—')}</div>
@@ -7368,7 +7368,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title">Nurture Cadence</div>
+          <div class="sd-card-title" style="color:#059669">🌱 Nurture Cadence</div>
           <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
           <div style="overflow-x:auto;margin-top:10px">
             <table class="data-table data-table-compact">
@@ -7379,7 +7379,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title">Booking Performance</div>
+          <div class="sd-card-title" style="color:#7c3aed">📊 Booking Performance</div>
           <div class="sd-card-sub">Last 100 days</div>
           <div style="display:flex;gap:28px;margin-top:12px">
             <div><div style="font-size:20px;font-weight:700;color:var(--navy)">${bookingsRes.bookings.length}</div><div style="font-size:11.5px;color:var(--text-muted)">Total bookings</div></div>
@@ -7391,7 +7391,7 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('educators')">
             <div>
-              <div class="sd-card-title">Educator Relationships</div>
+              <div class="sd-card-title" style="color:#b45309">👥 Educator Relationships</div>
               <div class="sd-card-sub">Ranked by shifts worked, last 100 days${educators.length ? ` — ${educators.length} educator${educators.length === 1 ? '' : 's'}` : ''}</div>
             </div>
             <span id="centre360-educators-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
@@ -7406,7 +7406,7 @@
 
         <div class="admin-table-card" style="padding:20px 24px">
           <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('history')">
-            <div class="sd-card-title">Relationship History</div>
+            <div class="sd-card-title" style="color:#0891b2">🕒 Relationship History</div>
             <span id="centre360-history-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
           </div>
           <div id="centre360-history-body" style="display:none;margin-top:10px">${renderCentreActivityTimeline(activity)}</div>
