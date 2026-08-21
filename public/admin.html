@@ -9278,7 +9278,7 @@
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['firstName', 'lastName', 'userName', 'email'],
         extraFilters: [
-          { id: 'status', label: 'Status', type: 'select', field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
+          { id: 'status', label: 'Status', type: 'select', multi: true, field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
           { id: 'engagement', label: 'Engagement', type: 'select', field: 'engagementStatus', labelMap: { actively_engaged: ENGAGEMENT_META.actively_engaged.label, active_not_engaged: ENGAGEMENT_META.active_not_engaged.label } }
         ],
         // Same sub-view pattern as Clients — a searchable directory over the
@@ -9295,10 +9295,11 @@
           // are confirmed so far, the rest fall back to their raw number
           // rather than a guessed label.
           selectFilters: [
-            { id: 'status', label: 'Status', field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
+            { id: 'status', label: 'Status', multi: true, field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
             { id: 'state', label: 'State', multi: true, optionsFn: candidateStates },
-            { id: 'qualification', label: 'Qualification', optionsFn: candidateQualificationNames }
+            { id: 'qualification', label: 'Qualification', multi: true, optionsFn: candidateQualificationNames }
           ],
+          suburbMulti: true,
           extraFilters: [
             { id: 'expiring', label: 'Expiring/expired docs only', type: 'checkbox', test: r => candidateExpiringDocsCount(r) > 0 },
             { id: 'activelyEngaged', label: 'Actively Engaged only', type: 'checkbox', test: r => r.engagementStatus === 'actively_engaged' }
@@ -9706,9 +9707,18 @@
             <div class="admin-table-card" style="padding:12px 20px;margin-bottom:16px">
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <input type="text" id="report_${type}_list_search" class="form-control" placeholder="Search…" style="width:220px;flex:1;min-width:180px" oninput="applyListViewFilters('${type}')">
+                ${cfg.listView.suburbMulti ? `
+                  <div class="report-multiselect" style="position:relative">
+                    <button type="button" class="form-control" id="report_${type}_list_suburb_btn" style="width:170px;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px" onclick="toggleReportMultiSelect('${type}','suburb','list')">
+                      <span id="report_${type}_list_suburb_label">Suburb: Any</span><span style="font-size:10px;color:var(--text-muted)">▾</span>
+                    </button>
+                    <div id="report_${type}_list_suburb_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px 0;min-width:190px;max-height:260px;overflow-y:auto;z-index:40"></div>
+                  </div>
+                ` : `
                 <select id="report_${type}_list_suburb" class="form-control" style="width:170px" onchange="applyListViewFilters('${type}')">
                   <option value="">Suburb: Any</option>
                 </select>
+                `}
                 <select id="report_${type}_list_active" class="form-control" style="width:150px" onchange="applyListViewFilters('${type}')">
                   <option value="">Active + Inactive</option>
                   <option value="true">Active Only</option>
@@ -9891,8 +9901,13 @@
 
     function onReportMultiSelectChange(type, id, scope) {
       const cfg = REPORT_CONFIG[type];
-      const filters = scope === 'list' ? (cfg.listView.selectFilters || []) : (cfg.extraFilters || []);
-      const f = filters.find(x => x.id === id);
+      // 'suburb' isn't a listView.selectFilters entry — it's the older,
+      // separately-configured suburbFn/suburbMulti pair — so it needs its
+      // own synthetic filter descriptor here, same shape as the one
+      // populateListViewSuburbOptions already builds to render its panel.
+      const f = (id === 'suburb' && scope === 'list')
+        ? { id: 'suburb', label: 'Suburb' }
+        : (scope === 'list' ? (cfg.listView.selectFilters || []) : (cfg.extraFilters || [])).find(x => x.id === id);
       const key = msKey(type, id, scope);
       const checked = [...document.querySelectorAll(`#${msElBase(type, id, scope)}_panel input[type=checkbox]`)].filter(c => c.checked).map(c => c.value);
       reportMultiSelectState[key] = new Set(checked);
@@ -10269,10 +10284,15 @@
 
     function populateListViewSuburbOptions(type, rows) {
       const cfg = REPORT_CONFIG[type];
-      const sel = document.getElementById(`report_${type}_list_suburb`);
-      if (!sel || !cfg.listView.suburbFn) return;
-      const current = sel.value;
+      if (!cfg.listView.suburbFn) return;
       const suburbs = [...new Set(rows.flatMap(cfg.listView.suburbFn))].sort((a, b) => a.localeCompare(b));
+      if (cfg.listView.suburbMulti) {
+        renderReportMultiSelectPanel(type, { id: 'suburb', label: 'Suburb' }, suburbs, 'list');
+        return;
+      }
+      const sel = document.getElementById(`report_${type}_list_suburb`);
+      if (!sel) return;
+      const current = sel.value;
       sel.innerHTML = `<option value="">Suburb: Any</option>` + suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
       if (suburbs.includes(current)) sel.value = current;
     }
@@ -10299,12 +10319,19 @@
       const cfg = REPORT_CONFIG[type];
       const rows = reportDataCache[type] || [];
       const search = (document.getElementById(`report_${type}_list_search`)?.value || '').trim().toLowerCase();
-      const suburb = document.getElementById(`report_${type}_list_suburb`)?.value || '';
       const activeVal = document.getElementById(`report_${type}_list_active`)?.value || '';
 
       let filtered = rows;
       if (activeVal !== '') filtered = filtered.filter(r => String(r.isActive) === activeVal);
-      if (suburb && cfg.listView.suburbFn) filtered = filtered.filter(r => cfg.listView.suburbFn(r).includes(suburb));
+      if (cfg.listView.suburbFn) {
+        if (cfg.listView.suburbMulti) {
+          const selectedSuburbs = reportMultiSelectState[msKey(type, 'suburb', 'list')];
+          if (selectedSuburbs && selectedSuburbs.size) filtered = filtered.filter(r => cfg.listView.suburbFn(r).some(s => selectedSuburbs.has(s)));
+        } else {
+          const suburb = document.getElementById(`report_${type}_list_suburb`)?.value || '';
+          if (suburb) filtered = filtered.filter(r => cfg.listView.suburbFn(r).includes(suburb));
+        }
+      }
       (cfg.listView.selectFilters || []).forEach(f => {
         if (f.multi) {
           const selected = reportMultiSelectState[msKey(type, f.id, 'list')];
