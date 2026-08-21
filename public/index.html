@@ -381,19 +381,21 @@
       overflow: hidden;
     }
     /* Home grid tiles — same .article-card base as the Articles list and
-       Training cards, but forced to a 1:1 square (via aspect-ratio) so all
-       8 tiles line up evenly regardless of how long each description is. */
+       Training cards. Sized to content (icon + title + one-line summary)
+       rather than forced into a 1:1 square — a square tall enough to fit
+       the longest description left every shorter one mostly empty white
+       space. */
     .home-tile-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 14px;
     }
     .article-card.home-tile {
-      aspect-ratio: 1;
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      padding: 18px 22px;
     }
+    .home-tile .card-summary { margin-bottom: 0; }
     .card-footer {
       display: flex;
       align-items: center;
