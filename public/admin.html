@@ -1858,7 +1858,6 @@
               <tbody>
                 <tr><td>Clients</td><td><code>clientAssignmentTypeId</code></td><td>Values narrowed to {0,1,2,3} by the sweep, but no correlation found against anything else that would hint at meaning.</td></tr>
                 <tr><td>Clients</td><td><code>clientPreferenceId</code></td><td>Almost always 0 in real data — low priority, but still unlabeled.</td></tr>
-                <tr><td>Candidates</td><td><code>status</code></td><td>Sweep found strong evidence it's a <strong>bitmask</strong> (1/2/4/8 + combinations), not a simple enum — worth telling the dev team that shape specifically, since a single value→label table won't be the right ask.</td></tr>
                 <tr><td>Candidate Availability</td><td><code>status</code> (<code>CandidateAvailabilityStatus</code>)</td><td><strong>Still the top priority.</strong> 99.95% of 21,000+ sampled entries are the same value (0) — far too rare a spread to infer 1 vs. 2 from behavior. This is the field Micropods would need most.</td></tr>
                 <tr><td>Bookings</td><td><code>statusId</code></td><td>Sweep produced a strong hypothesis (see the Bookings table below) from correlating against assignment + past/future date, but it's inferred, not confirmed — worth a quick sanity check with the dev team before relying on it.</td></tr>
                 <tr><td>Bookings</td><td><code>certificateId</code></td><td>Shares its value range with the confirmed <code>qualificationId</code> codes, but the dominant value doesn't intuitively fit — don't assume it's the same table without asking.</td></tr>
@@ -1979,7 +1978,7 @@
                 <tr><td><code>createdBy</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above.</td></tr>
                 <tr><td><code>userTypeId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Sweep found this is <strong>2 in every single one</strong> of 1,600 sampled candidates — since this endpoint only ever returns candidates, 2 almost certainly just means "Candidate" as a user type, distinguishing from staff/client-contact users elsewhere in RT's system. Doesn't differentiate anything within this report.</td></tr>
                 <tr><td><code>userRoleId</code></td><td>int</td><td class="rtapi-inferred">🔬 Inferred</td><td>Same finding as <code>userTypeId</code> — constant at 2 across every sampled candidate. Not differentiating within this report either.</td></tr>
-                <tr><td><code>status</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Sweep found values {0, 1, 2, 4, 8, 9} — <strong>1, 2, 4, 8 are all powers of two, and 9 = 8+1</strong>, a strong sign this is a <em>bitmask of flags</em> (e.g. verified/onboarded/compliant/etc., combinable) rather than a simple sequential status enum. Worth telling the dev team this shape specifically — a single "which number = which status" table won't be right if it's really flags.</td></tr>
+                <tr><td><code>status</code></td><td>int</td><td class="rtapi-confirmed">🔬 Confirmed</td><td>Initially looked like it might be a bitmask (non-sequential values {0,1,2,4,5,8,9,10}), but spot-checking 3 real candidates per code against RT's own candidate app disproved that — all 8 are genuinely distinct statuses, not combinations of each other: <strong>0 = Vetting Call, 1 = Active, 2 = In Progress, 4 = Do Not Use, 5 = Awaiting Activation, 8 = Not Interested, 9 = Student, 10 = Pending Reference.</strong> "Welcome Call" (the one remaining status name from the candidate app) hasn't turned up as a code in real data yet.</td></tr>
                 <tr><td><code>userClientId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>Presumably which agency/client owns this candidate record.</td></tr>
                 <tr><td><code>addresses[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Addresses table below — <strong>pre-geocoded</strong>.</td></tr>
                 <tr><td><code>qualifications[]</code></td><td>array</td><td class="rtapi-clear">✓ Clear (new)</td><td>See Candidate Qualifications table below.</td></tr>
@@ -9226,18 +9225,19 @@
       return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
     }
 
-    // candidate.status is a raw RT integer a live-data sweep flagged as
-    // likely a bitmask (see the RT API Data Reference's Candidates gap
-    // table) — real values on file span {0,1,2,4,5,8,9,10}, and the rare
-    // ones (5, 9, 10) look like combinations of the common ones (4+1, 8+1,
-    // 8+2), not a clean sequential enum. These 3 are the only ones actually
-    // confirmed so far, spot-checked email-by-email against RT's own
-    // candidate app: 0=Vetting Call, 4=Do Not Use, 8=Not Interested.
-    // Everything else stays an unlabeled raw code (falls back to the number
-    // itself) until more of them are confirmed the same way — guessing the
-    // remaining 6 status names onto codes 1/2/5/9/10 without checking would
-    // risk silently mis-labeling real people.
-    const CANDIDATE_STATUS_LABELS = { 0: 'Vetting Call', 4: 'Do Not Use', 8: 'Not Interested' };
+    // candidate.status is a raw RT integer — an earlier live-data sweep
+    // guessed it might be a bitmask since the real values on file
+    // ({0,1,2,4,5,8,9,10}) aren't sequential, but spot-checking every one
+    // of them email-by-email against RT's own candidate app (3 real
+    // candidates per code, all 3 agreeing every time) disproved that:
+    // they're just 8 genuinely distinct statuses using non-sequential
+    // numbers, not combinations of each other. Fully confirmed now — the
+    // only one of the 9 status names with no matching code seen in real
+    // data yet is "Welcome Call".
+    const CANDIDATE_STATUS_LABELS = {
+      0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use',
+      5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference'
+    };
 
     // An address's free-text `state` field is a mess (typos, suburb names,
     // stray backticks, even non-Latin scripts — confirmed across a live
@@ -9344,9 +9344,7 @@
           idField: 'userId',
           suburbFn: candidateSuburbs,
           searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
-          // See CANDIDATE_STATUS_LABELS — only 3 of the ~8 real status codes
-          // are confirmed so far, the rest fall back to their raw number
-          // rather than a guessed label.
+          // See CANDIDATE_STATUS_LABELS — all 8 real status codes confirmed.
           selectFilters: [
             { id: 'status', label: 'Status', multi: true, field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
             { id: 'state', label: 'State', multi: true, optionsFn: candidateStates },
@@ -9387,7 +9385,7 @@
           ];
         },
         breakdowns: [
-          { title: 'By Status', sub: '3 of ~8 codes confirmed so far — see RT API Data Reference', compute: rows => computeCodeBreakdown(rows, 'status', 'Status', null, CANDIDATE_STATUS_LABELS) },
+          { title: 'By Status', sub: 'Spot-checked against RT’s own candidate app', compute: rows => computeCodeBreakdown(rows, 'status', 'Status', null, CANDIDATE_STATUS_LABELS) },
           { title: 'By User Type', sub: 'Raw type codes', field: 'userTypeId', labelPrefix: 'Type' }
         ],
         columns: [
