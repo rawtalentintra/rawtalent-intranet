@@ -9173,6 +9173,19 @@
       return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
     }
 
+    // candidate.status is a raw RT integer a live-data sweep flagged as
+    // likely a bitmask (see the RT API Data Reference's Candidates gap
+    // table) — real values on file span {0,1,2,4,5,8,9,10}, and the rare
+    // ones (5, 9, 10) look like combinations of the common ones (4+1, 8+1,
+    // 8+2), not a clean sequential enum. These 3 are the only ones actually
+    // confirmed so far, spot-checked email-by-email against RT's own
+    // candidate app: 0=Vetting Call, 4=Do Not Use, 8=Not Interested.
+    // Everything else stays an unlabeled raw code (falls back to the number
+    // itself) until more of them are confirmed the same way — guessing the
+    // remaining 6 status names onto codes 1/2/5/9/10 without checking would
+    // risk silently mis-labeling real people.
+    const CANDIDATE_STATUS_LABELS = { 0: 'Vetting Call', 4: 'Do Not Use', 8: 'Not Interested' };
+
     const REPORT_CONFIG = {
       clients: {
         label: 'Clients', icon: '🏢',
@@ -9255,7 +9268,7 @@
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['firstName', 'lastName', 'userName', 'email'],
         extraFilters: [
-          { id: 'status', label: 'Status', type: 'select', field: 'status' },
+          { id: 'status', label: 'Status', type: 'select', field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
           { id: 'engagement', label: 'Engagement', type: 'select', field: 'engagementStatus', labelMap: { actively_engaged: ENGAGEMENT_META.actively_engaged.label, active_not_engaged: ENGAGEMENT_META.active_not_engaged.label } }
         ],
         // Same sub-view pattern as Clients — a searchable directory over the
@@ -9268,17 +9281,11 @@
           idField: 'userId',
           suburbFn: candidateSuburbs,
           searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
-          // Status is deliberately NOT label-mapped here — RT's own
-          // candidate.status is a raw integer that a live-data sweep found
-          // strong evidence is a bitmask (1/2/4/8 + combinations), not a
-          // clean 1:1 enum (see the RT API Data Reference's Candidates gap
-          // table). Guessing labels like "Active"/"Vetting Call" onto raw
-          // codes we haven't confirmed would risk silently mis-filtering
-          // people — so this filters on the real raw codes, unlabeled, same
-          // "shown as-is" convention as everywhere else in this app that
-          // touches this field, until RT's dev team confirms the mapping.
+          // See CANDIDATE_STATUS_LABELS — only 3 of the ~8 real status codes
+          // are confirmed so far, the rest fall back to their raw number
+          // rather than a guessed label.
           selectFilters: [
-            { id: 'status', label: 'Status (raw code)', field: 'status' },
+            { id: 'status', label: 'Status', field: 'status', labelMap: CANDIDATE_STATUS_LABELS },
             { id: 'state', label: 'State', optionsFn: candidateStates },
             { id: 'qualification', label: 'Qualification', optionsFn: candidateQualificationNames }
           ],
@@ -9316,7 +9323,7 @@
           ];
         },
         breakdowns: [
-          { title: 'By Status', sub: 'Raw status codes', field: 'status', labelPrefix: 'Status' },
+          { title: 'By Status', sub: '3 of ~8 codes confirmed so far — see RT API Data Reference', compute: rows => computeCodeBreakdown(rows, 'status', 'Status', null, CANDIDATE_STATUS_LABELS) },
           { title: 'By User Type', sub: 'Raw type codes', field: 'userTypeId', labelPrefix: 'Type' }
         ],
         columns: [
@@ -10842,7 +10849,7 @@
             ['Active', candidate.isActive ? '✅ Active' : '❌ Inactive'],
             ['User Type', candidate.userTypeId ?? '—'],
             ['Role', candidate.userRoleId ?? '—'],
-            ['Status', candidate.status ?? '—'],
+            ['Status', candidate.status === null || candidate.status === undefined ? '—' : (CANDIDATE_STATUS_LABELS[candidate.status] ? `${CANDIDATE_STATUS_LABELS[candidate.status]} (${candidate.status})` : candidate.status)],
             ['Client ID', candidate.userClientId ?? '—'],
             ['Created', fmtDate(candidate.createdDate)]
           ].map(([label, value]) => `
