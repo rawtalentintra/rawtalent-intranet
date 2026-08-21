@@ -3846,7 +3846,8 @@
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Upcoming</div>
           ${notifData.upcomingEvents.map(ev => `
             <div style="background:${ev.alreadySent ? 'white' : 'linear-gradient(135deg,#fff7ed,#fef3e8)'};border:1px solid ${ev.alreadySent ? 'var(--gray-100)' : '#fed7aa'};border-radius:10px;padding:12px 14px;margin:0 6px 8px">
-              <div style="font-weight:${ev.alreadySent ? '500' : '700'};color:${ev.alreadySent ? 'var(--text-muted)' : 'var(--navy)'};font-size:13px;margin-bottom:4px">${escHtml(ev.headline)}</div>
+              <div style="font-weight:${ev.alreadySent ? '500' : '700'};color:${ev.alreadySent ? 'var(--text-muted)' : 'var(--navy)'};font-size:13px;margin-bottom:2px">${escHtml(ev.headline)}</div>
+              <div style="font-size:11px;font-weight:600;color:${ev.alreadySent ? 'var(--text-muted)' : 'var(--orange)'};margin-bottom:4px">${escHtml(fmtEventDate(ev.date))}</div>
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(ev.action)}</div>
               <button class="btn-add" style="font-size:11px;padding:6px 12px" onclick="previewGreeting('${ev.teamMemberId}','${ev.type}','${escHtml(ev.name)}')">${greetingButtonLabel(ev)}</button>
             </div>
@@ -5486,6 +5487,15 @@
     function fmtDate(iso) {
       if (!iso) return '';
       try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
+      catch { return iso; }
+    }
+
+    // Weekday-included form for the notification bell's Upcoming reminders —
+    // those fire up to a week ahead, so "in 7 days" alone doesn't tell
+    // someone which actual day to plan for.
+    function fmtEventDate(iso) {
+      if (!iso) return '';
+      try { return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }); }
       catch { return iso; }
     }
 

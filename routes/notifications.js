@@ -90,7 +90,11 @@ function nextOccurrence(dateStr) {
   next.setHours(0, 0, 0, 0);
   if (next < today) next.setFullYear(next.getFullYear() + 1);
   const daysUntil = Math.round((next - today) / 86400000);
-  return { daysUntil };
+  return { daysUntil, date: ymd(next) };
+}
+
+function ymd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // Reminders fire a week before, 2 days before, 1 day before, and on the day
@@ -140,7 +144,7 @@ router.get('/', async (req, res) => {
         const bday = nextOccurrence(m.birthdate);
         if (bday && REMINDER_DAYS_BEFORE.includes(bday.daysUntil)) {
           upcomingEvents.push({
-            teamMemberId: m.id, name: m.name, type: 'birthday', daysUntil: bday.daysUntil,
+            teamMemberId: m.id, name: m.name, type: 'birthday', daysUntil: bday.daysUntil, date: bday.date,
             headline: bday.daysUntil === 0 ? `It's ${m.name}'s Birthday today! 🎂` : `It's almost ${m.name}'s Birthday! 🎂`,
             action: pick(BIRTHDAY_ACTIONS),
             alreadySent: recentlySent.has(`${m.id}:birthday`)
@@ -149,7 +153,7 @@ router.get('/', async (req, res) => {
         const anniv = nextOccurrence(m.employment_date);
         if (anniv && REMINDER_DAYS_BEFORE.includes(anniv.daysUntil)) {
           upcomingEvents.push({
-            teamMemberId: m.id, name: m.name, type: 'anniversary', daysUntil: anniv.daysUntil,
+            teamMemberId: m.id, name: m.name, type: 'anniversary', daysUntil: anniv.daysUntil, date: anniv.date,
             headline: anniv.daysUntil === 0 ? `It's ${m.name}'s Employment Date Anniversary today! 🎉` : `It's almost ${m.name}'s Employment Date Anniversary! 🎉`,
             action: pick(ANNIVERSARY_ACTIONS),
             alreadySent: recentlySent.has(`${m.id}:anniversary`)
