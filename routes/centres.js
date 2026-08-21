@@ -13,6 +13,7 @@ const { detectTimestampFromText } = require('../services/transcriptDateService')
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { MELBOURNE_SUBURB_PARTNER } = require('../services/melbourneTerritoryService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
 
@@ -207,6 +208,17 @@ router.get('/', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+});
+
+// The Melbourne suburb->partner map (Liam north/west vs Justine east/
+// south-east/bayside, see melbourneTerritoryService) so the frontend's
+// display-only defaultCentrePartner() fallback can do the same suburb
+// lookup as the backend, for the rare centre with no real
+// centre_partner_assignments row (e.g. a brand new RT client synced in
+// after the one-time backfill). Registered ahead of GET /:centreKey for
+// the same reason as /due-for-routing below.
+router.get('/territory-map', (req, res) => {
+  res.json(MELBOURNE_SUBURB_PARTNER);
 });
 
 // Smart Routing's due-centres pool — see routes/routePlanner.js and

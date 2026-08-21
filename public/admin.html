@@ -3616,6 +3616,7 @@
       // page load; opening the bell (see toggleNotifPanel) re-fetches too,
       // so nothing goes stale for longer than "next time you check it".
       loadNotifications();
+      loadMelbourneTerritoryMap();
 
       // Land back on whichever section was open before the refresh, instead
       // of always resetting to Articles — showSection() keeps this in sync
@@ -6438,16 +6439,26 @@
       return null;
     }
 
-    // Territory-based default — VIC belongs to Justine, SA to Gwen, unless
-    // a centre has been manually reassigned (centre_partner_assignments,
-    // typically to Liam). Display-only: never written back to the DB, so
-    // a centre with no manual override still shows the sensible default
-    // it's obviously covered by (matches the existing VIC/SA My Centres
-    // toggle, which was already territory-based and unaffected by this)
-    // without needing a real row for every one of ~350 centres.
-    function defaultCentrePartner(rawState) {
+    // Territory-based default for a centre with no manual/backfilled
+    // centre_partner_assignments row. SA -> Gwen. VIC is split by suburb
+    // (Liam north/west vs Justine east/south-east/bayside, 2026-08-22
+    // directive) via the same melbourneSuburbPartner map the backend uses
+    // (see GET /api/centres/territory-map) — anything outside that metro
+    // split (regional Victoria, or the map not loaded yet) falls back to
+    // Justine, VIC's sole partner before this split. Display-only: never
+    // written back to the DB itself (the one-time backfill already wrote
+    // real rows for every centre that existed at split time — this is
+    // just the fallback for whatever shows up after).
+    let melbourneSuburbPartner = {};
+    async function loadMelbourneTerritoryMap() {
+      try { melbourneSuburbPartner = await fetch('/api/centres/territory-map').then(r => r.json()); } catch {}
+    }
+    function defaultCentrePartner(rawState, suburb) {
       const bucket = wfpCentreStateBucket(rawState);
-      if (bucket === 'VIC') return 'Justine Hardware (VIC)';
+      if (bucket === 'VIC') {
+        const key = (suburb || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.,]+$/, '');
+        return melbourneSuburbPartner[key] || 'Justine Hardware (VIC)';
+      }
       if (bucket === 'SA') return 'Gwen Stocks (SA)';
       return null;
     }
@@ -7335,7 +7346,7 @@
 
     function renderCentre360(c, bookingsRes, educators, activity) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
-      const effectivePartner = c.assignedWorkforcePartner || defaultCentrePartner(c.state);
+      const effectivePartner = c.assignedWorkforcePartner || defaultCentrePartner(c.state, c.suburb);
       const healthMeta = CENTRE_HEALTH_META[c.health] || { label: c.health, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
       return `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px">

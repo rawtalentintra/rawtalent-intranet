@@ -11,6 +11,7 @@ const { keyForLocation, keyForClient } = require('../services/centreKeyService')
 const { MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
 const { visitsByCentreKey } = require('./centres');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { partnerForSuburbState } = require('../services/melbourneTerritoryService');
 
 router.use(requireAuth);
 
@@ -28,10 +29,16 @@ const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforc
 
 // State -> Workforce Partner auto-assignment. Still overridable afterwards
 // via PUT — this just sets a sensible default so nothing sits unassigned.
+// VIC is further split by suburb (Liam's north/west vs Justine's
+// east/south-east/bayside directive, 2026-08-22) via
+// melbourneTerritoryService — this map now only covers non-VIC states.
 const STATE_WORKFORCE_PARTNER = {
-  SA: 'Gwen Stocks (SA)',
-  VIC: 'Justine Hardware (VIC)'
+  SA: 'Gwen Stocks (SA)'
 };
+
+function autoAssignWorkforcePartner(suburb, state) {
+  return partnerForSuburbState(suburb, state) || STATE_WORKFORCE_PARTNER[state] || null;
+}
 
 // Anyone signed in can submit — consultant identity is always the caller,
 // never a field the client can set, so a lead can't be logged under
@@ -49,7 +56,7 @@ router.post('/', async (req, res) => {
     if (!agencyUsage) return res.status(400).json({ error: 'Agency usage is required' });
 
     const id = uuidv4();
-    const assignedWorkforcePartner = STATE_WORKFORCE_PARTNER[state] || null;
+    const assignedWorkforcePartner = autoAssignWorkforcePartner(suburb, state);
     // Defaults to 'lead' (a consultant's vetting-call submission) unless the
     // Leads table's "Add Centre" button explicitly says otherwise — that's
     // the only caller that should ever send 'centre'.
