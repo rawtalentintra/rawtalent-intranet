@@ -6069,11 +6069,19 @@
       // 'LIAM' isn't a real value the State dropdown can hold (leads.state
       // is always a real AU code) — it routes through the existing Partner
       // dropdown instead, which already filters by
-      // assigned_workforce_partner. Each button clears the other dimension
-      // so the two never combine into a stale, confusing filter.
+      // assigned_workforce_partner. 'VIC' now needs the same treatment:
+      // since Liam's Melbourne territory split (2026-08-22), VIC contains
+      // both his and Justine's leads, so filtering by state='VIC' would
+      // wrongly include his under her button too — 'VIC' here specifically
+      // means "assigned to Justine", so it routes through Partner as well.
+      // Each button clears the other dimension so the two never combine
+      // into a stale, confusing filter.
       if (state === 'LIAM') {
         document.getElementById('leadsFilterState').value = '';
         document.getElementById('leadsFilterPartner').value = 'Liam Baxter (VIC)';
+      } else if (state === 'VIC') {
+        document.getElementById('leadsFilterState').value = '';
+        document.getElementById('leadsFilterPartner').value = 'Justine Hardware (VIC)';
       } else {
         document.getElementById('leadsFilterState').value = state === 'all' ? '' : state;
         document.getElementById('leadsFilterPartner').value = '';
@@ -6112,7 +6120,7 @@
 
       // Keeps button styling correct even if the State/Partner dropdowns
       // were changed directly rather than via a button click.
-      const activeBtnState = partner === 'Liam Baxter (VIC)' ? 'LIAM' : (state || 'all');
+      const activeBtnState = partner === 'Liam Baxter (VIC)' ? 'LIAM' : partner === 'Justine Hardware (VIC)' ? 'VIC' : (state || 'all');
       document.querySelectorAll('#section-leads .wfp-state-filter-btn').forEach(btn => {
         btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
       });
@@ -6463,7 +6471,7 @@
       return null;
     }
 
-    // 'LIAM' isn't a real state the way VIC/SA are — Liam's territory is a
+    // 'LIAM' isn't a real state the way SA is — Liam's territory is a
     // manual per-lead/per-centre assignment (see My Centres), not
     // geography, so every wfpStateFilter comparison below goes through
     // these two helpers rather than a raw `l.state === wfpStateFilter`,
@@ -6471,14 +6479,26 @@
     // dashboard for him. Centralized here once so adding Liam didn't mean
     // hunting down and patching every one of this page's ~10 separate
     // filter call sites individually.
+    //
+    // 'VIC' stopped being a plain geography bucket once Liam's Melbourne
+    // territory split landed (2026-08-22) — VIC now contains BOTH his and
+    // Justine's centres/leads, so "VIC" here specifically means "assigned
+    // to Justine", matched the same assignment-based way as LIAM, not by
+    // `state === 'VIC'` (which would wrongly include Liam's too). SA
+    // stays geography-based deliberately — Gwen is still the sole,
+    // unsplit partner for all of SA, and SA centres were never backfilled
+    // with a real assignedWorkforcePartner row, so switching that one to
+    // assignment-based too would make most of SA vanish from its own filter.
     function leadMatchesWfpFilter(l) {
       if (!wfpStateFilter) return true;
       if (wfpStateFilter === 'LIAM') return l.assigned_workforce_partner === 'Liam Baxter (VIC)';
+      if (wfpStateFilter === 'VIC') return l.assigned_workforce_partner === 'Justine Hardware (VIC)';
       return l.state === wfpStateFilter;
     }
     function centreMatchesWfpFilter(c) {
       if (!wfpStateFilter) return true;
       if (wfpStateFilter === 'LIAM') return c.assignedWorkforcePartner === 'Liam Baxter (VIC)';
+      if (wfpStateFilter === 'VIC') return c.assignedWorkforcePartner === 'Justine Hardware (VIC)';
       return wfpCentreStateBucket(c.state) === wfpStateFilter;
     }
     function retentionRowMatchesWfpFilter(r) {
@@ -6487,9 +6507,10 @@
       // (it's not relevant to retention math) — cross-referenced from
       // allLeads instead of a backend change, since it's already loaded
       // for this page and r.leadId ties straight back to it.
-      if (wfpStateFilter === 'LIAM') {
+      if (wfpStateFilter === 'LIAM' || wfpStateFilter === 'VIC') {
         const lead = allLeads.find(l => l.id === r.leadId);
-        return lead?.assigned_workforce_partner === 'Liam Baxter (VIC)';
+        const wantedPartner = wfpStateFilter === 'LIAM' ? 'Liam Baxter (VIC)' : 'Justine Hardware (VIC)';
+        return lead?.assigned_workforce_partner === wantedPartner;
       }
       return r.state === wfpStateFilter;
     }
@@ -6777,13 +6798,16 @@
     }
 
     function renderSalesFunnel(leads) {
-      // Liam's "territory" is a manual assignment, not geography, so his
-      // card is keyed by partner (below) rather than state like Justine/
-      // Gwen's — same distinction leadMatchesWfpFilter draws.
+      // Liam and Justine's "territories" are both manual assignments now
+      // (Melbourne territory split, 2026-08-22), not geography — VIC leads
+      // split between them, so both are keyed by partner, only Gwen's SA
+      // card stays state-keyed (unsplit, same distinction leadMatchesWfpFilter draws).
       const allStates = [{ key: 'LIAM', label: '📍 VIC — Liam' }, { key: 'VIC', label: '📍 VIC — Justine' }, { key: 'SA', label: '📍 SA — Gwen' }];
       const states = wfpStateFilter ? allStates.filter(s => s.key === wfpStateFilter) : allStates;
       document.getElementById('salesFunnelRow').innerHTML = states.map(s => {
-        const stateLeads = s.key === 'LIAM' ? leads.filter(l => l.assigned_workforce_partner === 'Liam Baxter (VIC)') : leads.filter(l => l.state === s.key);
+        const stateLeads = s.key === 'LIAM' ? leads.filter(l => l.assigned_workforce_partner === 'Liam Baxter (VIC)')
+          : s.key === 'VIC' ? leads.filter(l => l.assigned_workforce_partner === 'Justine Hardware (VIC)')
+          : leads.filter(l => l.state === s.key);
         const c = salesFunnelCounts(stateLeads);
         const stages = [
           { label: 'Leads', value: c.total },
@@ -6926,14 +6950,20 @@
       const partners = wfpStateFilter ? allPartners.filter(p => p.key === wfpStateFilter) : allPartners;
       const attention = computeAttentionItems();
       document.getElementById('salesPartnerRow').innerHTML = partners.map(p => {
-        const stateLeads = p.key === 'LIAM' ? leads.filter(l => l.assigned_workforce_partner === 'Liam Baxter (VIC)') : leads.filter(l => l.state === p.key);
+        const stateLeads = p.key === 'LIAM' ? leads.filter(l => l.assigned_workforce_partner === 'Liam Baxter (VIC)')
+          : p.key === 'VIC' ? leads.filter(l => l.assigned_workforce_partner === 'Justine Hardware (VIC)')
+          : leads.filter(l => l.state === p.key);
         const c = salesFunnelCounts(stateLeads);
         // Centre attention items aren't scoped to a Workforce Partner yet
         // (see the My Centres section note) and RT's state is a full name
         // ("Victoria") rather than this card's short 'VIC'/'SA' key, so
         // they're excluded from this specific per-partner count rather
         // than compared incorrectly.
-        const attnCount = attention.filter(a => a.type !== 'centre' && (p.key === 'LIAM' ? a.lead.assigned_workforce_partner === 'Liam Baxter (VIC)' : a.lead.state === p.key)).length;
+        const attnCount = attention.filter(a => a.type !== 'centre' && (
+          p.key === 'LIAM' ? a.lead.assigned_workforce_partner === 'Liam Baxter (VIC)'
+          : p.key === 'VIC' ? a.lead.assigned_workforce_partner === 'Justine Hardware (VIC)'
+          : a.lead.state === p.key
+        )).length;
         return `
           <div class="admin-table-card" style="padding:18px 20px;flex:1">
             <div class="sd-card-title" style="margin-bottom:2px">${p.short}</div>
@@ -7168,9 +7198,15 @@
       // 'LIAM' is a pseudo-state — piggybacks the same toggle UI/opacity
       // mechanism as the real VIC/SA state buttons, but filters by manual
       // per-centre assignment (centre_partner_assignments) instead of
-      // geography, since Liam is VIC-based like Justine and this is an
-      // additive lens, not a re-carve of her existing state-based view.
+      // geography. 'VIC' now means "assigned to Justine" the same way,
+      // not blanket VIC geography — Liam's Melbourne territory split
+      // (2026-08-22) means VIC contains both their centres now, all
+      // backfilled with a real assignedWorkforcePartner row, so a
+      // geography check would wrongly include his under her button too.
+      // SA stays geography-based (Gwen's still the sole, unsplit
+      // partner there, and SA was never backfilled with real rows).
       if (myCentresStateFilter === 'LIAM') rows = rows.filter(c => c.assignedWorkforcePartner === 'Liam Baxter (VIC)');
+      else if (myCentresStateFilter === 'VIC') rows = rows.filter(c => c.assignedWorkforcePartner === 'Justine Hardware (VIC)');
       else if (myCentresStateFilter) rows = rows.filter(c => wfpCentreStateBucket(c.state) === myCentresStateFilter);
       // Counts reflect search/state/suburb (and the state-toggle) so the
       // Portfolio Health boxes track whatever slice of the portfolio is
@@ -8618,14 +8654,19 @@
       if (includeCentres) pool = pool.concat(routePlannerCentres);
 
       let filtered = pool;
-      // 'LIAM' matches manual partner assignment on both leads and
-      // centres — a real state matches either type's own state field
-      // (centres are already normalised to the short code, see
-      // routes/centres.js's toRouteStop).
-      if (routeStateFilter === 'LIAM') {
+      // 'LIAM'/'VIC' both match manual partner assignment on both leads and
+      // centres now (Liam's Melbourne territory split, 2026-08-22, means
+      // VIC is no longer a single-partner geography bucket — 'VIC' here
+      // specifically means "assigned to Justine"). A real state other than
+      // VIC still matches either type's own state field (centres are
+      // already normalised to the short code, see routes/centres.js's
+      // toRouteStop) since only VIC/SA's Gwen split is affected, and SA
+      // stays geography-based (unsplit, never backfilled with real rows).
+      if (routeStateFilter === 'LIAM' || routeStateFilter === 'VIC') {
+        const wantedPartner = routeStateFilter === 'LIAM' ? 'Liam Baxter (VIC)' : 'Justine Hardware (VIC)';
         filtered = filtered.filter(item => item.type === 'centre'
-          ? item.assignedWorkforcePartner === 'Liam Baxter (VIC)'
-          : item.assigned_workforce_partner === 'Liam Baxter (VIC)');
+          ? item.assignedWorkforcePartner === wantedPartner
+          : item.assigned_workforce_partner === wantedPartner);
       } else if (routeStateFilter) {
         filtered = filtered.filter(item => item.state === routeStateFilter);
       }
