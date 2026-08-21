@@ -9268,6 +9268,20 @@
           idField: 'userId',
           suburbFn: candidateSuburbs,
           searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
+          // Status is deliberately NOT label-mapped here — RT's own
+          // candidate.status is a raw integer that a live-data sweep found
+          // strong evidence is a bitmask (1/2/4/8 + combinations), not a
+          // clean 1:1 enum (see the RT API Data Reference's Candidates gap
+          // table). Guessing labels like "Active"/"Vetting Call" onto raw
+          // codes we haven't confirmed would risk silently mis-filtering
+          // people — so this filters on the real raw codes, unlabeled, same
+          // "shown as-is" convention as everywhere else in this app that
+          // touches this field, until RT's dev team confirms the mapping.
+          selectFilters: [
+            { id: 'status', label: 'Status (raw code)', field: 'status' },
+            { id: 'state', label: 'State', optionsFn: candidateStates },
+            { id: 'qualification', label: 'Qualification', optionsFn: candidateQualificationNames }
+          ],
           extraFilters: [
             { id: 'expiring', label: 'Expiring/expired docs only', type: 'checkbox', test: r => candidateExpiringDocsCount(r) > 0 },
             { id: 'activelyEngaged', label: 'Actively Engaged only', type: 'checkbox', test: r => r.engagementStatus === 'actively_engaged' }
@@ -9276,6 +9290,7 @@
             { header: 'Name', render: r => escHtml([r.firstName, r.lastName].filter(Boolean).join(' ') || '—') },
             { header: 'Username', render: r => escHtml(r.userName || '—') },
             { header: 'Suburb(s)', render: r => escHtml(candidateSuburbs(r).join(', ') || '—') },
+            { header: 'State', render: r => escHtml(candidateStates(r).join(', ') || '—') },
             { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
             { header: 'Email', render: r => escHtml(r.email || '—') },
             { header: 'Quals', render: r => String((r.qualifications || []).length) },
@@ -9682,12 +9697,21 @@
                   <option value="true">Active Only</option>
                   <option value="false">Inactive Only</option>
                 </select>
+                ${(cfg.listView.selectFilters || []).map(f => `
+                  <select id="report_${type}_list_${f.id}" class="form-control" style="width:150px" onchange="applyListViewFilters('${type}')">
+                    <option value="">${escHtml(f.label)}: Any</option>
+                  </select>
+                `).join('')}
                 ${(cfg.listView.extraFilters || []).map(f => `
                   <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
                     <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyListViewFilters('${type}')"> ${escHtml(f.label)}
                   </label>
                 `).join('')}
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
+                <div style="margin-left:auto;display:flex;gap:8px">
+                  <button type="button" class="btn-secondary" style="padding:6px 12px;font-size:12px" onclick="exportListViewCsv('${type}')">⬇️ Export CSV</button>
+                  <button type="button" class="btn-secondary" style="padding:6px 12px;font-size:12px" onclick="exportListViewPdf('${type}')">🖨️ Export PDF</button>
+                </div>
               </div>
               ${cfg.note ? `<div style="font-size:11.5px;color:var(--text-muted);white-space:pre-line;margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">${escHtml(cfg.note)}</div>` : ''}
             </div>
@@ -9778,7 +9802,7 @@
         populateReportExtraFilterOptions(type, rows);
         reportPage[type] = 1;
         applyReportFilters(type);
-        if (cfg.hasListView && !cfg.listView.dated) { populateListViewSuburbOptions(type, rows); applyListViewFilters(type); }
+        if (cfg.hasListView && !cfg.listView.dated) { populateListViewSuburbOptions(type, rows); populateListViewSelectFilterOptions(type, rows); applyListViewFilters(type); }
       } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load — ${escHtml(err.message || 'network error')}</td></tr>`;
       }
@@ -10187,6 +10211,14 @@
       return [...new Set((candidate.addresses || []).map(a => a.suburb).filter(Boolean))];
     }
 
+    function candidateStates(candidate) {
+      return [...new Set((candidate.addresses || []).map(a => a.state).filter(Boolean))];
+    }
+
+    function candidateQualificationNames(candidate) {
+      return [...new Set((candidate.qualifications || []).map(q => q.qualificationName || q.shortCode).filter(Boolean))];
+    }
+
     // attachedRequirements[] is where WWCC/PCC-type compliance documents
     // live, each with its own expiryDate. isExpiry is the RT app's own
     // "already expired" flag; falls back to comparing expiryDate against
@@ -10212,6 +10244,23 @@
       if (suburbs.includes(current)) sel.value = current;
     }
 
+    // Generic single-select extraFilters for the (non-dated) listView filter
+    // bar — either a plain field value (f.field) or, for a value that can
+    // appear multiple times per row (e.g. a candidate's several
+    // qualifications), an f.optionsFn returning that row's distinct values.
+    function populateListViewSelectFilterOptions(type, rows) {
+      const cfg = REPORT_CONFIG[type];
+      (cfg.listView.selectFilters || []).forEach(f => {
+        const sel = document.getElementById(`report_${type}_list_${f.id}`);
+        if (!sel) return;
+        const current = sel.value;
+        const values = [...new Set(f.optionsFn ? rows.flatMap(f.optionsFn) : rows.map(r => r[f.field]).filter(v => v !== null && v !== undefined && v !== ''))]
+          .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+        sel.innerHTML = `<option value="">${escHtml(f.label)}: Any</option>` + values.map(v => `<option value="${escHtml(String(v))}">${escHtml(f.labelMap?.[v] || String(v))}</option>`).join('');
+        if (values.map(String).includes(current)) sel.value = current;
+      });
+    }
+
     function applyListViewFilters(type) {
       const cfg = REPORT_CONFIG[type];
       const rows = reportDataCache[type] || [];
@@ -10222,6 +10271,11 @@
       let filtered = rows;
       if (activeVal !== '') filtered = filtered.filter(r => String(r.isActive) === activeVal);
       if (suburb && cfg.listView.suburbFn) filtered = filtered.filter(r => cfg.listView.suburbFn(r).includes(suburb));
+      (cfg.listView.selectFilters || []).forEach(f => {
+        const val = document.getElementById(`report_${type}_list_${f.id}`)?.value || '';
+        if (val === '') return;
+        filtered = filtered.filter(r => f.optionsFn ? f.optionsFn(r).map(String).includes(val) : String(r[f.field]) === val);
+      });
       // Checkbox extraFilters (mirrors the Dashboard tab's own pattern).
       filtered = filtered.filter(r => (cfg.listView.extraFilters || []).every(f => {
         const checked = document.getElementById(`report_${type}_list_${f.id}`)?.checked;
@@ -10262,6 +10316,72 @@
       const totalPages = Math.max(1, Math.ceil(rows.length / REPORT_PAGE_SIZE));
       reportListPage[type] = Math.min(totalPages, Math.max(1, (reportListPage[type] || 1) + delta));
       renderListViewTable(type, rows);
+    }
+
+    // Exports export exactly the currently-filtered set (reportListFilteredCache),
+    // not just the one page on screen — matching what the "N of M" count above
+    // the table says is selected. Columns reuse each column's own render() —
+    // most already emit plain escaped text, so stripping tags gets a clean
+    // CSV/print cell without a second column-definition to maintain.
+    function listViewCellText(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      return (div.textContent || '').trim();
+    }
+
+    function exportListViewCsv(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportListFilteredCache[type] || [];
+      if (!rows.length) { toast('No rows to export', 'error'); return; }
+      const csvEscape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const headers = cfg.listView.columns.map(c => c.header);
+      const lines = [headers.map(csvEscape).join(',')];
+      rows.forEach(r => lines.push(cfg.listView.columns.map(c => csvEscape(listViewCellText(c.render(r)))).join(',')));
+      const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // No PDF library anywhere in this stack (server or client) — rather than
+    // add one for a single admin export button, this opens a plain print
+    // stylesheet in a new tab and triggers the browser's own print dialog,
+    // where "Save as PDF" is a standard destination on every platform.
+    function exportListViewPdf(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportListFilteredCache[type] || [];
+      if (!rows.length) { toast('No rows to export', 'error'); return; }
+      const headers = cfg.listView.columns.map(c => c.header);
+      const tableRows = rows.map(r => `<tr>${cfg.listView.columns.map(c => `<td>${escHtml(listViewCellText(c.render(r)))}</td>`).join('')}</tr>`).join('');
+      const win = window.open('', '_blank');
+      win.document.write(`
+        <html>
+        <head>
+          <title>${escHtml(cfg.listView.label)} — ${new Date().toLocaleDateString('en-AU')}</title>
+          <style>
+            body { font-family: -apple-system, Arial, sans-serif; margin: 24px; color: #111; }
+            h1 { font-size: 16px; margin-bottom: 4px; }
+            .meta { font-size: 11px; color: #666; margin-bottom: 16px; }
+            table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+            th, td { border: 1px solid #ccc; padding: 5px 7px; text-align: left; }
+            th { background: #f0f0f0; }
+          </style>
+        </head>
+        <body>
+          <h1>${escHtml(cfg.listView.label)}</h1>
+          <div class="meta">${rows.length} record${rows.length === 1 ? '' : 's'} · exported ${new Date().toLocaleString('en-AU')}</div>
+          <table><thead><tr>${headers.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table>
+        </body>
+        </html>
+      `);
+      win.document.close();
+      win.focus();
+      win.print();
     }
 
     // Detail view: every field the RT API returns for this record, read
