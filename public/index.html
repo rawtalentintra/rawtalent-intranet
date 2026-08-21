@@ -660,6 +660,8 @@
        when unset) — purely spatial, not derived from manager_id. */
     #teamChartContainer { overflow: auto; background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--gray-200); }
     .org-canvas { position: relative; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #orgChartLinesSvg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    .org-line { stroke: var(--gray-400); stroke-width: 1.5; fill: none; stroke-linejoin: round; }
     .org-node {
       position: absolute; width: 148px; box-sizing: border-box; padding: 9px 12px;
       border-radius: 10px; background: white; border: 1.5px solid var(--gray-200);
@@ -1849,6 +1851,7 @@
           if (node.classList.contains('org-node-tohire')) return;
           node.addEventListener('click', () => openTeamProfile(node.dataset.id));
         });
+        drawOrgLines(document.getElementById('teamChartContainer'));
       } catch {
         list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load team.</div></div>';
       }
@@ -2106,7 +2109,38 @@
       }).join('');
       const canvasW = Math.max(maxX + ORG_NODE_W + 30, 700);
       const canvasH = Math.max(maxY + ORG_NODE_H + 30, 260);
-      return `<div class="org-canvas" style="width:${canvasW}px;height:${canvasH}px">${nodes}</div>`;
+      return `<div class="org-canvas" style="width:${canvasW}px;height:${canvasH}px"><svg id="orgChartLinesSvg"></svg>${nodes}</div>`;
+    }
+
+    // Read-only mirror of admin.html's drawOrgLines/orgElbowPath — same
+    // elbow-connector math and the same per-person chart_line_bend_y
+    // override a super_admin can drag in the admin panel, just with no
+    // drag handles here (nobody edits the chart from this public page).
+    function orgElbowPath(x1, y1, x2, y2, midY) {
+      if (Math.abs(x1 - x2) < 1) return `M${x1},${y1} L${x2},${y2}`;
+      return `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`;
+    }
+    function orgDefaultBendY(y1, y2) {
+      return Math.round(y1 + (y2 - y1) / 2);
+    }
+    function drawOrgLines(container) {
+      const canvas = container.querySelector('.org-canvas');
+      const svg = canvas && canvas.querySelector('#orgChartLinesSvg');
+      if (!svg) return;
+      const nodesById = {};
+      canvas.querySelectorAll('.org-node').forEach(n => { nodesById[n.dataset.id] = n; });
+      let html = '';
+      allTeamMembers
+        .filter(m => m.manager_id && nodesById[m.manager_id] && nodesById[m.id])
+        .forEach(m => {
+          const mgr = nodesById[m.manager_id], child = nodesById[m.id];
+          const x1 = mgr.offsetLeft + mgr.offsetWidth / 2, y1 = mgr.offsetTop + mgr.offsetHeight;
+          const x2 = child.offsetLeft + child.offsetWidth / 2, y2 = child.offsetTop;
+          const bendable = Math.abs(x1 - x2) >= 1;
+          const midY = bendable ? (m.chart_line_bend_y != null ? m.chart_line_bend_y : orgDefaultBendY(y1, y2)) : y1;
+          html += `<path class="org-line" d="${orgElbowPath(x1, y1, x2, y2, midY)}" />`;
+        });
+      svg.innerHTML = html;
     }
 
     // Table view intentionally hides the birth year (month/day only) — the
