@@ -10962,6 +10962,14 @@
       // badge already explains itself (it's the centre THIS lead created).
       const existingMatch = leadsCentreMatches[lead.id];
       const existingMatchCentreKey = existingMatch ? (existingMatch.rtLocationId ? `loc:${existingMatch.rtLocationId}` : `client:${existingMatch.rtClientId}`) : null;
+      // Signed + matched means this lead already IS a real RT centre — the
+      // single most useful thing to do with it is jump straight there, so
+      // it gets top billing above every other banner, not just a badge in
+      // the table.
+      const goToCentreBanner = (lead.signed_status === 'signed' && existingMatch) ? `
+        <button type="button" class="btn-add" style="width:100%;justify-content:center;padding:13px 16px;font-size:14.5px;margin-bottom:16px" onclick="closeLeadDetailModal();goToCentre360('${existingMatchCentreKey}')">
+          🏢 Click to go to Centre — ${escHtml(existingMatch.clientName)} →
+        </button>` : '';
       const existingMatchBanner = (existingMatch && lead.signed_status !== 'signed') ? `
         <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92600a">
           ⚠️ <strong>This might already be an existing centre:</strong> ${escHtml(existingMatch.clientName)} — ${escHtml(existingMatch.locationLabel)}.
@@ -10989,6 +10997,7 @@
         </div>`;
 
       document.getElementById('leadDetailBody').innerHTML = `
+        ${goToCentreBanner}
         ${autoSignedBanner}
         ${existingMatchBanner}
         <div class="lead-group-label">Centre</div>
