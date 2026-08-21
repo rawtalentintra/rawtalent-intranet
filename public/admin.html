@@ -9324,7 +9324,7 @@
         showTodayOption: true,
         searchTest: (r, q) => clientName(r.clientId).toLowerCase().includes(q) || candidateName(r.assignedUserId).toLowerCase().includes(q),
         extraFilters: [
-          { id: 'status', label: 'Status', type: 'select', field: 'statusId', labelMap: BOOKING_STATUS_LABELS }
+          { id: 'status', label: 'Status', type: 'select', multi: true, field: 'statusId', labelMap: BOOKING_STATUS_LABELS }
         ],
         // Bookings is a fundamentally different scale from Clients/Candidates
         // (100k+ rows total) — fetch-everything-then-filter-client-side, the
@@ -9564,15 +9564,26 @@
                 <option value="true">Active Only</option>
                 <option value="false">Inactive Only</option>
               </select>
-              ${(cfg.extraFilters || []).map(f => f.type === 'select' ? `
-                <select id="report_${type}_${f.id}" class="form-control" style="width:150px" onchange="applyReportFilters('${type}')">
-                  <option value="">${escHtml(f.label)}: Any</option>
-                </select>
-              ` : `
-                <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
-                  <input type="checkbox" id="report_${type}_${f.id}" onchange="applyReportFilters('${type}')"> ${escHtml(f.label)}
-                </label>
-              `).join('')}
+              ${(cfg.extraFilters || []).map(f => {
+                if (f.type === 'select' && f.multi) return `
+                  <div class="report-multiselect" style="position:relative">
+                    <button type="button" class="form-control" id="report_${type}_${f.id}_btn" style="width:150px;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px" onclick="toggleReportMultiSelect('${type}','${f.id}')">
+                      <span id="report_${type}_${f.id}_label">${escHtml(f.label)}: Any</span><span style="font-size:10px;color:var(--text-muted)">▾</span>
+                    </button>
+                    <div id="report_${type}_${f.id}_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px 0;min-width:190px;max-height:260px;overflow-y:auto;z-index:40"></div>
+                  </div>
+                `;
+                if (f.type === 'select') return `
+                  <select id="report_${type}_${f.id}" class="form-control" style="width:150px" onchange="applyReportFilters('${type}')">
+                    <option value="">${escHtml(f.label)}: Any</option>
+                  </select>
+                `;
+                return `
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
+                    <input type="checkbox" id="report_${type}_${f.id}" onchange="applyReportFilters('${type}')"> ${escHtml(f.label)}
+                  </label>
+                `;
+              }).join('')}
               <input type="text" id="report_${type}_search" class="form-control" placeholder="Search…" style="width:190px;flex:1;min-width:150px" oninput="applyReportFilters('${type}')">
               <span id="report_${type}_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
             </div>
@@ -9769,13 +9780,94 @@
     function populateReportExtraFilterOptions(type, rows) {
       const cfg = REPORT_CONFIG[type];
       (cfg.extraFilters || []).filter(f => f.type === 'select').forEach(f => {
+        const values = [...new Set(rows.map(r => r[f.field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+        if (f.multi) { renderReportMultiSelectPanel(type, f, values); return; }
         const sel = document.getElementById(`report_${type}_${f.id}`);
         const current = sel.value;
-        const values = [...new Set(rows.map(r => r[f.field]).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
         sel.innerHTML = `<option value="">${escHtml(f.label)}: Any</option>` + values.map(v => `<option value="${v}">${escHtml(f.labelMap?.[v] || `${f.label} ${v}`)}</option>`).join('');
         if (values.map(String).includes(current)) sel.value = current;
       });
     }
+
+    // Multi-select extraFilters (currently just Bookings Dashboard's Status
+    // filter) keep their checked values in this map rather than a form
+    // element's own value, since no native control holds a set of values —
+    // key is `${type}_${f.id}`, value is a Set of selected option strings.
+    // An empty Set means "Any", matching the native select's empty-string
+    // sentinel used everywhere else in applyReportFilters.
+    const reportMultiSelectState = {};
+
+    function renderReportMultiSelectPanel(type, f, values) {
+      const key = `${type}_${f.id}`;
+      if (!reportMultiSelectState[key]) reportMultiSelectState[key] = new Set();
+      const selected = reportMultiSelectState[key];
+      // Drop any previously-checked value that's no longer a valid option
+      // for this data set (e.g. switching period/active filters changes
+      // which statuses actually appear).
+      [...selected].forEach(v => { if (!values.map(String).includes(v)) selected.delete(v); });
+      const panel = document.getElementById(`report_${type}_${f.id}_panel`);
+      if (panel) {
+        panel.innerHTML = values.map(v => {
+          const label = escHtml(f.labelMap?.[v] || `${f.label} ${v}`);
+          const checked = selected.has(String(v));
+          return `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 14px;font-size:12.5px;cursor:pointer;white-space:nowrap" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background=''">
+              <input type="checkbox" value="${v}" ${checked ? 'checked' : ''} onchange="onReportMultiSelectChange('${type}','${f.id}')"> ${label}
+            </label>
+          `;
+        }).join('') || `<div style="padding:8px 14px;font-size:12.5px;color:var(--text-muted)">No values in range</div>`;
+      }
+      updateReportMultiSelectLabel(type, f);
+    }
+
+    function updateReportMultiSelectLabel(type, f) {
+      const key = `${type}_${f.id}`;
+      const selected = reportMultiSelectState[key] || new Set();
+      const labelEl = document.getElementById(`report_${type}_${f.id}_label`);
+      if (labelEl) labelEl.textContent = selected.size ? `${f.label}: ${selected.size} selected` : `${f.label}: Any`;
+    }
+
+    function onReportMultiSelectChange(type, id) {
+      const cfg = REPORT_CONFIG[type];
+      const f = (cfg.extraFilters || []).find(x => x.id === id);
+      const key = `${type}_${id}`;
+      const checked = [...document.querySelectorAll(`#report_${type}_${id}_panel input[type=checkbox]`)].filter(c => c.checked).map(c => c.value);
+      reportMultiSelectState[key] = new Set(checked);
+      updateReportMultiSelectLabel(type, f);
+      applyReportFilters(type);
+    }
+
+    // The panel is position:fixed (its trigger sits inside an
+    // overflow:hidden .admin-table-card, which would otherwise clip an
+    // absolutely-positioned dropdown) — so its coordinates are computed
+    // from the button's own viewport rect each time it opens, rather than
+    // relying on CSS positioning against an ancestor.
+    function toggleReportMultiSelect(type, id) {
+      const panel = document.getElementById(`report_${type}_${id}_panel`);
+      const btn = document.getElementById(`report_${type}_${id}_btn`);
+      if (!panel || !btn) return;
+      const opening = panel.style.display === 'none';
+      closeAllReportMultiSelects();
+      if (opening) {
+        const rect = btn.getBoundingClientRect();
+        panel.style.top = `${rect.bottom + 4}px`;
+        panel.style.left = `${rect.left}px`;
+        panel.style.display = '';
+      }
+    }
+
+    function closeAllReportMultiSelects() {
+      document.querySelectorAll('.report-multiselect > div[id$="_panel"]').forEach(p => p.style.display = 'none');
+    }
+
+    document.addEventListener('click', e => {
+      if (e.target.closest('.report-multiselect')) return;
+      closeAllReportMultiSelects();
+    });
+    // position:fixed doesn't track the scrolling admin-content panel, so a
+    // scroll would otherwise leave the dropdown floating away from its
+    // button — simplest correct behavior is to just close it.
+    document.addEventListener('scroll', closeAllReportMultiSelects, true);
 
     function applyReportFilters(type) {
       const cfg = REPORT_CONFIG[type];
@@ -9786,6 +9878,9 @@
         for (const f of (cfg.extraFilters || [])) {
           if (f.type === 'checkbox') {
             if (document.getElementById(`report_${type}_${f.id}`).checked && !f.test(r)) return false;
+          } else if (f.type === 'select' && f.multi) {
+            const selected = reportMultiSelectState[`${type}_${f.id}`];
+            if (selected && selected.size && !selected.has(String(r[f.field]))) return false;
           } else if (f.type === 'select') {
             const val = document.getElementById(`report_${type}_${f.id}`).value;
             if (val !== '' && String(r[f.field]) !== val) return false;
