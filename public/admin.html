@@ -732,11 +732,15 @@
               </div>
               <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
-                  <label for="micropodsEngagementFilter">Candidate Engagement</label>
-                  <select id="micropodsEngagementFilter" class="form-control" style="width:190px" onchange="loadMicropods()">
+                  <label for="micropodsSegmentFilter">Educator Segment</label>
+                  <select id="micropodsSegmentFilter" class="form-control" style="width:190px" onchange="loadMicropods()">
                     <option value="">All candidates</option>
-                    <option value="engaged">Actively Engaged</option>
-                    <option value="not_engaged">Active — Not Engaged</option>
+                    <option value="currently_working">Currently Working</option>
+                    <option value="newly_activated">Newly Activated</option>
+                    <option value="available_engaged">Available &amp; Engaged</option>
+                    <option value="warm_reactivation">Warm Reactivation</option>
+                    <option value="dormant_lapsed">Dormant / Lapsed</option>
+                    <option value="onboarding_supply">Onboarding Supply</option>
                   </select>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
@@ -758,8 +762,8 @@
                 </div>
               </div>
             </div>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
-            <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)">🧭 <strong>Territory Strategy</strong> compares each pod's Actively Engaged educator supply against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)"><strong>Currently Working</strong>: worked shift in the last 28 days. <strong>Newly Activated</strong>: created in the last 28 days, no shift history yet. <strong>Available &amp; Engaged</strong>: has upcoming availability set in RT, no recent shift. <strong>Warm Reactivation</strong>: last shift was 29–90 days ago. <strong>Dormant / Lapsed</strong>: no shift in over 90 days (or never). <strong>Onboarding Supply</strong>: still in a pre-active RT status, or has a lapsed/unreviewed mandatory document.</div>
+            <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)">🧭 <strong>Territory Strategy</strong> compares each pod's Active Supply (Currently Working + Newly Activated + Available &amp; Engaged) against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
           </div>
 
           <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
@@ -3701,7 +3705,7 @@
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue'],
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods', 'educator-outreach']
     };
 
     function applyRoleVisibility() {
@@ -6568,7 +6572,7 @@
       let best = null;
       for (const pod of attentionSupplyPods) {
         const km = haversineKmClient({ lat, lng }, pod.centroid);
-        if (km <= maxKm && (!best || km < best.distanceKm)) best = { podId: pod.id, podName: pod.name, engagedCount: pod.engagedCount, candidateCount: pod.candidateCount, distanceKm: km };
+        if (km <= maxKm && (!best || km < best.distanceKm)) best = { podId: pod.id, podName: pod.name, activeSupplyCount: pod.activeSupplyCount, candidateCount: pod.candidateCount, distanceKm: km };
       }
       return best;
     }
@@ -6592,9 +6596,10 @@
       try {
         const detail = await fetch(`/api/micropods/${podId}?state=all&minPodSize=15`).then(r => r.json());
         if (detail.error) throw new Error(detail.error);
-        const engaged = (detail.candidates || []).filter(c => c.engaged).sort((a, b) => a.name.localeCompare(b.name));
+        const ACTIVE_SUPPLY_SEGMENTS = new Set(['currently_working', 'newly_activated', 'available_engaged']);
+        const engaged = (detail.candidates || []).filter(c => ACTIVE_SUPPLY_SEGMENTS.has(c.segment)).sort((a, b) => a.name.localeCompare(b.name));
         if (!engaged.length) {
-          body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12.5px">No Actively Engaged educators found in this pod right now.</div>';
+          body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12.5px">No active-supply educators found in this pod right now.</div>';
           return;
         }
         body.innerHTML = engaged.map(c => `
@@ -6871,7 +6876,7 @@
             <div class="attn-outcome">
               <span>👉 ${escHtml(it.outcome)}</span>
               ${it.supply
-                ? `<span class="attn-supply-badge attn-supply-good" style="cursor:pointer" title="Click to see who's nearby" onclick="event.stopPropagation();openSupplyEducatorsPopover('${it.supply.podId}')">🧑‍🏫 ${it.supply.engagedCount} educators within ${Math.round(it.supply.distanceKm)}km</span>`
+                ? `<span class="attn-supply-badge attn-supply-good" style="cursor:pointer" title="Click to see who's nearby" onclick="event.stopPropagation();openSupplyEducatorsPopover('${it.supply.podId}')">🧑‍🏫 ${it.supply.activeSupplyCount} educators within ${Math.round(it.supply.distanceKm)}km</span>`
                 : `<span class="attn-supply-badge attn-supply-low">⚠️ No nearby educator supply found</span>`}
             </div>
           </div>`).join('')}
@@ -7666,17 +7671,17 @@
 
     async function loadMicropods() {
       const minSize = document.getElementById('micropodsMinSize').value || 15;
-      const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
+      const segmentFilter = document.getElementById('micropodsSegmentFilter').value;
       const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
       document.getElementById('micropodsTerritoryNote').style.display = territoryMode ? 'block' : 'none';
-      const colspan = territoryMode ? 4 : 2;
+      const colspan = territoryMode ? 4 : 8;
       const tbody = document.getElementById('micropodsTableBody');
       tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       document.getElementById('micropodsSummary').textContent = '';
       renderMicropodsTableHead(territoryMode);
       try {
         const endpoint = territoryMode ? '/api/micropods/territory-strategy' : '/api/micropods';
-        const data = await fetch(`${endpoint}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
+        const data = await fetch(`${endpoint}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
         if (data.error) throw new Error(data.error);
         micropodsPods = data.pods;
         micropodsLastData = data;
@@ -7690,12 +7695,12 @@
     function renderMicropodsTableHead(territoryMode) {
       document.getElementById('micropodsTableHead').innerHTML = territoryMode
         ? '<tr><th>Area</th><th>Educator Supply</th><th>Nearby Demand (30d)</th><th>Strategy</th></tr>'
-        : '<tr><th>Area</th><th>Candidates</th></tr>';
+        : `<tr><th>Area</th><th>Candidates</th>${SEGMENT_ORDER.map(key => `<th>${SEGMENT_META[key].label}</th>`).join('')}</tr>`;
     }
 
     function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
-      const colspan = territoryMode ? 4 : 2;
+      const colspan = territoryMode ? 4 : 8;
       if (!data || !data.pods.length) {
         document.getElementById('micropodsSummary').textContent = data ? `0 pods · ${data.unclusteredCount} candidates outside any pod` : '';
         tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>`;
@@ -7707,6 +7712,7 @@
           <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
             <td>${escHtml(p.name)}</td>
             <td>${p.candidateCount}</td>
+            ${SEGMENT_ORDER.map(key => `<td style="color:${SEGMENT_META[key].color}">${p.segmentCounts ? p.segmentCounts[key] : 0}</td>`).join('')}
           </tr>`).join('');
         return;
       }
@@ -7722,7 +7728,7 @@
       tbody.innerHTML = pods.map(p => `
         <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
           <td>${escHtml(p.name)}</td>
-          <td>${p.supply} <span style="color:var(--text-muted);font-size:11px">engaged / ${p.candidateCount} total</span></td>
+          <td>${p.supply} <span style="color:var(--text-muted);font-size:11px">active supply / ${p.candidateCount} total</span></td>
           <td>${p.demandBookings30d} <span style="color:var(--text-muted);font-size:11px">across ${p.nearbyCentreCount} centres</span></td>
           <td><span style="font-weight:700;color:${MICROPODS_QUADRANT_COLOR[p.quadrant] || 'var(--text-muted)'}">${p.icon} ${escHtml(p.label)}</span><div style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:280px">${escHtml(p.action)}</div></td>
         </tr>`).join('');
@@ -7811,7 +7817,7 @@
     // — this is the point where actual candidates first get fetched.
     let micropodDetailCandidates = [];
     let micropodDetailPage = 1;
-    let micropodDetailEngagementFilter = '';
+    let micropodDetailSegmentFilter = '';
     const MICROPOD_PAGE_SIZE = 50;
 
     async function openMicropod(podId) {
@@ -7822,12 +7828,12 @@
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const minSize = document.getElementById('micropodsMinSize').value || 15;
-        const engagementFilter = document.getElementById('micropodsEngagementFilter').value;
-        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&engagement=${encodeURIComponent(engagementFilter)}`).then(r => r.json());
+        const segmentFilter = document.getElementById('micropodsSegmentFilter').value;
+        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
         if (pod.error) throw new Error(pod.error);
         micropodDetailCandidates = pod.candidates;
         micropodDetailPage = 1;
-        micropodDetailEngagementFilter = '';
+        micropodDetailSegmentFilter = '';
         bodyEl.innerHTML = renderMicropodDetail(pod);
         renderMicropodCandidatesPage();
         renderMicropodHeatmap(pod);
@@ -7837,28 +7843,33 @@
     }
 
     function renderMicropodDetail(pod) {
+      const qualCounts = pod.qualificationCounts || {};
+      const qualLine = Object.keys(qualCounts).length
+        ? Object.entries(qualCounts).sort((a, b) => b[1] - a[1]).map(([name, n]) => `${escHtml(name)} (${n})`).join(' · ')
+        : '—';
       return `
         <div style="margin-bottom:16px">
           <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(pod.name)}</div>
-          <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">
-            ${pod.candidateCount} candidates · ${pod.engagedCount} Actively Engaged · ${pod.notEngagedCount} Active — Not Engaged
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-weight:600;color:var(--navy)">${pod.candidateCount} candidates</span>
+            ${SEGMENT_ORDER.map(key => `<span class="badge" style="font-size:11px;background:${SEGMENT_META[key].bg};color:${SEGMENT_META[key].color};font-weight:700;white-space:nowrap">${SEGMENT_META[key].label}: ${pod.segmentCounts ? pod.segmentCounts[key] : 0}</span>`).join('')}
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months. Active — Not Engaged: still active in RT, but no shift in the last 6 months.</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Available now: <strong>${pod.availableNowCount ?? 0}</strong> · Shifts in last 28 days: <strong>${pod.shifts28d ?? 0}</strong> · Median days since last shift: <strong>${pod.medianDaysSinceLastShift ?? '—'}</strong></div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Qualification mix (from RT's reporting API — known limitation: only one qualification per candidate is returned, and it's sometimes wrong): ${qualLine}</div>
         </div>
         <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
           <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
         </div>
         <div class="admin-table-card">
           <div style="display:flex;justify-content:flex-end;padding:12px 20px 0">
-            <select id="micropodEngagementFilter" class="form-control" style="max-width:220px" onchange="changeMicropodEngagementFilter(this.value)">
-              <option value="">All engagement</option>
-              <option value="engaged">Actively Engaged only</option>
-              <option value="not_engaged">Active — Not Engaged only</option>
+            <select id="micropodSegmentFilter" class="form-control" style="max-width:220px" onchange="changeMicropodSegmentFilter(this.value)">
+              <option value="">All segments</option>
+              ${SEGMENT_ORDER.map(key => `<option value="${key}">${SEGMENT_META[key].label} only</option>`).join('')}
             </select>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Engagement</th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Qualification</th><th>Segment</th><th>Shifts 28d</th><th>Days Since Last Shift</th><th>Compliant</th></tr></thead>
               <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
@@ -7866,13 +7877,8 @@
         </div>`;
     }
 
-    function micropodEngagementBadge(engaged) {
-      const meta = engaged ? ENGAGEMENT_META.actively_engaged : ENGAGEMENT_META.active_not_engaged;
-      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
-    }
-
-    function changeMicropodEngagementFilter(value) {
-      micropodDetailEngagementFilter = value;
+    function changeMicropodSegmentFilter(value) {
+      micropodDetailSegmentFilter = value;
       micropodDetailPage = 1;
       renderMicropodCandidatesPage();
     }
@@ -7881,12 +7887,11 @@
     // hand from the one fetch in openMicropod (max ~1,400 rows for the
     // biggest real pod), so there's no reason to round-trip the server
     // per page. This just keeps a 1,000+ row pod from rendering as one
-    // enormous, hard-to-scan table. The engagement filter is client-side
+    // enormous, hard-to-scan table. The segment filter is client-side
     // too, same reasoning.
     function renderMicropodCandidatesPage() {
       const filtered = micropodDetailCandidates.filter(c => {
-        if (micropodDetailEngagementFilter === 'engaged') return c.engaged;
-        if (micropodDetailEngagementFilter === 'not_engaged') return !c.engaged;
+        if (micropodDetailSegmentFilter) return c.segment === micropodDetailSegmentFilter;
         return true;
       });
       const total = filtered.length;
@@ -7901,8 +7906,12 @@
           <td>${escHtml(c.email || '—')}</td>
           <td>${escHtml(c.contactNo || '—')}</td>
           <td>${escHtml(c.address || c.suburb || '—')}</td>
-          <td>${micropodEngagementBadge(c.engaged)}</td>
-        </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No candidates match this filter</td></tr>`;
+          <td>${escHtml(c.qualification || '—')}</td>
+          <td>${segmentBadge(c.segment)}</td>
+          <td>${c.shifts28d || 0}</td>
+          <td>${c.daysSinceLastShift ?? '—'}</td>
+          <td title="Fully compliant: no mandatory document is expired or unreviewed. Does not confirm every required document type has actually been submitted.">${c.fullyCompliant ? '✅' : '⚠️'}</td>
+        </tr>`).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No candidates match this filter</td></tr>`;
 
       document.getElementById('micropodCandidatesPager').innerHTML = `
         <div style="font-size:11.5px;color:var(--text-muted)">${total ? `${start + 1}–${Math.min(start + MICROPOD_PAGE_SIZE, total)} of ${total}` : '0 of 0'}</div>
@@ -9161,6 +9170,26 @@
     // (the classification itself always comes from the server).
     const ENGAGEMENT_LOOKBACK_MONTHS = 6;
     const ENGAGEMENT_TOOLTIP = 'Actively Engaged: had at least one worked shift (Assigned or Completed booking) in the last 6 months.\nActive — Not Engaged: still active in RT, but no shift in the last 6 months.';
+
+    // Decision Area 1's 6-tier educator segmentation (Micropods only, see
+    // classifyEducator() in services/educatorEngagementService.js) —
+    // deliberately a separate constant from ENGAGEMENT_META above, not a
+    // replacement for it: the Candidates report keeps its existing
+    // Actively Engaged / Active — Not Engaged split, out of scope here.
+    const SEGMENT_META = {
+      currently_working: { label: 'Currently Working', bg: '#dcfce7', color: '#15803d' },
+      newly_activated: { label: 'Newly Activated', bg: '#dbeafe', color: '#1d4ed8' },
+      available_engaged: { label: 'Available & Engaged', bg: '#ccfbf1', color: '#0f766e' },
+      warm_reactivation: { label: 'Warm Reactivation', bg: '#fef3c7', color: '#b45309' },
+      dormant_lapsed: { label: 'Dormant / Lapsed', bg: '#fee2e2', color: '#b91c1c' },
+      onboarding_supply: { label: 'Onboarding Supply', bg: '#ede9fe', color: '#6d28d9' }
+    };
+    const SEGMENT_ORDER = ['currently_working', 'newly_activated', 'available_engaged', 'warm_reactivation', 'dormant_lapsed', 'onboarding_supply'];
+    function segmentBadge(segment) {
+      const meta = SEGMENT_META[segment];
+      if (!meta) return '<span style="color:var(--text-muted)">—</span>';
+      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap">${meta.label}</span>`;
+    }
     function engagementBadge(status) {
       const meta = ENGAGEMENT_META[status];
       if (!meta) return '<span style="color:var(--text-muted)">—</span>';

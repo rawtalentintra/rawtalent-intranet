@@ -6,29 +6,6 @@ const rtApi = require('../services/rtApiReportService');
 const rtCandidatesSync = require('../services/rtCandidatesSyncService');
 const engagement = require('../services/educatorEngagementService');
 
-// One candidate's full RT profile, opened for workforce_partner too — not
-// just admin/super_admin like the rest of Reports. Priority Today's "who's
-// nearby" educator popover (public/admin.html, openSupplyEducatorsPopover)
-// opens this same detail for Gwen/Justine, who need the full profile just
-// as much as an admin does when deciding who to call. Registered ahead of
-// router.use(requireAdmin) below so it isn't swept into that broader gate —
-// the REPORT_TYPES loop further down registers a plain requireAdmin
-// '/candidates/:id' too, but Express's first-match-wins means this wider
-// one always handles it first.
-router.get('/candidates/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
-  try {
-    const item = await rtApi.fetchById('candidates', req.params.id);
-    res.json(item);
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-// Admin/super_admin only for now — access for other roles (e.g. Workforce
-// Partners) can be revisited later once this is settled in, per how it
-// was scoped when this was built.
-router.use(requireAdmin);
-
 const REPORT_TYPES = ['clients', 'candidates', 'bookings', 'timesheets'];
 
 function parseFilters(req) {
@@ -50,7 +27,7 @@ function parseFilters(req) {
 // Candidate detail view, so a stale cache here never risks stale
 // compliance data. Registered ahead of /candidates/:id — a distinct path
 // segment, not a sub-path, so there's no route-matching ambiguity either way.
-router.get('/candidates-search', async (req, res) => {
+router.get('/candidates-search', requireAdmin, async (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
   // A phone search only makes sense once there's a handful of digits typed
@@ -82,11 +59,16 @@ router.get('/candidates-search', async (req, res) => {
 
 // Which active candidates count as "Actively Engaged" (a real shift in the
 // last 6 months) — see educatorEngagementService.js for the definition.
-// Registered ahead of /candidates/:id below, same reason as
-// /candidates-search and /candidates/sync-status: a literal path segment,
-// not a param, so it must come first or Express would try to treat
-// "engagement" as a candidate id.
-router.get('/candidates/engagement', async (req, res) => {
+// Registered ahead of /candidates/:id below (and given its own explicit
+// requireAdmin, since it now sits ahead of router.use(requireAdmin) too) —
+// a literal path segment, not a param, so it must come first or Express
+// would try to treat "engagement" as a candidate id. This used to be
+// registered AFTER /candidates/:id despite a comment claiming otherwise —
+// confirmed live 2026-08-22 that the wildcard route was silently
+// swallowing this (and /candidates/sync-status) the whole time, sending
+// "engagement"/"sync-status" to RT as if they were candidate ids and
+// getting a 404 back.
+router.get('/candidates/engagement', requireAdmin, async (req, res) => {
   try {
     const { engagedUserIds, computedAt } = await engagement.getEngagedUserIds();
     res.json({ engagedUserIds: [...engagedUserIds], computedAt, lookbackMonths: engagement.LOOKBACK_MONTHS });
@@ -95,7 +77,7 @@ router.get('/candidates/engagement', async (req, res) => {
   }
 });
 
-router.get('/candidates/sync-status', async (req, res) => {
+router.get('/candidates/sync-status', requireAdmin, async (req, res) => {
   try {
     const state = await rtCandidatesSync.getSyncState();
     res.json({ ...state, isRunning: rtCandidatesSync.isSyncRunning(state) });
@@ -122,6 +104,32 @@ router.post('/candidates/sync', requireSuperAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// One candidate's full RT profile, opened for workforce_partner too — not
+// just admin/super_admin like the rest of Reports. Priority Today's "who's
+// nearby" educator popover (public/admin.html, openSupplyEducatorsPopover)
+// opens this same detail for Gwen/Justine, who need the full profile just
+// as much as an admin does when deciding who to call. Registered ahead of
+// router.use(requireAdmin) below so it isn't swept into that broader gate —
+// the REPORT_TYPES loop further down registers a plain requireAdmin
+// '/candidates/:id' too, but Express's first-match-wins means this wider
+// one always handles it first. Must also stay AFTER every literal
+// '/candidates/<segment>' route above (engagement, sync-status,
+// candidates-search) — as a param route it would otherwise swallow all of
+// them (see the comment above /candidates/engagement).
+router.get('/candidates/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const item = await rtApi.fetchById('candidates', req.params.id);
+    res.json(item);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Admin/super_admin only for now — access for other roles (e.g. Workforce
+// Partners) can be revisited later once this is settled in, per how it
+// was scoped when this was built.
+router.use(requireAdmin);
 
 REPORT_TYPES.forEach(type => {
   // Candidates' full list is served from the local cache instead of RT

@@ -4,15 +4,15 @@
 // opens with: where supply outstrips demand, where demand outstrips
 // supply, and what a Workforce Partner should do about it today.
 //
-// Deliberately reuses whatever supply definition is already live
-// (Actively Engaged, see educatorEngagementService — a decided,
-// already-shipped classification) rather than introducing a new one. The
-// quadrant split itself is self-calibrating (median supply/demand across
-// the pods in view) rather than a fixed threshold someone has to tune —
-// the doc's proposed Grow/Recruit/Develop Business/Monitor framework
-// depends on business-rule decisions (see Decision Area 2 of the review)
-// that haven't been made yet, so this ships the structure now without
-// pre-empting those calls with an arbitrary number.
+// Deliberately reuses whatever supply definition is already live — Active
+// Supply (currently_working + newly_activated + available_engaged, see
+// educatorEngagementService's classifyEducator / Decision Area 1) — rather
+// than introducing a new one. The quadrant split itself is self-calibrating
+// (median supply/demand across the pods in view) rather than a fixed
+// threshold someone has to tune — the doc's proposed Grow/Recruit/Develop
+// Business/Monitor framework depends on business-rule decisions (see
+// Decision Area 2 of the review) that haven't been made yet, so this ships
+// the structure now without pre-empting those calls with an arbitrary number.
 const { haversineKm } = require('./mapboxService');
 const { bucketBookingsForCentre } = require('./centreHealthService');
 
@@ -82,7 +82,7 @@ function classifyQuadrant(supply, demand, medianSupply, medianDemand) {
 // caller so nearbyCentres never has to check for missing coordinates.
 function computeTerritoryStrategy(pods, centresWithGeo, bookings, { radiusKm = DEFAULT_RADIUS_KM } = {}) {
   const enriched = pods.map(pod => {
-    const supply = pod.engagedCount ?? pod.candidateCount;
+    const supply = pod.activeSupplyCount ?? pod.candidateCount;
     const { nearbyCentreCount, demandBookings30d } = demandForPod(pod, centresWithGeo, bookings, radiusKm);
     return { ...pod, supply, nearbyCentreCount, demandBookings30d };
   });

@@ -18,11 +18,13 @@ const CANDIDATES_CACHE_TTL_MS = 10 * 60 * 1000; // underlying data only changes 
 const PODS_CACHE_TTL_MS = 10 * 60 * 1000;
 
 let candidatesCache = { points: null, totalActive: 0, totalGeocoded: 0, expiresAt: 0 };
-const podsCache = new Map(); // `${state}:${gridKm}:${minPodSize}` -> { result, expiresAt }
+const podsCache = new Map(); // `${state}:${gridKm}:${minPodSize}:${segment}` -> { result, expiresAt }
 
-// Projects only state/lat/lng/name/contact fields via jsonb path
-// expressions rather than pulling the full `raw` payload — no reason to
-// move megabytes of JSON just to cluster ~13k points by coordinate.
+// Projects state/lat/lng/name/contact fields plus the facts Decision Area
+// 1's educator segmentation needs (status/created_date/qualification/
+// availability/compliance) via jsonb path expressions rather than pulling
+// the full `raw` payload — no reason to move megabytes of JSON just to
+// cluster ~13k points by coordinate and classify them.
 async function getCandidatePoints() {
   if (candidatesCache.points && Date.now() < candidatesCache.expiresAt) return candidatesCache;
 
@@ -30,45 +32,95 @@ async function getCandidatePoints() {
   // inconsistency (confirmed live: 1 of 12,950 "active" rows) — excluded
   // explicitly so "active candidates only" can't have an edge case leak
   // through just because RT's own isActive/isDeleted flags disagree.
+  //
+  // status NOT IN (4, 8) excludes Do Not Use / Not Interested candidates —
+  // the first place candidate.status gates Micropods supply at all (see
+  // EXCLUDED_CANDIDATE_STATUSES in educatorEngagementService.js). Neither
+  // represents real or prospective supply.
   const totalRes = await getDb().execute({
-    sql: "SELECT count(*)::int AS n FROM rt_candidates_cache WHERE is_active = true AND is_deleted IS NOT TRUE",
+    sql: "SELECT count(*)::int AS n FROM rt_candidates_cache WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)",
     args: []
   });
   const totalActive = totalRes.rows[0]?.n || 0;
 
+  // has_current_availability / fully_compliant computed as jsonb scalar
+  // EXISTS checks (not full array extraction) so a malformed date/boolean
+  // anywhere in 13k rows of nested jsonb can't abort the whole query —
+  // deliberately using lexicographic ISO-string comparison (left(...,10)
+  // >= 'YYYY-MM-DD'), not ::date/::timestamptz casts, for the same reason
+  // (this table has documented dirty free-text elsewhere, e.g. the
+  // addresses[].state field admin.html's candidateStates() normalizes).
+  //
+  // "Fully compliant" = no MANDATORY attachedRequirements entry that's
+  // expired or unreviewed. This deliberately does NOT attempt to detect
+  // wholesale-missing required document types — there's no canonical
+  // "which docs are required for whom" list anywhere in this codebase,
+  // that's a harder, separate problem this doesn't try to solve.
   const rows = (await getDb().execute({
     sql: `SELECT
             user_id, first_name, last_name, email, contact_no, suburb,
+            status, created_date,
             raw->'addresses'->0->>'state' AS addr_state,
             (raw->'addresses'->0->>'latitude')::float8 AS lat,
-            (raw->'addresses'->0->>'longitude')::float8 AS lng
+            (raw->'addresses'->0->>'longitude')::float8 AS lng,
+            raw->'qualifications'->0->>'qualificationName' AS qualification_name,
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(coalesce(raw->'availableCandidateList','[]'::jsonb)) a
+              WHERE left(a->>'date', 10) >= to_char(current_date, 'YYYY-MM-DD')
+            ) AS has_current_availability,
+            NOT EXISTS (
+              SELECT 1 FROM jsonb_array_elements(coalesce(raw->'attachedRequirements','[]'::jsonb)) r
+              WHERE (r->>'isMandatory')::boolean IS TRUE
+                AND (
+                     (r->>'isExpiry')::boolean IS TRUE
+                  OR (r->>'expiryDate' IS NOT NULL AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD'))
+                  OR (r->>'isReviewed')::boolean IS NOT TRUE
+                )
+            ) AS fully_compliant
           FROM rt_candidates_cache
           WHERE is_active = true
             AND is_deleted IS NOT TRUE
+            AND status NOT IN (4, 8)
             AND raw->'addresses'->0->>'latitude' IS NOT NULL
             AND raw->'addresses'->0->>'longitude' IS NOT NULL`,
     args: []
   })).rows;
 
-  // Actively Engaged vs Active — Not Engaged (see educatorEngagementService
-  // — a real shift, Assigned/Completed, in the last 6 months). Every row
-  // here is already active-only (see the WHERE above), so this is the same
-  // classification the Candidates report shows, just attached per-point so
-  // the engagement filter below can restrict clustering itself rather than
-  // just labeling candidates after the fact.
-  const { engagedUserIds } = await engagement.getEngagedUserIds();
+  // Segmentation (Decision Area 1, 2026-08-22): Currently Working / Newly
+  // Activated / Available & Engaged / Warm Reactivation / Dormant or
+  // Lapsed / Onboarding Supply — see classifyEducator() in
+  // educatorEngagementService.js for the full definition and rationale.
+  // bookingAggregates comes from the exact same 6-month RT bookings fetch
+  // the original engagement split already used — no second RT call.
+  const { bookingAggregates } = await engagement.getEngagedUserIds();
 
-  const points = rows.map(r => ({
-    userId: String(r.user_id),
-    name: [r.first_name, r.last_name].filter(Boolean).join(' ') || `Candidate #${r.user_id}`,
-    email: r.email || null,
-    contactNo: r.contact_no || null,
-    suburb: r.suburb || null,
-    state: normalizeStateToShort(r.addr_state),
-    lat: r.lat,
-    lng: r.lng,
-    engaged: engagedUserIds.has(String(r.user_id))
-  })).filter(p =>
+  const points = rows.map(r => {
+    const agg = bookingAggregates.get(String(r.user_id));
+    const facts = {
+      status: r.status,
+      fullyCompliant: r.fully_compliant,
+      hasCurrentAvailability: r.has_current_availability,
+      createdDate: r.created_date
+    };
+    return {
+      userId: String(r.user_id),
+      name: [r.first_name, r.last_name].filter(Boolean).join(' ') || `Candidate #${r.user_id}`,
+      email: r.email || null,
+      contactNo: r.contact_no || null,
+      suburb: r.suburb || null,
+      state: normalizeStateToShort(r.addr_state),
+      lat: r.lat,
+      lng: r.lng,
+      segment: engagement.classifyEducator(facts, agg),
+      fullyCompliant: r.fully_compliant,
+      hasCurrentAvailability: r.has_current_availability,
+      qualification: r.qualification_name || null,
+      shifts28d: agg?.shiftsIn28Days || 0,
+      daysSinceLastShift: agg?.lastWorkedDate
+        ? Math.floor((Date.now() - new Date(agg.lastWorkedDate).getTime()) / 86400000)
+        : null
+    };
+  }).filter(p =>
     // Exact (0,0) is RT's "never actually geocoded" sentinel ("null
     // island"), not a real address — confirmed against production data
     // (1,220 rows, all with otherwise-legit suburb/state text). Treated
@@ -86,11 +138,11 @@ function clamp(n, min, max, fallback) {
   return Math.min(max, Math.max(min, num));
 }
 
-// '' (all), 'engaged', or 'not_engaged' — anything else falls back to all,
-// same permissive-default pattern as the state/gridKm/minPodSize parsing
-// below rather than 400ing on a stray value.
-function parseEngagementFilter(raw) {
-  return raw === 'engaged' || raw === 'not_engaged' ? raw : '';
+// '' (all) or one of the six segment keys — anything else falls back to
+// all, same permissive-default pattern as the state/gridKm/minPodSize
+// parsing below rather than 400ing on a stray value.
+function parseSegmentFilter(raw) {
+  return raw && Object.prototype.hasOwnProperty.call(engagement.SEGMENTS, raw) ? raw : '';
 }
 
 // '', 'all' (case-insensitive), or missing all mean no state filter —
@@ -109,45 +161,75 @@ function parseStateFilter(raw) {
   return normalized ? { state: normalized, error: null } : { state: null, error: `Unrecognised state "${trimmed}" — try VIC, SA, or leave blank for all states` };
 }
 
+function median(numbers) {
+  if (!numbers.length) return null;
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function emptySegmentCounts() {
+  const counts = {};
+  for (const key of Object.keys(engagement.SEGMENTS)) counts[key] = 0;
+  return counts;
+}
+
+// Shared by the list view, Territory Strategy, and pod detail — one place
+// that knows how to turn a pod's member points into the aggregate figures
+// Decision Area 1 asked Micropods to show.
+function computePodAggregates(memberPoints) {
+  const segmentCounts = emptySegmentCounts();
+  let availableNowCount = 0;
+  let shifts28d = 0;
+  const daysSinceValues = [];
+  for (const p of memberPoints) {
+    if (p.segment) segmentCounts[p.segment] = (segmentCounts[p.segment] || 0) + 1;
+    if (p.hasCurrentAvailability) availableNowCount++;
+    shifts28d += p.shifts28d || 0;
+    if (p.daysSinceLastShift != null) daysSinceValues.push(p.daysSinceLastShift);
+  }
+  const activeSupplyCount = segmentCounts.currently_working + segmentCounts.newly_activated + segmentCounts.available_engaged;
+  return { segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift: median(daysSinceValues) };
+}
+
 async function getPodsForParams(req) {
   const { state, error: stateError } = parseStateFilter(req.query.state);
   if (stateError) return { error: stateError };
 
   const gridKm = clamp(req.query.gridKm, 2, 10, 2);
   const minPodSize = clamp(req.query.minPodSize, 5, 100, 15);
-  const engagementFilter = parseEngagementFilter(req.query.engagement);
-  const cacheKey = `${state || 'ALL'}:${gridKm}:${minPodSize}:${engagementFilter}`;
+  const segmentFilter = parseSegmentFilter(req.query.segment);
+  const cacheKey = `${state || 'ALL'}:${gridKm}:${minPodSize}:${segmentFilter}`;
 
   const cached = podsCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return { state: state || '', gridKm, minPodSize, engagement: engagementFilter, ...cached.result };
+  if (cached && Date.now() < cached.expiresAt) return { state: state || '', gridKm, minPodSize, segment: segmentFilter, ...cached.result };
 
   const { points, totalActive, totalGeocoded } = await getCandidatePoints();
   const fullStatePoints = state ? points.filter(p => p.state === state) : points;
   let statePoints = fullStatePoints;
   // Filters the actual clustering input, not just a label applied
-  // afterward — "Actively Engaged" genuinely reclusters on just that
+  // afterward — selecting a segment genuinely reclusters on just that
   // subset, so pod boundaries/counts reflect where THOSE candidates are,
   // not where the full active pool happens to be. Combines with state the
   // same way state combines with gridKm/minPodSize: as an independent AND.
-  if (engagementFilter === 'engaged') statePoints = statePoints.filter(p => p.engaged);
-  else if (engagementFilter === 'not_engaged') statePoints = statePoints.filter(p => !p.engaged);
+  if (segmentFilter) statePoints = statePoints.filter(p => p.segment === segmentFilter);
 
   // buildMicropods' coreMinPerCell (how many people a 2km cell needs to
   // seed a pod) defaults to a fixed 20 — deliberately NOT tied to
   // minPodSize (see micropodService.js), but that constant was tuned
-  // against the full ~9k-candidate VIC pool. Filtering to e.g. just
-  // Actively Engaged candidates can shrink the pool 30x+ (VIC: ~9,200 ->
-  // ~280), and 20-per-cell never happens in a pool that sparse — every
-  // Micropod call silently returned zero pods regardless of minPodSize
-  // until this was caught live. Scaling the threshold down by how much
-  // THIS filter thinned the state's pool (not by minPodSize — that
-  // coupling was already tried and rejected once) keeps the same
-  // "requires real local density" guard at whatever scale the filtered
-  // pool actually is. Floor of 3 so it never drops low enough to just
-  // merge every occupied cell again. Unfiltered calls (ratio 1) pass
-  // undefined and fall through to buildMicropods' own default, so normal
-  // behaviour is untouched.
-  const coreMinPerCell = engagementFilter && fullStatePoints.length
+  // against the full ~9k-candidate VIC pool. Filtering to a single segment
+  // can shrink the pool far more than the old binary engaged/not-engaged
+  // split ever did, and 20-per-cell never happens in a pool that sparse —
+  // every Micropod call silently returned zero pods regardless of
+  // minPodSize until this was caught live (see the original engaged-only
+  // fix this comment is inherited from). Scaling the threshold down by how
+  // much THIS filter thinned the state's pool keeps the same "requires
+  // real local density" guard at whatever scale the filtered pool actually
+  // is. Floor of 3 so it never drops low enough to just merge every
+  // occupied cell again. Unfiltered calls (ratio 1) pass undefined and
+  // fall through to buildMicropods' own default, so normal behaviour is
+  // untouched.
+  const coreMinPerCell = segmentFilter && fullStatePoints.length
     ? Math.max(3, Math.round(20 * (statePoints.length / fullStatePoints.length)))
     : undefined;
   const { pods, unclusteredCount } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
@@ -155,23 +237,18 @@ async function getPodsForParams(req) {
   // Deterministic centroid-based id — stays stable across recomputation/
   // cache expiry so a stale client-side pod list can never point at the
   // wrong pod's candidates. Rounded centroids can coincide across two
-  // different engagement filters for the same state, but a pod is always
-  // looked up together with the same engagement param that produced its
+  // different segment filters for the same state, but a pod is always
+  // looked up together with the same segment param that produced its
   // list, so that's never ambiguous in practice.
-  // engagedCount per pod (not just candidateCount) so callers needing the
-  // "Actively Engaged" supply figure — the Territory Strategy demand
-  // overlay below, and the list view's own display — don't each have to
-  // re-derive it from memberIds themselves.
-  const engagedIdSet = new Set(statePoints.filter(p => p.engaged).map(p => p.userId));
-  const podsWithId = pods.map(pod => ({
-    ...pod,
-    id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`,
-    engagedCount: pod.memberIds.filter(id => engagedIdSet.has(id)).length
-  }));
+  const pointsByUserId = new Map(statePoints.map(p => [p.userId, p]));
+  const podsWithId = pods.map(pod => {
+    const memberPoints = pod.memberIds.map(id => pointsByUserId.get(id)).filter(Boolean);
+    return { ...pod, id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`, ...computePodAggregates(memberPoints) };
+  });
 
   const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
-  return { state: state || '', gridKm, minPodSize, engagement: engagementFilter, ...result };
+  return { state: state || '', gridKm, minPodSize, segment: segmentFilter, ...result };
 }
 
 // Pod summaries only — no candidate arrays. This is the "no full list
@@ -182,7 +259,8 @@ router.get('/', async (req, res) => {
     if (result.error) return res.status(400).json({ error: result.error });
     const { pods, unclusteredCount, totalActive, totalGeocoded } = result;
     res.json({
-      pods: pods.map(({ id, name, centroid, candidateCount, engagedCount }) => ({ id, name, centroid, candidateCount, engagedCount })),
+      pods: pods.map(({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift }) =>
+        ({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift })),
       unclusteredCount,
       totalActive,
       totalGeocoded
@@ -216,8 +294,8 @@ router.get('/territory-strategy', async (req, res) => {
     const pods = computeTerritoryStrategy(result.pods, centresWithGeo, bookings, { radiusKm });
 
     res.json({
-      pods: pods.map(({ id, name, centroid, candidateCount, engagedCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action }) =>
-        ({ id, name, centroid, candidateCount, engagedCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action })),
+      pods: pods.map(({ id, name, centroid, candidateCount, activeSupplyCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action }) =>
+        ({ id, name, centroid, candidateCount, activeSupplyCount, supply, nearbyCentreCount, demandBookings30d, quadrant, label, icon, action })),
       unclusteredCount: result.unclusteredCount,
       totalActive: result.totalActive,
       totalGeocoded: result.totalGeocoded,
@@ -272,19 +350,30 @@ router.get('/:podId', async (req, res) => {
 
     // lat/lng included here (not in the list-view pod summary) purely to
     // drive the per-pod heatmap once a pod is actually open — still never
-    // exposed before that point. `engaged` already comes from
-    // getCandidatePoints() (see educatorEngagementService.js).
+    // exposed before that point.
     const candidates = members
-      .map(({ userId, name, email, contactNo, suburb, lat, lng, engaged }) => ({
-        userId, name, email, contactNo, suburb, lat, lng, engaged,
+      .map(({ userId, name, email, contactNo, suburb, lat, lng, segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift }) => ({
+        userId, name, email, contactNo, suburb, lat, lng,
+        segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift,
         address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    const engagedCount = candidates.filter(c => c.engaged).length;
+
+    // "from RT's reporting API — known limitation": qualifications[] is
+    // separately documented (RT API Data Reference, admin.html) as only
+    // ever returning one entry per candidate, sometimes the wrong one —
+    // this breakdown is directionally useful, not authoritative.
+    const qualificationCounts = {};
+    for (const c of candidates) {
+      const key = c.qualification || 'Unknown';
+      qualificationCounts[key] = (qualificationCounts[key] || 0) + 1;
+    }
 
     res.json({
       id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount,
-      engagedCount, notEngagedCount: candidates.length - engagedCount, candidates
+      ...computePodAggregates(members),
+      qualificationCounts,
+      candidates
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
