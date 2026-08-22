@@ -267,17 +267,29 @@
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Reports</div>
-        <div class="admin-nav-item" onclick="showSection('report-clients', this)">
-          <span class="admin-nav-icon">🏢</span> Clients
-        </div>
-        <div class="admin-nav-item" onclick="showSection('report-candidates', this)">
-          <span class="admin-nav-icon">🧑‍🎓</span> Candidates
-        </div>
         <div class="admin-nav-item" onclick="showSection('report-bookings', this)">
           <span class="admin-nav-icon">📅</span> Bookings
         </div>
         <div class="admin-nav-item" onclick="showSection('report-timesheets', this)">
           <span class="admin-nav-icon">🕒</span> Timesheets
+        </div>
+      </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">Onboarding</div>
+        <div class="admin-nav-item" onclick="showSection('report-candidates', this)">
+          <span class="admin-nav-icon">🧑‍🎓</span> Educators
+        </div>
+        <div class="admin-nav-item" onclick="showSection('report-clients', this)">
+          <span class="admin-nav-icon">🏢</span> Centres
+        </div>
+        <div class="admin-nav-item" onclick="showSection('document-checker', this)">
+          <span class="admin-nav-icon">🛡️</span> Document Checker
+        </div>
+        <div class="admin-nav-item" onclick="showSection('educator-outreach', this)">
+          <span class="admin-nav-icon">📤</span> Educator Outreach
+        </div>
+        <div class="admin-nav-item" onclick="showSection('advertising-opportunities', this)">
+          <span class="admin-nav-icon">📢</span> Advertising Opportunities
         </div>
       </div>
       <div class="admin-nav-section">
@@ -294,21 +306,8 @@
         <div class="admin-nav-item" onclick="showSection('micropods', this)">
           <span class="admin-nav-icon">🗺️</span> Micropods
         </div>
-        <div class="admin-nav-item" onclick="showSection('advertising-opportunities', this)">
-          <span class="admin-nav-icon">📢</span> Advertising Opportunities
-        </div>
         <div class="admin-nav-item" onclick="showSection('route-planner', this)">
           <span class="admin-nav-icon">🧭</span> Smart Routing
-        </div>
-        <!-- Educator Outreach: built but hidden — see EDUCATOR_OUTREACH_ENABLED. Belongs under Onboarding/Ops once it moves, not here. -->
-        <div class="admin-nav-item" onclick="showSection('educator-outreach', this)" style="display:none">
-          <span class="admin-nav-icon">📤</span> Educator Outreach
-        </div>
-      </div>
-      <div class="admin-nav-section">
-        <div class="admin-nav-label" onclick="toggleNavSection(this)">Compliance</div>
-        <div class="admin-nav-item" onclick="showSection('document-checker', this)">
-          <span class="admin-nav-icon">🛡️</span> Document Checker
         </div>
       </div>
       <div class="admin-nav-section">
@@ -3646,13 +3645,9 @@
       });
     }
 
-    // Educator Outreach is fully built (backend + frontend) but not ready
-    // to hand to anyone yet — Joy: it belongs under Onboarding/Ops, not
-    // Workforce Partners, and needs to move there before anyone sees it.
-    // One flag hides every entry point (nav item, Micropods' checkbox
-    // selection/save-list UI, and direct navigation) regardless of role
-    // or grant — flip to true once it's relocated and ready to reveal.
-    const EDUCATOR_OUTREACH_ENABLED = false;
+    // Educator Outreach moved under Onboarding (2026-08-22, Joy — it's
+    // Ops/Onboarding's feature, not Workforce Partners') and is now visible.
+    const EDUCATOR_OUTREACH_ENABLED = true;
 
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
@@ -3808,23 +3803,25 @@
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue'],
-      // 'educator-outreach' deliberately left out here — see
-      // EDUCATOR_OUTREACH_ENABLED. It's Ops/Onboarding's feature, not
-      // Workforce Partners', and stays out of every role's allowlist
-      // (including workforce_partner) until it's rebuilt under that section.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods', 'advertising-opportunities']
+      // 'educator-outreach', 'report-candidates' (Educators), 'report-clients'
+      // (Centres), 'document-checker', and 'advertising-opportunities' —
+      // Onboarding's items — are deliberately left out of both allowlists
+      // below. They stayed admin/super_admin-only before this section
+      // existed and this move doesn't change that; qa_view/workforce_partner
+      // access can be added later if Ops needs it.
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
-    // Vicky) — kept for when EDUCATOR_OUTREACH_ENABLED flips back on.
-    // Shared by applyRoleVisibility() (nav item visibility) and
-    // showSection() (the actual navigation gate) so the two can never
-    // disagree — a granted qa_view user seeing the nav item but bouncing
-    // on click, or vice versa, would both be bugs.
+    // Vicky), on top of admin/super_admin's unconditional access. Shared by
+    // applyRoleVisibility() (nav item visibility) and showSection() (the
+    // actual navigation gate) so the two can never disagree — a granted
+    // qa_view user seeing the nav item but bouncing on click, or vice
+    // versa, would both be bugs.
     function getEffectiveAllowedSections() {
       const base = RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (!base) return null;
-      return (EDUCATOR_OUTREACH_ENABLED && currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
+      return (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
     }
 
     function applyRoleVisibility() {
@@ -4847,10 +4844,11 @@
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
 
     function showSection(id, el) {
-      // Hidden for everyone regardless of role until it's rebuilt under
-      // Onboarding/Ops — see EDUCATOR_OUTREACH_ENABLED. Blocks direct
-      // navigation (console, stale localStorage/URL) even though the nav
-      // item itself is already display:none.
+      // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
+      // it's true now that this lives under Onboarding, but if it's ever
+      // flipped back off this still blocks direct navigation (console,
+      // stale localStorage/URL) even though the nav item itself would
+      // already be display:none.
       if (id === 'educator-outreach' && !EDUCATOR_OUTREACH_ENABLED) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
@@ -5406,7 +5404,8 @@
       { area: 'Public HeartBeat — search, Ask AI, Announcements, Glossary, Team directory, own Training', user: true, qa: true, wfp: true, admin: true, superAdmin: true },
       { area: 'Admin panel — access at all', user: false, qa: 'Limited', wfp: 'Limited', admin: true, superAdmin: true },
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Reports — Clients/Candidates/Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Reports — Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
+      { area: 'Onboarding — Educators, Centres, Document Checker, Advertising Opportunities', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Leads — Calendar Sync (register channels, sync now, review queue)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Smart Routing — plan/optimize centre visit routes, export to Maps/Calendar', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
@@ -9847,7 +9846,7 @@
 
     const REPORT_CONFIG = {
       clients: {
-        label: 'Clients', icon: '🏢',
+        label: 'Centres', icon: '🏢',
         sub: 'All client centres from the RawTalent app.',
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['name', 'nickName', 'email', 'emailAddress'],
@@ -9861,7 +9860,7 @@
         // isn't on the client record itself — it only exists per-location).
         hasListView: true,
         listView: {
-          label: 'Client List',
+          label: 'Centre List',
           idField: 'clientId',
           suburbFn: clientSuburbs,
           searchFields: ['name', 'nickName', 'email', 'emailAddress', 'contactNo'],
@@ -9908,7 +9907,7 @@
         ]
       },
       candidates: {
-        label: 'Candidates', icon: '🧑‍🎓',
+        label: 'Educators', icon: '🧑‍🎓',
         sub: 'Educators and other candidates registered in the RawTalent app.',
         // The list itself is served from a nightly-synced local cache, not
         // a live RT fetch (~25k records, ~60s+ live) — see
@@ -9936,7 +9935,7 @@
         // expiry) is otherwise invisible anywhere else in this app.
         hasListView: true,
         listView: {
-          label: 'Candidate List',
+          label: 'Educator List',
           idField: 'userId',
           suburbFn: candidateSuburbs,
           searchFields: ['firstName', 'lastName', 'userName', 'email', 'contactNo'],
