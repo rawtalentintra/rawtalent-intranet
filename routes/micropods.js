@@ -7,6 +7,7 @@ const engagement = require('../services/educatorEngagementService');
 const centreGeoService = require('../services/centreGeoService');
 const { computeTerritoryStrategy } = require('../services/territoryStrategyService');
 const { getCentresAndBookings } = require('./centres');
+const { LIAM, JUSTINE, partnerForSuburbState } = require('../services/melbourneTerritoryService');
 
 // Candidate density clustering ("Micropods") for the Workforce Partners
 // section — computed on read from rt_candidates_cache (nightly-synced), no
@@ -138,11 +139,15 @@ function clamp(n, min, max, fallback) {
   return Math.min(max, Math.max(min, num));
 }
 
-// '' (all) or one of the six segment keys — anything else falls back to
-// all, same permissive-default pattern as the state/gridKm/minPodSize
-// parsing below rather than 400ing on a stray value.
+// '' (all) or a comma-separated list of segment keys (checking multiple
+// segments at once, e.g. "currently_working,warm_reactivation") — unknown
+// keys are dropped rather than rejected, same permissive-default pattern
+// as the state/gridKm/minPodSize parsing below. Returns an array; an empty
+// array means "all segments", matching the empty-string sentinel used
+// everywhere else in this file.
 function parseSegmentFilter(raw) {
-  return raw && Object.prototype.hasOwnProperty.call(engagement.SEGMENTS, raw) ? raw : '';
+  if (!raw) return [];
+  return String(raw).split(',').map(s => s.trim()).filter(s => Object.prototype.hasOwnProperty.call(engagement.SEGMENTS, s));
 }
 
 // '', 'all' (case-insensitive), or missing all mean no state filter —
@@ -159,6 +164,17 @@ function parseStateFilter(raw) {
   if (!trimmed || trimmed.toLowerCase() === 'all') return { state: null, error: null };
   const normalized = normalizeStateToShort(trimmed);
   return normalized ? { state: normalized, error: null } : { state: null, error: `Unrecognised state "${trimmed}" — try VIC, SA, or leave blank for all states` };
+}
+
+// Sub-filter within VIC only — Liam's north/west territory vs Justine's
+// east/south-east/bayside/Port Phillip split (services/melbourneTerritoryService.js,
+// same suburb map the leads/centres auto-assign and the WFP Dashboard/My
+// Centres/Leads state toggles already use). Ignored outside VIC — SA has
+// no partner split, and 'all states' mixes VIC with SA/etc where a VIC-only
+// partner label wouldn't make sense.
+function parsePartnerFilter(raw) {
+  const v = (raw || '').trim().toLowerCase();
+  return v === 'liam' || v === 'justine' ? v : null;
 }
 
 function median(numbers) {
@@ -195,41 +211,52 @@ function computePodAggregates(memberPoints) {
 async function getPodsForParams(req) {
   const { state, error: stateError } = parseStateFilter(req.query.state);
   if (stateError) return { error: stateError };
+  const partner = state === 'VIC' ? parsePartnerFilter(req.query.partner) : null;
 
   const gridKm = clamp(req.query.gridKm, 2, 10, 2);
   const minPodSize = clamp(req.query.minPodSize, 5, 100, 15);
-  const segmentFilter = parseSegmentFilter(req.query.segment);
-  const cacheKey = `${state || 'ALL'}:${gridKm}:${minPodSize}:${segmentFilter}`;
+  const segmentFilter = parseSegmentFilter(req.query.segment); // array; [] = all
+  const cacheKey = `${state || 'ALL'}:${partner || ''}:${gridKm}:${minPodSize}:${[...segmentFilter].sort().join('|')}`;
 
   const cached = podsCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return { state: state || '', gridKm, minPodSize, segment: segmentFilter, ...cached.result };
+  if (cached && Date.now() < cached.expiresAt) return { state: state || '', partner: partner || '', gridKm, minPodSize, segments: segmentFilter, ...cached.result };
 
   const { points, totalActive, totalGeocoded } = await getCandidatePoints();
-  const fullStatePoints = state ? points.filter(p => p.state === state) : points;
+  let fullStatePoints = state ? points.filter(p => p.state === state) : points;
+  // Liam's north/west VIC territory vs Justine's east/south-east/bayside/
+  // Port Phillip split — same suburb map every other partner-aware VIC
+  // filter in this app already uses (see melbourneTerritoryService.js's
+  // header comment for why "outside the metro split falls back to
+  // Justine" is the rule, not an error).
+  if (partner) {
+    const wanted = partner === 'liam' ? LIAM : JUSTINE;
+    fullStatePoints = fullStatePoints.filter(p => partnerForSuburbState(p.suburb, 'VIC') === wanted);
+  }
   let statePoints = fullStatePoints;
   // Filters the actual clustering input, not just a label applied
-  // afterward — selecting a segment genuinely reclusters on just that
+  // afterward — selecting segment(s) genuinely reclusters on just that
   // subset, so pod boundaries/counts reflect where THOSE candidates are,
-  // not where the full active pool happens to be. Combines with state the
-  // same way state combines with gridKm/minPodSize: as an independent AND.
-  if (segmentFilter) statePoints = statePoints.filter(p => p.segment === segmentFilter);
+  // not where the full active pool happens to be. Combines with state/
+  // partner the same way state combines with gridKm/minPodSize: as an
+  // independent AND. Checking multiple segments is a plain OR across them.
+  if (segmentFilter.length) statePoints = statePoints.filter(p => segmentFilter.includes(p.segment));
 
   // buildMicropods' coreMinPerCell (how many people a 2km cell needs to
   // seed a pod) defaults to a fixed 20 — deliberately NOT tied to
   // minPodSize (see micropodService.js), but that constant was tuned
-  // against the full ~9k-candidate VIC pool. Filtering to a single segment
-  // can shrink the pool far more than the old binary engaged/not-engaged
-  // split ever did, and 20-per-cell never happens in a pool that sparse —
-  // every Micropod call silently returned zero pods regardless of
-  // minPodSize until this was caught live (see the original engaged-only
-  // fix this comment is inherited from). Scaling the threshold down by how
-  // much THIS filter thinned the state's pool keeps the same "requires
-  // real local density" guard at whatever scale the filtered pool actually
-  // is. Floor of 3 so it never drops low enough to just merge every
-  // occupied cell again. Unfiltered calls (ratio 1) pass undefined and
-  // fall through to buildMicropods' own default, so normal behaviour is
-  // untouched.
-  const coreMinPerCell = segmentFilter && fullStatePoints.length
+  // against the full ~9k-candidate VIC pool. Filtering to a segment (or a
+  // partner territory) can shrink the pool far more than the old binary
+  // engaged/not-engaged split ever did, and 20-per-cell never happens in a
+  // pool that sparse — every Micropod call silently returned zero pods
+  // regardless of minPodSize until this was caught live (see the original
+  // engaged-only fix this comment is inherited from). Scaling the
+  // threshold down by how much THIS filter thinned the state's pool keeps
+  // the same "requires real local density" guard at whatever scale the
+  // filtered pool actually is. Floor of 3 so it never drops low enough to
+  // just merge every occupied cell again. Unfiltered calls (ratio 1) pass
+  // undefined and fall through to buildMicropods' own default, so normal
+  // behaviour is untouched.
+  const coreMinPerCell = segmentFilter.length && fullStatePoints.length
     ? Math.max(3, Math.round(20 * (statePoints.length / fullStatePoints.length)))
     : undefined;
   const { pods, unclusteredCount } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
@@ -243,12 +270,12 @@ async function getPodsForParams(req) {
   const pointsByUserId = new Map(statePoints.map(p => [p.userId, p]));
   const podsWithId = pods.map(pod => {
     const memberPoints = pod.memberIds.map(id => pointsByUserId.get(id)).filter(Boolean);
-    return { ...pod, id: `${state || 'ALL'}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`, ...computePodAggregates(memberPoints) };
+    return { ...pod, id: `${state || 'ALL'}${partner ? '_' + partner.toUpperCase() : ''}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`, ...computePodAggregates(memberPoints) };
   });
 
   const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
-  return { state: state || '', gridKm, minPodSize, segment: segmentFilter, ...result };
+  return { state: state || '', partner: partner || '', gridKm, minPodSize, segments: segmentFilter, ...result };
 }
 
 // Pod summaries only — no candidate arrays. This is the "no full list

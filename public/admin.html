@@ -297,7 +297,8 @@
         <div class="admin-nav-item" onclick="showSection('route-planner', this)">
           <span class="admin-nav-icon">🧭</span> Smart Routing
         </div>
-        <div class="admin-nav-item" onclick="showSection('educator-outreach', this)">
+        <!-- Educator Outreach: built but hidden — see EDUCATOR_OUTREACH_ENABLED. Belongs under Onboarding/Ops once it moves, not here. -->
+        <div class="admin-nav-item" onclick="showSection('educator-outreach', this)" style="display:none">
           <span class="admin-nav-icon">📤</span> Educator Outreach
         </div>
       </div>
@@ -730,21 +731,15 @@
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
               <div style="display:flex;gap:10px" id="micropodsStateToggle">
                 <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setMicropodsState('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s">🌏 All States</button>
+                <button type="button" class="wfp-state-filter-btn" data-state="LIAM" onclick="setMicropodsState('LIAM')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s">🔷 Victoria — Liam</button>
                 <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMicropodsState('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s">🟢 Victoria — Justine</button>
                 <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMicropodsState('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#db2777;color:white;opacity:.55;transition:opacity .15s">💗 South Australia — Gwen</button>
               </div>
               <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
-                  <label for="micropodsSegmentFilter">Educator Segment</label>
-                  <select id="micropodsSegmentFilter" class="form-control" style="width:190px" onchange="loadMicropods()">
-                    <option value="">All candidates</option>
-                    <option value="currently_working">Currently Working</option>
-                    <option value="newly_activated">Newly Activated</option>
-                    <option value="available_engaged">Available &amp; Engaged</option>
-                    <option value="warm_reactivation">Warm Reactivation</option>
-                    <option value="dormant_lapsed">Dormant / Lapsed</option>
-                    <option value="onboarding_supply">Onboarding Supply</option>
-                  </select>
+                <div class="report-multiselect" style="position:relative;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                  <label>Educator Segment</label>
+                  <button type="button" id="micropodsSegmentFilter_btn" class="form-control" style="width:190px;text-align:left;cursor:pointer;background:white" onclick="toggleMicropodsSegmentFilterPanel()">All candidates</button>
+                  <div id="micropodsSegmentFilter_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);z-index:1000;min-width:200px;padding:6px 0"></div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
                   <label for="micropodsMinSize">Minimum pod size</label>
@@ -1299,12 +1294,23 @@
             <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);margin-left:auto;align-self:center">
               <input type="checkbox" id="routeIncludeDueCentres" checked onchange="filterRoutePlannerLeads()"> Include due centres
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--navy);font-weight:600;cursor:pointer;align-self:center">
+              <input type="checkbox" id="routeTerritoryToggle" onchange="onRouteTerritoryToggleChange()"> 🧭 Territory Strategy
+            </label>
+            <select id="routeTerritoryFilter" style="display:none" onchange="filterRoutePlannerLeads()">
+              <option value="">Strategy: any</option>
+              <option value="recruit">🎯 Recruit</option>
+              <option value="develop_business">📈 Develop Business</option>
+              <option value="grow">🌱 Grow</option>
+              <option value="monitor">👀 Monitor</option>
+            </select>
             <span id="routeSelectedCount" style="font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
+          <div id="routeTerritoryNote" style="display:none;font-size:11px;color:var(--text-muted);padding:0 0 10px">🧭 Matches each due centre against Micropods' Territory Strategy (nearest pod within 20km, all states, min pod size 15) — see the Micropods section for the full picture. Leads have no saved location yet, so they show as unmatched.</div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
-                <tr><th style="width:26px"></th><th style="width:24%">Centre</th><th style="width:13%">Suburb</th><th style="width:7%">State</th><th style="width:13%">Called</th><th style="width:13%">Visited</th><th style="width:14%">Profile</th><th style="width:10%">WF Partner</th></tr>
+                <tr><th style="width:26px"></th><th style="width:22%">Centre</th><th style="width:12%">Suburb</th><th style="width:6%">State</th><th style="width:12%">Called</th><th style="width:12%">Visited</th><th style="width:12%">Profile</th><th style="width:9%">WF Partner</th><th id="routeStrategyColHead" style="width:15%;display:none">Strategy</th></tr>
               </thead>
               <tbody id="routePlannerLeadsBody">
                 <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
@@ -3613,6 +3619,14 @@
       });
     }
 
+    // Educator Outreach is fully built (backend + frontend) but not ready
+    // to hand to anyone yet — Joy: it belongs under Onboarding/Ops, not
+    // Workforce Partners, and needs to move there before anyone sees it.
+    // One flag hides every entry point (nav item, Micropods' checkbox
+    // selection/save-list UI, and direct navigation) regardless of role
+    // or grant — flip to true once it's relocated and ready to reveal.
+    const EDUCATOR_OUTREACH_ENABLED = false;
+
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
     let currentUserEmail = '';
@@ -3767,21 +3781,23 @@
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue'],
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods', 'educator-outreach']
+      // 'educator-outreach' deliberately left out here — see
+      // EDUCATOR_OUTREACH_ENABLED. It's Ops/Onboarding's feature, not
+      // Workforce Partners', and stays out of every role's allowlist
+      // (including workforce_partner) until it's rebuilt under that section.
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
-    // Vicky), unlike workforce_partner where it's already unconditional in
-    // RESTRICTED_ROLE_SECTIONS above (Gwen/Justine) — so qa_view's fixed
-    // list gets it added dynamically only when granted. Shared by
-    // applyRoleVisibility() (nav item visibility) and showSection() (the
-    // actual navigation gate) so the two can never disagree — a granted
-    // qa_view user seeing the nav item but bouncing on click, or vice
-    // versa, would both be bugs.
+    // Vicky) — kept for when EDUCATOR_OUTREACH_ENABLED flips back on.
+    // Shared by applyRoleVisibility() (nav item visibility) and
+    // showSection() (the actual navigation gate) so the two can never
+    // disagree — a granted qa_view user seeing the nav item but bouncing
+    // on click, or vice versa, would both be bugs.
     function getEffectiveAllowedSections() {
       const base = RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (!base) return null;
-      return (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
+      return (EDUCATOR_OUTREACH_ENABLED && currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
     }
 
     function applyRoleVisibility() {
@@ -4804,6 +4820,14 @@
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
 
     function showSection(id, el) {
+      // Hidden for everyone regardless of role until it's rebuilt under
+      // Onboarding/Ops — see EDUCATOR_OUTREACH_ENABLED. Blocks direct
+      // navigation (console, stale localStorage/URL) even though the nav
+      // item itself is already display:none.
+      if (id === 'educator-outreach' && !EDUCATOR_OUTREACH_ENABLED) {
+        showSection('articles', document.querySelector('[onclick*="articles"]'));
+        return;
+      }
       // Restricted roles (qa_view, workforce_partner) each have their own
       // small allowlist (qa_view's includes 'faq', normally super_admin-only
       // per superAdminSections below — the FAQ page itself hides the
@@ -7712,6 +7736,9 @@
     let micropodsPods = [];
     let micropodsMapInstance = null;
     let micropodsHeatmapInstance = null;
+    // Checked segment keys — empty Set means "all candidates", same
+    // sentinel every other multi-select in this app uses.
+    let micropodsSegmentSelection = new Set();
 
     function initMicropodsSection() {
       if (!micropodsState) micropodsState = defaultStateForCurrentUser() || 'all';
@@ -7730,6 +7757,60 @@
       document.querySelectorAll('#micropodsStateToggle button').forEach(btn => {
         btn.style.opacity = btn.dataset.state === micropodsState ? '1' : '.55';
       });
+    }
+
+    // Matches the 'all'/'LIAM'/'VIC'/'SA' convention every other WFP page's
+    // state toggle already uses (WFP Dashboard/My Centres/Leads/Smart
+    // Routing) — 'VIC' means Justine specifically, 'LIAM' is his own
+    // north/west VIC territory (see melbourneTerritoryService.js). Turns
+    // that one button value into the {state, partner} query params
+    // routes/micropods.js actually expects.
+    function micropodsApiStateParams() {
+      if (micropodsState === 'LIAM') return { state: 'VIC', partner: 'liam' };
+      if (micropodsState === 'VIC') return { state: 'VIC', partner: 'justine' };
+      return { state: micropodsState || 'all', partner: '' };
+    }
+
+    // Reusable, purpose-built multi-select for the 6 fixed segment keys —
+    // deliberately its own small implementation rather than routing through
+    // the generic report multi-select machinery (renderReportMultiSelectPanel
+    // etc.), which is keyed by REPORT_CONFIG type/filter descriptors that
+    // don't apply here. Shares the `.report-multiselect` class/panel id
+    // suffix so it still closes via the same global outside-click/scroll
+    // listeners those use.
+    function renderMicropodsSegmentFilterPanel() {
+      const panel = document.getElementById('micropodsSegmentFilter_panel');
+      panel.innerHTML = SEGMENT_ORDER.map(key => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 14px;font-size:12.5px;cursor:pointer;white-space:nowrap" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background=''">
+          <input type="checkbox" value="${key}" ${micropodsSegmentSelection.has(key) ? 'checked' : ''} onchange="onMicropodsSegmentFilterChange()"> ${SEGMENT_META[key].label}
+        </label>`).join('');
+      updateMicropodsSegmentFilterLabel();
+    }
+
+    function updateMicropodsSegmentFilterLabel() {
+      const btn = document.getElementById('micropodsSegmentFilter_btn');
+      if (btn) btn.textContent = micropodsSegmentSelection.size ? `${micropodsSegmentSelection.size} segment${micropodsSegmentSelection.size === 1 ? '' : 's'} selected` : 'All candidates';
+    }
+
+    function toggleMicropodsSegmentFilterPanel() {
+      const panel = document.getElementById('micropodsSegmentFilter_panel');
+      const btn = document.getElementById('micropodsSegmentFilter_btn');
+      const opening = panel.style.display === 'none';
+      closeAllReportMultiSelects();
+      if (opening) {
+        renderMicropodsSegmentFilterPanel();
+        const rect = btn.getBoundingClientRect();
+        panel.style.top = `${rect.bottom + 4}px`;
+        panel.style.left = `${rect.left}px`;
+        panel.style.display = '';
+      }
+    }
+
+    function onMicropodsSegmentFilterChange() {
+      const checked = [...document.querySelectorAll('#micropodsSegmentFilter_panel input[type=checkbox]')].filter(c => c.checked).map(c => c.value);
+      micropodsSegmentSelection = new Set(checked);
+      updateMicropodsSegmentFilterLabel();
+      loadMicropods();
     }
 
     const MICROPODS_QUADRANT_COLOR = {
@@ -7751,7 +7832,8 @@
 
     async function loadMicropods() {
       const minSize = document.getElementById('micropodsMinSize').value || 15;
-      const segmentFilter = document.getElementById('micropodsSegmentFilter').value;
+      const segmentFilter = [...micropodsSegmentSelection].join(',');
+      const { state, partner } = micropodsApiStateParams();
       const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
       document.getElementById('micropodsTerritoryNote').style.display = territoryMode ? 'block' : 'none';
       const colspan = territoryMode ? 4 : 8;
@@ -7761,7 +7843,7 @@
       renderMicropodsTableHead(territoryMode);
       try {
         const endpoint = territoryMode ? '/api/micropods/territory-strategy' : '/api/micropods';
-        const data = await fetch(`${endpoint}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
+        const data = await fetch(`${endpoint}?state=${encodeURIComponent(state)}&partner=${encodeURIComponent(partner)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
         if (data.error) throw new Error(data.error);
         micropodsPods = data.pods;
         micropodsLastData = data;
@@ -7897,7 +7979,7 @@
     // — this is the point where actual candidates first get fetched.
     let micropodDetailCandidates = [];
     let micropodDetailPage = 1;
-    let micropodDetailSegmentFilter = '';
+    let micropodDetailSegmentSelection = new Set();
     let micropodSelectedUserIds = new Set();
     let micropodDetailPodContext = null; // { id, segment } — for the outreach list's sourcePodId/sourceSegment
     const MICROPOD_PAGE_SIZE = 50;
@@ -7906,6 +7988,7 @@
     // who always pass requireOutreachListBuilder server-side) — showing the
     // checkbox column to someone whose save would just 403 isn't useful.
     function currentUserCanUseOutreach() {
+      if (!EDUCATOR_OUTREACH_ENABLED) return false;
       return currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserCanCreateOutreachLists;
     }
 
@@ -7917,12 +8000,13 @@
       bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         const minSize = document.getElementById('micropodsMinSize').value || 15;
-        const segmentFilter = document.getElementById('micropodsSegmentFilter').value;
-        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(micropodsState)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
+        const segmentFilter = [...micropodsSegmentSelection].join(',');
+        const { state, partner } = micropodsApiStateParams();
+        const pod = await fetch(`/api/micropods/${encodeURIComponent(podId)}?state=${encodeURIComponent(state)}&partner=${encodeURIComponent(partner)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
         if (pod.error) throw new Error(pod.error);
         micropodDetailCandidates = pod.candidates;
         micropodDetailPage = 1;
-        micropodDetailSegmentFilter = '';
+        micropodDetailSegmentSelection = new Set();
         micropodSelectedUserIds = new Set();
         micropodDetailPodContext = { id: podId, segment: segmentFilter || null };
         bodyEl.innerHTML = renderMicropodDetail(pod);
@@ -7952,11 +8036,9 @@
           <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
         </div>
         <div class="admin-table-card">
-          <div style="display:flex;justify-content:flex-end;padding:12px 20px 0">
-            <select id="micropodSegmentFilter" class="form-control" style="max-width:220px" onchange="changeMicropodSegmentFilter(this.value)">
-              <option value="">All segments</option>
-              ${SEGMENT_ORDER.map(key => `<option value="${key}">${SEGMENT_META[key].label} only</option>`).join('')}
-            </select>
+          <div class="report-multiselect" style="position:relative;display:flex;justify-content:flex-end;padding:12px 20px 0">
+            <button type="button" id="micropodDetailSegmentFilter_btn" class="form-control" style="max-width:220px;text-align:left;cursor:pointer;background:white" onclick="toggleMicropodDetailSegmentFilterPanel()">All segments</button>
+            <div id="micropodDetailSegmentFilter_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);z-index:1000;min-width:200px;padding:6px 0"></div>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
@@ -7976,8 +8058,38 @@
         </div>`;
     }
 
-    function changeMicropodSegmentFilter(value) {
-      micropodDetailSegmentFilter = value;
+    function renderMicropodDetailSegmentFilterPanel() {
+      const panel = document.getElementById('micropodDetailSegmentFilter_panel');
+      panel.innerHTML = SEGMENT_ORDER.map(key => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 14px;font-size:12.5px;cursor:pointer;white-space:nowrap" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background=''">
+          <input type="checkbox" value="${key}" ${micropodDetailSegmentSelection.has(key) ? 'checked' : ''} onchange="onMicropodDetailSegmentFilterChange()"> ${SEGMENT_META[key].label}
+        </label>`).join('');
+      updateMicropodDetailSegmentFilterLabel();
+    }
+
+    function updateMicropodDetailSegmentFilterLabel() {
+      const btn = document.getElementById('micropodDetailSegmentFilter_btn');
+      if (btn) btn.textContent = micropodDetailSegmentSelection.size ? `${micropodDetailSegmentSelection.size} segment${micropodDetailSegmentSelection.size === 1 ? '' : 's'} selected` : 'All segments';
+    }
+
+    function toggleMicropodDetailSegmentFilterPanel() {
+      const panel = document.getElementById('micropodDetailSegmentFilter_panel');
+      const btn = document.getElementById('micropodDetailSegmentFilter_btn');
+      const opening = panel.style.display === 'none';
+      closeAllReportMultiSelects();
+      if (opening) {
+        renderMicropodDetailSegmentFilterPanel();
+        const rect = btn.getBoundingClientRect();
+        panel.style.top = `${rect.bottom + 4}px`;
+        panel.style.left = `${rect.left}px`;
+        panel.style.display = '';
+      }
+    }
+
+    function onMicropodDetailSegmentFilterChange() {
+      const checked = [...document.querySelectorAll('#micropodDetailSegmentFilter_panel input[type=checkbox]')].filter(c => c.checked).map(c => c.value);
+      micropodDetailSegmentSelection = new Set(checked);
+      updateMicropodDetailSegmentFilterLabel();
       micropodDetailPage = 1;
       renderMicropodCandidatesPage();
     }
@@ -7987,10 +8099,10 @@
     // biggest real pod), so there's no reason to round-trip the server
     // per page. This just keeps a 1,000+ row pod from rendering as one
     // enormous, hard-to-scan table. The segment filter is client-side
-    // too, same reasoning.
+    // too, same reasoning. Checking multiple segments is an OR across them.
     function renderMicropodCandidatesPage() {
       const filtered = micropodDetailCandidates.filter(c => {
-        if (micropodDetailSegmentFilter) return c.segment === micropodDetailSegmentFilter;
+        if (micropodDetailSegmentSelection.size) return micropodDetailSegmentSelection.has(c.segment);
         return true;
       });
       const total = filtered.length;
@@ -8051,7 +8163,7 @@
     // Selects/deselects every candidate matching the CURRENT segment filter
     // (not just the page on screen) — the "select all N filtered" affordance.
     function toggleAllMicropodSelection(checkbox) {
-      const filtered = micropodDetailCandidates.filter(c => !micropodDetailSegmentFilter || c.segment === micropodDetailSegmentFilter);
+      const filtered = micropodDetailCandidates.filter(c => !micropodDetailSegmentSelection.size || micropodDetailSegmentSelection.has(c.segment));
       if (checkbox.checked) filtered.forEach(c => micropodSelectedUserIds.add(c.userId));
       else filtered.forEach(c => micropodSelectedUserIds.delete(c.userId));
       renderMicropodCandidatesPage();
@@ -8590,6 +8702,20 @@
     let routeSelectedOrder = []; // lead/centre ids, in the order they were checked
     let currentRouteResult = null; // last /optimize response
     let mapboxTokenCache = null; // { configured, token } — fetched once per session
+
+    // Per-person default Start Location (2026-08-22, Joy) — each Workforce
+    // Partner's own home/office, not a generic placeholder. Justine's and
+    // Gwen's addresses are still to come; anyone without a specific entry
+    // (including Justine/Gwen for now) gets the shared fallback. Only ever
+    // applied when the field is empty AND nothing's saved in localStorage
+    // yet (see loadRoutePlannerSection) — a real saved address always wins.
+    const ROUTE_START_ADDRESS_BY_EMAIL = {
+      'liam@rawtalent.com.au': '205 Burnley St, Richmond VIC 3121, Australia'
+    };
+    const ROUTE_START_ADDRESS_FALLBACK = 'Cecil St, South Melbourne VIC 3205, Australia';
+    function defaultRouteStartAddress() {
+      return ROUTE_START_ADDRESS_BY_EMAIL[(currentUserEmail || '').toLowerCase()] || ROUTE_START_ADDRESS_FALLBACK;
+    }
     let routeMapInstance = null;
     let routeGeofenceLeadIds = null; // Set of lead ids within the searched route corridor, or null when no search is active
     let routeGeofenceDistances = new Map(); // lead id -> distanceKm, for the "Xkm from route" label
@@ -8933,7 +9059,7 @@
         filterRoutePlannerLeads();
 
         const startInput = document.getElementById('routeStartAddress');
-        if (!startInput.value) startInput.value = localStorage.getItem('routePlannerStartAddress') || '';
+        if (!startInput.value) startInput.value = localStorage.getItem('routePlannerStartAddress') || defaultRouteStartAddress();
 
         if (!mapboxTokenCache) mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json());
         document.getElementById('routePlannerMapboxNotice').style.display = mapboxTokenCache.configured ? 'none' : 'block';
@@ -8956,6 +9082,45 @@
       routeStateFilter = state === 'all' ? null : state;
       updateRouteStateToggleButtons();
       filterRoutePlannerLeads();
+    }
+
+    // Territory Strategy overlay for Smart Routing — reuses Micropods'
+    // own /territory-strategy endpoint (all states, min pod size 15) so a
+    // Workforce Partner can see which due centres sit in a Recruit/Grow/
+    // Develop Business/Monitor area while planning a route, not just the
+    // pipeline status. Only centre rows can be matched (they're geocoded
+    // via routes/centres.js's toRouteStop) — leads have no saved
+    // lat/lng yet, so they always show unmatched here.
+    let routeTerritoryMode = false;
+    let routeTerritoryPods = null;
+
+    async function onRouteTerritoryToggleChange() {
+      routeTerritoryMode = document.getElementById('routeTerritoryToggle').checked;
+      document.getElementById('routeTerritoryFilter').style.display = routeTerritoryMode ? '' : 'none';
+      document.getElementById('routeTerritoryNote').style.display = routeTerritoryMode ? 'block' : 'none';
+      document.getElementById('routeStrategyColHead').style.display = routeTerritoryMode ? '' : 'none';
+      if (!routeTerritoryMode) {
+        document.getElementById('routeTerritoryFilter').value = '';
+        filterRoutePlannerLeads();
+        return;
+      }
+      if (!routeTerritoryPods) {
+        try {
+          const data = await fetch('/api/micropods/territory-strategy?state=all&minPodSize=15').then(r => r.json());
+          routeTerritoryPods = Array.isArray(data.pods) ? data.pods : [];
+        } catch { routeTerritoryPods = []; }
+      }
+      filterRoutePlannerLeads();
+    }
+
+    function nearestRouteTerritoryPod(lat, lng, maxKm = 20) {
+      if (!routeTerritoryPods || !routeTerritoryPods.length || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      let best = null;
+      for (const pod of routeTerritoryPods) {
+        const km = haversineKmClient({ lat, lng }, pod.centroid);
+        if (km <= maxKm && (!best || km < best.km)) best = { pod, km };
+      }
+      return best ? best.pod : null;
     }
 
     function filterRoutePlannerLeads() {
@@ -9008,6 +9173,14 @@
       if (leadCalled) filtered = filtered.filter(l => l.type === 'centre' || l.lead_called_status === leadCalled);
       if (visited) filtered = filtered.filter(l => l.type === 'centre' || l.centre_visited_status === visited);
       if (profileCreated) filtered = filtered.filter(l => l.type === 'centre' || l.signed_status === profileCreated);
+      const territoryFilter = routeTerritoryMode ? document.getElementById('routeTerritoryFilter').value : '';
+      if (territoryFilter) {
+        filtered = filtered.filter(item => {
+          if (item.type !== 'centre') return false; // leads have no matched pod yet
+          const pod = nearestRouteTerritoryPod(item.latitude, item.longitude);
+          return pod && pod.quadrant === territoryFilter;
+        });
+      }
       if (routeGeofenceLeadIds) filtered = filtered.slice().sort((a, b) => (routeGeofenceDistances.get(a.id) ?? 0) - (routeGeofenceDistances.get(b.id) ?? 0));
       renderRoutePlannerLeadsTable(filtered);
     }
@@ -9055,10 +9228,21 @@
 
     function renderRoutePlannerLeadsTable(list) {
       const body = document.getElementById('routePlannerLeadsBody');
+      const colspan = routeTerritoryMode ? 9 : 8;
       if (!list.length) {
-        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
+        body.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
         return;
       }
+      // Only centre rows can be matched to a pod (they're geocoded; leads
+      // aren't yet) — see onRouteTerritoryToggleChange's comment.
+      function strategyCell(row) {
+        if (!routeTerritoryMode) return '';
+        if (row.type !== 'centre') return `<td style="color:var(--text-muted)">—</td>`;
+        const pod = nearestRouteTerritoryPod(row.latitude, row.longitude);
+        if (!pod) return `<td style="color:var(--text-muted)">—</td>`;
+        return `<td><span style="font-weight:700;font-size:11px;color:${MICROPODS_QUADRANT_COLOR[pod.quadrant] || 'var(--text-muted)'}">${pod.icon} ${escHtml(pod.label)}</span></td>`;
+      }
+
       body.innerHTML = list.map(row => {
         const checked = routeSelectedOrder.includes(row.id);
         const geofenceDist = routeGeofenceDistances.get(row.id);
@@ -9075,6 +9259,7 @@
             <td>${escHtml(row.state || '—')}</td>
             <td colspan="3"><span class="attn-chip ${nMeta.cls}">${escHtml(nMeta.label)}</span></td>
             <td>—</td>
+            ${strategyCell(row)}
           </tr>`;
         }
 
@@ -9091,6 +9276,7 @@
           <td><span class="lead-badge ${visitedMeta.cls}">${escHtml(visitedMeta.label)}</span></td>
           <td><span class="lead-badge ${profileMeta.cls}">${escHtml(profileMeta.label)}</span></td>
           <td>${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
+          ${strategyCell(l)}
         </tr>`;
       }).join('');
       updateRouteSelectedCount();
