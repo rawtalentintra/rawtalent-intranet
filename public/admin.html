@@ -1278,6 +1278,18 @@
         </div>
 
         <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+            <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Route Mode</label>
+            <select id="routeModeFilter" class="form-control" style="width:220px;font-weight:700;color:var(--navy)" onchange="onRouteModeChange()">
+              <option value="">⚖️ Balanced Day</option>
+              <option value="protect_recover">🛟 Protect and Recover</option>
+              <option value="activate">🌱 Activate</option>
+              <option value="grow">📈 Grow</option>
+              <option value="new_business">🎯 New Business</option>
+              <option value="supply_led_growth">🗺️ Supply-led Growth</option>
+            </select>
+            <span id="routeModeNote" style="font-size:11.5px;color:var(--text-muted)">A recommended mix of everything below — pick a mode to focus on one kind of day.</span>
+          </div>
           <div class="leads-filter-bar" style="padding:0 0 12px;border-bottom:none">
             <input type="text" id="routeFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterRoutePlannerLeads()">
             <select id="routeFilterPeriod" onchange="filterRoutePlannerLeads()">
@@ -1332,14 +1344,15 @@
             </select>
             <span id="routeSelectedCount" style="font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
+          <div style="font-size:11px;color:var(--text-muted);padding:0 0 6px">🎯 Aim for around 5 quality stops for a typical day — that's a guideline, not a hard rule; a couple of long, valuable conversations beats a rushed ten.</div>
           <div id="routeTerritoryNote" style="display:none;font-size:11px;color:var(--text-muted);padding:0 0 10px">🧭 Matches each due centre against Micropods' Territory Strategy (nearest pod within 20km, all states, min pod size 15) — see the Micropods section for the full picture. Leads have no saved location yet, so they show as unmatched.</div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
-                <tr><th style="width:26px"></th><th style="width:22%">Centre</th><th style="width:12%">Suburb</th><th style="width:6%">State</th><th style="width:12%">Called</th><th style="width:12%">Visited</th><th style="width:12%">Profile</th><th style="width:9%">WF Partner</th><th id="routeStrategyColHead" style="width:15%;display:none">Strategy</th></tr>
+                <tr><th style="width:26px"></th><th style="width:20%">Centre</th><th style="width:10%">Suburb</th><th style="width:5%">State</th><th style="width:12%">Priority</th><th style="width:11%">Called</th><th style="width:11%">Visited</th><th style="width:11%">Profile</th><th style="width:8%">WF Partner</th><th id="routeStrategyColHead" style="width:12%;display:none">Strategy</th></tr>
               </thead>
               <tbody id="routePlannerLeadsBody">
-                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -9141,6 +9154,7 @@
       try {
         if (!routePlannerLeads.length) routePlannerLeads = await fetch('/api/leads').then(r => r.json());
         if (!routePlannerCentres.length) routePlannerCentres = await fetch('/api/centres/due-for-routing').then(r => r.json());
+        await ensureSupplyLoaded(); // recommendation card's "nearby supply" needs this — see recommendationDetailRow
 
         const stateSelect = document.getElementById('routeFilterState');
         if (stateSelect.options.length === 1) {
@@ -9222,6 +9236,125 @@
       return best ? best.pod : null;
     }
 
+    // ── Route Modes & Priority Order (Decision Area 4, 2026-08-22) ─────
+    // All 6 proposed modes ship together — confirmed live (Joy: "just add
+    // all of them... let's just, yeah"). Each mode is a client-side filter
+    // over the SAME already-fetched lead+centre pool Smart Routing already
+    // has — no new endpoint, reusing Decision Area 3's health categories/
+    // isStrategic/isEscalated and the existing agency_usage lead field.
+    // Supply-led Growth needs routeTerritoryPods loaded (same lazy-load
+    // Territory Strategy already uses) since "near strong Micropods" is
+    // exactly Territory Strategy's own 'develop_business' quadrant
+    // (strong supply, room for more demand).
+    let routeMode = '';
+
+    async function onRouteModeChange() {
+      routeMode = document.getElementById('routeModeFilter').value;
+      const notes = {
+        '': 'A recommended mix of everything below — pick a mode to focus on one kind of day.',
+        protect_recover: '🛟 Declining, at-risk, and service-affected centres — Escalated/Declining/Needs Attention.',
+        activate: '🌱 Centres awaiting login, first booking, welcome visit, or second booking.',
+        grow: '📈 Healthy or growing centres with further opportunity.',
+        new_business: '🎯 High-Agency and Target Temp leads.',
+        supply_led_growth: '🗺️ Centres and leads near strong Micropods supply with room to grow (Territory Strategy\'s "Develop Business" areas).'
+      };
+      document.getElementById('routeModeNote').textContent = notes[routeMode] || '';
+      if (routeMode === 'supply_led_growth' && !routeTerritoryPods) {
+        try {
+          const data = await fetch('/api/micropods/territory-strategy?state=all&minPodSize=15').then(r => r.json());
+          routeTerritoryPods = Array.isArray(data.pods) ? data.pods : [];
+        } catch { routeTerritoryPods = []; }
+      }
+      filterRoutePlannerLeads();
+    }
+
+    function matchesRouteMode(item, mode) {
+      if (!mode) return true; // Balanced Day — no filter
+      if (mode === 'protect_recover') {
+        return item.type === 'centre' && (item.isEscalated || item.health === 'declining' || item.health === 'needs_attention');
+      }
+      if (mode === 'activate') {
+        if (item.type === 'centre') return item.health === 'new_activating';
+        // Leads: not yet called, or called but no visit booked yet — still working toward first contact/booking.
+        return item.lead_called_status === 'to_schedule' || (item.lead_called_status === 'done' && item.centre_visited_status === 'to_schedule');
+      }
+      if (mode === 'grow') {
+        return item.type === 'centre' && (item.health === 'healthy' || item.health === 'growing' || item.health === 'opportunity');
+      }
+      if (mode === 'new_business') {
+        return item.type === 'lead' && (item.agency_usage === 'high_agency_user' || item.agency_usage === 'target_temp');
+      }
+      if (mode === 'supply_led_growth') {
+        const pod = nearestRouteTerritoryPod(item.latitude, item.longitude);
+        return !!pod && pod.quadrant === 'develop_business';
+      }
+      return true;
+    }
+
+    // 8-tier priority order, confirmed live — tier 3 ("a standardized note
+    // flag when a new centre calls in about pricing/educators, or logs its
+    // first booking, jumps straight to #3") is a known, deliberate gap:
+    // it needs a new call-note field this pass doesn't add (Joy, live:
+    // "we are not able to automatically pull and analyze transcripts on
+    // each call... do we put notes in after calls?" — an open follow-up,
+    // not something to fake with a shaky proxy). Escalation (tier 1)
+    // is also Decision 2's answer to "what should outrank geographic
+    // convenience" — it's why this tier ordering, not distance, drives
+    // the default sort.
+    const ROUTE_PRIORITY_META = {
+      1: { label: 'Urgent', color: '#b91c1c' },
+      2: { label: 'High-Agency Lead', color: '#b45309' },
+      4: { label: 'Target Temp Lead', color: '#b45309' },
+      5: { label: 'High-Value Declining', color: '#c0392b' },
+      6: { label: 'Overdue / New Centre', color: '#2563eb' },
+      7: { label: 'Growing Opportunity', color: '#15803d' },
+      8: { label: 'Fill Route', color: 'var(--text-muted)' }
+    };
+
+    function routePriorityTier(item) {
+      if (item.type === 'centre' && item.isEscalated) return 1;
+      if (item.type === 'lead' && item.agency_usage === 'high_agency_user') return 2;
+      if (item.type === 'lead' && item.agency_usage === 'target_temp') return 4;
+      if (item.type === 'centre' && item.isStrategic && (item.health === 'declining' || item.health === 'dormant')) return 5;
+      if (item.type === 'centre' && (item.nurture?.status === 'recurring_overdue' || item.nurture?.status === 'first_contact_overdue' || item.health === 'new_activating')) return 6;
+      if (item.type === 'lead' && (
+        (item.lead_called_status === 'scheduled' && item.lead_called_at && new Date(item.lead_called_at).getTime() < Date.now()) ||
+        (item.centre_visited_status === 'scheduled' && item.centre_visited_at && new Date(item.centre_visited_at).getTime() < Date.now())
+      )) return 6;
+      if (item.type === 'centre' && (item.health === 'growing' || item.health === 'opportunity')) return 7;
+      return 8;
+    }
+
+    function routePriorityReason(item, tier) {
+      if (tier === 1) return item.healthReasons?.[0] || 'Issue raised at last visit';
+      if (tier === 2) return 'High agency usage — convert to direct bookings';
+      if (tier === 4) return 'Target temp lead';
+      if (tier === 5) return item.healthReasons?.[0] || 'Declining/dormant, high value';
+      if (tier === 6) return item.type === 'centre' ? (item.healthReasons?.[0] || 'Overdue for contact') : 'Call/visit overdue';
+      if (tier === 7) return item.healthReasons?.[0] || 'Room to grow';
+      return 'Nearby — completes the route efficiently';
+    }
+
+    // Deterministic, rule-based objective sentence — same "no AI, plain
+    // template" posture as territoryStrategyService.js's QUADRANTS action
+    // text and centreHealthService.js's reasons, matching the meeting's
+    // own example format ("Oaklands Park: bookings declined from 68 to 8;
+    // no visit in 104 days; strong active supply within 8km. Objective:
+    // understand the decline, review service performance and agree
+    // upcoming staffing requirements.").
+    function routeSuggestedObjective(item, tier) {
+      if (tier === 1) return 'Understand the issue, address it directly, and agree next steps with the centre.';
+      if (item.type === 'lead') return tier === 2 || tier === 4
+        ? 'Open or progress the relationship — confirm educator supply and pricing fit.'
+        : 'Follow up on the pipeline stage that\'s overdue.';
+      if (item.health === 'declining') return 'Understand the decline, review service performance, and agree upcoming staffing requirements.';
+      if (item.health === 'dormant') return 'Confirm whether there\'s current opportunity before investing further time.';
+      if (item.health === 'new_activating') return 'Support setup, confirm login/first booking, and welcome them once booking starts.';
+      if (item.health === 'growing') return 'Confirm ongoing educator supply and look for ways to deepen the relationship.';
+      if (item.health === 'opportunity') return 'Check in — steady bookings, but under-engaged; look for ways to grow usage.';
+      return 'Routine check-in — confirm everything\'s on track.';
+    }
+
     function filterRoutePlannerLeads() {
       const centreSearch = document.getElementById('routeFilterCentre').value.trim().toLowerCase();
       const periodKey = document.getElementById('routeFilterPeriod').value;
@@ -9280,7 +9413,15 @@
           return pod && pod.quadrant === territoryFilter;
         });
       }
+      if (routeMode) filtered = filtered.filter(item => matchesRouteMode(item, routeMode));
+      // Geographic convenience only wins when a geofence search is actively
+      // in use (an intentional "along this specific route" query, where
+      // distance genuinely should dominate) — otherwise Priority Order
+      // (Decision Area 4) is the default sort, since Decision 2 confirmed
+      // escalation (and the rest of the tier order) outranks geographic
+      // convenience, not the other way around.
       if (routeGeofenceLeadIds) filtered = filtered.slice().sort((a, b) => (routeGeofenceDistances.get(a.id) ?? 0) - (routeGeofenceDistances.get(b.id) ?? 0));
+      else filtered = filtered.slice().sort((a, b) => routePriorityTier(a) - routePriorityTier(b));
       renderRoutePlannerLeadsTable(filtered);
     }
 
@@ -9327,7 +9468,7 @@
 
     function renderRoutePlannerLeadsTable(list) {
       const body = document.getElementById('routePlannerLeadsBody');
-      const colspan = routeTerritoryMode ? 9 : 8;
+      const colspan = routeTerritoryMode ? 10 : 9;
       if (!list.length) {
         body.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:20px">No centres match these filters</td></tr>`;
         return;
@@ -9342,6 +9483,48 @@
         return `<td><span style="font-weight:700;font-size:11px;color:${MICROPODS_QUADRANT_COLOR[pod.quadrant] || 'var(--text-muted)'}">${pod.icon} ${escHtml(pod.label)}</span></td>`;
       }
 
+      // Minimum recommendation card (Decision Area 4) — priority type/
+      // reason shows inline as a badge; the rest (booking trend, last
+      // call/visit, nearby supply, suggested objective) is one click away
+      // via the ℹ️ toggle rather than a 9th-15th column, which would make
+      // this already-wide table unreadable.
+      function priorityCell(row) {
+        const tier = routePriorityTier(row);
+        const meta = ROUTE_PRIORITY_META[tier] || ROUTE_PRIORITY_META[8];
+        const reason = routePriorityReason(row, tier);
+        return `<td>
+          <span class="badge" style="font-size:10.5px;background:${meta.color}22;color:${meta.color};font-weight:700;white-space:nowrap" title="${escHtml(reason)}">#${tier} ${escHtml(meta.label)}</span>
+          <button class="btn-secondary" style="padding:1px 6px;font-size:10.5px;margin-left:4px" onclick="toggleRouteRecommendation('${escHtml(row.id)}')" title="Show recommendation details">ℹ️</button>
+        </td>`;
+      }
+
+      function recommendationDetailRow(row, colspanForRow) {
+        const tier = routePriorityTier(row);
+        const objective = routeSuggestedObjective(row, tier);
+        const supply = nearestSupplyContext(row.latitude, row.longitude);
+        const trend = row.type === 'centre'
+          ? `${row.bookingsPrev30dCount ?? '—'} → ${row.bookings30dCount ?? '—'} bookings (30d vs prior 30d)`
+          : '—';
+        const lastContact = row.type === 'centre'
+          ? (row.nurture?.lastContactDate ? `Last contact ${fmtDate(row.nurture.lastContactDate)}` : 'Never contacted yet')
+          : '—';
+        const supplyText = supply ? `${supply.activeSupplyCount} active educators within ${Math.round(supply.distanceKm)}km` : 'No nearby supply data';
+        const lifecycle = row.type === 'centre' ? (CENTRE_HEALTH_META[row.health]?.label || row.health) : `Lead — ${LEAD_CALLED_META[row.lead_called_status]?.label || row.lead_called_status}`;
+        return `<tr id="routeRecDetail_${escHtml(row.id)}" style="display:none;background:var(--gray-50)">
+          <td></td>
+          <td colspan="${colspanForRow - 1}" style="padding:10px 14px;font-size:11.5px;color:var(--text-muted)">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px 18px">
+              <div><strong>Lifecycle stage:</strong> ${escHtml(lifecycle)}</div>
+              <div><strong>Recent trend:</strong> ${escHtml(trend)}</div>
+              <div><strong>Last call/visit:</strong> ${escHtml(lastContact)}</div>
+              <div><strong>Nearby supply:</strong> ${escHtml(supplyText)}</div>
+            </div>
+            <div style="margin-top:6px"><strong>Suggested objective:</strong> ${escHtml(objective)}</div>
+          </td>
+        </tr>`;
+      }
+
+      const rowColspan = routeTerritoryMode ? 10 : 9;
       body.innerHTML = list.map(row => {
         const checked = routeSelectedOrder.includes(row.id);
         const geofenceDist = routeGeofenceDistances.get(row.id);
@@ -9356,10 +9539,11 @@
             <td style="font-weight:600;color:var(--navy)" title="${escHtml(row.centre_name)}"><span class="badge" style="font-size:9.5px;margin-right:5px">Centre</span>${centreLabel}</td>
             <td title="${escHtml(row.suburb || '')}">${escHtml(row.suburb || '—')}</td>
             <td>${escHtml(row.state || '—')}</td>
+            ${priorityCell(row)}
             <td colspan="3"><span class="attn-chip ${nMeta.cls}">${escHtml(nMeta.label)}</span></td>
             <td>—</td>
             ${strategyCell(row)}
-          </tr>`;
+          </tr>${recommendationDetailRow(row, rowColspan)}`;
         }
 
         const l = row;
@@ -9371,14 +9555,20 @@
           <td style="font-weight:600;color:var(--navy)" title="${escHtml(l.centre_name)}">${centreLabel}</td>
           <td title="${escHtml(l.suburb || '')}">${escHtml(l.suburb || '—')}</td>
           <td>${escHtml(l.state || '—')}</td>
+          ${priorityCell(l)}
           <td><span class="lead-badge ${calledMeta.cls}">${escHtml(calledMeta.label)}</span></td>
           <td><span class="lead-badge ${visitedMeta.cls}">${escHtml(visitedMeta.label)}</span></td>
           <td><span class="lead-badge ${profileMeta.cls}">${escHtml(profileMeta.label)}</span></td>
           <td>${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
           ${strategyCell(l)}
-        </tr>`;
+        </tr>${recommendationDetailRow(l, rowColspan)}`;
       }).join('');
       updateRouteSelectedCount();
+    }
+
+    function toggleRouteRecommendation(rowId) {
+      const el = document.getElementById(`routeRecDetail_${rowId}`);
+      if (el) el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
     }
 
     function toggleRouteStop(leadId, checkbox) {

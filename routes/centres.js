@@ -192,7 +192,16 @@ function toRouteStop(centreWithHealth, geocodes) {
     rtClientId: centreWithHealth.rtClientId,
     rtLocationId: centreWithHealth.rtLocationId,
     nurture: centreWithHealth.nurture,
-    health: centreWithHealth.health
+    health: centreWithHealth.health,
+    // Decision Area 4's Route Modes/priority order/recommendation card all
+    // need these — health/nurture alone weren't enough for Smart Routing
+    // to distinguish e.g. a Strategic Declining centre from an ordinary
+    // one, or to show a real reason/trend in the recommendation card.
+    healthReasons: centreWithHealth.healthReasons,
+    isStrategic: centreWithHealth.isStrategic,
+    isEscalated: centreWithHealth.isEscalated,
+    bookings30dCount: centreWithHealth.bookings30dCount,
+    bookingsPrev30dCount: centreWithHealth.bookingsPrev30dCount
   };
 }
 
