@@ -7,22 +7,65 @@ const { lastVisitDate } = require('./centreHealthService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Tunable per-health-category cadence, in days — not finalized numbers,
-// just a single object to adjust. firstContactDays follows Joy's own two
-// examples (Needs Attention -> within the week, Declining -> within two
-// weeks), extrapolated for the rest by urgency. recurringDays is uniformly
-// "monthly" (her own phrasing) since she didn't differentiate that part
-// by category yet.
+// Per-health-category cadence, in days — confirmed live in the Decision
+// Area 3 meeting (2026-08-22, Liam/Justine/Gwen/Sophia/Joy), replacing
+// this file's previous placeholder numbers (its own comment used to say
+// "not finalized... didn't differentiate [recurring] yet").
+//
+// The proposed cadence document gives Healthy/Strategic/New-Activating
+// separate call-cadence and visit-cadence numbers (e.g. Healthy: "call
+// every 60-90 days; visit at least every 90 days"). centre_visits has no
+// column distinguishing a phone call from an in-person visit today (the
+// feature is literally named "Log a Call/Visit" — one combined event
+// type) — splitting that is a real schema/UI change beyond this pass, so
+// this uses ONE combined "next touchpoint" cadence per category, set to
+// the TIGHTER of the two proposed numbers so the more frequent
+// requirement always wins rather than silently loosening to the looser one.
+//
+// firstContactDays anchors a centre with NO visit ever logged (see
+// NURTURE_FEATURE_LAUNCH_DATE below); recurringDays anchors one measured
+// from its last logged visit.
 const NURTURE_CADENCE_DAYS = {
-  needs_attention: { firstContactDays: 7, recurringDays: 30 },
-  declining: { firstContactDays: 14, recurringDays: 30 },
-  opportunity: { firstContactDays: 14, recurringDays: 30 },
-  new_activating: { firstContactDays: 14, recurringDays: 30 },
-  growing: { firstContactDays: 21, recurringDays: 30 },
-  healthy: { firstContactDays: 30, recurringDays: 30 },
-  dormant: { firstContactDays: 30, recurringDays: 30 }
+  // Declining: "Call within seven days of the alert" (Liam's own document;
+  // Gwen flagged live that 7 days felt tight for her SA portfolio, but no
+  // replacement number was actually locked in afterward, so the written 7
+  // stands until amended).
+  declining: { firstContactDays: 7, recurringDays: 7 },
+  // Needs Attention: "a specific action is required" — same urgency tier
+  // as Declining, not a separate number in the source document.
+  needs_attention: { firstContactDays: 7, recurringDays: 7 },
+  // Growing: "Prompt growth conversation" — prompt, not immediate; visit
+  // itself is opportunistic ("when there is an opportunity to deepen the
+  // relationship"), not on a fixed clock, so this is a backstop ceiling
+  // rather than a real target.
+  growing: { firstContactDays: 7, recurringDays: 14 },
+  // New/Activating: "Immediate setup support" before first login/booking,
+  // then "support until second booking" — approximated as a fast initial
+  // window tightening to a steady fortnightly check-in once the centre has
+  // its footing, since centre_visits can't yet distinguish "before 1st
+  // booking" from "between 1st and 2nd" without a schema change.
+  new_activating: { firstContactDays: 3, recurringDays: 14 },
+  // Opportunity: no explicit number in the source document — left as the
+  // existing reasonable middle-ground pending a real decision.
+  opportunity: { firstContactDays: 14, recurringDays: 14 },
+  // Healthy active: "Meaningful call every 60-90 days; visit at least
+  // every 90 days" — 75 is the midpoint of the call range, which is also
+  // the tighter of the two numbers, so it's the one used.
+  healthy: { firstContactDays: 30, recurringDays: 75 }
+  // 'dormant' is deliberately absent — see computeCentreNurture's
+  // reactivation-workflow branch below. No blanket cadence at all
+  // (Liam: "A blanket visit cadence for every dormant historical centre
+  // would consume time without necessarily creating value").
 };
 const DEFAULT_CADENCE = { firstContactDays: 14, recurringDays: 30 };
+
+// Strategic/High Volume (>=2 bookings/week, see centreHealthService.js) —
+// "faster intervention when required" (Decision Area 3's own cadence
+// doc). A cross-cutting modifier, not its own category: tightens whatever
+// cadence the health category would otherwise give, but never loosens
+// one that's already tighter (e.g. a Strategic-but-Declining centre keeps
+// Declining's 7-day cadence, not a looser Strategic one).
+const STRATEGIC_MAX_CADENCE_DAYS = 30;
 
 // The date this feature went live. Anchors the "needs first contact"
 // deadline for a centre with zero visit history so ship day doesn't
@@ -35,16 +78,49 @@ const DEFAULT_CADENCE = { firstContactDays: 14, recurringDays: 30 };
 // own createdDate instead, so it isn't given an artificial head start.
 const NURTURE_FEATURE_LAUNCH_DATE = new Date('2026-08-21T00:00:00Z');
 
-function cadenceFor(healthCategory) {
-  return NURTURE_CADENCE_DAYS[healthCategory] || DEFAULT_CADENCE;
+function cadenceFor(healthCategory, isStrategic) {
+  const base = NURTURE_CADENCE_DAYS[healthCategory] || DEFAULT_CADENCE;
+  if (!isStrategic) return base;
+  return {
+    firstContactDays: Math.min(base.firstContactDays, STRATEGIC_MAX_CADENCE_DAYS),
+    recurringDays: Math.min(base.recurringDays, STRATEGIC_MAX_CADENCE_DAYS)
+  };
 }
 
 // `visits` is the same raw centre_visits row array already fetched at
-// every call site. `healthCategory` is computeCentreHealth(...).category —
-// cadence depends on it, so this is meant to run right after
-// computeCentreHealth, not standalone.
-function computeCentreNurture(centre, visits, healthCategory, now = new Date()) {
-  const cadence = cadenceFor(healthCategory);
+// every call site. `healthCategory`/`isStrategic`/`isEscalated` come from
+// computeCentreHealth(...) — cadence depends on all three, so this is
+// meant to run right after computeCentreHealth, not standalone.
+function computeCentreNurture(centre, visits, healthCategory, now = new Date(), { isStrategic = false, isEscalated = false } = {}) {
+  // Escalation exception (Decision Area 3, @1:02:28 — "if there's an issue
+  // or an allegation... that comes straight to the top") outranks every
+  // other cadence rule, including Dormant's own no-cadence exception —
+  // an escalated dormant centre still needs to be looked at immediately.
+  if (isEscalated) {
+    return {
+      status: 'escalated', lastContactDate: lastVisitDate(visits)?.toISOString() || null,
+      dueDate: now.toISOString(), daysUntilDue: null, daysOverdue: 0,
+      cadenceDays: 0, cadenceLabel: 'escalation — immediate'
+    };
+  }
+
+  // Dormant: no blanket cadence at all (see NURTURE_CADENCE_DAYS' comment)
+  // — a distinct status, excluded from the automatic due-for-routing pool
+  // (routes/centres.js's getDueCentreStops) rather than surfaced as
+  // "overdue" alongside everything else. Still fully visible/actionable
+  // from My Centres' own health filter — "visit only where previous value
+  // or current opportunity justifies it" means a deliberate choice, not
+  // an automatic one.
+  if (healthCategory === 'dormant') {
+    const lastContact = lastVisitDate(visits);
+    return {
+      status: 'reactivation_candidate', lastContactDate: lastContact ? lastContact.toISOString() : null,
+      dueDate: null, daysUntilDue: null, daysOverdue: null,
+      cadenceDays: null, cadenceLabel: 'reactivation workflow — no fixed cadence'
+    };
+  }
+
+  const cadence = cadenceFor(healthCategory, isStrategic);
   const lastContact = lastVisitDate(visits);
 
   if (!lastContact) {
@@ -76,4 +152,4 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date()) 
   };
 }
 
-module.exports = { computeCentreNurture, NURTURE_CADENCE_DAYS, DEFAULT_CADENCE, NURTURE_FEATURE_LAUNCH_DATE };
+module.exports = { computeCentreNurture, NURTURE_CADENCE_DAYS, DEFAULT_CADENCE, STRATEGIC_MAX_CADENCE_DAYS, NURTURE_FEATURE_LAUNCH_DATE };

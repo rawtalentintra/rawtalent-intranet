@@ -6806,7 +6806,14 @@
       // centres are still fully visible via My Centres' own health filter
       // — just not force-fed into this list.
       centresScope.forEach(c => {
-        if (c.health === 'declining') {
+        // Escalation exception (Decision Area 3, 2026-08-22 — Liam: "if
+        // there's an issue or an allegation... that comes straight to the
+        // top") always outranks everything else in this queue, regardless
+        // of health category — an escalated Healthy or Growing centre is
+        // still more urgent right now than an ordinary Declining one.
+        if (c.isEscalated) {
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Issue raised at last visit', urgency: 1000, cls: 'attn-overdue', outcome: '🚨 Escalated — an issue or allegation was raised. Call or visit today.' });
+        } else if (c.health === 'declining') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue', outcome: centreAttentionOutcome('declining') });
         } else if (c.health === 'needs_attention') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Needs attention', urgency: 30, cls: 'attn-stale', outcome: centreAttentionOutcome('needs_attention') });
@@ -6889,13 +6896,18 @@
       const bookings30d = data.reduce((sum, c) => sum + c.bookings30dCount, 0);
       const bookingsPrev30d = data.reduce((sum, c) => sum + c.bookingsPrev30dCount, 0);
       const counts = {};
-      data.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      let escalatedCount = 0;
+      data.forEach(c => {
+        counts[c.health] = (counts[c.health] || 0) + 1;
+        if (c.isEscalated) escalatedCount++;
+      });
       const cards = [
         { label: 'Active centres', value: data.length },
         { label: 'Portfolio bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d) },
         { label: '📈 Growing', value: counts.growing || 0 },
         { label: '📉 Declining', value: counts.declining || 0 },
-        { label: '⚠️ Needs Attention', value: counts.needs_attention || 0 }
+        { label: '⚠️ Needs Attention', value: counts.needs_attention || 0 },
+        { label: '🚨 Escalated', value: escalatedCount }
       ];
       box.innerHTML = `<div style="display:flex;gap:32px;flex-wrap:wrap">
         ${cards.map(c => `
@@ -7175,10 +7187,17 @@
     // actually need a call today.
     const CENTRE_HEALTH_ORDER = ['needs_attention', 'declining', 'opportunity', 'new_activating', 'growing', 'healthy', 'dormant'];
 
-    function centreHealthBadge(category, reasons) {
+    // isStrategic/isEscalated (Decision Area 3, 2026-08-22) are modifiers,
+    // not health categories — a centre can be e.g. "Healthy" AND
+    // "Strategic" at once, so they render as small suffix badges rather
+    // than replacing the category badge.
+    function centreHealthBadge(category, reasons, isStrategic, isEscalated) {
       const meta = CENTRE_HEALTH_META[category] || { label: category, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
       const title = reasons && reasons.length ? ` title="${escHtml(reasons.join(' '))}"` : '';
-      return `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap"${title}>${meta.label}</span>`;
+      let html = `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap"${title}>${meta.label}</span>`;
+      if (isEscalated) html += ` <span class="badge" style="font-size:10.5px;background:#fee2e2;color:#b91c1c;font-weight:700;white-space:nowrap" title="Latest visit outcome flagged as an issue — needs attention now">🚨 Escalated</span>`;
+      if (isStrategic) html += ` <span class="badge" style="font-size:10.5px;background:#ede9fe;color:#6d28d9;font-weight:700;white-space:nowrap" title="2+ bookings/week on average — Strategic/High Volume, faster intervention cadence applies">⭐ Strategic</span>`;
+      return html;
     }
 
     // services/centreNurtureService.js computes this live from centre_visits
@@ -7190,7 +7209,13 @@
       needs_first_contact: { label: 'Needs First Contact', cls: 'attn-waiting' },
       first_contact_overdue: { label: 'First Contact Overdue', cls: 'attn-overdue' },
       on_track: { label: 'On Track', cls: 'attn-supply-good' },
-      recurring_overdue: { label: 'Follow-up Overdue', cls: 'attn-overdue' }
+      recurring_overdue: { label: 'Follow-up Overdue', cls: 'attn-overdue' },
+      // Dormant centres (Decision Area 3, 2026-08-22) deliberately have no
+      // fixed cadence — see centreNurtureService.js's reactivation-workflow
+      // branch. 'escalated' is the issue/allegation exception that
+      // outranks everything else, including this one.
+      reactivation_candidate: { label: 'Reactivation Candidate', cls: 'attn-waiting' },
+      escalated: { label: '🚨 Escalated', cls: 'attn-overdue' }
     };
 
     // One row, not a fabricated history — a centre is either waiting on
@@ -7205,12 +7230,18 @@
       const meta = NURTURE_STATUS_META[n.status] || { label: n.status, cls: 'attn-waiting' };
       const actionLabel = n.lastContactDate ? 'Recurring follow-up (call or visit)' : 'First contact (call or visit)';
       const lastContact = n.lastContactDate ? fmtDate(n.lastContactDate) : 'Never contacted yet';
-      const deadlineNote = n.daysOverdue != null ? `${n.daysOverdue}d overdue` : `in ${n.daysUntilDue}d`;
+      // Dormant ('reactivation_candidate') has no due date at all; escalated
+      // is always "now" — both need their own copy rather than the usual
+      // "in Xd"/"Yd overdue" note, which assumes a real scheduled date.
+      const deadlineNote = n.status === 'reactivation_candidate' ? 'No fixed cadence — visit only if value/opportunity justifies it'
+        : n.status === 'escalated' ? 'Needs attention now'
+        : n.daysOverdue != null ? `${n.daysOverdue}d overdue` : `in ${n.daysUntilDue}d`;
+      const dueDateText = n.dueDate ? fmtDate(n.dueDate) : '—';
       return `
         <tr>
           <td>${escHtml(actionLabel)}</td>
           <td>${escHtml(lastContact)}</td>
-          <td>${fmtDate(n.dueDate)} <span style="color:var(--text-muted);font-size:11px">(${deadlineNote})</span></td>
+          <td>${dueDateText} <span style="color:var(--text-muted);font-size:11px">(${escHtml(deadlineNote)})</span></td>
           <td><span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span></td>
           <td style="white-space:nowrap">
             <button class="btn-add" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">+ Log Call/Visit</button>
@@ -7397,7 +7428,7 @@
           <td class="td-truncate" style="max-width:220px" title="${escHtml(c.name)}">${escHtml(c.name)}</td>
           <td>${escHtml(c.suburb || '—')}</td>
           <td>${escHtml(c.state || '—')}</td>
-          <td>${centreHealthBadge(c.health, c.healthReasons)}</td>
+          <td>${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}</td>
           <td>${c.bookings30dCount}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
         </tr>`;
@@ -7528,7 +7559,7 @@
             <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(c.name)}</div>
             <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${escHtml([c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file')}</div>
           </div>
-          ${centreHealthBadge(c.health)}
+          ${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
         </div>
 
         <div style="padding:14px 20px;margin-bottom:16px;background:${healthMeta.bg};border-left:4px solid ${healthMeta.color};border-radius:var(--radius)">

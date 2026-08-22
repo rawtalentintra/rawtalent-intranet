@@ -7,7 +7,7 @@ const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const { flattenCentres, parseCentreKey } = require('../services/centreKeyService');
-const { computeCentreHealth, bucketBookingsForCentre, MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
+const { computeCentreHealth, bucketBookingsForCentre, lastMeaningfulBookingDate, MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
 const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
@@ -72,6 +72,35 @@ async function getCentresAndBookings() {
   return cache;
 }
 
+// Dormancy (Decision Area 3, 2026-08-22: 12 months with no meaningful
+// booking — see centreHealthService.js's DORMANCY_DAYS) needs a real last-
+// booking date, which the 100-day window above can't answer — a centre
+// with zero bookings in 100 days might have booked plenty 4-11 months ago,
+// or not at all. This is a SEPARATE, wider (366-day) fetch and its own
+// longer-lived cache, not a widened version of the shared 100-day one
+// above — the same "different time window gets its own cache" convention
+// services/educatorEngagementService.js already uses for its own 6-month
+// bookings fetch, so Micropods/Territory Strategy/Smart Routing's much
+// more frequently-hit 100-day fetch doesn't get slower for a signal only
+// dormancy classification needs. 30-minute TTL (vs. the 5-minute one
+// above) since a year-old booking history doesn't meaningfully change
+// minute to minute the way "what's due today" does.
+const DORMANCY_LOOKBACK_DAYS = 366;
+const DORMANCY_CACHE_TTL_MS = 30 * 60 * 1000;
+let dormancyCache = { lastBookingByCentreKey: null, expiresAt: 0 };
+
+async function getLastBookingDates(centres) {
+  if (dormancyCache.lastBookingByCentreKey && Date.now() < dormancyCache.expiresAt) return dormancyCache.lastBookingByCentreKey;
+  const startDate = new Date(Date.now() - DORMANCY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const bookings = await rtApi.fetchAllPages('bookings', { startDate });
+  const byKey = {};
+  for (const c of centres) {
+    byKey[c.centreKey] = lastMeaningfulBookingDate(bookings, { rtLocationId: c.rtLocationId, rtClientId: c.rtClientId });
+  }
+  dormancyCache = { lastBookingByCentreKey: byKey, expiresAt: Date.now() + DORMANCY_CACHE_TTL_MS };
+  return byKey;
+}
+
 // Tiny table, queried fresh each time rather than cached alongside the RT
 // centre/booking cache above — a "delete" should take effect immediately,
 // not wait out a stale cache window.
@@ -104,15 +133,17 @@ async function visitsByCentreKey(centreKeys) {
   return byKey;
 }
 
-function healthForCentre(centre, bookings, visits) {
+function healthForCentre(centre, bookings, visits, lastBookingDate = null) {
   const now = new Date();
   const buckets = bucketBookingsForCentre(bookings, { rtLocationId: centre.rtLocationId, rtClientId: centre.rtClientId });
-  const health = computeCentreHealth(centre, { visits, ...buckets }, now);
-  const nurture = computeCentreNurture(centre, visits, health.category, now);
+  const health = computeCentreHealth(centre, { visits, ...buckets, lastBookingDate }, now);
+  const nurture = computeCentreNurture(centre, visits, health.category, now, { isStrategic: health.isStrategic, isEscalated: health.isEscalated });
   return {
     ...centre,
     health: health.category,
     healthReasons: health.reasons,
+    isStrategic: health.isStrategic,
+    isEscalated: health.isEscalated,
     nurture,
     bookings30dCount: buckets.bookings30d.length,
     bookingsPrev30dCount: buckets.bookingsPrev30d.length,
@@ -135,7 +166,8 @@ async function centresWithNurture(filterKeys) {
     visible = visible.filter(c => keySet.has(c.centreKey));
   }
   const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
-  return visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || []));
+  const lastBookingByCentreKey = await getLastBookingDates(visible);
+  return visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null));
 }
 
 // Normalizes a healthForCentre(...) result into the exact "stop" field
@@ -171,9 +203,19 @@ function toRouteStop(centreWithHealth, geocodes) {
 // round-trip — same in-process reuse pattern as getCentresAndBookings/
 // visitsByCentreKey, already exported for micropods.js/leads.js) and via
 // GET /due-for-routing below for the picker.
+//
+// Dormant centres are deliberately excluded here even though their status
+// is never 'on_track' either (it's 'reactivation_candidate', see
+// centreNurtureService.js) — Decision Area 3, Liam: "a blanket visit
+// cadence for every dormant historical centre would consume time without
+// necessarily creating value." They're still fully visible/selectable
+// from My Centres' own health filter; this pool is just the automatic
+// "due" suggestion, not the full centre list. An escalated dormant centre
+// (status 'escalated' overrides 'reactivation_candidate') still comes
+// through, since an active issue/allegation outranks even that exception.
 async function getDueCentreStops() {
   const withHealth = await centresWithNurture();
-  const due = withHealth.filter(c => c.nurture.status !== 'on_track');
+  const due = withHealth.filter(c => c.nurture.status !== 'on_track' && c.nurture.status !== 'reactivation_candidate');
   const geocodes = await getGeocodesForCentres(due);
   return due.map(c => toRouteStop(c, geocodes));
 }
@@ -200,8 +242,9 @@ router.get('/', async (req, res) => {
     const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
     const assignments = await getCentrePartnerAssignments();
+    const lastBookingByCentreKey = await getLastBookingDates(visible);
     const withHealth = visible.map(c => ({
-      ...healthForCentre(c, bookings, visits[c.centreKey] || []),
+      ...healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
       assignedWorkforcePartner: assignments[c.centreKey] || null
     }));
     res.json(withHealth);
@@ -260,8 +303,9 @@ router.get('/:centreKey', async (req, res) => {
     const { bookings } = await getCentresAndBookings();
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
     const assignments = await getCentrePartnerAssignments();
+    const lastBookingByCentreKey = await getLastBookingDates([centre]);
     res.json({
-      ...healthForCentre(centre, bookings, visits),
+      ...healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null),
       assignedWorkforcePartner: assignments[centre.centreKey] || null
     });
   } catch (err) {
