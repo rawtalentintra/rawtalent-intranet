@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS users (
 -- Per-user grant, not a role — Build Training needs to be handed to one
 -- specific person (e.g. Sophia) without opening it to every admin.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_build_training BOOLEAN DEFAULT false;
+-- Same pattern, for the Educator Outreach list builder (Decision Area 1,
+-- 2026-08-22) — named ops staff (Adzi/Laurie/Vicky) build outreach lists
+-- without being promoted off qa_view. admin/super_admin always have access
+-- regardless of this flag (see requireOutreachListBuilder).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_create_outreach_lists BOOLEAN DEFAULT false;
 -- Ties a workforce_partner login to their existing free-text
 -- leads.assigned_workforce_partner label (e.g. 'Gwen Stocks (SA)') so My
 -- Centres/My Dashboard can default to that person's own portfolio. Not a
@@ -1239,4 +1244,42 @@ CREATE TABLE IF NOT EXISTS rt_candidates_sync_state (
   CONSTRAINT rt_candidates_sync_state_singleton CHECK (id = 1)
 );
 INSERT INTO rt_candidates_sync_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Saved, named educator outreach lists (Decision Area 1, 2026-08-22) —
+-- LIST-BUILDING ONLY. HeartBeat has no send capability yet (Joy, on the
+-- meeting recording: "the heartbeat is not yet built to send outreach").
+-- Deliberately no sent_at/message/template/approval columns — that
+-- contract isn't designed yet; add an approval-status column here when the
+-- send feature is actually built (the meeting's own rule: a send to more
+-- than one educator needs admin-tier approval first).
+CREATE TABLE IF NOT EXISTS educator_outreach_lists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  purpose TEXT,
+  source_pod_id TEXT,
+  source_segment TEXT,
+  created_by CITEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_lists_created_by ON educator_outreach_lists(created_by);
+
+-- Snapshot, not a live join — rt_candidates_cache is fully replaced every
+-- nightly sync, so storing only user_id would silently shrink an
+-- already-built list as RT records disappear/change. name/email/contact/
+-- segment are frozen at build time. The ON DELETE CASCADE here is a
+-- deliberate, commented exception to this app's usual "no FKs" convention
+-- (see schema.sql's header note) — this is an owned child table where
+-- cascade delete is the actual point.
+CREATE TABLE IF NOT EXISTS educator_outreach_list_members (
+  list_id TEXT NOT NULL REFERENCES educator_outreach_lists(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL,
+  name TEXT,
+  email CITEXT,
+  contact_no TEXT,
+  suburb TEXT,
+  segment TEXT,
+  added_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (list_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;

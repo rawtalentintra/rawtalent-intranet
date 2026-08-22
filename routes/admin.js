@@ -291,7 +291,7 @@ router.get('/stats', async (req, res) => {
 router.get('/users', requireSuperAdmin, async (req, res) => {
   try {
     const result = await getDb().execute(
-      'SELECT id, email, name, role, active, can_build_training, created_at, last_login FROM users ORDER BY created_at DESC'
+      'SELECT id, email, name, role, active, can_build_training, can_create_outreach_lists, created_at, last_login FROM users ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {
@@ -300,7 +300,7 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.post('/users', requireSuperAdmin, async (req, res) => {
-  const { email, name, password, role = 'user', active = true, canBuildTraining = false } = req.body;
+  const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });
   if (!email.toLowerCase().endsWith('@rawtalent.com.au')) {
     return res.status(400).json({ error: 'Only @rawtalent.com.au email addresses are allowed' });
@@ -313,8 +313,8 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 
     const hash = password ? await bcrypt.hash(password, 12) : null;
     await db.execute({
-      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining]
+      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training, can_create_outreach_lists) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining, !!canCreateOutreachLists]
     });
     await logActivity('user', email.toLowerCase(), 'created', `User "${name}" (${role}) created`, req.user.email);
     res.json({ success: true });
@@ -324,10 +324,10 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.put('/users/:id', requireSuperAdmin, async (req, res) => {
-  const { name, role, active, password, canBuildTraining } = req.body;
+  const { name, role, active, password, canBuildTraining, canCreateOutreachLists } = req.body;
   try {
     const db = getDb();
-    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training FROM users WHERE id = ?', args: [req.params.id] });
+    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training, can_create_outreach_lists FROM users WHERE id = ?', args: [req.params.id] });
     const target = targetRes.rows[0];
     if (!target) return res.status(404).json({ error: 'User not found' });
 
@@ -346,6 +346,7 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     if (role !== undefined && role !== target.role) { await db.execute({ sql: 'UPDATE users SET role = ? WHERE id = ?', args: [role, req.params.id] }); changes.push(`Role: "${target.role}" → "${role}"`); }
     if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [!!active, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
     if (canBuildTraining !== undefined && Boolean(canBuildTraining) !== Boolean(target.can_build_training)) { await db.execute({ sql: 'UPDATE users SET can_build_training = ? WHERE id = ?', args: [!!canBuildTraining, req.params.id] }); changes.push(canBuildTraining ? 'Granted Build Training access' : 'Revoked Build Training access'); }
+    if (canCreateOutreachLists !== undefined && Boolean(canCreateOutreachLists) !== Boolean(target.can_create_outreach_lists)) { await db.execute({ sql: 'UPDATE users SET can_create_outreach_lists = ? WHERE id = ?', args: [!!canCreateOutreachLists, req.params.id] }); changes.push(canCreateOutreachLists ? 'Granted Outreach List access' : 'Revoked Outreach List access'); }
 
     invalidateUserCache(Number(req.params.id));
     await logActivity('user', target.email, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email);

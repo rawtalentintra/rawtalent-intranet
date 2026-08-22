@@ -297,6 +297,9 @@
         <div class="admin-nav-item" onclick="showSection('route-planner', this)">
           <span class="admin-nav-icon">🧭</span> Smart Routing
         </div>
+        <div class="admin-nav-item" onclick="showSection('educator-outreach', this)">
+          <span class="admin-nav-icon">📤</span> Educator Outreach
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Compliance</div>
@@ -794,6 +797,34 @@
         <div id="micropodDetailScreen" style="display:none">
           <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMicropodsList()">← Back to Micropods</button>
           <div id="micropodDetailBody"></div>
+        </div>
+      </div>
+      </template>
+
+      <template id="__lazy_educator_outreach">
+      <!-- Educator Outreach -->
+      <div class="admin-section" id="section-educator-outreach">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">📤 Educator Outreach</div>
+            <div class="admin-page-sub">Saved educator lists, built from Micropods — view membership, export, and manage. HeartBeat doesn't send outreach yet; use an exported list with your own email/call workflow for now.</div>
+          </div>
+        </div>
+
+        <div id="outreachListsScreen">
+          <div class="admin-table-card">
+            <div style="overflow-x:auto">
+              <table class="data-table">
+                <thead><tr><th>Name</th><th>Purpose</th><th>Members</th><th>Created By</th><th>Created</th><th></th></tr></thead>
+                <tbody id="outreachListsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="outreachListDetailScreen" style="display:none">
+          <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToOutreachLists()">← Back to Educator Outreach</button>
+          <div id="outreachListDetailBody"></div>
         </div>
       </div>
       </template>
@@ -3007,6 +3038,31 @@
     </div>
   </div>
 
+  <!-- Save Outreach List Modal -->
+  <div class="modal-overlay" id="outreachSaveListModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Save as Outreach List</div>
+        <button class="modal-close" onclick="closeOutreachSaveListModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="outreachSaveListCount" class="form-hint" style="margin-bottom:12px"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">List Name <span style="color:#ef4444">*</span></label>
+          <input type="text" id="outreachListName" class="form-control" placeholder="e.g. Tarneit — Currently Working">
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Purpose <span class="optional">(optional)</span></label>
+          <input type="text" id="outreachListPurpose" class="form-control" placeholder="e.g. New centre opening nearby, checking availability">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeOutreachSaveListModal()">Cancel</button>
+        <button class="btn-add" onclick="saveOutreachList()">Save List</button>
+      </div>
+    </div>
+  </div>
+
   <!-- User Modal -->
   <div class="modal-overlay" id="userModal">
     <div class="modal">
@@ -3048,6 +3104,10 @@
         <div class="checkbox-row">
           <input type="checkbox" id="userCanBuildTraining">
           <label for="userCanBuildTraining">Can build training courses (grants Build Training access to this person specifically, regardless of role)</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="userCanCreateOutreachLists">
+          <label for="userCanCreateOutreachLists">Can build educator outreach lists (grants Educator Outreach access to this person specifically, regardless of role)</label>
         </div>
       </div>
       <div class="modal-footer">
@@ -3558,6 +3618,7 @@
     let currentUserEmail = '';
     let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
+    let currentUserCanCreateOutreachLists = false;
     let currentUserWfpLabel = null;
 
     // WFP Dashboard/My Centres/Leads/Micropods all share the same VIC/SA
@@ -3587,6 +3648,7 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
+        currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
         currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
@@ -3708,6 +3770,20 @@
       workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods', 'educator-outreach']
     };
 
+    // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
+    // Vicky), unlike workforce_partner where it's already unconditional in
+    // RESTRICTED_ROLE_SECTIONS above (Gwen/Justine) — so qa_view's fixed
+    // list gets it added dynamically only when granted. Shared by
+    // applyRoleVisibility() (nav item visibility) and showSection() (the
+    // actual navigation gate) so the two can never disagree — a granted
+    // qa_view user seeing the nav item but bouncing on click, or vice
+    // versa, would both be bugs.
+    function getEffectiveAllowedSections() {
+      const base = RESTRICTED_ROLE_SECTIONS[currentUserRole];
+      if (!base) return null;
+      return (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
+    }
+
     function applyRoleVisibility() {
       if (currentUserRole === 'super_admin') {
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
@@ -3719,11 +3795,11 @@
         const navTrainingBuild = document.getElementById('navTrainingBuild');
         if (navTrainingBuild) navTrainingBuild.style.display = '';
       }
-      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
-      if (allowedSections) {
+      const effectiveAllowed = getEffectiveAllowedSections();
+      if (effectiveAllowed) {
         document.querySelectorAll('.admin-nav-item').forEach(item => {
           const match = item.getAttribute('onclick')?.match(/showSection\('([^']+)'/);
-          item.style.display = (match && allowedSections.includes(match[1])) ? '' : 'none';
+          item.style.display = (match && effectiveAllowed.includes(match[1])) ? '' : 'none';
         });
         document.querySelectorAll('.admin-nav-section').forEach(section => {
           const anyVisible = [...section.querySelectorAll('.admin-nav-item')].some(i => i.style.display !== 'none');
@@ -4733,10 +4809,10 @@
       // per superAdminSections below — the FAQ page itself hides the
       // super-admin-only parts once loaded) instead of the superAdminSections
       // check every other role uses.
-      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
-      if (allowedSections) {
-        if (!allowedSections.includes(id)) {
-          const fallback = allowedSections[0];
+      const effectiveAllowed = getEffectiveAllowedSections();
+      if (effectiveAllowed) {
+        if (!effectiveAllowed.includes(id)) {
+          const fallback = effectiveAllowed[0];
           showSection(fallback, document.querySelector(`[onclick*="showSection('${fallback}'"]`));
           return;
         }
@@ -4810,6 +4886,7 @@
       if (id === 'document-checker') loadDocumentCheckHistory();
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
       if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
+      if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
@@ -5383,6 +5460,7 @@
           document.getElementById('userRole').value = u.role;
           document.getElementById('userActive').checked = !!u.active;
           document.getElementById('userCanBuildTraining').checked = !!u.can_build_training;
+          document.getElementById('userCanCreateOutreachLists').checked = !!u.can_create_outreach_lists;
         }
       } else {
         document.getElementById('userName').value = '';
@@ -5391,6 +5469,7 @@
         document.getElementById('userRole').value = 'user';
         document.getElementById('userActive').checked = true;
         document.getElementById('userCanBuildTraining').checked = false;
+        document.getElementById('userCanCreateOutreachLists').checked = false;
       }
       document.getElementById('userPassword').value = '';
       document.getElementById('userModal').classList.add('open');
@@ -5409,6 +5488,7 @@
       const role = document.getElementById('userRole').value;
       const active = document.getElementById('userActive').checked;
       const canBuildTraining = document.getElementById('userCanBuildTraining').checked;
+      const canCreateOutreachLists = document.getElementById('userCanCreateOutreachLists').checked;
 
       if (!name) { toast('Name is required', 'error'); return; }
       if (!id && !email) { toast('Email is required', 'error'); return; }
@@ -5418,8 +5498,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, canBuildTraining, ...(password ? { password } : {}) }
-          : { email, name, password, role, active, canBuildTraining };
+          ? { name, role, active, canBuildTraining, canCreateOutreachLists, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists };
 
         const res = await fetch(url, {
           method,
@@ -7818,7 +7898,16 @@
     let micropodDetailCandidates = [];
     let micropodDetailPage = 1;
     let micropodDetailSegmentFilter = '';
+    let micropodSelectedUserIds = new Set();
+    let micropodDetailPodContext = null; // { id, segment } — for the outreach list's sourcePodId/sourceSegment
     const MICROPOD_PAGE_SIZE = 50;
+
+    // Outreach list creation needs the flag itself (or admin/super_admin,
+    // who always pass requireOutreachListBuilder server-side) — showing the
+    // checkbox column to someone whose save would just 403 isn't useful.
+    function currentUserCanUseOutreach() {
+      return currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserCanCreateOutreachLists;
+    }
 
     async function openMicropod(podId) {
       document.getElementById('micropodsListScreen').style.display = 'none';
@@ -7834,6 +7923,8 @@
         micropodDetailCandidates = pod.candidates;
         micropodDetailPage = 1;
         micropodDetailSegmentFilter = '';
+        micropodSelectedUserIds = new Set();
+        micropodDetailPodContext = { id: podId, segment: segmentFilter || null };
         bodyEl.innerHTML = renderMicropodDetail(pod);
         renderMicropodCandidatesPage();
         renderMicropodHeatmap(pod);
@@ -7869,11 +7960,19 @@
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Qualification</th><th>Segment</th><th>Shifts 28d</th><th>Days Since Last Shift</th><th>Compliant</th></tr></thead>
+              <thead><tr>${currentUserCanUseOutreach() ? '<th><input type="checkbox" id="micropodSelectAllCheckbox" onchange="toggleAllMicropodSelection(this)"></th>' : ''}<th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Qualification</th><th>Segment</th><th>Shifts 28d</th><th>Days Since Last Shift</th><th>Compliant</th></tr></thead>
               <tbody id="micropodCandidatesBody"></tbody>
             </table>
           </div>
           <div id="micropodCandidatesPager" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-100)"></div>
+          ${currentUserCanUseOutreach() ? `
+          <div id="micropodSelectionBar" style="display:none;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-100);background:var(--gray-50)">
+            <div id="micropodSelectionCount" style="font-size:12.5px;font-weight:600;color:var(--navy)"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-secondary" style="padding:6px 14px;font-size:12px" onclick="exportMicropodSelectionCsv()">Export CSV</button>
+              <button class="btn-add" style="padding:6px 14px;font-size:12px" onclick="openOutreachSaveListModal()">Save as outreach list</button>
+            </div>
+          </div>` : ''}
         </div>`;
     }
 
@@ -7899,9 +7998,11 @@
       micropodDetailPage = Math.min(Math.max(1, micropodDetailPage), totalPages);
       const start = (micropodDetailPage - 1) * MICROPOD_PAGE_SIZE;
       const pageRows = filtered.slice(start, start + MICROPOD_PAGE_SIZE);
+      const canOutreach = currentUserCanUseOutreach();
 
       document.getElementById('micropodCandidatesBody').innerHTML = pageRows.length ? pageRows.map(c => `
         <tr>
+          ${canOutreach ? `<td><input type="checkbox" ${micropodSelectedUserIds.has(c.userId) ? 'checked' : ''} onchange="toggleMicropodSelection('${c.userId}', this)"></td>` : ''}
           <td>${escHtml(c.name)}</td>
           <td>${escHtml(c.email || '—')}</td>
           <td>${escHtml(c.contactNo || '—')}</td>
@@ -7911,7 +8012,12 @@
           <td>${c.shifts28d || 0}</td>
           <td>${c.daysSinceLastShift ?? '—'}</td>
           <td title="Fully compliant: no mandatory document is expired or unreviewed. Does not confirm every required document type has actually been submitted.">${c.fullyCompliant ? '✅' : '⚠️'}</td>
-        </tr>`).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No candidates match this filter</td></tr>`;
+        </tr>`).join('') : `<tr><td colspan="${canOutreach ? 10 : 9}" style="text-align:center;color:var(--text-muted);padding:20px">No candidates match this filter</td></tr>`;
+      if (canOutreach) {
+        const selectAll = document.getElementById('micropodSelectAllCheckbox');
+        if (selectAll) selectAll.checked = filtered.length > 0 && filtered.every(c => micropodSelectedUserIds.has(c.userId));
+        updateMicropodSelectionBar();
+      }
 
       document.getElementById('micropodCandidatesPager').innerHTML = `
         <div style="font-size:11.5px;color:var(--text-muted)">${total ? `${start + 1}–${Math.min(start + MICROPOD_PAGE_SIZE, total)} of ${total}` : '0 of 0'}</div>
@@ -7926,6 +8032,209 @@
       micropodDetailPage += delta;
       renderMicropodCandidatesPage();
       document.getElementById('micropodCandidatesBody').closest('.admin-table-card').scrollIntoView({ block: 'nearest' });
+    }
+
+    const OUTREACH_LIST_COLUMNS = [
+      { header: 'Name', render: r => escHtml(r.name || '') },
+      { header: 'Email', render: r => escHtml(r.email || '') },
+      { header: 'Phone', render: r => escHtml(r.contactNo || '') },
+      { header: 'Suburb', render: r => escHtml(r.suburb || '') },
+      { header: 'Segment', render: r => escHtml(SEGMENT_META[r.segment]?.label || r.segment || '') }
+    ];
+
+    function toggleMicropodSelection(userId, checkbox) {
+      if (checkbox.checked) micropodSelectedUserIds.add(userId);
+      else micropodSelectedUserIds.delete(userId);
+      renderMicropodCandidatesPage();
+    }
+
+    // Selects/deselects every candidate matching the CURRENT segment filter
+    // (not just the page on screen) — the "select all N filtered" affordance.
+    function toggleAllMicropodSelection(checkbox) {
+      const filtered = micropodDetailCandidates.filter(c => !micropodDetailSegmentFilter || c.segment === micropodDetailSegmentFilter);
+      if (checkbox.checked) filtered.forEach(c => micropodSelectedUserIds.add(c.userId));
+      else filtered.forEach(c => micropodSelectedUserIds.delete(c.userId));
+      renderMicropodCandidatesPage();
+    }
+
+    function updateMicropodSelectionBar() {
+      const bar = document.getElementById('micropodSelectionBar');
+      if (!bar) return;
+      bar.style.display = micropodSelectedUserIds.size ? 'flex' : 'none';
+      document.getElementById('micropodSelectionCount').textContent = `${micropodSelectedUserIds.size} selected`;
+    }
+
+    function getMicropodSelectedRows() {
+      return micropodDetailCandidates.filter(c => micropodSelectedUserIds.has(c.userId));
+    }
+
+    function exportMicropodSelectionCsv() {
+      exportRowsCsv(getMicropodSelectedRows(), OUTREACH_LIST_COLUMNS, `educator-selection-${new Date().toISOString().slice(0, 10)}.csv`);
+    }
+
+    function openOutreachSaveListModal() {
+      if (!micropodSelectedUserIds.size) { toast('Select at least one educator first', 'error'); return; }
+      document.getElementById('outreachSaveListCount').textContent = `${micropodSelectedUserIds.size} educator${micropodSelectedUserIds.size === 1 ? '' : 's'} selected`;
+      document.getElementById('outreachListName').value = '';
+      document.getElementById('outreachListPurpose').value = '';
+      document.getElementById('outreachSaveListModal').classList.add('open');
+    }
+
+    function closeOutreachSaveListModal() {
+      document.getElementById('outreachSaveListModal').classList.remove('open');
+    }
+
+    async function saveOutreachList() {
+      const name = document.getElementById('outreachListName').value.trim();
+      if (!name) { toast('List name is required', 'error'); return; }
+      const members = getMicropodSelectedRows().map(c => ({
+        userId: c.userId, name: c.name, email: c.email, contactNo: c.contactNo, suburb: c.suburb, segment: c.segment
+      }));
+      try {
+        const res = await fetch('/api/outreach-lists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            purpose: document.getElementById('outreachListPurpose').value.trim() || null,
+            sourcePodId: micropodDetailPodContext?.id || null,
+            sourceSegment: micropodDetailPodContext?.segment || null,
+            members
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to save list');
+        closeOutreachSaveListModal();
+        toast(`Saved "${name}" with ${members.length} educator(s)`, 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    // ── Educator Outreach ─────────────────────────────────────────────
+    // Lists are created from Micropods' candidate selection (above) — this
+    // section is for viewing, exporting, and managing membership of what's
+    // already been saved. No send capability here — see db/schema.sql's
+    // comment on educator_outreach_lists for why.
+    let outreachListsCache = [];
+    let currentOutreachListDetail = null;
+
+    async function loadOutreachLists() {
+      const body = document.getElementById('outreachListsBody');
+      body.innerHTML = `<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+      try {
+        const res = await fetch('/api/outreach-lists');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load lists');
+        outreachListsCache = data;
+        renderOutreachListsTable();
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">${escHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function renderOutreachListsTable() {
+      const body = document.getElementById('outreachListsBody');
+      if (!outreachListsCache.length) {
+        body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No saved lists yet — build one from a Micropods pod.</td></tr>`;
+        return;
+      }
+      body.innerHTML = outreachListsCache.map(l => `
+        <tr style="cursor:pointer" onclick="openOutreachList('${l.id}')">
+          <td style="font-weight:600;color:var(--navy)">${escHtml(l.name)}</td>
+          <td>${escHtml(l.purpose || '—')}</td>
+          <td>${l.memberCount}</td>
+          <td>${escHtml(l.createdBy)}</td>
+          <td>${new Date(l.createdAt).toLocaleDateString('en-AU')}</td>
+          <td><button class="action-btn delete" style="font-size:11px;padding:3px 8px" onclick="event.stopPropagation();deleteOutreachList('${l.id}', '${escHtml(l.name).replace(/'/g, "\\'")}')">🗑️</button></td>
+        </tr>`).join('');
+    }
+
+    async function deleteOutreachList(id, name) {
+      if (!confirm(`Delete the outreach list "${name}"? This can't be undone.`)) return;
+      try {
+        const res = await fetch(`/api/outreach-lists/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to delete list');
+        toast('List deleted', 'success');
+        loadOutreachLists();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    async function openOutreachList(id) {
+      document.getElementById('outreachListsScreen').style.display = 'none';
+      document.getElementById('outreachListDetailScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
+      const bodyEl = document.getElementById('outreachListDetailBody');
+      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const res = await fetch(`/api/outreach-lists/${id}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load list');
+        currentOutreachListDetail = data;
+        bodyEl.innerHTML = renderOutreachListDetail(data);
+      } catch (err) {
+        bodyEl.innerHTML = `<div style="color:#c0392b;padding:20px">${escHtml(err.message)}</div>`;
+      }
+    }
+
+    function backToOutreachLists() {
+      document.getElementById('outreachListDetailScreen').style.display = 'none';
+      document.getElementById('outreachListsScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
+    }
+
+    function renderOutreachListDetail(list) {
+      return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(list.name)}</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">${escHtml(list.purpose || 'No purpose noted')} · ${list.members.length} educator(s) · created by ${escHtml(list.createdBy)} on ${new Date(list.createdAt).toLocaleDateString('en-AU')}</div>
+        </div>
+        <div class="admin-table-card">
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 0">
+            <button class="btn-secondary" style="padding:6px 14px;font-size:12px" onclick="exportOutreachListCsv()">Export CSV</button>
+            <button class="btn-secondary" style="padding:6px 14px;font-size:12px" onclick="exportOutreachListPdf()">Export PDF</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact">
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Suburb</th><th>Segment</th><th>Added</th><th></th></tr></thead>
+              <tbody>${list.members.length ? list.members.map(m => `
+                <tr>
+                  <td>${escHtml(m.name || '—')}</td>
+                  <td>${escHtml(m.email || '—')}</td>
+                  <td>${escHtml(m.contactNo || '—')}</td>
+                  <td>${escHtml(m.suburb || '—')}</td>
+                  <td>${segmentBadge(m.segment)}</td>
+                  <td>${new Date(m.addedAt).toLocaleDateString('en-AU')}</td>
+                  <td><button class="action-btn delete" style="font-size:11px;padding:3px 8px" onclick="removeOutreachListMember('${list.id}', '${m.userId}')">🗑️</button></td>
+                </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No educators in this list</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    async function removeOutreachListMember(listId, userId) {
+      if (!confirm('Remove this educator from the list?')) return;
+      try {
+        const res = await fetch(`/api/outreach-lists/${listId}/members/${userId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to remove');
+        openOutreachList(listId);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    function exportOutreachListCsv() {
+      if (!currentOutreachListDetail) return;
+      exportRowsCsv(currentOutreachListDetail.members, OUTREACH_LIST_COLUMNS, `${currentOutreachListDetail.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    }
+
+    function exportOutreachListPdf() {
+      if (!currentOutreachListDetail) return;
+      exportRowsPdf(currentOutreachListDetail.members, OUTREACH_LIST_COLUMNS, currentOutreachListDetail.name);
     }
 
     // A heatmap (density gradient), not bubbles, once you're inside a
@@ -10482,19 +10791,20 @@
       return (div.textContent || '').trim();
     }
 
-    function exportListViewCsv(type) {
-      const cfg = REPORT_CONFIG[type];
-      const rows = reportListFilteredCache[type] || [];
+    // columns: [{ header, render(r) }] — same shape as REPORT_CONFIG[type]
+    // .listView.columns, so any caller with rows + a column list (a report,
+    // or an Educator Outreach list) gets the same export for free.
+    function exportRowsCsv(rows, columns, filename) {
       if (!rows.length) { toast('No rows to export', 'error'); return; }
       const csvEscape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const headers = cfg.listView.columns.map(c => c.header);
+      const headers = columns.map(c => c.header);
       const lines = [headers.map(csvEscape).join(',')];
-      rows.forEach(r => lines.push(cfg.listView.columns.map(c => csvEscape(listViewCellText(c.render(r)))).join(',')));
+      rows.forEach(r => lines.push(columns.map(c => csvEscape(listViewCellText(c.render(r)))).join(',')));
       const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -10505,17 +10815,15 @@
     // add one for a single admin export button, this opens a plain print
     // stylesheet in a new tab and triggers the browser's own print dialog,
     // where "Save as PDF" is a standard destination on every platform.
-    function exportListViewPdf(type) {
-      const cfg = REPORT_CONFIG[type];
-      const rows = reportListFilteredCache[type] || [];
+    function exportRowsPdf(rows, columns, title) {
       if (!rows.length) { toast('No rows to export', 'error'); return; }
-      const headers = cfg.listView.columns.map(c => c.header);
-      const tableRows = rows.map(r => `<tr>${cfg.listView.columns.map(c => `<td>${escHtml(listViewCellText(c.render(r)))}</td>`).join('')}</tr>`).join('');
+      const headers = columns.map(c => c.header);
+      const tableRows = rows.map(r => `<tr>${columns.map(c => `<td>${escHtml(listViewCellText(c.render(r)))}</td>`).join('')}</tr>`).join('');
       const win = window.open('', '_blank');
       win.document.write(`
         <html>
         <head>
-          <title>${escHtml(cfg.listView.label)} — ${new Date().toLocaleDateString('en-AU')}</title>
+          <title>${escHtml(title)} — ${new Date().toLocaleDateString('en-AU')}</title>
           <style>
             body { font-family: -apple-system, Arial, sans-serif; margin: 24px; color: #111; }
             h1 { font-size: 16px; margin-bottom: 4px; }
@@ -10526,7 +10834,7 @@
           </style>
         </head>
         <body>
-          <h1>${escHtml(cfg.listView.label)}</h1>
+          <h1>${escHtml(title)}</h1>
           <div class="meta">${rows.length} record${rows.length === 1 ? '' : 's'} · exported ${new Date().toLocaleString('en-AU')}</div>
           <table><thead><tr>${headers.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table>
         </body>
@@ -10535,6 +10843,18 @@
       win.document.close();
       win.focus();
       win.print();
+    }
+
+    function exportListViewCsv(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportListFilteredCache[type] || [];
+      exportRowsCsv(rows, cfg.listView.columns, `${type}-${new Date().toISOString().slice(0, 10)}.csv`);
+    }
+
+    function exportListViewPdf(type) {
+      const cfg = REPORT_CONFIG[type];
+      const rows = reportListFilteredCache[type] || [];
+      exportRowsPdf(rows, cfg.listView.columns, cfg.listView.label);
     }
 
     // Detail view: every field the RT API returns for this record, read

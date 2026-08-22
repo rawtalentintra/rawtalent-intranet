@@ -48,4 +48,17 @@ function requireTrainingBuilder(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder };
+// Educator Outreach list builder (Decision Area 1, 2026-08-22) — granted
+// per-person (e.g. Adzi/Laurie/Vicky), not per-role, same pattern as
+// requireTrainingBuilder. Unlike that one, admin (not just super_admin)
+// always has access here too — Outreach sits alongside Micropods/Leads,
+// which admin already has unconditionally.
+function requireOutreachListBuilder(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (req.user.role !== 'super_admin' && req.user.role !== 'admin' && !req.user.can_create_outreach_lists) {
+    return res.status(403).json({ error: 'You do not have access to this' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder };
