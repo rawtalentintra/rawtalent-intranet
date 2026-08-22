@@ -6,6 +6,7 @@ const { normalizeStateToShort, buildMicropods } = require('../services/micropodS
 const engagement = require('../services/educatorEngagementService');
 const centreGeoService = require('../services/centreGeoService');
 const { computeTerritoryStrategy } = require('../services/territoryStrategyService');
+const { computeAdvertisingOpportunities, DEFAULT_RADIUS_KM, DEFAULT_MIN_EDUCATORS } = require('../services/advertisingOpportunityService');
 const { getCentresAndBookings } = require('./centres');
 const { LIAM, JUSTINE, partnerForSuburbState } = require('../services/melbourneTerritoryService');
 
@@ -329,6 +330,39 @@ router.get('/territory-strategy', async (req, res) => {
       radiusKm,
       geocodedCentreCount: centresWithGeo.length,
       totalCentreCount: centres.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Advertising Opportunity Engine (Decision Area 2, 2026-08-22) — flags
+// centres with fewer than DEFAULT_MIN_EDUCATORS educators who worked a
+// shift in the last 28 days within DEFAULT_RADIUS_KM. Deliberately NOT
+// pod-based (see services/advertisingOpportunityService.js's header for
+// why) — a genuine per-centre, per-individual-educator-point radius
+// check, bypassing Micropods' own clustering entirely. Radius/threshold
+// are fixed constants, not query params, since the meeting locked those
+// numbers explicitly rather than leaving them tunable like
+// /territory-strategy's radiusKm. Registered as a literal path ahead of
+// '/:podId' below, same reason as /territory-strategy above.
+router.get('/advertising-opportunities', async (req, res) => {
+  try {
+    const { points } = await getCandidatePoints();
+    const { centres, bookings } = await getCentresAndBookings();
+    const geocodes = await centreGeoService.getGeocodesForCentres(centres);
+    const centresWithGeo = centres
+      .filter(c => geocodes[c.centreKey])
+      .map(c => ({ ...c, lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng }));
+
+    const opportunities = computeAdvertisingOpportunities(centresWithGeo, points, bookings);
+
+    res.json({
+      opportunities,
+      radiusKm: DEFAULT_RADIUS_KM,
+      minEducatorsThreshold: DEFAULT_MIN_EDUCATORS,
+      totalActiveCentreCount: centres.length,
+      geocodedCentreCount: centresWithGeo.length
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

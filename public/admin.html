@@ -294,6 +294,9 @@
         <div class="admin-nav-item" onclick="showSection('micropods', this)">
           <span class="admin-nav-icon">🗺️</span> Micropods
         </div>
+        <div class="admin-nav-item" onclick="showSection('advertising-opportunities', this)">
+          <span class="admin-nav-icon">📢</span> Advertising Opportunities
+        </div>
         <div class="admin-nav-item" onclick="showSection('route-planner', this)">
           <span class="admin-nav-icon">🧭</span> Smart Routing
         </div>
@@ -792,6 +795,30 @@
         <div id="micropodDetailScreen" style="display:none">
           <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMicropodsList()">← Back to Micropods</button>
           <div id="micropodDetailBody"></div>
+        </div>
+      </div>
+      </template>
+
+      <template id="__lazy_advertising_opportunities">
+      <!-- Advertising Opportunities (Decision Area 2) -->
+      <div class="admin-section" id="section-advertising-opportunities">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">📢 Advertising Opportunities</div>
+            <div class="admin-page-sub">Centres with a genuine local supply gap — fewer than 10 educators who've worked a shift in the last 28 days within 5km. Not pod-based; this checks each centre against its own real nearby supply.</div>
+          </div>
+        </div>
+        <div class="admin-table-card">
+          <div id="adOppSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px"></div>
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead><tr><th>Location</th><th>Current Usable Supply</th><th>Demand (30d)</th><th>Recommended Action</th></tr></thead>
+              <tbody id="adOppTableBody">
+                <tr><td colspan="4"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Educator type/qualification breakdown isn't shown — RT's qualification data only ever returns one qualification per candidate, sometimes the wrong one, and isn't reliable enough to break out by type here.</div>
         </div>
       </div>
       </template>
@@ -3785,7 +3812,7 @@
       // EDUCATOR_OUTREACH_ENABLED. It's Ops/Onboarding's feature, not
       // Workforce Partners', and stays out of every role's allowlist
       // (including workforce_partner) until it's rebuilt under that section.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods', 'advertising-opportunities']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
@@ -4910,6 +4937,7 @@
       if (id === 'document-checker') loadDocumentCheckHistory();
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
       if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
+      if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
@@ -8435,6 +8463,47 @@
       document.getElementById('micropodsListScreen').style.display = 'block';
       if (micropodsHeatmapInstance) { micropodsHeatmapInstance.remove(); micropodsHeatmapInstance = null; }
       window.scrollTo({ top: 0 });
+    }
+
+    // ── Advertising Opportunities (Decision Area 2) ────────────────────
+    // Deliberately its own section, not a Micropods toggle — this checks
+    // real per-centre, per-individual-educator distance (bypassing pod
+    // clustering entirely), so it has nothing to do with Micropods'
+    // state/gridKm/minPodSize/segment filters and shouldn't imply it does.
+    async function initAdvertisingOpportunitiesSection() {
+      loadAdvertisingOpportunities();
+    }
+
+    async function loadAdvertisingOpportunities() {
+      const body = document.getElementById('adOppTableBody');
+      body.innerHTML = `<tr><td colspan="4"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
+      document.getElementById('adOppSummary').textContent = '';
+      try {
+        const data = await fetch('/api/micropods/advertising-opportunities').then(r => r.json());
+        if (data.error) throw new Error(data.error);
+        renderAdvertisingOpportunitiesTable(data);
+      } catch {
+        body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load advertising opportunities.</td></tr>`;
+      }
+    }
+
+    function renderAdvertisingOpportunitiesTable(data) {
+      const body = document.getElementById('adOppTableBody');
+      const radiusKm = data.radiusKm ?? 5;
+      const minEducators = data.minEducatorsThreshold ?? 10;
+      document.getElementById('adOppSummary').textContent =
+        `${data.opportunities.length} centre${data.opportunities.length === 1 ? '' : 's'} flagged · within ${radiusKm}km · ${data.geocodedCentreCount} of ${data.totalActiveCentreCount} active centres geocoded`;
+      if (!data.opportunities.length) {
+        body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No centres currently fall below the ${minEducators}-educator threshold.</td></tr>`;
+        return;
+      }
+      body.innerHTML = data.opportunities.map(o => `
+        <tr>
+          <td style="font-weight:600;color:var(--navy)">${escHtml(o.name)}<div style="font-size:11px;color:var(--text-muted);font-weight:400">${escHtml(o.suburb || '—')}, ${escHtml(o.state || '—')}</div></td>
+          <td style="color:#b91c1c;font-weight:700">${o.nearbyWorkingEducatorCount} of ${minEducators}</td>
+          <td>${o.demandBookings30d}</td>
+          <td style="max-width:320px">${escHtml(o.action)}</td>
+        </tr>`).join('');
     }
 
     // ── Visit logging modal ──────────────────────────────────────────
