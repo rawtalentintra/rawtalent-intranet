@@ -254,16 +254,30 @@ router.get('/', async (req, res) => {
     });
     const taskAlerts = taskAlertsRes.rows;
 
-    // Notes on any task that @mention me — informational, dismissible via
-    // notification_dismissals same as leave/feedback decisions.
+    // Anyone @mentioned either in a task note OR a task description —
+    // informational, dismissible via notification_dismissals same as
+    // leave/feedback decisions. Two sources unioned together: a note is an
+    // immutable log entry (mentioned_emails frozen at post time), a
+    // description is a mutable field (mentioned_emails recomputed on every
+    // save — see resolveDescriptionMentions in routes/tasks.js). `kind`
+    // tells the frontend which one it's looking at and shapes the
+    // dismissal key (`taskmention:note:<id>` vs `taskmention:task:<id>`).
     const taskMentionsRes = await db.execute({
-      sql: `SELECT n.*, t.title AS task_title, (d.user_email IS NOT NULL) AS is_read
+      sql: `SELECT 'note' AS kind, n.id AS mention_id, n.task_id, n.body, n.author_name, n.author_email, n.created_at,
+                   t.title AS task_title, (d.user_email IS NOT NULL) AS is_read
             FROM task_notes n
             JOIN tasks t ON t.id = n.task_id
-            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:' || n.id AND d.user_email = ?
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:note:' || n.id AND d.user_email = ?
             WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text)
-            ORDER BY n.created_at DESC LIMIT 30`,
-      args: [req.user.email, req.user.email]
+            UNION ALL
+            SELECT 'task' AS kind, t.id AS mention_id, t.id AS task_id, COALESCE(t.description, '') AS body,
+                   t.created_by_name AS author_name, t.created_by AS author_email, t.created_at,
+                   t.title AS task_title, (d.user_email IS NOT NULL) AS is_read
+            FROM tasks t
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:task:' || t.id AND d.user_email = ?
+            WHERE t.mentioned_emails @> to_jsonb(LOWER(?)::text)
+            ORDER BY created_at DESC LIMIT 30`,
+      args: [req.user.email, req.user.email, req.user.email, req.user.email]
     });
     const taskMentions = taskMentionsRes.rows;
 
@@ -619,16 +633,20 @@ router.post('/read-all', async (req, res) => {
     }
 
     const unreadTaskMentions = await db.execute({
-      sql: `SELECT n.id FROM task_notes n
-            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:' || n.id AND d.user_email = ?
-            WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text) AND d.user_email IS NULL`,
-      args: [req.user.email, req.user.email]
+      sql: `SELECT 'note' AS kind, n.id AS mention_id FROM task_notes n
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:note:' || n.id AND d.user_email = ?
+            WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text) AND d.user_email IS NULL
+            UNION ALL
+            SELECT 'task' AS kind, t.id AS mention_id FROM tasks t
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:task:' || t.id AND d.user_email = ?
+            WHERE t.mentioned_emails @> to_jsonb(LOWER(?)::text) AND d.user_email IS NULL`,
+      args: [req.user.email, req.user.email, req.user.email, req.user.email]
     });
     for (const row of unreadTaskMentions.rows) {
       await db.execute({
         sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
               ON CONFLICT (user_email, notification_key) DO NOTHING`,
-        args: [req.user.email, `taskmention:${row.id}`]
+        args: [req.user.email, `taskmention:${row.kind}:${row.mention_id}`]
       });
     }
 

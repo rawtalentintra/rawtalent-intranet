@@ -1082,7 +1082,10 @@
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
-          <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail"></textarea>
+          <div style="position:relative">
+            <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown')" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
+            <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
+          </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:160px">
@@ -1119,7 +1122,7 @@
           <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📝 Notes</div>
           <div id="taskNotesList" style="max-height:220px;overflow-y:auto;margin-bottom:10px"></div>
           <div style="position:relative">
-            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleTaskNoteInput(this)" onblur="setTimeout(hideTaskMentionDropdown,150)"></textarea>
+            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleMentionInput(this,'taskMentionDropdown')" onblur="setTimeout(()=>hideMentionDropdown('taskMentionDropdown'),150)"></textarea>
             <div id="taskMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:8px">
@@ -1252,8 +1255,8 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Task mentions</div>
           ${notifData.taskMentions.map(m => `
-            <div style="background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.id}','${m.task_id}')">
-              <div style="font-weight:${m.is_read ? '500' : '700'};color:${m.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you on "${escHtml(m.task_title)}"</div>
+            <div style="background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
+              <div style="font-weight:${m.is_read ? '500' : '700'};color:${m.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${escHtml(m.task_title)}"</div>
               <div style="font-size:11px;color:var(--text-muted)">${escHtml(m.body).slice(0,80)}${m.body.length > 80 ? '…' : ''}</div>
             </div>
           `).join('')}
@@ -1463,9 +1466,9 @@
       spawnConfetti(document.getElementById('confettiLayer'));
     }
 
-    function openTaskMention(noteId, taskId) {
-      const m = notifData.taskMentions.find(x => x.id === noteId);
-      if (m && !m.is_read) dismissNotification(`taskmention:${noteId}`);
+    function openTaskMention(kind, mentionId, taskId) {
+      const m = notifData.taskMentions.find(x => x.kind === kind && x.mention_id === mentionId);
+      if (m && !m.is_read) dismissNotification(`taskmention:${kind}:${mentionId}`);
       toggleNotifPanel();
       setMode('tasks');
       setTimeout(() => openTaskDetail(taskId), 300);
@@ -2087,7 +2090,8 @@
 
     function closeTaskModal() {
       document.getElementById('taskModal').classList.remove('open');
-      hideTaskMentionDropdown();
+      hideMentionDropdown('taskMentionDropdown');
+      hideMentionDropdown('taskDescMentionDropdown');
       editingTaskId = null;
       currentTaskNotes = [];
     }
@@ -2195,7 +2199,7 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
         input.value = '';
-        hideTaskMentionDropdown();
+        hideMentionDropdown('taskMentionDropdown');
         currentTaskNotes.push(data.note);
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
@@ -2215,31 +2219,40 @@
       return { atIndex, query: after };
     }
 
-    function handleTaskNoteInput(el) {
+    // Generic across both mention-enabled fields (task notes AND the
+    // description box) — tracks which textarea/dropdown pair is currently
+    // active so one set of functions serves both instead of duplicating
+    // near-identical logic per field.
+    let taskMentionActiveEl = null;
+    let taskMentionActiveDropdownId = null;
+
+    function handleMentionInput(el, dropdownId) {
+      taskMentionActiveEl = el;
+      taskMentionActiveDropdownId = dropdownId;
       const match = handleTaskMentionQuery(el.value);
-      const dropdown = document.getElementById('taskMentionDropdown');
+      const dropdown = document.getElementById(dropdownId);
       if (!match) { dropdown.style.display = 'none'; taskMentionCandidates = []; return; }
       const q = match.query.toLowerCase();
       taskMentionCandidates = taskMeta.users.filter(u => (u.name || u.email).toLowerCase().includes(q)).slice(0, 6);
       if (!taskMentionCandidates.length) { dropdown.style.display = 'none'; return; }
-      dropdown.innerHTML = taskMentionCandidates.map((u, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();insertTaskMention(${i})">${escHtml(u.name || u.email)}</div>`).join('');
+      dropdown.innerHTML = taskMentionCandidates.map((u, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();insertMention(${i})">${escHtml(u.name || u.email)}</div>`).join('');
       dropdown.style.display = 'block';
     }
 
-    function insertTaskMention(i) {
+    function insertMention(i) {
       const u = taskMentionCandidates[i];
-      if (!u) return;
-      const el = document.getElementById('taskNoteInput');
+      if (!u || !taskMentionActiveEl) return;
+      const el = taskMentionActiveEl;
       const match = handleTaskMentionQuery(el.value);
       if (!match) return;
       const name = u.name || u.email.split('@')[0];
       el.value = el.value.slice(0, match.atIndex) + '@' + name + ' ';
-      hideTaskMentionDropdown();
+      hideMentionDropdown(taskMentionActiveDropdownId);
       el.focus();
     }
 
-    function hideTaskMentionDropdown() {
-      const dropdown = document.getElementById('taskMentionDropdown');
+    function hideMentionDropdown(dropdownId) {
+      const dropdown = document.getElementById(dropdownId || taskMentionActiveDropdownId);
       if (dropdown) dropdown.style.display = 'none';
     }
 

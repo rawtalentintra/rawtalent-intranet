@@ -29,6 +29,15 @@ function extractMentions(body, users) {
   return [...found];
 }
 
+// Shared by task create/update — description mentions are recomputed on
+// every save (unlike task_notes.mentioned_emails, which freezes at the
+// moment a note is posted), since a description is a mutable field, not a
+// running log.
+async function resolveDescriptionMentions(db, description, excludeEmail) {
+  const usersRes = await db.execute("SELECT email, name FROM users WHERE active = true");
+  return extractMentions(description || '', usersRes.rows).filter(e => e.toLowerCase() !== excludeEmail.toLowerCase());
+}
+
 // Full dataset, client-side grouping/filtering — same convention as Leads/
 // Reports/My Centres in this codebase, rather than server-side query params.
 router.get('/', async (req, res) => {
@@ -97,17 +106,20 @@ router.post('/', async (req, res) => {
   if (status && !STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   if (priority && !PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
   try {
+    const db = getDb();
     const id = uuidv4();
     const finalStatus = status || 'to_do';
-    await getDb().execute({
+    const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
+    await db.execute({
       sql: `INSERT INTO tasks
-            (id, department_id, classification_id, title, description, status, priority, assigned_to, due_date, created_by, created_by_name, completed_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            (id, department_id, classification_id, title, description, status, priority, assigned_to, due_date, created_by, created_by_name, completed_at, mentioned_emails)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         id, department_id, classification_id || null, title.trim(), description || null,
         finalStatus, priority || 'normal', assigned_to || null, due_date || null,
         req.user.email, req.user.name || req.user.email,
-        finalStatus === 'done' ? new Date().toISOString() : null
+        finalStatus === 'done' ? new Date().toISOString() : null,
+        JSON.stringify(mentioned)
       ]
     });
     res.json({ success: true, id });
@@ -132,15 +144,16 @@ router.put('/:id', async (req, res) => {
     let completedAt = existing.rows[0].completed_at;
     if (finalStatus === 'done' && existing.rows[0].status !== 'done') completedAt = new Date().toISOString();
     else if (finalStatus !== 'done') completedAt = null;
+    const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
 
     await db.execute({
       sql: `UPDATE tasks SET
               department_id=?, classification_id=?, title=?, description=?, status=?, priority=?,
-              assigned_to=?, due_date=?, completed_at=?, updated_at=now()
+              assigned_to=?, due_date=?, completed_at=?, mentioned_emails=?, updated_at=now()
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
-        priority || 'normal', assigned_to || null, due_date || null, completedAt, req.params.id
+        priority || 'normal', assigned_to || null, due_date || null, completedAt, JSON.stringify(mentioned), req.params.id
       ]
     });
     res.json({ success: true });

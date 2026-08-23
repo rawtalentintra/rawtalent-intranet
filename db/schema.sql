@@ -1333,8 +1333,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_by_name TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  -- Anyone @tagged in the description (recomputed on every save, unlike
+  -- task_notes.mentioned_emails which freezes at note creation — a
+  -- description is a mutable field, not a running log) — lets the
+  -- notification bell alert them, same mechanism as note mentions.
+  mentioned_emails JSONB DEFAULT '[]'
 );
+-- CREATE TABLE ... IF NOT EXISTS won't add this column to an already-
+-- existing tasks table (e.g. an environment that ran this migration
+-- before mentioned_emails was added) — the ALTER below covers that case.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS mentioned_emails JSONB DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
