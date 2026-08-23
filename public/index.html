@@ -1881,7 +1881,22 @@
     // whenever the modal opens for a different task.
     let taskLinkedCandidate = null; // { userId, name, phone, portalUrl }
     let taskLinkedClient = null;    // { name, suburb, state, phone }
+    // Set when the user clicks ✕ on an auto-selected match — stops the
+    // very next debounced lookup from silently re-selecting the same
+    // thing just because it's still a confident phone match. Reset
+    // whenever the modal opens/closes or a suggestion is explicitly
+    // picked from the list.
+    let taskCandidateDismissed = false;
+    let taskClientDismissed = false;
     let taskMatchTimer = null;
+    // Bumped on every new lookup and every modal open/close — an in-flight
+    // fetch checks this when it resolves and drops its result if a newer
+    // one has since started. Without this, a slow response for an earlier,
+    // shorter query (e.g. "Kir") could resolve AFTER a faster response for
+    // what's now in the field (e.g. "Kirandeep") and overwrite it with
+    // stale/wrong matches — or, worse, land in a modal that's since been
+    // closed or reopened for a different task entirely.
+    let taskMatchRequestId = 0;
     let currentTaskNotes = [];
     let taskMentionCandidates = [];
 
@@ -2142,7 +2157,9 @@
 
     function populateTaskClassSelect(deptId, selectedId) {
       const sel = document.getElementById('taskClassSelect');
-      const options = taskMeta.classifications.filter(c => c.department_id === deptId);
+      const options = taskMeta.classifications
+        .filter(c => c.department_id === deptId)
+        .sort((a, b) => a.name.localeCompare(b.name));
       sel.innerHTML = '<option value="">None</option>' + options.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
     }
 
@@ -2170,6 +2187,10 @@
     function openTaskModal(taskId) {
       editingTaskId = taskId || null;
       if (!taskMeta.departments.length) return; // meta still loading — card click race, harmless no-op
+      clearTimeout(taskMatchTimer);
+      taskMatchRequestId++; // invalidate any in-flight lookup from whatever was open before
+      taskCandidateDismissed = false;
+      taskClientDismissed = false;
       populateTaskSelects();
       const deleteBtn = document.getElementById('taskDeleteBtn');
       const notesSection = document.getElementById('taskNotesSection');
@@ -2227,10 +2248,12 @@
     function handleTaskTitleInput(value) {
       clearTimeout(taskMatchTimer);
       const q = value.trim();
+      const requestId = ++taskMatchRequestId;
       if (q.length < 3) { renderTaskPersonMatchPanel(null); return; }
       taskMatchTimer = setTimeout(async () => {
         try {
           const data = await fetch(`/api/tasks/match-person?q=${encodeURIComponent(q)}`).then(r => r.json());
+          if (requestId !== taskMatchRequestId) return; // a newer lookup has since started — this one's stale
           renderTaskPersonMatchPanel(data);
         } catch { /* best-effort — a failed lookup just leaves the panel as-is */ }
       }, 400);
@@ -2260,16 +2283,22 @@
           taskLinkedCandidate.phone ? `📞 ${taskLinkedCandidate.phone}` : '',
           `openCandidatePortal('${taskLinkedCandidate.portalUrl}')`, 'clearTaskCandidate()'));
       } else if (data?.candidates?.length) {
-        if (data.candidateDuplicates) {
-          sections.push(`<div class="task-person-warning">⚠️ Possible duplicate educator profiles found — pick the right one:</div>`);
-        } else if (data.candidates[0].confidence === 'phone') {
-          // A single confident phone match — auto-selected, no click needed.
+        // A single confident phone match auto-selects — UNLESS the user
+        // already explicitly removed (✕) this exact suggestion earlier in
+        // this same modal session, in which case it's offered as a pick
+        // again rather than silently re-linking itself the next time they
+        // type. Without this, dismissing a wrong auto-match and then
+        // typing one more character would just bring it right back.
+        const singleConfidentPhone = !data.candidateDuplicates && data.candidates[0].confidence === 'phone';
+        if (singleConfidentPhone && !taskCandidateDismissed) {
           selectTaskCandidateFromData(data.candidates[0]);
           sections.push(taskPersonChipHtml('candidate', data.candidates[0].name,
             data.candidates[0].phone ? `📞 ${data.candidates[0].phone}` : '',
             `openCandidatePortal('${data.candidates[0].portalUrl}')`, 'clearTaskCandidate()'));
-        }
-        if (data.candidateDuplicates || data.candidates[0].confidence === 'name') {
+        } else {
+          if (data.candidateDuplicates) {
+            sections.push(`<div class="task-person-warning">⚠️ Possible duplicate educator profiles found — pick the right one:</div>`);
+          }
           window.__taskCandidateCandidates = data.candidates;
           // Each duplicate is independently viewable (real, distinct
           // people — RT already confirms that via the phone match), not
@@ -2288,14 +2317,15 @@
         sections.push(taskPersonChipHtml('client', taskLinkedClient.name,
           taskLinkedClient.phone ? `📞 ${taskLinkedClient.phone}` : '', null, 'clearTaskClient()'));
       } else if (data?.clients?.length) {
-        if (data.clientDuplicates) {
-          sections.push(`<div class="task-person-warning">⚠️ Possible duplicate centre records found — pick the right one:</div>`);
-        } else if (data.clients[0].confidence === 'phone') {
+        const singleConfidentPhone = !data.clientDuplicates && data.clients[0].confidence === 'phone';
+        if (singleConfidentPhone && !taskClientDismissed) {
           selectTaskClientFromData(data.clients[0]);
           sections.push(taskPersonChipHtml('client', data.clients[0].name,
             data.clients[0].phone ? `📞 ${data.clients[0].phone}` : '', null, 'clearTaskClient()'));
-        }
-        if (data.clientDuplicates || data.clients[0].confidence === 'name') {
+        } else {
+          if (data.clientDuplicates) {
+            sections.push(`<div class="task-person-warning">⚠️ Possible duplicate centre records found — pick the right one:</div>`);
+          }
           window.__taskClientCandidates = data.clients;
           sections.push(`<div class="task-person-suggestions">${data.clients.map((c, i) => `
             <button type="button" class="task-person-suggestion" onclick="selectTaskClientByIndex(${i})">${escHtml(c.name)}${c.suburb ? ` · ${escHtml(c.suburb)}` : ''}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
@@ -2315,10 +2345,12 @@
       const c = (window.__taskCandidateCandidates || [])[i];
       if (!c) return;
       selectTaskCandidateFromData(c);
+      taskCandidateDismissed = false; // an explicit pick overrides any earlier dismissal
       renderTaskPersonMatchPanel(null);
     }
     function clearTaskCandidate() {
       taskLinkedCandidate = null;
+      taskCandidateDismissed = true;
       renderTaskPersonMatchPanel(null);
     }
     function selectTaskClientFromData(c) {
@@ -2328,10 +2360,12 @@
       const c = (window.__taskClientCandidates || [])[i];
       if (!c) return;
       selectTaskClientFromData(c);
+      taskClientDismissed = false;
       renderTaskPersonMatchPanel(null);
     }
     function clearTaskClient() {
       taskLinkedClient = null;
+      taskClientDismissed = true;
       renderTaskPersonMatchPanel(null);
     }
     function openCandidatePortal(url) {
@@ -2360,6 +2394,8 @@
       document.getElementById('taskModal').classList.remove('open');
       hideMentionDropdown('taskMentionDropdown');
       hideMentionDropdown('taskDescMentionDropdown');
+      clearTimeout(taskMatchTimer);
+      taskMatchRequestId++; // invalidate any in-flight lookup so it can't render after the modal's gone
       editingTaskId = null;
       currentTaskNotes = [];
     }
@@ -2420,22 +2456,30 @@
       } catch { return iso; }
     }
 
+    // One combined regex (longest name first), not a loop of independent
+    // per-name replacements — a loop would let a shorter name that's a
+    // prefix of a longer one (e.g. "John" vs. a different real user
+    // "John Smith") re-match *inside* the span the longer name's pass
+    // already inserted, producing broken nested spans and wrongly
+    // highlighting "John" when only "John Smith" was actually tagged.
+    // Ordering alternatives longest-first makes the regex engine consume
+    // "John Smith" whole before "John" ever gets a chance at that text.
+    function mentionRegex(users) {
+      const names = users.map(u => u.name || u.email.split('@')[0]).filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+      if (!names.length) return null;
+      const pattern = names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+      return new RegExp('@(' + pattern + ')(?![A-Za-z])', 'g');
+    }
+
     function renderNoteBody(body) {
       // Visual highlight only — who actually got notified is decided
       // server-side (see extractMentions in routes/tasks.js) against the
-      // real user list. Matches full display names (which can contain
-      // spaces, e.g. "@Second Tester"), longest name first, so a shorter
-      // name that happens to be a prefix of a longer one doesn't steal
-      // the match.
-      let html = escHtml(body);
-      const names = taskMeta.users.map(u => u.name || u.email.split('@')[0]).filter(Boolean)
-        .sort((a, b) => b.length - a.length);
-      for (const name of names) {
-        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = new RegExp('@' + escapedName + '(?![A-Za-z])', 'g');
-        html = html.replace(re, m => `<span class="task-mention">${m}</span>`);
-      }
-      return html;
+      // real user list.
+      const html = escHtml(body);
+      const re = mentionRegex(taskMeta.users);
+      if (!re) return html;
+      return html.replace(re, m => `<span class="task-mention">${m}</span>`);
     }
 
     async function loadTaskNotes(taskId) {
@@ -2568,10 +2612,17 @@
     function updateMentionPreview(el, previewId) {
       const preview = document.getElementById(previewId);
       if (!preview) return;
-      const tagged = taskMeta.users.filter(u => {
-        const name = (u.name || u.email.split('@')[0]).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return new RegExp('@' + name + '(?![A-Za-z])', 'i').test(el.value);
-      });
+      // Same single-pass matching as renderNoteBody/extractMentions —
+      // independent per-user testing would show "Tagging: John Smith,
+      // John" when only "John Smith" was actually typed, if "John"
+      // happens to be a separate real user too.
+      const re = mentionRegex(taskMeta.users);
+      const matchedNames = new Set();
+      if (re) {
+        let match;
+        while ((match = re.exec(el.value)) !== null) matchedNames.add(match[1].toLowerCase());
+      }
+      const tagged = taskMeta.users.filter(u => matchedNames.has((u.name || u.email.split('@')[0]).toLowerCase()));
       if (!tagged.length) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
       preview.style.display = 'block';
       preview.innerHTML = '🏷️ Tagging ' + tagged.map(u => `<span class="task-mention">${escHtml(u.name || u.email.split('@')[0])}</span>`).join(', ');

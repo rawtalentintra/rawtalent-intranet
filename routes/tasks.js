@@ -19,13 +19,25 @@ const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 // frontend's autocomplete is what actually inserts these mentions.
 function extractMentions(body, users) {
   if (!body) return [];
+  // Single combined regex, longest name first — NOT independent
+  // per-user substring checks. Independent checks would say "John" is
+  // mentioned whenever "John Smith" is (if both are real users), since
+  // "@John" is a literal substring of "@John Smith" followed by a
+  // non-letter (a space). Ordering the alternatives longest-first makes
+  // the regex engine consume "John Smith" whole before "John" ever gets
+  // a chance to match inside it.
+  const candidates = users
+    .map(u => ({ email: u.email.toLowerCase(), label: (u.name || u.email.split('@')[0]).trim() }))
+    .filter(c => c.label)
+    .sort((a, b) => b.label.length - a.label.length);
+  if (!candidates.length) return [];
+  const pattern = candidates.map(c => c.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const re = new RegExp('@(' + pattern + ')(?![A-Za-z])', 'gi');
   const found = new Set();
-  const sorted = [...users].sort((a, b) => (b.name || b.email).length - (a.name || a.email).length);
-  for (const u of sorted) {
-    const label = (u.name || u.email.split('@')[0]).trim();
-    if (!label) continue;
-    const needle = `@${label}`.toLowerCase();
-    if (body.toLowerCase().includes(needle)) found.add(u.email.toLowerCase());
+  let match;
+  while ((match = re.exec(body)) !== null) {
+    const owner = candidates.find(c => c.label.toLowerCase() === match[1].toLowerCase());
+    if (owner) found.add(owner.email);
   }
   return [...found];
 }
