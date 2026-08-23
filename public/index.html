@@ -1873,6 +1873,7 @@
     let taskMineOnly = false;
     let taskSearchQuery = '';
     let taskLegendOpen = false;
+    let taskViewMode = 'board'; // 'board' | 'list'
     let currentTaskNotes = [];
     let taskMentionCandidates = [];
 
@@ -1910,6 +1911,7 @@
 
     function setTaskDeptFilter(id) { taskFilterDept = id; renderTasksView(); }
     function toggleTaskLegend() { taskLegendOpen = !taskLegendOpen; renderTasksView(); }
+    function setTaskViewMode(mode) { taskViewMode = mode; renderTasksView(); }
 
     function taskLegendHtml() {
       return `
@@ -1932,15 +1934,18 @@
       `;
     }
 
+    function assigneeLabelFor(t) {
+      const assignee = taskMeta.users.find(u => (u.email || '').toLowerCase() === (t.assigned_to || '').toLowerCase());
+      return assignee ? (assignee.name || assignee.email.split('@')[0]) : (t.assigned_to ? t.assigned_to.split('@')[0] : 'Unassigned');
+    }
+
     function taskCardHtml(t) {
       const dept = taskDeptMeta(t.department_id);
       const pr = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META.normal;
       const overdue = isTaskOverdue(t);
       const dueSoon = isTaskDueSoon(t);
-      const assignee = taskMeta.users.find(u => (u.email || '').toLowerCase() === (t.assigned_to || '').toLowerCase());
-      const assigneeLabel = assignee ? (assignee.name || assignee.email.split('@')[0]) : (t.assigned_to ? t.assigned_to.split('@')[0] : 'Unassigned');
       return `
-        <div class="task-card" onclick="openTaskDetail('${t.id}')">
+        <div class="task-card" draggable="true" ondragstart="handleTaskDragStart(event,'${t.id}')" ondragend="handleTaskDragEnd()" onclick="openTaskDetail('${t.id}')">
           <div class="task-card-top">
             <span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span>
             <span class="task-priority-dot" title="${pr.label} priority" style="background:${pr.color}"></span>
@@ -1948,9 +1953,128 @@
           <div class="task-card-title">${escHtml(t.title)}</div>
           ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
           <div class="task-card-bottom">
-            <span class="task-card-assignee">👤 ${escHtml(assigneeLabel)}</span>
+            <span class="task-card-assignee">👤 ${escHtml(assigneeLabelFor(t))}</span>
             ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
           </div>
+        </div>
+      `;
+    }
+
+    // Drag-and-drop between status columns — plain HTML5 DnD, no library.
+    // Browsers don't fire a click after a genuine drag gesture, so this
+    // doesn't fight with the card's own onclick (open detail).
+    let draggingTaskId = null;
+    let dragOverColumnStatus = null;
+
+    function handleTaskDragStart(e, taskId) {
+      draggingTaskId = taskId;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', taskId); // Firefox requires real data to allow the drag
+    }
+
+    function handleTaskDragEnd() {
+      draggingTaskId = null;
+      dragOverColumnStatus = null;
+      document.querySelectorAll('.task-column-body.drag-over').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    function handleTaskDragOverColumn(e, status) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragOverColumnStatus === status) return;
+      dragOverColumnStatus = status;
+      document.querySelectorAll('.task-column-body').forEach(el => el.classList.toggle('drag-over', el.dataset.status === status));
+    }
+
+    function handleTaskDragLeaveColumn(e) {
+      // Only clear when actually leaving the column body (not just moving
+      // between a card and its parent) — relatedTarget is null on some
+      // browsers when leaving the window entirely, which should also clear.
+      if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+      e.currentTarget.classList.remove('drag-over');
+      if (dragOverColumnStatus === e.currentTarget.dataset.status) dragOverColumnStatus = null;
+    }
+
+    async function handleTaskDrop(e, status) {
+      e.preventDefault();
+      document.querySelectorAll('.task-column-body.drag-over').forEach(el => el.classList.remove('drag-over'));
+      dragOverColumnStatus = null;
+      const taskId = draggingTaskId || e.dataTransfer.getData('text/plain');
+      draggingTaskId = null;
+      if (!taskId) return;
+      const t = allTasks.find(x => x.id === taskId);
+      if (!t || t.status === status) return;
+      const previousStatus = t.status;
+      t.status = status; // optimistic — instant visual move, reverted below on failure
+      renderTasksView();
+      try {
+        const res = await fetch(`/api/tasks/${taskId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            department_id: t.department_id, classification_id: t.classification_id, title: t.title,
+            description: t.description, status, priority: t.priority, assigned_to: t.assigned_to, due_date: t.due_date
+          })
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        t.status = previousStatus;
+        renderTasksView();
+        toast('Failed to move task — please try again', 'error');
+      }
+    }
+
+    function renderTaskBoardHtml(filtered) {
+      const columns = TASK_STATUS_ORDER.map(status => {
+        const meta = TASK_STATUS_META[status];
+        const items = filtered.filter(t => t.status === status)
+          .sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
+        return `
+          <div class="task-column">
+            <div class="task-column-header" style="color:${meta.color};background:${meta.bg};border-color:${meta.border}">
+              <span>${meta.label}</span><span class="task-pill-count">${items.length}</span>
+            </div>
+            <div class="task-column-body" data-status="${status}" ondragover="handleTaskDragOverColumn(event,'${status}')" ondragleave="handleTaskDragLeaveColumn(event)" ondrop="handleTaskDrop(event,'${status}')">
+              ${items.length ? items.map(taskCardHtml).join('') : '<div class="task-column-empty">No tasks — drop one here</div>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+      return `<div class="task-board">${columns}</div>`;
+    }
+
+    // Same filtered set, one row per task, sorted by due date — for
+    // scanning everything at once rather than hunting across columns.
+    // Rows are clickable (same detail modal as a card); status isn't
+    // drag-and-droppable here, just shown as a badge — editing it from a
+    // flat list is a click-into-modal action, same as every other field.
+    function renderTaskListHtml(filtered) {
+      if (!filtered.length) return '<div class="empty-wrap"><div class="empty-icon">✅</div><div class="empty-title">No tasks match these filters</div></div>';
+      const sorted = filtered.slice().sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
+      const rows = sorted.map(t => {
+        const dept = taskDeptMeta(t.department_id);
+        const st = TASK_STATUS_META[t.status];
+        const pr = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META.normal;
+        const overdue = isTaskOverdue(t), dueSoon = isTaskDueSoon(t);
+        return `
+          <tr onclick="openTaskDetail('${t.id}')" style="cursor:pointer">
+            <td><span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span></td>
+            <td>
+              <div style="font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
+              ${t.classification_name ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+            </td>
+            <td>👤 ${escHtml(assigneeLabelFor(t))}</td>
+            <td>${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : '<span style="color:var(--gray-400)">—</span>'}</td>
+            <td><span class="task-chip" style="background:${pr.color}1a;color:${pr.color};border-color:${pr.color}">${pr.label}</span></td>
+            <td><span class="task-chip" style="background:${st.bg};color:${st.color};border-color:${st.border}">${st.label}</span></td>
+          </tr>
+        `;
+      }).join('');
+      return `
+        <div style="overflow-x:auto">
+          <table class="data-table" style="width:100%">
+            <thead><tr><th>Department</th><th>Task</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
         </div>
       `;
     }
@@ -1972,21 +2096,7 @@
         `).join('')}
       `;
 
-      const columns = TASK_STATUS_ORDER.map(status => {
-        const meta = TASK_STATUS_META[status];
-        const items = filtered.filter(t => t.status === status)
-          .sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
-        return `
-          <div class="task-column">
-            <div class="task-column-header" style="color:${meta.color};background:${meta.bg};border-color:${meta.border}">
-              <span>${meta.label}</span><span class="task-pill-count">${items.length}</span>
-            </div>
-            <div class="task-column-body">
-              ${items.length ? items.map(taskCardHtml).join('') : '<div class="task-column-empty">No tasks</div>'}
-            </div>
-          </div>
-        `;
-      }).join('');
+      const viewHtml = taskViewMode === 'list' ? renderTaskListHtml(filtered) : renderTaskBoardHtml(filtered);
 
       list.innerHTML = `
         <div class="task-toolbar">
@@ -1994,11 +2104,15 @@
           <input type="text" class="form-control" id="taskSearchInput" placeholder="Search tasks…" style="max-width:220px" value="${escHtml(taskSearchQuery)}" oninput="taskSearchQuery=this.value;renderTasksView()">
           <label class="task-toggle"><input type="checkbox" ${taskMineOnly ? 'checked' : ''} onchange="taskMineOnly=this.checked;renderTasksView()"> Assigned to me</label>
           <label class="task-toggle"><input type="checkbox" ${taskShowDone ? 'checked' : ''} onchange="taskShowDone=this.checked;renderTasksView()"> Show done</label>
-          <button class="btn-secondary" style="margin-left:auto" onclick="toggleTaskLegend()">ℹ️ What do these mean?</button>
+          <div class="task-view-toggle" style="margin-left:auto">
+            <button class="${taskViewMode === 'board' ? 'active' : ''}" onclick="setTaskViewMode('board')">🗂 Board</button>
+            <button class="${taskViewMode === 'list' ? 'active' : ''}" onclick="setTaskViewMode('list')">📋 List</button>
+          </div>
+          <button class="btn-secondary" onclick="toggleTaskLegend()">ℹ️ What do these mean?</button>
         </div>
         ${taskLegendOpen ? taskLegendHtml() : ''}
         <div class="task-pills">${deptPills}</div>
-        <div class="task-board">${columns}</div>
+        ${viewHtml}
       `;
       // Re-focus the search box after a re-render caused by typing in it —
       // innerHTML replacement otherwise loses focus after every keystroke.
