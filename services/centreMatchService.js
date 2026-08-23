@@ -1,9 +1,11 @@
 // Best-effort matching of a signed leads row to its real RT client/location
 // record. RT has no field connecting a booking/client back to "the lead
 // that created this centre" — this has to be inferred after the fact from
-// name/phone/suburb/state, same token-overlap-and-digits-comparison style
-// as documentCheckerService.js's namesLikelyMatch and the leads
+// phone/email/name/suburb/state, same token-overlap-and-digits-comparison
+// style as documentCheckerService.js's namesLikelyMatch and the leads
 // duplicate-checker's similarity() (routes/leads.js /check-duplicate).
+// Only phone and email are treated as confident/"Likely exists" signals
+// (confirmed 2026-08-22) — name/suburb/state are supporting context only.
 //
 // A centre in `leads` is one physical address; an RT Client can have
 // multiple locations[], each its own site with its own clientsLocationId —
@@ -46,10 +48,18 @@ function nameOverlaps(a, b) {
   return overlap >= Math.min(2, tokensB.size);
 }
 
-// Scores one lead against one (client, location) pair. Phone match is the
-// strongest signal (a centre's landline rarely coincides by chance);
-// name/suburb/state are supporting signals. Returns null if nothing lines
-// up at all, so callers can filter out true non-matches before ranking.
+// Scores one lead against one (client, location) pair. Phone and email are
+// the only signals strong/unique enough to call a match "confident" —
+// confirmed 2026-08-22: "Likely exists should either be if the email
+// address or phone number matches what we already have in the system."
+// Name/suburb/state are still scored as supporting signals (so a
+// low-confidence "did you mean" style hint can still surface), but no
+// combination of them alone reaches "confident" anymore — a shared
+// suburb plus a generic name like "Children's Centre" isn't the same
+// kind of signal as a real phone or email match, and treating it as
+// equivalent produced real false positives (verified live). Returns null
+// if nothing lines up at all, so callers can filter out true non-matches
+// before ranking.
 function scoreCandidate(lead, client, location) {
   const reasons = [];
   let score = 0;
@@ -59,6 +69,17 @@ function scoreCandidate(lead, client, location) {
   if (leadPhone.length >= 6 && leadPhone === locPhone) {
     score += 3;
     reasons.push('Phone number matches');
+  }
+
+  // contact_email is the decision-maker's own email, filled in once a
+  // Workforce Partner has actually spoken to the centre (leads has no
+  // separate "centre email" field) — compared against RT's client-level
+  // email, which is typically that same contact's address on file there.
+  const leadEmail = normalize(lead.contact_email);
+  const clientEmail = normalize(client.email || client.emailAddress);
+  if (leadEmail && clientEmail && leadEmail === clientEmail) {
+    score += 3;
+    reasons.push('Email matches');
   }
 
   if (nameOverlaps(lead.centre_name, client.name) || nameOverlaps(lead.centre_name, client.nickName)) {
@@ -79,13 +100,11 @@ function scoreCandidate(lead, client, location) {
   if (!score) return null;
 
   const phoneMatched = reasons.includes('Phone number matches');
-  const nameMatched = reasons.includes('Centre name matches');
-  const suburbMatched = reasons.includes('Suburb matches');
-  // Auto-link only when there's one strong signal plus a supporting one —
-  // a single matching field (just a suburb, or just a common name like
-  // "Little Learners") isn't confident enough to silently attach booking
-  // data to the wrong centre.
-  const confident = phoneMatched || (nameMatched && suburbMatched);
+  const emailMatched = reasons.includes('Email matches');
+  // Auto-link only on a real, unique identifier — phone or email — never
+  // on name/suburb/state alone or in combination, per the confirmed
+  // decision above.
+  const confident = phoneMatched || emailMatched;
 
   return {
     rtClientId: client.clientId,
