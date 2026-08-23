@@ -3859,11 +3859,17 @@
     }
 
     // ── Home ──────────────────────────────────────────────────────
+    // Kept in the exact same order as the sidebar tabs (minus Home itself)
+    // — these two lists drifting apart is exactly how Glossary/FAQ/Tasks
+    // ended up missing from this grid despite being real sidebar tabs.
     const HOME_TILES = [
       { icon: '🔍', label: 'Search Articles', desc: 'Browse the knowledge base', mode: 'search' },
       { icon: '✨', label: 'Ask AI', desc: 'Get an instant answer', mode: 'ai' },
       { icon: '📢', label: 'Announcements', desc: 'Company updates', mode: 'announcements' },
+      { icon: '📖', label: 'Glossary', desc: 'Quick definitions for common terms', mode: 'glossary' },
+      { icon: '❓', label: 'FAQ', desc: 'Real questions from the team', mode: 'faq' },
       { icon: '📋', label: 'Leads', desc: 'Log a lead from a vetting call', mode: 'leads' },
+      { icon: '✅', label: 'Tasks', desc: 'Everything the team is working on', mode: 'tasks' },
       { icon: '🎓', label: 'Training', desc: 'Courses assigned to you', mode: 'training' },
       { icon: '💡', label: 'Submit Ideas', desc: "Suggest an improvement", mode: 'ideas' },
       { icon: '🏖️', label: 'Leave Request', desc: 'Request time off', mode: 'leave' },
