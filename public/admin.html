@@ -959,7 +959,7 @@
            modal here so Workforce Partners/Admins can log a centre straight
            from this table without switching pages. Posts to the same
            POST /api/leads endpoint. -->
-      <div class="modal-overlay" id="addCentreModal" onclick="if(event.target===this)closeAddCentreModal()">
+      <div class="modal-overlay" id="addCentreModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAddCentreModal()">
         <div class="modal" style="max-width:520px">
           <div class="modal-header">
             <div class="modal-title">Add Centre</div>
@@ -1040,7 +1040,7 @@
 
       <!-- Visit logging — Centre 360's "+ Log Visit" and re-opening a past
            visit from the activity timeline share this one modal. -->
-      <div class="modal-overlay" id="visitLogModal" onclick="if(event.target===this)closeVisitLogModal()">
+      <div class="modal-overlay" id="visitLogModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeVisitLogModal()">
         <div class="modal" style="max-width:560px">
           <div class="modal-header">
             <div class="modal-title" id="visitLogModalTitle">Log a Call/Visit</div>
@@ -1122,7 +1122,7 @@
            the Leads filter bar rather than a nav section, since scheduling
            itself needs no UI at all — it happens automatically off the
            Lead Called/Centre Visited status change. -->
-      <div class="modal-overlay" id="calendarSyncModal" onclick="if(event.target===this)closeCalendarSyncModal()">
+      <div class="modal-overlay" id="calendarSyncModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCalendarSyncModal()">
         <div class="modal" style="max-width:760px">
           <div class="modal-header">
             <div class="modal-title">Calendar Sync</div>
@@ -1448,7 +1448,7 @@
       </div>
 
       <!-- Lead Detail Modal -->
-      <div class="modal-overlay" id="leadDetailModal" onclick="if(event.target===this)closeLeadDetailModal()">
+      <div class="modal-overlay" id="leadDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeLeadDetailModal()">
         <div class="modal" style="max-width:560px">
           <div class="modal-header">
             <div class="modal-title" id="leadDetailTitle">Lead Details</div>
@@ -1472,7 +1472,7 @@
            of the external RT app, not something this app can edit). Shared
            across every report type's List sub-view (Clients, Candidates, …) —
            REPORT_CONFIG[type].listView.renderDetail supplies the content. -->
-      <div class="modal-overlay" id="reportDetailModal" onclick="if(event.target===this)closeReportDetailModal()">
+      <div class="modal-overlay" id="reportDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeReportDetailModal()">
         <div class="modal" style="max-width:640px">
           <div class="modal-header">
             <div class="modal-title" id="reportDetailTitle">Details</div>
@@ -1491,7 +1491,7 @@
            Micropods' own pod-detail candidate list already shows, kept at
            that same access tier rather than the heavier admin-only
            Candidates report detail. -->
-      <div class="modal-overlay" id="supplyEducatorsModal" onclick="if(event.target===this)closeSupplyEducatorsModal()">
+      <div class="modal-overlay" id="supplyEducatorsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeSupplyEducatorsModal()">
         <div class="modal" style="max-width:480px">
           <div class="modal-header">
             <div class="modal-title" id="supplyEducatorsModalTitle">Educators nearby</div>
@@ -2911,7 +2911,7 @@
   </div>
 
   <!-- Logs Modal (per-article) -->
-  <div class="modal-overlay" id="logsModal" onclick="if(event.target===this)closeLogsModal()">
+  <div class="modal-overlay" id="logsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeLogsModal()">
     <div class="modal" style="max-width:680px">
       <div class="modal-header">
         <div class="modal-title" id="logsModalTitle">Change Log</div>
@@ -2924,7 +2924,7 @@
   </div>
 
   <!-- Password Change Modal -->
-  <div class="modal-overlay" id="passwordModal" onclick="if(event.target===this)closePasswordModal()">
+  <div class="modal-overlay" id="passwordModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closePasswordModal()">
     <div class="modal" style="max-width:420px">
       <div class="modal-header">
         <div class="modal-title">Change Password</div>
@@ -2979,7 +2979,7 @@
   </div>
 
   <!-- Project Create/Edit Modal -->
-  <div class="modal-overlay" id="projectFormModal" onclick="if(event.target===this)closeProjectFormModal()">
+  <div class="modal-overlay" id="projectFormModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeProjectFormModal()">
     <div class="modal" style="max-width:560px">
       <div class="modal-header">
         <div class="modal-title" id="projectFormModalTitle">New Project</div>
@@ -3063,7 +3063,7 @@
   </div>
 
   <!-- Project Detail Modal -->
-  <div class="modal-overlay" id="projectDetailModal" onclick="if(event.target===this)closeProjectDetailModal()">
+  <div class="modal-overlay" id="projectDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeProjectDetailModal()">
     <div class="modal" style="max-width:820px;width:92vw">
       <div class="modal-header">
         <div class="modal-title" id="projectDetailTitle">Project</div>
@@ -3190,7 +3190,7 @@
   </div>
 
   <!-- Transcript Modal -->
-  <div class="modal-overlay" id="transcriptModal" onclick="if(event.target===this)closeTranscriptModal()">
+  <div class="modal-overlay" id="transcriptModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTranscriptModal()">
     <div class="modal" style="max-width:720px">
       <div class="modal-header">
         <div class="modal-title" id="transcriptModalTitle">Transcript</div>
@@ -3203,7 +3203,7 @@
   </div>
 
   <!-- Greeting Celebration Modal -->
-  <div class="modal-overlay" id="celebrationModal" onclick="if(event.target===this)closeCelebrationModal()">
+  <div class="modal-overlay" id="celebrationModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCelebrationModal()">
     <div class="modal" style="max-width:420px;text-align:center;padding:36px 28px;overflow:hidden;position:relative">
       <div id="confettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
       <div id="celebrationEmoji" style="font-size:56px;margin-bottom:10px;position:relative">🎉</div>
@@ -3214,7 +3214,7 @@
   </div>
 
   <!-- Greeting Preview Modal — shows exactly what the recipient will see, before it's actually sent -->
-  <div class="modal-overlay" id="greetingPreviewModal" onclick="if(event.target===this)closeGreetingPreviewModal()">
+  <div class="modal-overlay" id="greetingPreviewModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeGreetingPreviewModal()">
     <div class="modal" style="max-width:420px;text-align:center;padding:36px 28px;overflow:hidden;position:relative">
       <div id="previewConfettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
       <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;position:relative">Preview — this is what they'll see</div>
@@ -3229,7 +3229,7 @@
   </div>
 
   <!-- New Announcement Modal -->
-  <div class="modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
+  <div class="modal-overlay" id="announcementModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAnnouncementModal()">
     <div class="modal" style="max-width:460px">
       <div class="modal-header">
         <div class="modal-title">New Announcement</div>
@@ -3259,7 +3259,7 @@
   <!-- Announce Changes Modal — preview/edit an AI-drafted "what changed"
        summary for an edited article before it's posted as a real
        Announcement. See saveArticle()/openAnnounceChangesModal(). -->
-  <div class="modal-overlay" id="announceChangesModal" onclick="if(event.target===this)closeAnnounceChangesModal()">
+  <div class="modal-overlay" id="announceChangesModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAnnounceChangesModal()">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
         <div class="modal-title">Announce Changes</div>
@@ -3285,7 +3285,7 @@
   </div>
 
   <!-- Calibration Note Modal -->
-  <div class="modal-overlay" id="calibrationNoteModal" onclick="if(event.target===this)closeCalibrationNoteModal()">
+  <div class="modal-overlay" id="calibrationNoteModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCalibrationNoteModal()">
     <div class="modal" style="max-width:560px">
       <div class="modal-header">
         <div class="modal-title">Calibration Note</div>
@@ -3301,7 +3301,7 @@
   </div>
 
   <!-- Manual Grade Modal -->
-  <div class="modal-overlay" id="manualGradeModal" onclick="if(event.target===this)closeManualGradeModal()">
+  <div class="modal-overlay" id="manualGradeModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeManualGradeModal()">
     <div class="modal" style="max-width:760px">
       <div class="modal-header">
         <div class="modal-title" id="manualGradeModalTitle">Grade Manually</div>
@@ -3323,7 +3323,7 @@
   </div>
 
   <!-- Team Profile Modal -->
-  <div class="modal-overlay" id="teamProfileModal" onclick="if(event.target===this)closeTeamProfileModal()">
+  <div class="modal-overlay" id="teamProfileModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTeamProfileModal()">
     <div class="modal" style="max-width:520px;padding:0;overflow:hidden">
       <div id="teamProfileHeader" style="background:var(--navy);padding:28px;display:flex;align-items:center;gap:20px;position:relative"></div>
       <div style="padding:24px 28px;max-height:52vh;overflow-y:auto">
@@ -3341,7 +3341,7 @@
   </div>
 
   <!-- Add/Edit Team Member Modal -->
-  <div class="modal-overlay" id="teamMemberModal" onclick="if(event.target===this)closeTeamMemberModal()">
+  <div class="modal-overlay" id="teamMemberModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTeamMemberModal()">
     <div class="modal" style="max-width:640px">
       <div class="modal-header">
         <div class="modal-title" id="teamMemberModalTitle">Add Team Member</div>
@@ -3460,7 +3460,7 @@
   </div>
 
   <!-- Add FAQ Modal -->
-  <div class="modal-overlay" id="addFaqModal" onclick="if(event.target===this)closeAddFaqModal()">
+  <div class="modal-overlay" id="addFaqModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAddFaqModal()">
     <div class="modal" style="max-width:560px">
       <div class="modal-header">
         <div class="modal-title">Add FAQ</div>
@@ -3484,7 +3484,7 @@
   </div>
 
   <!-- Course Editor Modal -->
-  <div class="modal-overlay" id="courseEditorModal" onclick="if(event.target===this)closeCourseEditor()">
+  <div class="modal-overlay" id="courseEditorModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCourseEditor()">
     <div class="modal" style="max-width:820px">
       <div class="modal-header">
         <div class="modal-title" id="courseEditorTitle">Edit Course</div>
@@ -3506,7 +3506,7 @@
   </div>
 
   <!-- Assign Course Modal -->
-  <div class="modal-overlay" id="assignCourseModal" onclick="if(event.target===this)closeAssignCourseModal()">
+  <div class="modal-overlay" id="assignCourseModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAssignCourseModal()">
     <div class="modal" style="max-width:440px">
       <div class="modal-header">
         <div class="modal-title">Assign Course</div>
@@ -3530,7 +3530,7 @@
   </div>
 
   <!-- Edit Due Date Modal -->
-  <div class="modal-overlay" id="editDueDateModal" onclick="if(event.target===this)closeEditDueDateModal()">
+  <div class="modal-overlay" id="editDueDateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeEditDueDateModal()">
     <div class="modal" style="max-width:360px">
       <div class="modal-header">
         <div class="modal-title">Edit Due Date</div>
@@ -3564,7 +3564,7 @@
   </div>
 
   <!-- Course Results Modal -->
-  <div class="modal-overlay" id="courseResultsModal" onclick="if(event.target===this)closeCourseResults()">
+  <div class="modal-overlay" id="courseResultsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCourseResults()">
     <div class="modal" style="max-width:700px">
       <div class="modal-header">
         <div class="modal-title" id="courseResultsTitle">Results</div>
@@ -3577,7 +3577,7 @@
   </div>
 
   <!-- Attempt Detail Modal -->
-  <div class="modal-overlay" id="attemptDetailModal" onclick="if(event.target===this)closeAttemptDetailModal()">
+  <div class="modal-overlay" id="attemptDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAttemptDetailModal()">
     <div class="modal" style="max-width:640px">
       <div class="modal-header">
         <div class="modal-title" id="attemptDetailTitle">Attempt Detail</div>
@@ -3590,7 +3590,7 @@
   </div>
 
   <!-- Evaluation Detail Modal -->
-  <div class="modal-overlay" id="evalDetailModal" onclick="if(event.target===this)closeEvalDetailModal()">
+  <div class="modal-overlay" id="evalDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeEvalDetailModal()">
     <div class="modal" style="max-width:800px">
       <div class="modal-header">
         <div class="modal-title" id="evalDetailModalTitle">Evaluation Detail</div>
@@ -3640,6 +3640,14 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js"></script>
   <script type="module" src="/js/richEditor.js"></script>
   <script>
+    // Every modal-overlay's onclick uses this to tell "the user clicked the
+    // dark backdrop to dismiss" apart from "the user mousedown'd inside the
+    // modal (selecting text, dragging a range input, etc.) and happened to
+    // release the mouse outside it" — the latter used to close the modal
+    // out from under them, since a plain click handler only sees where the
+    // mouseup landed. Set on mousedown, checked again on click; only a
+    // press-and-release that both land on the bare overlay counts.
+    let __modalMouseDownTarget = null;
     let allArticles = [];
     let allUsers = [];
     let editingArticleId = null;

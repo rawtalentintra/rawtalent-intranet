@@ -851,7 +851,7 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- Team Profile Modal (read-only) -->
-  <div class="team-profile-modal-overlay" id="teamProfileModal" onclick="if(event.target===this)closeTeamProfileModal()">
+  <div class="team-profile-modal-overlay" id="teamProfileModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTeamProfileModal()">
     <div class="team-profile-modal">
       <div id="teamProfileHeader" style="background:var(--navy);padding:28px;display:flex;align-items:center;gap:20px;position:relative"></div>
       <div style="padding:24px 28px;overflow-y:auto">
@@ -867,7 +867,7 @@
   </div>
 
   <!-- Greeting Celebration Modal -->
-  <div class="celebration-modal-overlay" id="celebrationModal" onclick="if(event.target===this)closeCelebrationModal()">
+  <div class="celebration-modal-overlay" id="celebrationModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCelebrationModal()">
     <div class="celebration-modal">
       <div id="confettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
       <div id="celebrationEmoji" style="font-size:56px;margin-bottom:10px;position:relative">🎉</div>
@@ -878,7 +878,7 @@
   </div>
 
   <!-- Greeting Preview Modal — shows exactly what the recipient will see, before it's actually sent -->
-  <div class="celebration-modal-overlay" id="greetingPreviewModal" onclick="if(event.target===this)closeGreetingPreviewModal()">
+  <div class="celebration-modal-overlay" id="greetingPreviewModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeGreetingPreviewModal()">
     <div class="celebration-modal">
       <div id="previewConfettiLayer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
       <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;position:relative">Preview — this is what they'll see</div>
@@ -893,7 +893,7 @@
   </div>
 
   <!-- New/Edit Announcement Modal (admin/super_admin) -->
-  <div class="modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
+  <div class="modal-overlay" id="announcementModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAnnouncementModal()">
     <div class="modal" style="max-width:460px">
       <div class="modal-header">
         <div class="modal-title" id="announcementModalTitle">New Announcement</div>
@@ -925,7 +925,7 @@
   </div>
 
   <!-- Announcement Acknowledgment Report Modal -->
-  <div class="modal-overlay" id="announcementReportModal" onclick="if(event.target===this)closeAnnouncementReportModal()">
+  <div class="modal-overlay" id="announcementReportModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAnnouncementReportModal()">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
         <div class="modal-title">Acknowledgment Report</div>
@@ -954,7 +954,7 @@
   </div>
 
   <!-- New Leave Request Modal -->
-  <div class="modal-overlay" id="leaveRequestModal" onclick="if(event.target===this)closeLeaveRequestModal()">
+  <div class="modal-overlay" id="leaveRequestModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeLeaveRequestModal()">
     <div class="modal" style="max-width:420px">
       <div class="modal-header">
         <div class="modal-title">Request Leave</div>
@@ -977,7 +977,7 @@
   </div>
 
   <!-- Plot Leave Modal — Joy/Sophia only, always auto-approved -->
-  <div class="modal-overlay" id="plotLeaveModal" onclick="if(event.target===this)closePlotLeaveModal()">
+  <div class="modal-overlay" id="plotLeaveModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closePlotLeaveModal()">
     <div class="modal" style="max-width:420px">
       <div class="modal-header">
         <div class="modal-title">Plot Leave</div>
@@ -1004,7 +1004,7 @@
   </div>
 
   <!-- Submit Idea Modal -->
-  <div class="modal-overlay" id="ideaModal" onclick="if(event.target===this)closeIdeaModal()">
+  <div class="modal-overlay" id="ideaModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeIdeaModal()">
     <div class="modal" style="max-width:440px">
       <div class="modal-header">
         <div class="modal-title">Submit an Idea</div>
@@ -1037,7 +1037,7 @@
   </div>
 
   <!-- Manage Idea Modal (admin only) -->
-  <div class="modal-overlay" id="ideaManageModal" onclick="if(event.target===this)closeIdeaManageModal()">
+  <div class="modal-overlay" id="ideaManageModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeIdeaManageModal()">
     <div class="modal" style="max-width:440px">
       <div class="modal-header">
         <div class="modal-title">Track Progress</div>
@@ -1069,7 +1069,7 @@
   <!-- Task Modal (New/Edit + Notes) — one modal for both, per the "keep it
        simple" brief: creating and editing a task should feel like the same
        screen, not two different flows to learn. -->
-  <div class="modal-overlay" id="taskModal" onclick="if(event.target===this)closeTaskModal()">
+  <div class="modal-overlay" id="taskModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTaskModal()">
     <div class="modal" style="max-width:560px;width:92vw">
       <div class="modal-header">
         <div class="modal-title" id="taskModalTitle">New Task</div>
@@ -1141,6 +1141,14 @@
   </div>
 
   <script>
+    // Every modal-overlay's onclick uses this to tell "the user clicked the
+    // dark backdrop to dismiss" apart from "the user mousedown'd inside the
+    // modal (selecting text, dragging a range input, etc.) and happened to
+    // release the mouse outside it" — the latter used to close the modal
+    // out from under them, since a plain click handler only sees where the
+    // mouseup landed. Set on mousedown, checked again on click; only a
+    // press-and-release that both land on the bare overlay counts.
+    let __modalMouseDownTarget = null;
     let currentMode = 'search';
     let currentCat = '';
     let searchTimer;
