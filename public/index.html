@@ -1846,7 +1846,7 @@
 
     // ── Tasks ─────────────────────────────────────────────────────
     // Replaces ClickUp for internal task tracking. Deliberately simple —
-    // a fixed 5-department list, a fixed 5-value status set, and
+    // a fixed department list, a fixed 5-value status set, and
     // user-addable classifications within a department — per the explicit
     // brief: "we do not want to complicate things". Visible to every role
     // (this whole tab lives in index.html, not admin.html, for that reason
@@ -1935,7 +1935,8 @@
           </div>
           <div>
             <div class="task-legend-heading">Department &amp; Classification</div>
-            <div class="task-legend-row"><b>Department</b> — which team owns the task (a fixed list of 5).</div>
+            <div class="task-legend-row"><b>Department</b> — which team owns the task.</div>
+            <div class="task-legend-row"><b>🚨 Workforce Partners</b> — anything placed under this department is an escalation, not a regular task.</div>
             <div class="task-legend-row"><b>Classification</b> — an optional sub-category inside a department (e.g. "Rosters"). Add your own anytime with "+ Add classification".</div>
             <div class="task-legend-row"><b>@mentions</b> — tag a teammate in a note and they'll see it in their notification bell.</div>
           </div>

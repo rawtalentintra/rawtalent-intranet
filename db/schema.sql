@@ -1305,7 +1305,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_
 -- Tasks (2026-08-23) — replaces ClickUp for internal task tracking.
 -- Visible to EVERY signed-in user regardless of role (built into
 -- public/index.html, not admin.html — role `user` has no admin panel
--- access at all). Deliberately simple: a fixed 5-department list, a fixed
+-- access at all). Deliberately simple: a fixed department list, a fixed
 -- 5-value status set, and user-addable classifications *within* a
 -- department — matching the explicit "don't make this harder than it
 -- needs to be" instruction, rather than ClickUp's fully custom
@@ -1318,14 +1318,29 @@ CREATE TABLE IF NOT EXISTS task_departments (
   sort_order INTEGER DEFAULT 0
 );
 INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
-  ('bookings', 'Bookings Team', '#2563eb', '📅', 1),
-  ('onboarding', 'Onboarding Team', '#15803d', '🧑‍🎓', 2),
-  ('app_dev', 'App Development Team', '#7c3aed', '💻', 3),
-  ('management', 'Management Team', '#b45309', '📊', 4),
-  ('marketing', 'Marketing Team', '#db2777', '📣', 5)
+  ('bookings', 'Bookings', '#2563eb', '📅', 1),
+  ('onboarding', 'Onboarding', '#15803d', '🧑‍🎓', 2),
+  ('app_dev', 'App Development', '#7c3aed', '💻', 3),
+  ('management', 'Management', '#b45309', '📊', 4),
+  ('marketing', 'Marketing', '#db2777', '📣', 5),
+  ('quality', 'Quality', '#0d9488', '🔍', 6),
+  -- Anything logged under this department is an escalation, not a regular
+  -- task (2026-08-24) — the 🚨 icon/red colour and the note in the
+  -- frontend's "What do these mean?" legend both exist to make that
+  -- obvious at a glance, not just in this comment.
+  ('workforce_partners', 'Workforce Partners', '#dc2626', '🚨', 7)
 ON CONFLICT (id) DO NOTHING;
+-- Dropping "Team" from the original 5 names (2026-08-24) — CREATE ... IF
+-- NOT EXISTS/ON CONFLICT DO NOTHING above won't rename a department that
+-- already exists in a database from before this change, so these UPDATEs
+-- (idempotent, safe to run every boot) cover that case explicitly.
+UPDATE task_departments SET name = 'Bookings' WHERE id = 'bookings' AND name = 'Bookings Team';
+UPDATE task_departments SET name = 'Onboarding' WHERE id = 'onboarding' AND name = 'Onboarding Team';
+UPDATE task_departments SET name = 'App Development' WHERE id = 'app_dev' AND name = 'App Development Team';
+UPDATE task_departments SET name = 'Management' WHERE id = 'management' AND name = 'Management Team';
+UPDATE task_departments SET name = 'Marketing' WHERE id = 'marketing' AND name = 'Marketing Team';
 
--- User-addable sub-categories within a department (e.g. "Bookings Team" ->
+-- User-addable sub-categories within a department (e.g. "Bookings" ->
 -- "Follow-ups", "Rosters"). Not seeded — starts empty per department, grows
 -- as people add what they actually need.
 CREATE TABLE IF NOT EXISTS task_classifications (
