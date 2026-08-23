@@ -483,12 +483,26 @@ async function linkRecordingsToVisit(centreKey, visitId, recordingIds) {
   });
 }
 
+// Mandatory fields, confirmed (Decision Area 6, 2026-08-24): visitDate +
+// channel + activityType, plus outcome once the contact has actually
+// happened (status 'completed') — a Planned/Rescheduled entry has no real
+// outcome yet, so it isn't enforced there. Shared by POST/PUT below so the
+// rule can't drift between create and edit.
+function validateVisitFields({ visitDate, channel, activityType, outcome, status }) {
+  if (!visitDate) return 'visitDate is required';
+  if (!channel) return 'channel is required';
+  if (!activityType) return 'activityType is required';
+  if ((status || 'planned') === 'completed' && !outcome) return 'outcome is required once status is completed';
+  return null;
+}
+
 router.post('/:centreKey/visits', async (req, res) => {
   const {
     visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
     channel, activityType, contactName, opportunityNotes, commitment, nextStepOwner, attendees, checklistCompleted
   } = req.body;
-  if (!visitDate) return res.status(400).json({ error: 'visitDate is required' });
+  const fieldError = validateVisitFields({ visitDate, channel, activityType, outcome, status });
+  if (fieldError) return res.status(400).json({ error: fieldError });
   try {
     const id = uuidv4();
     await getDb().execute({
@@ -519,6 +533,8 @@ router.put('/:centreKey/visits/:visitId', async (req, res) => {
     visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
     channel, activityType, contactName, opportunityNotes, commitment, nextStepOwner, attendees, checklistCompleted
   } = req.body;
+  const fieldError = validateVisitFields({ visitDate, channel, activityType, outcome, status });
+  if (fieldError) return res.status(400).json({ error: fieldError });
   try {
     const result = await getDb().execute({
       sql: `UPDATE centre_visits SET

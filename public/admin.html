@@ -1071,7 +1071,7 @@
                 </select>
               </div>
               <div class="form-group-modal">
-                <label class="form-label-modal">Activity type <span class="optional">(optional)</span></label>
+                <label class="form-label-modal">Activity type</label>
                 <select id="visitLogActivityType" class="form-control"></select>
               </div>
             </div>
@@ -1964,7 +1964,7 @@
         <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Decision Area 6 — Activity Logging</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
-            <strong style="color:#b45309">⚠️ Not yet discussed live (2026-08-24)</strong> — same status as Decision Area 5 above. The two activity-type lists below are copied verbatim from the brief (see <code>services/centreActivityTypeService.js</code>), so they shouldn't need to change; everything else — which fields are mandatory, what counts as "meaningful", how missed/rescheduled attempts are treated — is still genuinely open and answered here with a starting default, not a confirmed decision.
+            <strong style="color:#15803d">✅ Decisions confirmed 2026-08-24</strong> (still ahead of the actual meeting reaching this decision area, but confirmed directly by Joy). The four "Decisions required" questions below are answered and built; only the checklist-item list and the missed/rescheduled taxonomy remain genuinely open.
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
             <div>
@@ -1978,10 +1978,11 @@
           </div>
           <div style="font-size:12.5px;color:var(--text-muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);line-height:1.7">
             <strong style="color:var(--navy)">Where this lives:</strong> extended onto the existing <code>centre_visits</code> table (Channel/Activity Type/Contact Name/Opportunity notes/Commitment/Next Step Owner/Attendees/Checklist completed) rather than a new table — a call and a visit are still "one contact with a centre, on one day", the same thing this table already modelled. Log one from Centre 360's "Log a Call/Visit" button.<br>
-            <strong style="color:var(--navy)">Mandatory fields:</strong> ASSUMED default is just Visit date + Channel — everything else stays optional for now, to avoid the brief's own "without making logging burdensome" concern before the real answer is confirmed.<br>
-            <strong style="color:var(--navy)">"Meaningful completed" call/visit:</strong> ASSUMED to be Status = "Called / Visited" (the existing <code>completed</code> DB value) — matches what <code>centreNurtureService.js</code>/<code>centreHealthService.js</code> already treat as a real contact for cadence purposes.<br>
-            <strong style="color:var(--navy)">Missed/rescheduled/unsuccessful attempts:</strong> the existing Status field already has "Rescheduled"; there's no "No answer"/"Unsuccessful" value yet — an open decision, not yet added.<br>
-            <strong style="color:var(--navy)">Checklist items:</strong> only a single yes/no "Checklist completed" toggle exists — the brief's own "Decisions required" list asks what the checklist items even are, so there's nothing to enumerate yet.
+            <strong style="color:var(--navy)">Mandatory fields (confirmed):</strong> Date + Channel + Activity Type, plus Outcome once Status is "Called / Visited" (a Planned/Rescheduled entry has no real outcome yet, so it isn't forced there) — enforced both in the modal and server-side (<code>validateVisitFields</code> in routes/centres.js). Contact, attendees, notes, opportunity/commitment, and next step all stay optional.<br>
+            <strong style="color:var(--navy)">"Meaningful completed" call/visit (confirmed):</strong> Status = "Called / Visited" (the existing <code>completed</code> DB value) — no change needed, already matched what <code>centreNurtureService.js</code>/<code>centreHealthService.js</code> treat as a real contact for cadence purposes.<br>
+            <strong style="color:var(--navy)">Automatic capture (confirmed):</strong> none yet — every call/visit is logged by hand. Uploading a recording/transcript already auto-fills Outcome/Notes via AI (<code>centreVisitAnalysisService.js</code>), but doesn't create the log entry itself.<br>
+            <strong style="color:var(--navy)">Missed/rescheduled/unsuccessful attempts (confirmed):</strong> kept simple — reuse the existing "Rescheduled" status plus a note explaining what happened; no new status values added.<br>
+            <strong style="color:var(--navy)">Still open:</strong> checklist items — only a single yes/no "Checklist completed" toggle exists; nobody's specified what the checklist actually contains yet.
           </div>
         </div>
 
@@ -8852,9 +8853,27 @@
       else if (step === 'Check-in after Booking' && visitLogLastBookingDate) dueInput.value = addDaysToDateInputValue(toDateInputValue(visitLogLastBookingDate), 1);
     }
 
+    // Mandatory fields, confirmed (Decision Area 6, 2026-08-24): Date +
+    // Channel + Activity Type + Outcome. Everything else (contact,
+    // attendees, notes, opportunity/commitment, next step) stays optional.
+    // Outcome is only enforced once Status is "Called / Visited" — a
+    // Planned (or Rescheduled) entry is logged before the contact actually
+    // happens, so there's no real outcome to require yet. Not a re-litigation
+    // of the decision, just how it has to apply to a future-dated entry.
+    function validateVisitLogRequiredFields() {
+      if (!document.getElementById('visitLogDate').value) return 'Date is required';
+      if (!document.getElementById('visitLogChannel').value) return 'Channel is required';
+      if (!document.getElementById('visitLogActivityType').value) return 'Activity type is required';
+      if (document.getElementById('visitLogStatus').value === 'completed' && !document.getElementById('visitLogOutcome').value) {
+        return 'Outcome is required once status is "Called / Visited"';
+      }
+      return null;
+    }
+
     async function submitVisitLog() {
       const visitDate = document.getElementById('visitLogDate').value;
-      if (!visitDate) { toast('Visit date is required', 'error'); return; }
+      const missingFieldError = validateVisitLogRequiredFields();
+      if (missingFieldError) { toast(missingFieldError, 'error'); return; }
       const body = {
         visitDate: new Date(visitDate).toISOString(),
         status: document.getElementById('visitLogStatus').value,
