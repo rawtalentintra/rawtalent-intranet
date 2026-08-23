@@ -1083,9 +1083,10 @@
         <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
           <div style="position:relative">
-            <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown')" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
+            <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
             <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
           </div>
+          <div id="taskDescMentionPreview" class="task-mention-live-preview" style="display:none"></div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:160px">
@@ -1122,9 +1123,10 @@
           <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📝 Notes</div>
           <div id="taskNotesList" style="max-height:220px;overflow-y:auto;margin-bottom:10px"></div>
           <div style="position:relative">
-            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleMentionInput(this,'taskMentionDropdown')" onblur="setTimeout(()=>hideMentionDropdown('taskMentionDropdown'),150)"></textarea>
+            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleMentionInput(this,'taskMentionDropdown','taskNoteMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskMentionDropdown'),150)"></textarea>
             <div id="taskMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
           </div>
+          <div id="taskNoteMentionPreview" class="task-mention-live-preview" style="display:none"></div>
           <div style="display:flex;justify-content:flex-end;margin-top:8px">
             <button class="btn-add" style="font-size:12px;padding:6px 14px" onclick="submitTaskNote()">Add Note</button>
           </div>
@@ -2046,6 +2048,7 @@
         notesSection.style.display = 'block';
         document.getElementById('taskTitleInput').value = t.title || '';
         document.getElementById('taskDescInput').value = t.description || '';
+        updateMentionPreview(document.getElementById('taskDescInput'), 'taskDescMentionPreview');
         document.getElementById('taskDeptSelect').value = t.department_id;
         populateTaskClassSelect(t.department_id, t.classification_id);
         document.getElementById('taskAssigneeSelect').value = t.assigned_to || '';
@@ -2060,6 +2063,7 @@
         notesSection.style.display = 'none';
         document.getElementById('taskTitleInput').value = '';
         document.getElementById('taskDescInput').value = '';
+        document.getElementById('taskDescMentionPreview').style.display = 'none';
         document.getElementById('taskDeptSelect').value = taskFilterDept !== 'all' ? taskFilterDept : (taskMeta.departments[0]?.id || '');
         populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
         document.getElementById('taskAssigneeSelect').value = '';
@@ -2200,6 +2204,7 @@
         if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
         input.value = '';
         hideMentionDropdown('taskMentionDropdown');
+        document.getElementById('taskNoteMentionPreview').style.display = 'none';
         currentTaskNotes.push(data.note);
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
@@ -2220,23 +2225,53 @@
     }
 
     // Generic across both mention-enabled fields (task notes AND the
-    // description box) — tracks which textarea/dropdown pair is currently
-    // active so one set of functions serves both instead of duplicating
-    // near-identical logic per field.
+    // description box) — tracks which textarea/dropdown/preview trio is
+    // currently active so one set of functions serves both instead of
+    // duplicating near-identical logic per field.
     let taskMentionActiveEl = null;
     let taskMentionActiveDropdownId = null;
+    let taskMentionActivePreviewId = null;
 
-    function handleMentionInput(el, dropdownId) {
+    function handleMentionInput(el, dropdownId, previewId) {
       taskMentionActiveEl = el;
       taskMentionActiveDropdownId = dropdownId;
+      taskMentionActivePreviewId = previewId || null;
       const match = handleTaskMentionQuery(el.value);
       const dropdown = document.getElementById(dropdownId);
-      if (!match) { dropdown.style.display = 'none'; taskMentionCandidates = []; return; }
-      const q = match.query.toLowerCase();
-      taskMentionCandidates = taskMeta.users.filter(u => (u.name || u.email).toLowerCase().includes(q)).slice(0, 6);
-      if (!taskMentionCandidates.length) { dropdown.style.display = 'none'; return; }
-      dropdown.innerHTML = taskMentionCandidates.map((u, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();insertMention(${i})">${escHtml(u.name || u.email)}</div>`).join('');
-      dropdown.style.display = 'block';
+      if (!match) { dropdown.style.display = 'none'; taskMentionCandidates = []; }
+      else {
+        const q = match.query.toLowerCase();
+        // "Closest" match first — an exact/starts-with hit beats a mid-name
+        // substring hit, so pressing Enter picks the person you clearly
+        // meant rather than whoever happens to sort first alphabetically.
+        taskMentionCandidates = taskMeta.users
+          .filter(u => (u.name || u.email).toLowerCase().includes(q))
+          .sort((a, b) => {
+            const an = (a.name || a.email).toLowerCase(), bn = (b.name || b.email).toLowerCase();
+            const aRank = an === q ? 0 : an.startsWith(q) ? 1 : 2;
+            const bRank = bn === q ? 0 : bn.startsWith(q) ? 1 : 2;
+            return aRank !== bRank ? aRank - bRank : an.localeCompare(bn);
+          })
+          .slice(0, 6);
+        if (!taskMentionCandidates.length) { dropdown.style.display = 'none'; }
+        else {
+          dropdown.innerHTML = taskMentionCandidates.map((u, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();insertMention(${i})">${escHtml(u.name || u.email)}</div>`).join('');
+          dropdown.style.display = 'block';
+        }
+      }
+      if (previewId) updateMentionPreview(el, previewId);
+    }
+
+    // Enter accepts the top (closest) suggestion in the dropdown — without
+    // this, tagging someone required reaching for the mouse every time.
+    // Only intercepts Enter while the dropdown is actually open, so a plain
+    // Enter elsewhere in the field still behaves normally (e.g. a newline).
+    function handleMentionKeydown(e) {
+      if (e.key !== 'Enter') return;
+      const dropdown = document.getElementById(e.target.id === 'taskDescInput' ? 'taskDescMentionDropdown' : 'taskMentionDropdown');
+      if (!dropdown || dropdown.style.display === 'none' || !taskMentionCandidates.length) return;
+      e.preventDefault();
+      insertMention(0);
     }
 
     function insertMention(i) {
@@ -2248,12 +2283,29 @@
       const name = u.name || u.email.split('@')[0];
       el.value = el.value.slice(0, match.atIndex) + '@' + name + ' ';
       hideMentionDropdown(taskMentionActiveDropdownId);
+      if (taskMentionActivePreviewId) updateMentionPreview(el, taskMentionActivePreviewId);
       el.focus();
     }
 
     function hideMentionDropdown(dropdownId) {
       const dropdown = document.getElementById(dropdownId || taskMentionActiveDropdownId);
       if (dropdown) dropdown.style.display = 'none';
+    }
+
+    // Live "Tagging: …" line under the field — the textarea itself can't
+    // show inline coloured text, so this is how someone sees, while still
+    // typing, that a name they've typed will actually notify that person
+    // (matched against the real user list, same as the server does).
+    function updateMentionPreview(el, previewId) {
+      const preview = document.getElementById(previewId);
+      if (!preview) return;
+      const tagged = taskMeta.users.filter(u => {
+        const name = (u.name || u.email.split('@')[0]).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp('@' + name + '(?![A-Za-z])', 'i').test(el.value);
+      });
+      if (!tagged.length) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
+      preview.style.display = 'block';
+      preview.innerHTML = '🏷️ Tagging ' + tagged.map(u => `<span class="task-mention">${escHtml(u.name || u.email.split('@')[0])}</span>`).join(', ');
     }
 
     // ── Glossary ──────────────────────────────────────────────────
