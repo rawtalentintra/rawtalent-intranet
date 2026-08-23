@@ -969,6 +969,7 @@
             <div id="centreLeadExcludedWarning" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:600;margin-bottom:16px">
               ⚠️ This looks like it might be a Goodstart, Guardian, Affinity, or G8 centre — per policy we don't pursue these as leads. Double-check before submitting.
             </div>
+            <div id="centreLeadRtClientWarning" class="lead-dup-warning" style="display:none;margin-bottom:16px"></div>
             <div class="form-group-modal">
               <label class="form-label-modal">Centre Name</label>
               <input type="text" id="centreLeadCentreName" class="form-control" placeholder="e.g. Little Explorers Early Learning" oninput="checkCentreLeadExcluded();scheduleCentreLeadDupCheck()">
@@ -977,11 +978,11 @@
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Suburb</label>
-                <input type="text" id="centreLeadSuburb" class="form-control" placeholder="e.g. Queenstown">
+                <input type="text" id="centreLeadSuburb" class="form-control" placeholder="e.g. Queenstown" oninput="scheduleCentreLeadDupCheck()">
               </div>
               <div class="form-group-modal">
                 <label class="form-label-modal">State</label>
-                <select id="centreLeadState" class="form-control">
+                <select id="centreLeadState" class="form-control" onchange="scheduleCentreLeadDupCheck()">
                   <option value="">Select…</option>
                 </select>
               </div>
@@ -993,7 +994,7 @@
             <div id="centreLeadAddressDupWarning" class="lead-dup-warning" style="display:none"></div>
             <div class="form-group-modal">
               <label class="form-label-modal">Centre Phone Number</label>
-              <input type="text" id="centreLeadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
+              <input type="text" id="centreLeadCentrePhone" class="form-control" placeholder="e.g. 0884476519" oninput="scheduleCentreLeadDupCheck()">
             </div>
             <div class="form-group-modal">
               <label class="form-label-modal">Educator Name <span class="optional">(optional)</span></label>
@@ -1878,6 +1879,32 @@
             <strong style="color:var(--navy)">Training:</strong> course builder, assignment, attempts/scoring.<br>
             <strong style="color:var(--navy)">Projects:</strong> internal project tracking with milestones and SOP file attachments.<br>
             <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — a private, restricted-access area.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Client Acquisition &amp; Activation — System of Record</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
+            Decision Area 5 (Workforce Partner strategy meeting, 2026-08-22) asked which system owns each milestone in a centre's lead→client journey. The meeting itself ended before this decision area was actually discussed (it stops right at the boundary, mid-wrap-up) — no live answer exists in that recording. This table documents how the app is already architected to answer it, confirmed 2026-08-22.
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead><tr><th style="width:220px">Milestone / data</th><th style="width:110px">System of record</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td>Lead status, ownership, notes, activities, priorities</td><td>HeartBeat</td><td><code>leads</code>/<code>lead_notes</code> — the only place this exists; RT has no concept of a pre-signed prospect.</td></tr>
+                <tr><td>Centre existence &amp; activation</td><td>RT</td><td>Created in RT's own admin app, not HeartBeat — this app has no "create RT client" action of its own. <code>services/leadAutoSignService.js</code> detects a fresh match and auto-marks the lead Profile Created within ~15 minutes (the background poll interval).</td></tr>
+                <tr><td>Bookings — created, filled, completed</td><td>RT</td><td>HeartBeat reads these live/via a short cache; never the other way around.</td></tr>
+                <tr><td>Client portal login, requests, favourites, ratings</td><td>RT (if exposed)</td><td>Known gap: RT's API has no login-timestamp field for clients, the same gap already documented for candidates — "First portal login" can't be detected today without an RT-side change.</td></tr>
+                <tr><td>Client health — active/growing/declining/dormant</td><td>HeartBeat</td><td><code>services/centreHealthService.js</code> (Decision Area 3) — computed from RT's own booking/visit data, not a separate RT field.</td></tr>
+                <tr><td>Relationship cadence (call/visit due dates)</td><td>HeartBeat</td><td><code>services/centreNurtureService.js</code>, keyed off <code>centre_visits</code> — a Workforce Partner's own logged calls/visits.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px;line-height:1.6">
+            <strong style="color:var(--navy)">Lead → My Centres cutover:</strong> a lead formally becomes a centre when RT's own client record appears for it — matches the existing auto-sign trigger above exactly, not a separate decision to implement. The Leads list's "Existing Centre?" column and the Lead Detail "🏢 Click to go to Centre" banner already make this transition navigable once it happens.<br>
+            <strong style="color:var(--navy)">Follow-up ownership if a client doesn't book after activation:</strong> the <code>new_activating</code> health category (Decision Area 3) already exists for exactly this — a centre created in the last 60 days with fewer than 5 bookings gets flagged, owned by whoever's set as its <code>assignedWorkforcePartner</code>.<br>
+            <strong style="color:var(--navy)">Email/notification automation:</strong> deliberately out of scope — no email-sending integration exists anywhere in this codebase (confirmed while scoping Decision Area 1's Educator Outreach and Decision Area 2's Advertising Opportunity Engine, both held back for the same reason). Adding one is a real, separate infrastructure decision, not a one-line addition.<br>
+            <strong style="color:var(--navy)">Centre-creation duplicate check:</strong> HeartBeat's own Add Centre form (for logging a lead, not creating an RT client) now checks the new centre name/suburb/state/phone against RT's live client list, not just other leads already in the pipeline — using the same confidence bar as the Leads list's "Existing Centre?" column.
           </div>
         </div>
 
@@ -5878,6 +5905,7 @@
       document.getElementById('centreLeadAgencyUsage').value = '';
       document.getElementById('centreLeadStatus').value = 'signed';
       document.getElementById('centreLeadExcludedWarning').style.display = 'none';
+      document.getElementById('centreLeadRtClientWarning').style.display = 'none';
       hideCentreLeadDupWarning('centre');
       hideCentreLeadDupWarning('address');
       document.getElementById('addCentreModal').classList.add('open');
@@ -5901,17 +5929,40 @@
     async function checkCentreLeadDuplicates() {
       const centreName = document.getElementById('centreLeadCentreName').value.trim();
       const streetAddress = document.getElementById('centreLeadStreetAddress').value.trim();
+      const suburb = document.getElementById('centreLeadSuburb').value.trim();
+      const state = document.getElementById('centreLeadState').value.trim();
+      const centrePhone = document.getElementById('centreLeadCentrePhone').value.trim();
       if (centreName.length < 3 && streetAddress.length < 5) {
         hideCentreLeadDupWarning('centre');
         hideCentreLeadDupWarning('address');
+        document.getElementById('centreLeadRtClientWarning').style.display = 'none';
         return;
       }
       try {
-        const params = new URLSearchParams({ centreName, streetAddress });
-        const { centreMatches, addressMatches } = await fetch(`/api/leads/check-duplicate?${params}`).then(r => r.json());
+        const params = new URLSearchParams({ centreName, streetAddress, suburb, state, centrePhone });
+        const { centreMatches, addressMatches, rtClientMatch } = await fetch(`/api/leads/check-duplicate?${params}`).then(r => r.json());
         renderCentreLeadDupWarning('centre', centreMatches);
         renderCentreLeadDupWarning('address', addressMatches);
+        renderCentreLeadRtClientWarning(rtClientMatch);
       } catch { /* soft nicety — a network hiccup here shouldn't block submitting */ }
+    }
+
+    // Decision Area 5's duplicate-check exception — the ONE genuinely new
+    // signal beyond the existing lead-vs-lead check: this centre might
+    // already be a real, live RT client, not just another lead someone
+    // else already submitted. Same centreMatchService confidence bar and
+    // wording tone as the after-the-fact "Existing Centre?" column/Lead
+    // Detail banner, just surfaced before the lead is even created.
+    function renderCentreLeadRtClientWarning(match) {
+      const box = document.getElementById('centreLeadRtClientWarning');
+      if (!match) { box.style.display = 'none'; return; }
+      box.innerHTML = `
+        <div style="font-weight:700;margin-bottom:3px">⚠️ This might already be an existing centre</div>
+        <div>${escHtml(match.clientName)} — ${escHtml(match.locationLabel)}</div>
+        <div style="margin-top:2px;font-size:11.5px">Why: ${escHtml(match.reasons.join(', '))}</div>
+        <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:11px;margin-top:6px" onclick="closeAddCentreModal();goToCentre360('${match.centreKey}')">View this centre →</button>
+      `;
+      box.style.display = 'block';
     }
 
     function hideCentreLeadDupWarning(kind) {

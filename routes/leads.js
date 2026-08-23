@@ -9,7 +9,7 @@ const rtApi = require('../services/rtApiReportService');
 const centreMatchService = require('../services/centreMatchService');
 const { keyForLocation, keyForClient } = require('../services/centreKeyService');
 const { MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService');
-const { visitsByCentreKey } = require('./centres');
+const { visitsByCentreKey, getCentresAndBookings } = require('./centres');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
 const { partnerForSuburbState } = require('../services/melbourneTerritoryService');
 
@@ -241,10 +241,24 @@ router.get('/stats', requireAdmin, async (req, res) => {
 // Learning Caulfield"), so an exact-match lookup would miss most repeats.
 // Open to any authed user (not just admins), since it's the rep filling out
 // the form who needs the warning before wasting time on the rest of it.
+// Decision Area 5 (Client acquisition and activation, 2026-08-22) asked
+// for an approval/duplicate-check step during centre creation — this
+// endpoint only ever checked a new lead against OTHER LEADS, never
+// against RT's real, live client list, so the actual highest-value
+// duplicate case (someone spending time on a "lead" that's already a
+// paying, signed client) was never caught here at all. Reuses
+// centreMatchService's exact fuzzy name/phone/suburb/state matching —
+// the SAME logic already used after the fact for the Leads list's
+// "Existing Centre?" column and leadAutoSignService's auto-detection —
+// so a new lead gets the identical duplicate-risk signal at creation
+// time, not just once someone happens to look later.
 router.get('/check-duplicate', async (req, res) => {
   try {
     const centreName = (req.query.centreName || '').trim();
     const streetAddress = (req.query.streetAddress || '').trim();
+    const suburb = (req.query.suburb || '').trim();
+    const state = (req.query.state || '').trim();
+    const centrePhone = (req.query.centrePhone || '').trim();
 
     const centreMatches = centreName.length >= 3
       ? await getDb().execute({
@@ -268,7 +282,28 @@ router.get('/check-duplicate', async (req, res) => {
         }).then(r => r.rows)
       : [];
 
-    res.json({ centreMatches, addressMatches });
+    let rtClientMatch = null;
+    if (centreName.length >= 3 || centrePhone.length >= 6) {
+      const { rawClients } = await getCentresAndBookings();
+      const pseudoLead = { centre_name: centreName, centre_phone: centrePhone, suburb, state };
+      // findConfidentMatch, not findMatches — the same confidence bar
+      // every other consumer of this service uses (the Leads list's
+      // "Existing Centre?" column, leadAutoSignService). Verified live:
+      // a plain name-token overlap on generic words like "Children's
+      // Centre" alone clears a naive score-based threshold without
+      // actually being the right centre — confident requires a phone
+      // match, or name+suburb together, which is a real signal.
+      const best = centreMatchService.findConfidentMatch(pseudoLead, rawClients);
+      if (best) {
+        rtClientMatch = {
+          centreKey: best.rtLocationId ? keyForLocation(best.rtLocationId) : keyForClient(best.rtClientId),
+          clientName: best.clientName, locationLabel: best.locationLabel,
+          reasons: best.reasons, confident: best.confident
+        };
+      }
+    }
+
+    res.json({ centreMatches, addressMatches, rtClientMatch });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

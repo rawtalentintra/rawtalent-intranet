@@ -54,7 +54,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // rt_candidates_cache, justified by ~25k rows hit on every list load) — a
 // short in-memory cache just avoids re-pulling on every page load within
 // a few minutes of each other.
-let cache = { centres: null, bookings: null, expiresAt: 0 };
+let cache = { centres: null, bookings: null, rawClients: null, expiresAt: 0 };
 
 async function getCentresAndBookings() {
   if (cache.centres && Date.now() < cache.expiresAt) return cache;
@@ -68,7 +68,12 @@ async function getCentresAndBookings() {
   // confirmed against real data) aren't centres a Workforce Partner
   // manages, so they're excluded before anything else sees this list.
   const centres = flattenCentres(clients).filter(c => c.isActive);
-  cache = { centres, bookings, expiresAt: Date.now() + CACHE_TTL_MS };
+  // rawClients (pre-flatten, with each client's own locations[] intact) is
+  // kept alongside the flattened `centres` shape — centreMatchService's
+  // findMatches/findConfidentMatch (routes/leads.js's duplicate-check and
+  // leadAutoSignService) need the nested locations[] shape, not one row
+  // per location, so flattening it away here would lose what they need.
+  cache = { centres, bookings, rawClients: clients, expiresAt: Date.now() + CACHE_TTL_MS };
   return cache;
 }
 
