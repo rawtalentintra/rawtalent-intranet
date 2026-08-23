@@ -1344,6 +1344,23 @@ CREATE TABLE IF NOT EXISTS tasks (
 -- existing tasks table (e.g. an environment that ran this migration
 -- before mentioned_emails was added) — the ALTER below covers that case.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS mentioned_emails JSONB DEFAULT '[]';
+-- The RT educator/centre a task is actually about (2026-08-23) — matched
+-- from the title's name+phone by services/taskPersonMatchService.js and
+-- confirmed/picked by the user before saving (see routes/tasks.js). Name/
+-- phone are frozen at link time (RT data can change; this is "who this
+-- task was about", not a live join) — user_id is what makes the
+-- candidate name clickable through to their real backoffice profile.
+-- No FK, per this file's header convention, and rt_candidates_cache's
+-- user_id isn't a Postgres FK target here anyway (it's a synced mirror
+-- table, wiped and rebuilt on data changes elsewhere already).
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidate_id BIGINT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidate_name TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidate_phone TEXT;
+-- Client/centre match — informational only (no confirmed backoffice URL
+-- for a client profile the way candidateDetails was given, so nothing to
+-- link to yet; see taskPersonMatchService.js's clientResult()).
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_client_name TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_client_phone TEXT;
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

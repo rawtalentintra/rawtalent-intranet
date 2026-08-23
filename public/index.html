@@ -1078,7 +1078,8 @@
       <div class="modal-body" style="max-height:75vh;overflow-y:auto">
         <div class="form-group-modal">
           <label class="form-label-modal">Title</label>
-          <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done?" maxlength="200">
+          <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done? e.g. Kirandeep Kaur | 0455 534 510 — WWCC check" maxlength="200" oninput="handleTaskTitleInput(this.value)">
+          <div id="taskPersonMatchPanel" style="display:none;margin-top:8px"></div>
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
@@ -1874,6 +1875,14 @@
     let taskSearchQuery = '';
     let taskLegendOpen = false;
     let taskViewMode = 'board'; // 'board' | 'list'
+    // The RT educator/centre a task's title looks like it's about — set
+    // either automatically (a single confident phone match) or by the user
+    // picking from a "did you mean" list (name-only matches, or duplicate
+    // phone matches). null until something is actually confirmed; cleared
+    // whenever the modal opens for a different task.
+    let taskLinkedCandidate = null; // { userId, name, phone, portalUrl }
+    let taskLinkedClient = null;    // { name, suburb, state, phone }
+    let taskMatchTimer = null;
     let currentTaskNotes = [];
     let taskMentionCandidates = [];
 
@@ -1952,6 +1961,7 @@
           </div>
           <div class="task-card-title">${escHtml(t.title)}</div>
           ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+          ${t.linked_candidate_id ? `<div class="task-card-linked" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
           <div class="task-card-bottom">
             <span class="task-card-assignee">👤 ${escHtml(assigneeLabelFor(t))}</span>
             ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
@@ -2061,6 +2071,7 @@
             <td>
               <div style="font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
               ${t.classification_name ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+              ${t.linked_candidate_id ? `<div class="task-card-linked" style="margin-top:4px" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="margin-top:4px">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
             </td>
             <td>👤 ${escHtml(assigneeLabelFor(t))}</td>
             <td>${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : '<span style="color:var(--gray-400)">—</span>'}</td>
@@ -2179,6 +2190,11 @@
         document.getElementById('taskPrioritySelect').value = t.priority;
         currentTaskNotes = [];
         loadTaskNotes(taskId);
+        taskLinkedCandidate = t.linked_candidate_id
+          ? { userId: t.linked_candidate_id, name: t.linked_candidate_name, phone: t.linked_candidate_phone, portalUrl: candidatePortalUrl(t.linked_candidate_id) }
+          : null;
+        taskLinkedClient = t.linked_client_name ? { name: t.linked_client_name, phone: t.linked_client_phone } : null;
+        renderTaskPersonMatchPanel(null);
       } else {
         document.getElementById('taskModalTitle').textContent = 'New Task';
         deleteBtn.style.display = 'none';
@@ -2192,8 +2208,134 @@
         document.getElementById('taskDueInput').value = '';
         document.getElementById('taskStatusSelect').value = 'to_do';
         document.getElementById('taskPrioritySelect').value = 'normal';
+        taskLinkedCandidate = null;
+        taskLinkedClient = null;
+        renderTaskPersonMatchPanel(null);
       }
       document.getElementById('taskModal').classList.add('open');
+    }
+
+    function candidatePortalUrl(userId) {
+      return `https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${userId}`;
+    }
+
+    // Debounced live match against the title — matches the same 400ms feel
+    // as this app's other search-as-you-type inputs. Doesn't touch an
+    // already-confirmed candidate/client automatically; the match panel
+    // just shows fresh suggestions underneath until the user picks one (or
+    // clears the current pick with ✕ first).
+    function handleTaskTitleInput(value) {
+      clearTimeout(taskMatchTimer);
+      const q = value.trim();
+      if (q.length < 3) { renderTaskPersonMatchPanel(null); return; }
+      taskMatchTimer = setTimeout(async () => {
+        try {
+          const data = await fetch(`/api/tasks/match-person?q=${encodeURIComponent(q)}`).then(r => r.json());
+          renderTaskPersonMatchPanel(data);
+        } catch { /* best-effort — a failed lookup just leaves the panel as-is */ }
+      }, 400);
+    }
+
+    function taskPersonChipHtml(kind, label, sub, onClick, onRemove) {
+      return `
+        <div class="task-person-chip">
+          <div class="task-person-chip-main" ${onClick ? `onclick="${onClick}"` : ''} style="${onClick ? 'cursor:pointer' : ''}">
+            <span>${kind === 'candidate' ? '🎓' : '🏢'}</span>
+            <div>
+              <div class="task-person-chip-name">${escHtml(label)}${onClick ? ' <span class="task-person-chip-link">View Profile ↗</span>' : ''}</div>
+              ${sub ? `<div class="task-person-chip-sub">${escHtml(sub)}</div>` : ''}
+            </div>
+          </div>
+          <button type="button" class="task-person-chip-remove" onclick="${onRemove}" title="Remove">✕</button>
+        </div>
+      `;
+    }
+
+    function renderTaskPersonMatchPanel(data) {
+      const panel = document.getElementById('taskPersonMatchPanel');
+      const sections = [];
+
+      if (taskLinkedCandidate) {
+        sections.push(taskPersonChipHtml('candidate', taskLinkedCandidate.name,
+          taskLinkedCandidate.phone ? `📞 ${taskLinkedCandidate.phone}` : '',
+          `openCandidatePortal('${taskLinkedCandidate.portalUrl}')`, 'clearTaskCandidate()'));
+      } else if (data?.candidates?.length) {
+        if (data.candidateDuplicates) {
+          sections.push(`<div class="task-person-warning">⚠️ Possible duplicate educator profiles found — pick the right one:</div>`);
+        } else if (data.candidates[0].confidence === 'phone') {
+          // A single confident phone match — auto-selected, no click needed.
+          selectTaskCandidateFromData(data.candidates[0]);
+          sections.push(taskPersonChipHtml('candidate', data.candidates[0].name,
+            data.candidates[0].phone ? `📞 ${data.candidates[0].phone}` : '',
+            `openCandidatePortal('${data.candidates[0].portalUrl}')`, 'clearTaskCandidate()'));
+        }
+        if (data.candidateDuplicates || data.candidates[0].confidence === 'name') {
+          window.__taskCandidateCandidates = data.candidates;
+          // Each duplicate is independently viewable (real, distinct
+          // people — RT already confirms that via the phone match), not
+          // just selectable, so the user can actually check which one is
+          // right before committing to a pick.
+          sections.push(`<div class="task-person-suggestions">${data.candidates.map((c, i) => `
+            <span class="task-person-suggestion-row">
+              <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+              <button type="button" class="task-person-suggestion-view" onclick="event.stopPropagation();openCandidatePortal('${c.portalUrl}')" title="View profile">↗</button>
+            </span>
+          `).join('')}</div>`);
+        }
+      }
+
+      if (taskLinkedClient) {
+        sections.push(taskPersonChipHtml('client', taskLinkedClient.name,
+          taskLinkedClient.phone ? `📞 ${taskLinkedClient.phone}` : '', null, 'clearTaskClient()'));
+      } else if (data?.clients?.length) {
+        if (data.clientDuplicates) {
+          sections.push(`<div class="task-person-warning">⚠️ Possible duplicate centre records found — pick the right one:</div>`);
+        } else if (data.clients[0].confidence === 'phone') {
+          selectTaskClientFromData(data.clients[0]);
+          sections.push(taskPersonChipHtml('client', data.clients[0].name,
+            data.clients[0].phone ? `📞 ${data.clients[0].phone}` : '', null, 'clearTaskClient()'));
+        }
+        if (data.clientDuplicates || data.clients[0].confidence === 'name') {
+          window.__taskClientCandidates = data.clients;
+          sections.push(`<div class="task-person-suggestions">${data.clients.map((c, i) => `
+            <button type="button" class="task-person-suggestion" onclick="selectTaskClientByIndex(${i})">${escHtml(c.name)}${c.suburb ? ` · ${escHtml(c.suburb)}` : ''}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+          `).join('')}</div>`);
+        }
+      }
+
+      if (!sections.length) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+      panel.style.display = 'block';
+      panel.innerHTML = sections.join('');
+    }
+
+    function selectTaskCandidateFromData(c) {
+      taskLinkedCandidate = { userId: c.userId, name: c.name, phone: c.phone, portalUrl: c.portalUrl };
+    }
+    function selectTaskCandidateByIndex(i) {
+      const c = (window.__taskCandidateCandidates || [])[i];
+      if (!c) return;
+      selectTaskCandidateFromData(c);
+      renderTaskPersonMatchPanel(null);
+    }
+    function clearTaskCandidate() {
+      taskLinkedCandidate = null;
+      renderTaskPersonMatchPanel(null);
+    }
+    function selectTaskClientFromData(c) {
+      taskLinkedClient = { name: c.name, phone: c.phone };
+    }
+    function selectTaskClientByIndex(i) {
+      const c = (window.__taskClientCandidates || [])[i];
+      if (!c) return;
+      selectTaskClientFromData(c);
+      renderTaskPersonMatchPanel(null);
+    }
+    function clearTaskClient() {
+      taskLinkedClient = null;
+      renderTaskPersonMatchPanel(null);
+    }
+    function openCandidatePortal(url) {
+      window.open(url, '_blank', 'noopener');
     }
 
     // Used both by card clicks (data already loaded) and by notification-
@@ -2233,7 +2375,12 @@
         status: document.getElementById('taskStatusSelect').value,
         priority: document.getElementById('taskPrioritySelect').value,
         assigned_to: document.getElementById('taskAssigneeSelect').value || null,
-        due_date: document.getElementById('taskDueInput').value || null
+        due_date: document.getElementById('taskDueInput').value || null,
+        linked_candidate_id: taskLinkedCandidate?.userId || null,
+        linked_candidate_name: taskLinkedCandidate?.name || null,
+        linked_candidate_phone: taskLinkedCandidate?.phone || null,
+        linked_client_name: taskLinkedClient?.name || null,
+        linked_client_phone: taskLinkedClient?.phone || null
       };
       try {
         const url = editingTaskId ? `/api/tasks/${editingTaskId}` : '/api/tasks';

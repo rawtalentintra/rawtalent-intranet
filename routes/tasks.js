@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
+const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
 
 // Every signed-in user, any role — this is the whole point of the feature
 // (see public/index.html's Tasks tab). No role gate at all.
@@ -71,6 +72,20 @@ router.get('/meta', async (req, res) => {
   }
 });
 
+// Live match-as-you-type against real RT candidates/clients from a task
+// title (or any free text) — see taskPersonMatchService.js. Called on
+// every debounced title keystroke from the frontend, before the task is
+// even saved, so this deliberately has no side effects.
+router.get('/match-person', async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 3) return res.json({ phoneDigits: null, nameGuess: '', candidates: [], candidateDuplicates: false, clients: [], clientDuplicates: false });
+  try {
+    res.json(await matchPersonOrCentre(q));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/classifications', async (req, res) => {
   const { department_id, name } = req.body;
   if (!department_id?.trim() || !name?.trim()) return res.status(400).json({ error: 'department_id and name are required' });
@@ -100,7 +115,10 @@ router.post('/classifications', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { department_id, classification_id, title, description, status, priority, assigned_to, due_date } = req.body;
+  const {
+    department_id, classification_id, title, description, status, priority, assigned_to, due_date,
+    linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
+  } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (status && !STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -112,14 +130,17 @@ router.post('/', async (req, res) => {
     const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
     await db.execute({
       sql: `INSERT INTO tasks
-            (id, department_id, classification_id, title, description, status, priority, assigned_to, due_date, created_by, created_by_name, completed_at, mentioned_emails)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            (id, department_id, classification_id, title, description, status, priority, assigned_to, due_date, created_by, created_by_name, completed_at, mentioned_emails,
+             linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         id, department_id, classification_id || null, title.trim(), description || null,
         finalStatus, priority || 'normal', assigned_to || null, due_date || null,
         req.user.email, req.user.name || req.user.email,
         finalStatus === 'done' ? new Date().toISOString() : null,
-        JSON.stringify(mentioned)
+        JSON.stringify(mentioned),
+        linked_candidate_id || null, linked_candidate_name || null, linked_candidate_phone || null,
+        linked_client_name || null, linked_client_phone || null
       ]
     });
     res.json({ success: true, id });
@@ -129,7 +150,10 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
-  const { department_id, classification_id, title, description, status, priority, assigned_to, due_date } = req.body;
+  const {
+    department_id, classification_id, title, description, status, priority, assigned_to, due_date,
+    linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
+  } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (status && !STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -149,11 +173,16 @@ router.put('/:id', async (req, res) => {
     await db.execute({
       sql: `UPDATE tasks SET
               department_id=?, classification_id=?, title=?, description=?, status=?, priority=?,
-              assigned_to=?, due_date=?, completed_at=?, mentioned_emails=?, updated_at=now()
+              assigned_to=?, due_date=?, completed_at=?, mentioned_emails=?,
+              linked_candidate_id=?, linked_candidate_name=?, linked_candidate_phone=?, linked_client_name=?, linked_client_phone=?,
+              updated_at=now()
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
-        priority || 'normal', assigned_to || null, due_date || null, completedAt, JSON.stringify(mentioned), req.params.id
+        priority || 'normal', assigned_to || null, due_date || null, completedAt, JSON.stringify(mentioned),
+        linked_candidate_id || null, linked_candidate_name || null, linked_candidate_phone || null,
+        linked_client_name || null, linked_client_phone || null,
+        req.params.id
       ]
     });
     res.json({ success: true });
