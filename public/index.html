@@ -1854,7 +1854,6 @@
     const TASK_STATUS_META = {
       to_do:       { label: 'To Do',       color: '#475569', bg: '#f1f5f9', border: '#e2e8f0', desc: 'Not started yet.' },
       in_progress: { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', desc: 'Someone is actively working on it right now.' },
-      blocked:     { label: 'Blocked',     color: '#b91c1c', bg: '#fef2f2', border: '#fecaca', desc: "Can't move forward — waiting on something or someone else." },
       in_review:   { label: 'In Review',   color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', desc: 'Work is done and being checked before it closes out.' },
       done:        { label: 'Done',        color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Completed — nothing left to do.' }
     };
@@ -1864,7 +1863,7 @@
       high:   { label: 'High',   color: '#d97706', desc: 'Important — should be picked up soon.' },
       urgent: { label: 'Urgent', color: '#dc2626', desc: 'Time-critical — needs attention right away.' }
     };
-    const TASK_STATUS_ORDER = ['to_do', 'in_progress', 'blocked', 'in_review', 'done'];
+    const TASK_STATUS_ORDER = ['to_do', 'in_progress', 'in_review', 'done'];
 
     let taskMeta = { departments: [], classifications: [], users: [] };
     let allTasks = [];

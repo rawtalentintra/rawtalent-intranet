@@ -1358,7 +1358,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   classification_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT NOT NULL DEFAULT 'to_do', -- 'to_do' | 'in_progress' | 'blocked' | 'in_review' | 'done'
+  status TEXT NOT NULL DEFAULT 'to_do', -- 'to_do' | 'in_progress' | 'in_review' | 'done' — 'blocked' removed 2026-08-24, see the UPDATE below
   priority TEXT NOT NULL DEFAULT 'normal', -- 'low' | 'normal' | 'high' | 'urgent'
   assigned_to CITEXT, -- users.email; null = unassigned
   due_date DATE,
@@ -1398,6 +1398,11 @@ CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+-- 'blocked' status removed 2026-08-24 — reassigned to 'to_do' rather than
+-- left in place, since TASK_STATUS_ORDER in index.html no longer has a
+-- column for it and a task stuck on a status nothing renders would
+-- otherwise just vanish from the board. Idempotent — a no-op once run.
+UPDATE tasks SET status = 'to_do' WHERE status = 'blocked';
 
 -- Free-form notes on a task, ClickUp-style — a task can have many. Records
 -- who wrote it and when (created_at is UTC; the frontend renders it in

@@ -9,7 +9,7 @@ const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
 // (see public/index.html's Tasks tab). No role gate at all.
 router.use(requireAuth);
 
-const STATUSES = ['to_do', 'in_progress', 'blocked', 'in_review', 'done'];
+const STATUSES = ['to_do', 'in_progress', 'in_review', 'done'];
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 
 // Finds @Name mentions in a note body against the known active-user list and
