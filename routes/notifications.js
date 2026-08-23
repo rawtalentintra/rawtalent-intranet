@@ -238,14 +238,45 @@ router.get('/', async (req, res) => {
     });
     const feedbackDecisions = myFeedbackRes.rows;
 
+    // Tasks assigned to me that are due within 2 days or already overdue —
+    // a required action, so (like training assignments) this stays in the
+    // bell until the task is actually marked done or reassigned, never
+    // cleared by "Mark all read".
+    const taskAlertsRes = await db.execute({
+      sql: `SELECT t.*, tc.name AS classification_name, td.name AS department_name, td.color AS department_color
+            FROM tasks t
+            LEFT JOIN task_classifications tc ON tc.id = t.classification_id
+            LEFT JOIN task_departments td ON td.id = t.department_id
+            WHERE LOWER(t.assigned_to) = LOWER(?) AND t.status != 'done'
+              AND t.due_date IS NOT NULL AND t.due_date <= (CURRENT_DATE + INTERVAL '2 days')
+            ORDER BY t.due_date ASC`,
+      args: [req.user.email]
+    });
+    const taskAlerts = taskAlertsRes.rows;
+
+    // Notes on any task that @mention me — informational, dismissible via
+    // notification_dismissals same as leave/feedback decisions.
+    const taskMentionsRes = await db.execute({
+      sql: `SELECT n.*, t.title AS task_title, (d.user_email IS NOT NULL) AS is_read
+            FROM task_notes n
+            JOIN tasks t ON t.id = n.task_id
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:' || n.id AND d.user_email = ?
+            WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text)
+            ORDER BY n.created_at DESC LIMIT 30`,
+      args: [req.user.email, req.user.email]
+    });
+    const taskMentions = taskMentionsRes.rows;
+
     const unreadCount = receivedGreetings.filter(g => !g.is_read).length
       + upcomingEvents.filter(e => !e.alreadySent).length
       + announcements.filter(a => !a.is_read).length
       + trainingAssignments.length
       + leaveApprovals.length
       + leaveDecisions.filter(l => !l.is_read).length
-      + feedbackDecisions.filter(f => !f.is_read).length;
-    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, feedbackDecisions, unreadCount });
+      + feedbackDecisions.filter(f => !f.is_read).length
+      + taskAlerts.length
+      + taskMentions.filter(m => !m.is_read).length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, feedbackDecisions, taskAlerts, taskMentions, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -510,7 +541,7 @@ router.post('/:id/read', async (req, res) => {
 // announcement is only ever marked read via the Announcements tab checkbox
 // or "Mark all read", never by opening the bell item, per the existing
 // compliance-acknowledgment rule (see openAnnouncementRead).
-const DISMISSIBLE_KEY_PREFIXES = ['leave', 'feedback'];
+const DISMISSIBLE_KEY_PREFIXES = ['leave', 'feedback', 'taskmention'];
 router.post('/dismiss', async (req, res) => {
   const { key } = req.body;
   const prefix = key?.split(':')[0];
@@ -584,6 +615,20 @@ router.post('/read-all', async (req, res) => {
         sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
               ON CONFLICT (user_email, notification_key) DO NOTHING`,
         args: [req.user.email, `feedback:${row.id}`]
+      });
+    }
+
+    const unreadTaskMentions = await db.execute({
+      sql: `SELECT n.id FROM task_notes n
+            LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:' || n.id AND d.user_email = ?
+            WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text) AND d.user_email IS NULL`,
+      args: [req.user.email, req.user.email]
+    });
+    for (const row of unreadTaskMentions.rows) {
+      await db.execute({
+        sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
+              ON CONFLICT (user_email, notification_key) DO NOTHING`,
+        args: [req.user.email, `taskmention:${row.id}`]
       });
     }
 

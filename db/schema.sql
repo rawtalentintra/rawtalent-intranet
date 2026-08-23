@@ -1283,3 +1283,75 @@ CREATE TABLE IF NOT EXISTS educator_outreach_list_members (
   PRIMARY KEY (list_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_sync_review_unresolved ON calendar_sync_review_queue(resolved) WHERE resolved = false;
+
+-- Tasks (2026-08-23) — replaces ClickUp for internal task tracking.
+-- Visible to EVERY signed-in user regardless of role (built into
+-- public/index.html, not admin.html — role `user` has no admin panel
+-- access at all). Deliberately simple: a fixed 5-department list, a fixed
+-- 5-value status set, and user-addable classifications *within* a
+-- department — matching the explicit "don't make this harder than it
+-- needs to be" instruction, rather than ClickUp's fully custom
+-- lists/statuses/fields. No FKs, per this file's header convention.
+CREATE TABLE IF NOT EXISTS task_departments (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL,
+  icon TEXT,
+  sort_order INTEGER DEFAULT 0
+);
+INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
+  ('bookings', 'Bookings Team', '#2563eb', '📅', 1),
+  ('onboarding', 'Onboarding Team', '#15803d', '🧑‍🎓', 2),
+  ('app_dev', 'App Development Team', '#7c3aed', '💻', 3),
+  ('management', 'Management Team', '#b45309', '📊', 4),
+  ('marketing', 'Marketing Team', '#db2777', '📣', 5)
+ON CONFLICT (id) DO NOTHING;
+
+-- User-addable sub-categories within a department (e.g. "Bookings Team" ->
+-- "Follow-ups", "Rosters"). Not seeded — starts empty per department, grows
+-- as people add what they actually need.
+CREATE TABLE IF NOT EXISTS task_classifications (
+  id TEXT PRIMARY KEY,
+  department_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_by CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_classifications_department ON task_classifications(department_id);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  department_id TEXT NOT NULL,
+  classification_id TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'to_do', -- 'to_do' | 'in_progress' | 'blocked' | 'in_review' | 'done'
+  priority TEXT NOT NULL DEFAULT 'normal', -- 'low' | 'normal' | 'high' | 'urgent'
+  assigned_to CITEXT, -- users.email; null = unassigned
+  due_date DATE,
+  created_by CITEXT NOT NULL,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+
+-- Free-form notes on a task, ClickUp-style — a task can have many. Records
+-- who wrote it and when (created_at is UTC; the frontend renders it in
+-- Melbourne time, same convention as everywhere else in this codebase —
+-- see MELBOURNE_TZ in routes/calls.js). mentioned_emails captures anyone
+-- @tagged in the note body so the notification bell can alert them.
+CREATE TABLE IF NOT EXISTS task_notes (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  author_email CITEXT NOT NULL,
+  author_name TEXT,
+  mentioned_emails JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_notes_task ON task_notes(task_id);

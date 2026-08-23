@@ -786,6 +786,7 @@
       <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
       <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
+      <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
       <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
@@ -1065,6 +1066,75 @@
     </div>
   </div>
 
+  <!-- Task Modal (New/Edit + Notes) — one modal for both, per the "keep it
+       simple" brief: creating and editing a task should feel like the same
+       screen, not two different flows to learn. -->
+  <div class="modal-overlay" id="taskModal" onclick="if(event.target===this)closeTaskModal()">
+    <div class="modal" style="max-width:560px;width:92vw">
+      <div class="modal-header">
+        <div class="modal-title" id="taskModalTitle">New Task</div>
+        <button class="modal-close" onclick="closeTaskModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+        <div class="form-group-modal">
+          <label class="form-label-modal">Title</label>
+          <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done?" maxlength="200">
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
+          <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div class="form-group-modal" style="flex:1;min-width:160px">
+            <label class="form-label-modal">Department</label>
+            <select id="taskDeptSelect" class="form-control" onchange="onTaskDeptChange()"></select>
+          </div>
+          <div class="form-group-modal" style="flex:1;min-width:160px">
+            <label class="form-label-modal">Classification <span class="optional">(optional)</span></label>
+            <select id="taskClassSelect" class="form-control"></select>
+            <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;margin-top:6px" onclick="addTaskClassification()">+ Add classification</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div class="form-group-modal" style="flex:1;min-width:160px">
+            <label class="form-label-modal">Assigned to</label>
+            <select id="taskAssigneeSelect" class="form-control"></select>
+          </div>
+          <div class="form-group-modal" style="flex:1;min-width:140px">
+            <label class="form-label-modal">Due date <span class="optional">(optional)</span></label>
+            <input type="date" id="taskDueInput" class="form-control">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div class="form-group-modal" style="flex:1;min-width:140px">
+            <label class="form-label-modal">Status</label>
+            <select id="taskStatusSelect" class="form-control"></select>
+          </div>
+          <div class="form-group-modal" style="flex:1;min-width:140px">
+            <label class="form-label-modal">Priority</label>
+            <select id="taskPrioritySelect" class="form-control"></select>
+          </div>
+        </div>
+        <div id="taskNotesSection" style="display:none;border-top:1px solid var(--gray-200);margin-top:6px;padding-top:14px">
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📝 Notes</div>
+          <div id="taskNotesList" style="max-height:220px;overflow-y:auto;margin-bottom:10px"></div>
+          <div style="position:relative">
+            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleTaskNoteInput(this)" onblur="setTimeout(hideTaskMentionDropdown,150)"></textarea>
+            <div id="taskMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+            <button class="btn-add" style="font-size:12px;padding:6px 14px" onclick="submitTaskNote()">Add Note</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="taskDeleteBtn" style="display:none;margin-right:auto;border-color:rgba(239,68,68,.3);color:#dc2626" onclick="deleteTaskConfirm()">Delete</button>
+        <button class="btn-secondary" onclick="closeTaskModal()">Cancel</button>
+        <button class="btn-add" onclick="submitTask()">Save Task</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'search';
     let currentCat = '';
@@ -1075,12 +1145,16 @@
     let conversationHistory = [];   // Claude messages array (for multi-turn)
     let conversationSources = [];   // sources from first turn (reused throughout)
     let currentUserRole = '';
+    let currentUserEmail = '';
+    let currentUserName = '';
 
     async function init() {
       try {
         const me = await fetch('/auth/me').then(r => r.json());
         if (me.error) { location.href = '/login.html'; return; }
         currentUserRole = me.role;
+        currentUserEmail = me.email;
+        currentUserName = me.name || me.email;
         if (me.role === 'admin' || me.role === 'super_admin') {
           document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         }
@@ -1123,7 +1197,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], taskAlerts: [], taskMentions: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -1157,6 +1231,30 @@
             <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('leave')">
               <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">🏖️ ${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:12px;color:var(--text-muted)">${escHtml(l.reason)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      if (notifData.taskAlerts?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Tasks due soon or overdue</div>
+          ${notifData.taskAlerts.map(t => {
+            const overdue = isTaskOverdue(t);
+            return `
+            <div style="background:${overdue ? 'linear-gradient(135deg,#fef2f2,#fee2e2)' : 'linear-gradient(135deg,#fff7ed,#fef3e8)'};border:1px solid ${overdue ? '#fecaca' : '#fed7aa'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('tasks');setTimeout(()=>openTaskDetail('${t.id}'),300)">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${overdue ? '🔴' : '🟠'} ${escHtml(t.title)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml(t.department_name || '')} · ${overdue ? 'Overdue' : 'Due'} ${fmtDate(t.due_date)}</div>
+            </div>`;
+          }).join('')}
+        `);
+      }
+      if (notifData.taskMentions?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Task mentions</div>
+          ${notifData.taskMentions.map(m => `
+            <div style="background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.id}','${m.task_id}')">
+              <div style="font-weight:${m.is_read ? '500' : '700'};color:${m.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you on "${escHtml(m.task_title)}"</div>
+              <div style="font-size:11px;color:var(--text-muted)">${escHtml(m.body).slice(0,80)}${m.body.length > 80 ? '…' : ''}</div>
             </div>
           `).join('')}
         `);
@@ -1363,6 +1461,14 @@
         : `Your suggestion on "${f.article_title}" was actioned. Thanks for helping make HeartBeat better — keep the feedback coming! 💡`;
       document.getElementById('celebrationModal').classList.add('open');
       spawnConfetti(document.getElementById('confettiLayer'));
+    }
+
+    function openTaskMention(noteId, taskId) {
+      const m = notifData.taskMentions.find(x => x.id === noteId);
+      if (m && !m.is_read) dismissNotification(`taskmention:${noteId}`);
+      toggleNotifPanel();
+      setMode('tasks');
+      setTimeout(() => openTaskDetail(taskId), 300);
     }
 
     function markAllNotificationsRead() {
@@ -1648,7 +1754,9 @@
       const isIdeas = mode === 'ideas';
       const isHome = mode === 'home';
       const isLeads = mode === 'leads';
+      const isTasks = mode === 'tasks';
       document.getElementById('tabHome').classList.toggle('active', isHome);
+      document.getElementById('tabTasks').classList.toggle('active', isTasks);
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
@@ -1659,7 +1767,7 @@
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
       document.getElementById('tabLeads').classList.toggle('active', isLeads);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1673,6 +1781,7 @@
         : isLeave ? 'Leave Request'
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
+        : isTasks ? 'Tasks'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isHome ? 'The RawTalent intranet — everything that keeps us moving, all in one place'
         : isAI ? 'Ask AI anything — searches across all articles, documents, and reference sites'
@@ -1684,12 +1793,15 @@
         : isLeave ? 'Request leave, track approvals, and see who\'s off'
         : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
         : isLeads ? 'Log a potential client centre from an educator vetting call'
+        : isTasks ? 'Everything the team is working on, by department'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isHome) {
         loadHomeView();
       } else if (isLeads) {
         loadLeadsView();
+      } else if (isTasks) {
+        loadTasksView();
       } else if (isAI) {
         document.getElementById('resultsList').innerHTML = `
           <div class="empty-wrap">
@@ -1716,6 +1828,419 @@
         loadResults();
         setTimeout(() => document.getElementById('searchInput').focus(), 50);
       }
+    }
+
+    // ── Tasks ─────────────────────────────────────────────────────
+    // Replaces ClickUp for internal task tracking. Deliberately simple —
+    // a fixed 5-department list, a fixed 5-value status set, and
+    // user-addable classifications within a department — per the explicit
+    // brief: "we do not want to complicate things". Visible to every role
+    // (this whole tab lives in index.html, not admin.html, for that reason
+    // — see routes/tasks.js).
+    const TASK_STATUS_META = {
+      to_do:       { label: 'To Do',       color: '#475569', bg: '#f1f5f9', border: '#e2e8f0', desc: 'Not started yet.' },
+      in_progress: { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', desc: 'Someone is actively working on it right now.' },
+      blocked:     { label: 'Blocked',     color: '#b91c1c', bg: '#fef2f2', border: '#fecaca', desc: "Can't move forward — waiting on something or someone else." },
+      in_review:   { label: 'In Review',   color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', desc: 'Work is done and being checked before it closes out.' },
+      done:        { label: 'Done',        color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Completed — nothing left to do.' }
+    };
+    const TASK_PRIORITY_META = {
+      low:    { label: 'Low',    color: '#64748b', desc: 'Nice to get to, no rush.' },
+      normal: { label: 'Normal', color: '#2563eb', desc: 'Standard priority — the default for most tasks.' },
+      high:   { label: 'High',   color: '#d97706', desc: 'Important — should be picked up soon.' },
+      urgent: { label: 'Urgent', color: '#dc2626', desc: 'Time-critical — needs attention right away.' }
+    };
+    const TASK_STATUS_ORDER = ['to_do', 'in_progress', 'blocked', 'in_review', 'done'];
+
+    let taskMeta = { departments: [], classifications: [], users: [] };
+    let allTasks = [];
+    let editingTaskId = null;
+    let taskFilterDept = 'all';
+    let taskShowDone = false;
+    let taskMineOnly = false;
+    let taskSearchQuery = '';
+    let taskLegendOpen = false;
+    let currentTaskNotes = [];
+    let taskMentionCandidates = [];
+
+    async function loadTasksView() {
+      const list = document.getElementById('resultsList');
+      list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        const [tasks, meta] = await Promise.all([
+          fetch('/api/tasks').then(r => r.json()),
+          fetch('/api/tasks/meta').then(r => r.json())
+        ]);
+        allTasks = Array.isArray(tasks) ? tasks : [];
+        taskMeta = meta;
+        renderTasksView();
+      } catch {
+        list.innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load tasks.</div></div>';
+      }
+    }
+
+    function isTaskOverdue(t) {
+      if (!t.due_date || t.status === 'done') return false;
+      return new Date(t.due_date + 'T00:00:00') < new Date(new Date().toDateString());
+    }
+    function isTaskDueSoon(t) {
+      if (!t.due_date || t.status === 'done') return false;
+      const due = new Date(t.due_date + 'T00:00:00');
+      const today = new Date(new Date().toDateString());
+      const days = Math.round((due - today) / 86400000);
+      return days >= 0 && days <= 2;
+    }
+
+    function taskDeptMeta(id) {
+      return taskMeta.departments.find(d => d.id === id) || { name: id || 'Unknown', color: '#64748b', icon: '📁' };
+    }
+
+    function setTaskDeptFilter(id) { taskFilterDept = id; renderTasksView(); }
+    function toggleTaskLegend() { taskLegendOpen = !taskLegendOpen; renderTasksView(); }
+
+    function taskLegendHtml() {
+      return `
+        <div class="task-legend">
+          <div>
+            <div class="task-legend-heading">Status</div>
+            ${TASK_STATUS_ORDER.map(s => `<div class="task-legend-row"><span class="task-chip" style="background:${TASK_STATUS_META[s].bg};color:${TASK_STATUS_META[s].color};border-color:${TASK_STATUS_META[s].border}">${TASK_STATUS_META[s].label}</span> ${TASK_STATUS_META[s].desc}</div>`).join('')}
+          </div>
+          <div>
+            <div class="task-legend-heading">Priority</div>
+            ${Object.keys(TASK_PRIORITY_META).map(p => `<div class="task-legend-row"><span class="task-chip" style="background:${TASK_PRIORITY_META[p].color}1a;color:${TASK_PRIORITY_META[p].color};border-color:${TASK_PRIORITY_META[p].color}">${TASK_PRIORITY_META[p].label}</span> ${TASK_PRIORITY_META[p].desc}</div>`).join('')}
+          </div>
+          <div>
+            <div class="task-legend-heading">Department &amp; Classification</div>
+            <div class="task-legend-row"><b>Department</b> — which team owns the task (a fixed list of 5).</div>
+            <div class="task-legend-row"><b>Classification</b> — an optional sub-category inside a department (e.g. "Rosters"). Add your own anytime with "+ Add classification".</div>
+            <div class="task-legend-row"><b>@mentions</b> — tag a teammate in a note and they'll see it in their notification bell.</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function taskCardHtml(t) {
+      const dept = taskDeptMeta(t.department_id);
+      const pr = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META.normal;
+      const overdue = isTaskOverdue(t);
+      const dueSoon = isTaskDueSoon(t);
+      const assignee = taskMeta.users.find(u => (u.email || '').toLowerCase() === (t.assigned_to || '').toLowerCase());
+      const assigneeLabel = assignee ? (assignee.name || assignee.email.split('@')[0]) : (t.assigned_to ? t.assigned_to.split('@')[0] : 'Unassigned');
+      return `
+        <div class="task-card" onclick="openTaskDetail('${t.id}')">
+          <div class="task-card-top">
+            <span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span>
+            <span class="task-priority-dot" title="${pr.label} priority" style="background:${pr.color}"></span>
+          </div>
+          <div class="task-card-title">${escHtml(t.title)}</div>
+          ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+          <div class="task-card-bottom">
+            <span class="task-card-assignee">👤 ${escHtml(assigneeLabel)}</span>
+            ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTasksView() {
+      const list = document.getElementById('resultsList');
+      const visibleAll = allTasks.filter(t => taskShowDone || t.status !== 'done');
+      const filtered = visibleAll.filter(t => {
+        if (taskFilterDept !== 'all' && t.department_id !== taskFilterDept) return false;
+        if (taskMineOnly && (t.assigned_to || '').toLowerCase() !== (currentUserEmail || '').toLowerCase()) return false;
+        if (taskSearchQuery && !t.title.toLowerCase().includes(taskSearchQuery.toLowerCase())) return false;
+        return true;
+      });
+
+      const deptPills = `
+        <button class="task-pill ${taskFilterDept === 'all' ? 'active' : ''}" onclick="setTaskDeptFilter('all')">All <span class="task-pill-count">${visibleAll.length}</span></button>
+        ${taskMeta.departments.map(d => `
+          <button class="task-pill ${taskFilterDept === d.id ? 'active' : ''}" style="--pill-color:${d.color}" onclick="setTaskDeptFilter('${d.id}')">${d.icon || ''} ${escHtml(d.name)} <span class="task-pill-count">${visibleAll.filter(t => t.department_id === d.id).length}</span></button>
+        `).join('')}
+      `;
+
+      const columns = TASK_STATUS_ORDER.map(status => {
+        const meta = TASK_STATUS_META[status];
+        const items = filtered.filter(t => t.status === status)
+          .sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
+        return `
+          <div class="task-column">
+            <div class="task-column-header" style="color:${meta.color};background:${meta.bg};border-color:${meta.border}">
+              <span>${meta.label}</span><span class="task-pill-count">${items.length}</span>
+            </div>
+            <div class="task-column-body">
+              ${items.length ? items.map(taskCardHtml).join('') : '<div class="task-column-empty">No tasks</div>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      list.innerHTML = `
+        <div class="task-toolbar">
+          <button class="btn-add" onclick="openTaskModal()">+ New Task</button>
+          <input type="text" class="form-control" id="taskSearchInput" placeholder="Search tasks…" style="max-width:220px" value="${escHtml(taskSearchQuery)}" oninput="taskSearchQuery=this.value;renderTasksView()">
+          <label class="task-toggle"><input type="checkbox" ${taskMineOnly ? 'checked' : ''} onchange="taskMineOnly=this.checked;renderTasksView()"> Assigned to me</label>
+          <label class="task-toggle"><input type="checkbox" ${taskShowDone ? 'checked' : ''} onchange="taskShowDone=this.checked;renderTasksView()"> Show done</label>
+          <button class="btn-secondary" style="margin-left:auto" onclick="toggleTaskLegend()">ℹ️ What do these mean?</button>
+        </div>
+        ${taskLegendOpen ? taskLegendHtml() : ''}
+        <div class="task-pills">${deptPills}</div>
+        <div class="task-board">${columns}</div>
+      `;
+      // Re-focus the search box after a re-render caused by typing in it —
+      // innerHTML replacement otherwise loses focus after every keystroke.
+      if (document.activeElement === document.body) {
+        const input = document.getElementById('taskSearchInput');
+        if (input && taskSearchQuery) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
+      }
+    }
+
+    function populateTaskSelects() {
+      document.getElementById('taskDeptSelect').innerHTML = taskMeta.departments.map(d => `<option value="${d.id}">${d.icon || ''} ${escHtml(d.name)}</option>`).join('');
+      document.getElementById('taskAssigneeSelect').innerHTML = '<option value="">Unassigned</option>' + taskMeta.users.map(u => `<option value="${u.email}">${escHtml(u.name || u.email)}</option>`).join('');
+      document.getElementById('taskStatusSelect').innerHTML = TASK_STATUS_ORDER.map(s => `<option value="${s}">${TASK_STATUS_META[s].label}</option>`).join('');
+      document.getElementById('taskPrioritySelect').innerHTML = Object.keys(TASK_PRIORITY_META).map(p => `<option value="${p}">${TASK_PRIORITY_META[p].label}</option>`).join('');
+    }
+
+    function populateTaskClassSelect(deptId, selectedId) {
+      const sel = document.getElementById('taskClassSelect');
+      const options = taskMeta.classifications.filter(c => c.department_id === deptId);
+      sel.innerHTML = '<option value="">None</option>' + options.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
+    }
+
+    function onTaskDeptChange() {
+      populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
+    }
+
+    async function addTaskClassification() {
+      const deptId = document.getElementById('taskDeptSelect').value;
+      const name = prompt('New classification name (e.g. "Rosters")');
+      if (!name?.trim()) return;
+      try {
+        const res = await fetch('/api/tasks/classifications', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ department_id: deptId, name: name.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to add classification', 'error'); return; }
+        if (!taskMeta.classifications.find(c => c.id === data.classification.id)) taskMeta.classifications.push(data.classification);
+        populateTaskClassSelect(deptId, data.classification.id);
+        toast('Classification added', 'success');
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function openTaskModal(taskId) {
+      editingTaskId = taskId || null;
+      if (!taskMeta.departments.length) return; // meta still loading — card click race, harmless no-op
+      populateTaskSelects();
+      const deleteBtn = document.getElementById('taskDeleteBtn');
+      const notesSection = document.getElementById('taskNotesSection');
+      if (taskId) {
+        const t = allTasks.find(x => x.id === taskId);
+        if (!t) return;
+        document.getElementById('taskModalTitle').textContent = 'Edit Task';
+        deleteBtn.style.display = 'inline-flex';
+        notesSection.style.display = 'block';
+        document.getElementById('taskTitleInput').value = t.title || '';
+        document.getElementById('taskDescInput').value = t.description || '';
+        document.getElementById('taskDeptSelect').value = t.department_id;
+        populateTaskClassSelect(t.department_id, t.classification_id);
+        document.getElementById('taskAssigneeSelect').value = t.assigned_to || '';
+        document.getElementById('taskDueInput').value = t.due_date ? String(t.due_date).slice(0, 10) : '';
+        document.getElementById('taskStatusSelect').value = t.status;
+        document.getElementById('taskPrioritySelect').value = t.priority;
+        currentTaskNotes = [];
+        loadTaskNotes(taskId);
+      } else {
+        document.getElementById('taskModalTitle').textContent = 'New Task';
+        deleteBtn.style.display = 'none';
+        notesSection.style.display = 'none';
+        document.getElementById('taskTitleInput').value = '';
+        document.getElementById('taskDescInput').value = '';
+        document.getElementById('taskDeptSelect').value = taskFilterDept !== 'all' ? taskFilterDept : (taskMeta.departments[0]?.id || '');
+        populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
+        document.getElementById('taskAssigneeSelect').value = '';
+        document.getElementById('taskDueInput').value = '';
+        document.getElementById('taskStatusSelect').value = 'to_do';
+        document.getElementById('taskPrioritySelect').value = 'normal';
+      }
+      document.getElementById('taskModal').classList.add('open');
+    }
+
+    // Used both by card clicks (data already loaded) and by notification-
+    // bell deep links (data may not be loaded yet if the Tasks tab was
+    // never opened this session) — fetches first if needed rather than
+    // racing loadTasksView() with a timeout.
+    async function openTaskDetail(taskId) {
+      if (!allTasks.find(t => t.id === taskId) || !taskMeta.departments.length) {
+        try {
+          const [tasks, meta] = await Promise.all([
+            fetch('/api/tasks').then(r => r.json()),
+            fetch('/api/tasks/meta').then(r => r.json())
+          ]);
+          allTasks = Array.isArray(tasks) ? tasks : allTasks;
+          taskMeta = meta.departments ? meta : taskMeta;
+        } catch { toast('Network error', 'error'); return; }
+      }
+      openTaskModal(taskId);
+    }
+
+    function closeTaskModal() {
+      document.getElementById('taskModal').classList.remove('open');
+      hideTaskMentionDropdown();
+      editingTaskId = null;
+      currentTaskNotes = [];
+    }
+
+    async function submitTask() {
+      const title = document.getElementById('taskTitleInput').value.trim();
+      if (!title) { toast('Title is required', 'error'); return; }
+      const payload = {
+        department_id: document.getElementById('taskDeptSelect').value,
+        classification_id: document.getElementById('taskClassSelect').value || null,
+        title,
+        description: document.getElementById('taskDescInput').value.trim() || null,
+        status: document.getElementById('taskStatusSelect').value,
+        priority: document.getElementById('taskPrioritySelect').value,
+        assigned_to: document.getElementById('taskAssigneeSelect').value || null,
+        due_date: document.getElementById('taskDueInput').value || null
+      };
+      try {
+        const url = editingTaskId ? `/api/tasks/${editingTaskId}` : '/api/tasks';
+        const res = await fetch(url, {
+          method: editingTaskId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save task', 'error'); return; }
+        toast(editingTaskId ? 'Task updated' : 'Task created', 'success');
+        closeTaskModal();
+        loadTasksView();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function deleteTaskConfirm() {
+      if (!editingTaskId) return;
+      if (!confirm('Delete this task? This also removes all its notes.')) return;
+      fetch(`/api/tasks/${editingTaskId}`, { method: 'DELETE' })
+        .then(r => r.json()).then(data => {
+          if (data.error) { toast(data.error, 'error'); return; }
+          toast('Task deleted', 'success');
+          closeTaskModal();
+          loadTasksView();
+        }).catch(() => toast('Network error', 'error'));
+    }
+
+    // created_at is stored UTC; every timestamp in this app is shown in
+    // Melbourne local time (see MELBOURNE_TZ in routes/calls.js) — done
+    // purely on the frontend with Intl, no server-side timezone math needed.
+    function fmtMelbourne(iso) {
+      try {
+        return new Date(iso).toLocaleString('en-AU', {
+          timeZone: 'Australia/Melbourne', day: 'numeric', month: 'short', year: 'numeric',
+          hour: 'numeric', minute: '2-digit', hour12: true
+        }) + ' (Melbourne time)';
+      } catch { return iso; }
+    }
+
+    function renderNoteBody(body) {
+      // Visual highlight only — who actually got notified is decided
+      // server-side (see extractMentions in routes/tasks.js) against the
+      // real user list. Matches full display names (which can contain
+      // spaces, e.g. "@Second Tester"), longest name first, so a shorter
+      // name that happens to be a prefix of a longer one doesn't steal
+      // the match.
+      let html = escHtml(body);
+      const names = taskMeta.users.map(u => u.name || u.email.split('@')[0]).filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+      for (const name of names) {
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp('@' + escapedName + '(?![A-Za-z])', 'g');
+        html = html.replace(re, m => `<span class="task-mention">${m}</span>`);
+      }
+      return html;
+    }
+
+    async function loadTaskNotes(taskId) {
+      document.getElementById('taskNotesList').innerHTML = '<div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div>';
+      try {
+        currentTaskNotes = await fetch(`/api/tasks/${taskId}/notes`).then(r => r.json());
+        renderTaskNotes();
+      } catch {
+        document.getElementById('taskNotesList').innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Failed to load notes.</div>';
+      }
+    }
+
+    function renderTaskNotes() {
+      const el = document.getElementById('taskNotesList');
+      if (!currentTaskNotes.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No notes yet — be the first to add one.</div>'; return; }
+      el.innerHTML = currentTaskNotes.map(n => `
+        <div class="task-note">
+          <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span></div>
+          <div class="task-note-body">${renderNoteBody(n.body)}</div>
+        </div>
+      `).join('');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function submitTaskNote() {
+      if (!editingTaskId) return;
+      const input = document.getElementById('taskNoteInput');
+      const body = input.value.trim();
+      if (!body) return;
+      try {
+        const res = await fetch(`/api/tasks/${editingTaskId}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
+        input.value = '';
+        hideTaskMentionDropdown();
+        currentTaskNotes.push(data.note);
+        renderTaskNotes();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // Simple, reliable @mention autocomplete — a dropdown fixed under the
+    // textarea rather than tracked to the exact caret position (which is
+    // fragile across browsers and exactly the kind of "glitch" this
+    // feature was asked to avoid). Always resolves against whatever's
+    // typed after the last "@", and inserts by replacing from that "@" to
+    // the end of the field.
+    function handleTaskMentionQuery(text) {
+      const atIndex = text.lastIndexOf('@');
+      if (atIndex === -1) return null;
+      const after = text.slice(atIndex + 1);
+      if (/\s/.test(after)) return null;
+      return { atIndex, query: after };
+    }
+
+    function handleTaskNoteInput(el) {
+      const match = handleTaskMentionQuery(el.value);
+      const dropdown = document.getElementById('taskMentionDropdown');
+      if (!match) { dropdown.style.display = 'none'; taskMentionCandidates = []; return; }
+      const q = match.query.toLowerCase();
+      taskMentionCandidates = taskMeta.users.filter(u => (u.name || u.email).toLowerCase().includes(q)).slice(0, 6);
+      if (!taskMentionCandidates.length) { dropdown.style.display = 'none'; return; }
+      dropdown.innerHTML = taskMentionCandidates.map((u, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();insertTaskMention(${i})">${escHtml(u.name || u.email)}</div>`).join('');
+      dropdown.style.display = 'block';
+    }
+
+    function insertTaskMention(i) {
+      const u = taskMentionCandidates[i];
+      if (!u) return;
+      const el = document.getElementById('taskNoteInput');
+      const match = handleTaskMentionQuery(el.value);
+      if (!match) return;
+      const name = u.name || u.email.split('@')[0];
+      el.value = el.value.slice(0, match.atIndex) + '@' + name + ' ';
+      hideTaskMentionDropdown();
+      el.focus();
+    }
+
+    function hideTaskMentionDropdown() {
+      const dropdown = document.getElementById('taskMentionDropdown');
+      if (dropdown) dropdown.style.display = 'none';
     }
 
     // ── Glossary ──────────────────────────────────────────────────

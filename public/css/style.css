@@ -1777,3 +1777,41 @@ body:has(> .navbar) { padding-top: 64px; }
 }
 .error-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
 .error-sub { color: var(--text-muted); font-size: 14px; }
+
+/* ─── Tasks ───────────────────────────────────────────────────── */
+.task-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.task-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; user-select: none; }
+.task-toggle input { cursor: pointer; }
+.task-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
+.task-legend-heading { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; color: var(--navy); margin-bottom: 8px; }
+.task-legend-row { font-size: 12.5px; color: var(--text-muted); margin-bottom: 7px; line-height: 1.5; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.task-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.task-pill { --pill-color: var(--navy); display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 50px; border: 1.5px solid var(--gray-200); background: white; font-size: 12.5px; font-weight: 700; color: var(--text); cursor: pointer; transition: var(--transition); }
+.task-pill:hover { border-color: var(--pill-color); }
+.task-pill.active { background: var(--pill-color); border-color: var(--pill-color); color: white; }
+.task-pill.active .task-pill-count { background: rgba(255,255,255,.25); color: white; }
+.task-pill-count { background: var(--gray-100); color: var(--text-muted); font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 50px; }
+.task-board { display: grid; grid-template-columns: repeat(5, minmax(220px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+@media (max-width: 1200px) { .task-board { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
+.task-column { background: var(--offwhite); border-radius: var(--radius-lg); padding: 10px; min-width: 0; }
+.task-column-header { font-size: 12px; font-weight: 800; padding: 8px 10px; border-radius: 8px; border: 1px solid; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.task-column-body { display: flex; flex-direction: column; gap: 10px; min-height: 40px; }
+.task-column-empty { font-size: 11.5px; color: var(--gray-400); text-align: center; padding: 14px 4px; }
+.task-card { background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 12px; cursor: pointer; box-shadow: var(--shadow-sm); transition: var(--transition); }
+.task-card:hover { border-color: var(--orange); box-shadow: var(--shadow); }
+.task-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.task-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800; padding: 2px 9px; border-radius: 50px; border: 1px solid; }
+.task-priority-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.task-card-title { font-size: 13.5px; font-weight: 700; color: var(--navy); line-height: 1.35; margin-bottom: 6px; }
+.task-card-class { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.task-card-bottom { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); gap: 6px; flex-wrap: wrap; }
+.task-card-due { font-weight: 700; }
+.task-card-due.soon { color: #d97706; }
+.task-card-due.overdue { color: #dc2626; }
+.task-note { background: var(--offwhite); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.task-note-head { font-size: 11.5px; color: var(--navy); margin-bottom: 4px; }
+.task-note-head span { font-weight: 500; color: var(--text-muted); }
+.task-note-body { font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
+.task-mention { background: rgba(61,111,255,.12); color: var(--orange); font-weight: 700; padding: 0 3px; border-radius: 4px; }
+.task-mention-option { padding: 8px 12px; font-size: 12.5px; cursor: pointer; }
+.task-mention-option:hover { background: var(--offwhite); }
