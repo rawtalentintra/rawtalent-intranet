@@ -1064,6 +1064,19 @@
             <div class="lead-group-label" style="margin-top:14px">Details</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
               <div class="form-group-modal">
+                <label class="form-label-modal">Channel</label>
+                <select id="visitLogChannel" class="form-control" onchange="onVisitLogChannelChange()">
+                  <option value="call">📞 Call</option>
+                  <option value="visit">🚗 Visit</option>
+                </select>
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">Activity type <span class="optional">(optional)</span></label>
+                <select id="visitLogActivityType" class="form-control"></select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group-modal">
                 <label class="form-label-modal">Visit date</label>
                 <input type="date" id="visitLogDate" class="form-control">
               </div>
@@ -1074,6 +1087,16 @@
                   <option value="completed">Called / Visited</option>
                   <option value="rescheduled">Rescheduled</option>
                 </select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group-modal">
+                <label class="form-label-modal">Contact name <span class="optional">(optional)</span></label>
+                <input type="text" id="visitLogContactName" class="form-control" placeholder="Who at the centre">
+              </div>
+              <div class="form-group-modal" id="visitLogAttendeesGroup">
+                <label class="form-label-modal">Attendees <span class="optional">(optional)</span></label>
+                <input type="text" id="visitLogAttendees" class="form-control" placeholder="Everyone present">
               </div>
             </div>
             <div class="form-group-modal">
@@ -1089,6 +1112,17 @@
             <div class="form-group-modal">
               <label class="form-label-modal">Notes <span class="optional">(optional)</span></label>
               <textarea id="visitLogNotes" class="form-control" rows="3" placeholder="What happened…"></textarea>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Opportunity, risk or issue identified <span class="optional">(optional)</span></label>
+              <textarea id="visitLogOpportunityNotes" class="form-control" rows="2" placeholder="Anything worth flagging beyond the Outcome above"></textarea>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Commitment made <span class="optional">(optional)</span></label>
+              <input type="text" id="visitLogCommitment" class="form-control" placeholder="What was promised, by whom">
+            </div>
+            <div class="form-group-modal" id="visitLogChecklistGroup">
+              <label class="task-toggle" style="font-size:12.5px"><input type="checkbox" id="visitLogChecklistCompleted"> Checklist completed</label>
             </div>
 
             <div class="lead-group-label" style="margin-top:14px">Next Steps</div>
@@ -1106,6 +1140,10 @@
                 <label class="form-label-modal">Due</label>
                 <input type="date" id="visitLogNextStepDue" class="form-control">
               </div>
+            </div>
+            <div class="form-group-modal">
+              <label class="form-label-modal">Next step owner <span class="optional">(optional)</span></label>
+              <select id="visitLogNextStepOwner" class="form-control"></select>
             </div>
             <div style="font-size:11.5px;color:var(--text-muted)">Last Booking Date of Centre: <span id="visitLogLastBookingDate" style="font-weight:600;color:var(--text)">—</span></div>
           </div>
@@ -1905,6 +1943,45 @@
             <strong style="color:var(--navy)">Follow-up ownership if a client doesn't book after activation:</strong> the <code>new_activating</code> health category (Decision Area 3) already exists for exactly this — a centre created in the last 60 days with fewer than 5 bookings gets flagged, owned by whoever's set as its <code>assignedWorkforcePartner</code>.<br>
             <strong style="color:var(--navy)">Email/notification automation:</strong> deliberately out of scope — no email-sending integration exists anywhere in this codebase (confirmed while scoping Decision Area 1's Educator Outreach and Decision Area 2's Advertising Opportunity Engine, both held back for the same reason). Adding one is a real, separate infrastructure decision, not a one-line addition.<br>
             <strong style="color:var(--navy)">Centre-creation duplicate check:</strong> HeartBeat's own Add Centre form (for logging a lead, not creating an RT client) now checks the new centre name/suburb/state/phone against RT's live client list, not just other leads already in the pipeline — using the same confidence bar as the Leads list's "Existing Centre?" column.
+          </div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);line-height:1.7">
+            <strong style="color:#b45309">⚠️ Not yet discussed live (2026-08-24):</strong> the fuller Decision Area 5 brief (end-to-end workflow + "Required automatic events and notifications" list) hasn't reached the actual meeting yet — the table above and this status list are a best-guess v1 built from Decision Areas 1-4's confirmed patterns, meant to be adjusted once real decisions land, not a final design.
+            <table class="data-table" style="font-size:12px;margin-top:8px">
+              <thead><tr><th>Required event</th><th style="width:130px">Status today</th></tr></thead>
+              <tbody>
+                <tr><td>Centre submitted by Workforce Partner</td><td>📝 Manual — no "submit for approval" step exists; a WFP logging a lead is the closest equivalent</td></tr>
+                <tr><td>Centre approved and account made live</td><td>📝 Manual (RT's own admin app) — HeartBeat only ever reads that the client now exists</td></tr>
+                <tr><td>Welcome email + login details sent</td><td>🚧 Blocked — no email-sending integration exists anywhere in this codebase (deferred 2026-08-22)</td></tr>
+                <tr><td>First portal login</td><td>🚧 Blocked — RT's API has no login-timestamp field for clients (or candidates)</td></tr>
+                <tr><td>First/second booking created, first booking filled/completed</td><td>✅ Automatic — <code>services/centreMilestoneService.js</code>, computed live from RT bookings, shown in Centre 360's Relationship History</td></tr>
+                <tr><td>Welcome/merch-pack visit due</td><td>📝 Manual — log as a Visit with activity type "First-booking welcome/merch" (Decision Area 6)</td></tr>
+                <tr><td>Client becoming active/growing/declining/dormant</td><td>✅ Automatic — already exists independently of this decision area (<code>centreHealthService.js</code>, Decision Area 3)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Decision Area 6 — Activity Logging</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
+            <strong style="color:#b45309">⚠️ Not yet discussed live (2026-08-24)</strong> — same status as Decision Area 5 above. The two activity-type lists below are copied verbatim from the brief (see <code>services/centreActivityTypeService.js</code>), so they shouldn't need to change; everything else — which fields are mandatory, what counts as "meaningful", how missed/rescheduled attempts are treated — is still genuinely open and answered here with a starting default, not a confirmed decision.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px">📞 Call activity types</div>
+              <div style="font-size:12.5px;color:var(--text-muted);line-height:1.8">Prospect follow-up · Activation support · First-booking follow-up · Regular relationship check-in · Growth conversation · Decline investigation · Service recovery · Dormant reactivation</div>
+            </div>
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px">🚗 Visit activity types</div>
+              <div style="font-size:12.5px;color:var(--text-muted);line-height:1.8">Prospect · Centre setup · First-booking welcome/merch · Growth · Relationship maintenance · Decline investigation · Service recovery · Dormant reactivation</div>
+            </div>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);line-height:1.7">
+            <strong style="color:var(--navy)">Where this lives:</strong> extended onto the existing <code>centre_visits</code> table (Channel/Activity Type/Contact Name/Opportunity notes/Commitment/Next Step Owner/Attendees/Checklist completed) rather than a new table — a call and a visit are still "one contact with a centre, on one day", the same thing this table already modelled. Log one from Centre 360's "Log a Call/Visit" button.<br>
+            <strong style="color:var(--navy)">Mandatory fields:</strong> ASSUMED default is just Visit date + Channel — everything else stays optional for now, to avoid the brief's own "without making logging burdensome" concern before the real answer is confirmed.<br>
+            <strong style="color:var(--navy)">"Meaningful completed" call/visit:</strong> ASSUMED to be Status = "Called / Visited" (the existing <code>completed</code> DB value) — matches what <code>centreNurtureService.js</code>/<code>centreHealthService.js</code> already treat as a real contact for cadence purposes.<br>
+            <strong style="color:var(--navy)">Missed/rescheduled/unsuccessful attempts:</strong> the existing Status field already has "Rescheduled"; there's no "No answer"/"Unsuccessful" value yet — an open decision, not yet added.<br>
+            <strong style="color:var(--navy)">Checklist items:</strong> only a single yes/no "Checklist completed" toggle exists — the brief's own "Decisions required" list asks what the checklist items even are, so there's nothing to enumerate yet.
           </div>
         </div>
 
@@ -7561,7 +7638,7 @@
         if (centre.rtLocationId) locationNameById[centre.rtLocationId] = centre.name;
         educators.forEach(e => { candidateNameById[e.userId] = e.name; });
         currentCentre360Bookings = {};
-        activity.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
+        activity.events.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
         bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -7708,18 +7785,30 @@
             <div class="sd-card-title" style="color:#0891b2">🕒 Relationship History</div>
             <span id="centre360-history-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
           </div>
-          <div id="centre360-history-body" style="display:none;margin-top:10px">${renderCentreActivityTimeline(activity)}</div>
+          <div id="centre360-history-body" style="display:none;margin-top:10px">${renderCentreActivityTimeline(activity.events, activity.milestones)}</div>
         </div>`;
     }
 
-    function renderCentreActivityTimeline(events) {
-      if (!events.length) return '<div style="font-size:12.5px;color:var(--text-muted)">No activity recorded yet.</div>';
-      return events.slice(0, 30).map(ev => {
+    // "Full client timeline" (Decision Area 5, not yet discussed live —
+    // see services/centreMilestoneService.js's header). Milestones get
+    // their own always-visible strip ABOVE the chronological feed, not
+    // merged into it — a busy, long-running centre can easily have 30+
+    // recent bookings, which would bump "First booking created" (from
+    // years ago) straight out of the capped recent-activity list below.
+    function renderCentreActivityTimeline(events, milestones) {
+      const milestoneStrip = (milestones && milestones.length) ? `
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-100)">
+          ${milestones.map(m => `
+            <span class="attn-chip" style="background:rgba(21,128,61,.1);color:#15803d" title="${fmtDate(m.date)}">${m.icon} ${escHtml(m.label)} · ${fmtDate(m.date)}</span>
+          `).join('')}
+        </div>` : '';
+      if (!events.length) return milestoneStrip || '<div style="font-size:12.5px;color:var(--text-muted)">No activity recorded yet.</div>';
+      return milestoneStrip + events.slice(0, 30).map(ev => {
         if (ev.type === 'visit') {
           const v = ev.data;
           return `
             <div class="attn-row" style="cursor:pointer" onclick="openVisitLogModal('${v.centre_key}','${v.id}')">
-              <span class="attn-chip lead-badge-sched">🚗 ${escHtml(v.status === 'planned' ? 'Planned' : v.status === 'rescheduled' ? 'Rescheduled' : 'Called / Visited')}</span>
+              <span class="attn-chip lead-badge-sched">${v.channel === 'call' ? '📞' : '🚗'} ${escHtml(v.status === 'planned' ? 'Planned' : v.status === 'rescheduled' ? 'Rescheduled' : 'Called / Visited')}</span>
               <span class="attn-centre">${v.outcome ? escHtml(v.outcome.replace('_', ' ')) : (v.notes ? escHtml(v.notes.slice(0, 60)) : 'Call/Visit')}</span>
               <span class="attn-meta">${fmtDate(v.visit_date)}</span>
             </div>`;
@@ -8625,6 +8714,38 @@
     // the "Last Booking Date of Centre" readout and the Check-in-after-
     // Booking next-step rule. null when there isn't one.
     let visitLogLastBookingDate = null;
+    // Decision Area 6's two activity-type taxonomies + the active-user
+    // list for "Next step owner" — fetched once and cached for the
+    // session (see loadVisitLogLookups()), not refetched per modal open.
+    let visitLogActivityTypes = null;
+    let visitLogUsers = null;
+
+    async function loadVisitLogLookups() {
+      if (visitLogActivityTypes && visitLogUsers) return;
+      try {
+        const [types, meta] = await Promise.all([
+          fetch('/api/centres/activity-types').then(r => r.json()),
+          // /api/tasks/meta is open to every role (unlike /api/admin/users,
+          // which is super_admin-only) — reused here purely for its
+          // active-user list, not anything Tasks-specific.
+          fetch('/api/tasks/meta').then(r => r.json())
+        ]);
+        visitLogActivityTypes = types;
+        visitLogUsers = meta.users || [];
+      } catch { visitLogActivityTypes = { callTypes: [], visitTypes: [] }; visitLogUsers = []; }
+    }
+
+    function onVisitLogChannelChange() {
+      const channel = document.getElementById('visitLogChannel').value;
+      const isVisit = channel === 'visit';
+      document.getElementById('visitLogAttendeesGroup').style.display = isVisit ? '' : 'none';
+      document.getElementById('visitLogChecklistGroup').style.display = isVisit ? '' : 'none';
+      const types = isVisit ? (visitLogActivityTypes?.visitTypes || []) : (visitLogActivityTypes?.callTypes || []);
+      const sel = document.getElementById('visitLogActivityType');
+      const current = sel.value;
+      sel.innerHTML = '<option value="">—</option>' + types.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
+      if (types.includes(current)) sel.value = current;
+    }
 
     // Reads LOCAL date components rather than round-tripping through
     // toISOString() (which converts to UTC) — RT's own bookingDate comes
@@ -8657,7 +8778,7 @@
       visitLogEditingId = visitId || null;
       visitLogPendingRecordingIds = [];
       document.getElementById('visitLogModalTitle').textContent = visitId ? 'Edit Call/Visit' : 'Log a Call/Visit';
-      ['visitLogBrief', 'visitLogNotes'].forEach(id => { document.getElementById(id).value = ''; });
+      ['visitLogBrief', 'visitLogNotes', 'visitLogContactName', 'visitLogAttendees', 'visitLogOpportunityNotes', 'visitLogCommitment'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('visitLogStatus').value = 'planned';
       document.getElementById('visitLogOutcome').value = '';
       document.getElementById('visitLogNextStep').value = '';
@@ -8665,7 +8786,15 @@
       document.getElementById('visitLogDate').value = toDateInputValue(new Date());
       document.getElementById('visitLogRecordingsList').innerHTML = '';
       document.getElementById('visitLogLastBookingDate').textContent = '…';
+      document.getElementById('visitLogChannel').value = 'visit';
+      document.getElementById('visitLogChecklistCompleted').checked = false;
       visitLogLastBookingDate = null;
+
+      await loadVisitLogLookups();
+      onVisitLogChannelChange(); // populates Activity Type options for the default channel
+      const ownerSel = document.getElementById('visitLogNextStepOwner');
+      ownerSel.innerHTML = '<option value="">Unassigned</option>' + visitLogUsers.map(u => `<option value="${u.email}">${escHtml(u.name || u.email)}</option>`).join('');
+      ownerSel.value = visitId ? '' : (currentUserEmail || ''); // defaults to whoever's logging a NEW one; an edit shows whatever was actually saved
 
       // Fire-and-forget alongside the visit fetch below — Last Booking
       // Date/the Check-in-after-Booking rule need this regardless of
@@ -8689,6 +8818,15 @@
             document.getElementById('visitLogNotes').value = v.notes || '';
             document.getElementById('visitLogNextStep').value = v.next_step || '';
             document.getElementById('visitLogNextStepDue').value = v.next_step_due_date || '';
+            document.getElementById('visitLogChannel').value = v.channel || 'visit';
+            onVisitLogChannelChange();
+            document.getElementById('visitLogActivityType').value = v.activity_type || '';
+            document.getElementById('visitLogContactName').value = v.contact_name || '';
+            document.getElementById('visitLogAttendees').value = v.attendees || '';
+            document.getElementById('visitLogOpportunityNotes').value = v.opportunity_notes || '';
+            document.getElementById('visitLogCommitment').value = v.commitment || '';
+            document.getElementById('visitLogChecklistCompleted').checked = !!v.checklist_completed;
+            ownerSel.value = v.next_step_owner || '';
           }
         } catch { /* fall back to a blank form rather than blocking the modal */ }
       }
@@ -8725,7 +8863,15 @@
         notes: document.getElementById('visitLogNotes').value.trim() || null,
         nextStep: document.getElementById('visitLogNextStep').value || null,
         nextStepDueDate: document.getElementById('visitLogNextStepDue').value || null,
-        recordingIds: visitLogPendingRecordingIds
+        recordingIds: visitLogPendingRecordingIds,
+        channel: document.getElementById('visitLogChannel').value,
+        activityType: document.getElementById('visitLogActivityType').value || null,
+        contactName: document.getElementById('visitLogContactName').value.trim() || null,
+        opportunityNotes: document.getElementById('visitLogOpportunityNotes').value.trim() || null,
+        commitment: document.getElementById('visitLogCommitment').value.trim() || null,
+        nextStepOwner: document.getElementById('visitLogNextStepOwner').value || null,
+        attendees: document.getElementById('visitLogAttendees').value.trim() || null,
+        checklistCompleted: document.getElementById('visitLogChannel').value === 'visit' ? document.getElementById('visitLogChecklistCompleted').checked : null
       };
       const btn = document.getElementById('visitLogSubmitBtn');
       btn.disabled = true;

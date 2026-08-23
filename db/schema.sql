@@ -999,6 +999,24 @@ CREATE TABLE IF NOT EXISTS centre_visits (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Decision Area 6 — Activity Logging (2026-08-24). NOT YET DISCUSSED LIVE
+-- — the meeting hasn't reached this decision area, so these are best-
+-- guess defaults built from the fields the spec listed, not a locked
+-- design; see services/centreActivityTypeService.js for the full
+-- reasoning and the taxonomy lists. Additive columns on the existing
+-- table rather than a new one — a call and a visit are still fundamentally
+-- "one contact with a centre, on one day", which is exactly what this
+-- table already models; splitting them into separate tables would just
+-- duplicate the shared fields (outcome/notes/next_step/...) for no gain.
+-- All nullable — every existing row predates this and stays valid as-is.
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS channel TEXT DEFAULT 'visit'; -- 'call' | 'visit' — ASSUMED default 'visit' for pre-existing rows (this table's original name/purpose), not a confirmed backfill decision
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS activity_type TEXT; -- one of centreActivityTypeService.js's CALL_ACTIVITY_TYPES / VISIT_ACTIVITY_TYPES
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS contact_name TEXT; -- who at the centre this contact was with — "Centre and contact" required field
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS opportunity_notes TEXT; -- "Opportunity, risk or issue identified" — deliberately separate from `outcome`, which centreHealthService.js's escalation logic already depends on ('issue_raised')
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS commitment TEXT; -- "Commitment made" — distinct from next_step, which is closer to "next action"
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS next_step_owner CITEXT; -- users.email; defaults to the logger themselves in the UI, not enforced here
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS attendees TEXT; -- visit-only ("Centre and attendees") — free text, no attendee taxonomy defined yet
+ALTER TABLE centre_visits ADD COLUMN IF NOT EXISTS checklist_completed BOOLEAN; -- visit-only — a plain yes/no for now; the spec's own "Decisions required" list asks what the checklist items even are, so there's nothing to check off yet
 CREATE INDEX IF NOT EXISTS idx_centre_visits_centre_key ON centre_visits(centre_key);
 -- Backs the "overdue next step" signal both Centre 360 and the My
 -- Dashboard attention queue need to surface.

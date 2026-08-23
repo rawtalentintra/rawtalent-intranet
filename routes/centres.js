@@ -16,6 +16,8 @@ const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimet
 const { MELBOURNE_SUBURB_PARTNER } = require('../services/melbourneTerritoryService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
+const { computeSystemMilestones } = require('../services/centreMilestoneService');
+const { CALL_ACTIVITY_TYPES, VISIT_ACTIVITY_TYPES, DECISIONS_REQUIRED } = require('../services/centreActivityTypeService');
 
 // Any format — a site-visit recording could be a phone-app voice memo, a
 // Zoom/Teams export, a plain-text transcript, whatever the Workforce
@@ -295,6 +297,18 @@ router.get('/due-for-routing', async (req, res) => {
   }
 });
 
+// Decision Area 6's two activity-type taxonomies, straight from
+// centreActivityTypeService.js — one call so the frontend never hardcodes
+// a copy that could drift from the real list. Registered ahead of GET
+// /:centreKey below for the same reason as due-for-routing above.
+router.get('/activity-types', (req, res) => {
+  res.json({
+    callTypes: CALL_ACTIVITY_TYPES,
+    visitTypes: VISIT_ACTIVITY_TYPES,
+    decisionsRequired: DECISIONS_REQUIRED
+  });
+});
+
 // Centre 360 overview — re-fetches this one client live from RT so the
 // name/contact/active status shown is always current even if the bulk
 // list cache is a few minutes stale (same "list can lag, detail is
@@ -470,19 +484,26 @@ async function linkRecordingsToVisit(centreKey, visitId, recordingIds) {
 }
 
 router.post('/:centreKey/visits', async (req, res) => {
-  const { visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds } = req.body;
+  const {
+    visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
+    channel, activityType, contactName, opportunityNotes, commitment, nextStepOwner, attendees, checklistCompleted
+  } = req.body;
   if (!visitDate) return res.status(400).json({ error: 'visitDate is required' });
   try {
     const id = uuidv4();
     await getDb().execute({
       sql: `INSERT INTO centre_visits (
               id, centre_key, visit_date, status, pre_visit_brief, outcome, notes,
-              next_step, next_step_due_date, created_by_email, created_by_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              next_step, next_step_due_date, created_by_email, created_by_name,
+              channel, activity_type, contact_name, opportunity_notes, commitment, next_step_owner, attendees, checklist_completed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id, req.params.centreKey, visitDate, status || 'planned', preVisitBrief || null,
         outcome || null, notes || null, nextStep || null, nextStepDueDate || null,
-        req.user.email, req.user.name || req.user.email
+        req.user.email, req.user.name || req.user.email,
+        channel || 'visit', activityType || null, contactName || null, opportunityNotes || null,
+        commitment || null, nextStepOwner || req.user.email, attendees || null,
+        typeof checklistCompleted === 'boolean' ? checklistCompleted : null
       ]
     });
     await linkRecordingsToVisit(req.params.centreKey, id, recordingIds);
@@ -494,17 +515,26 @@ router.post('/:centreKey/visits', async (req, res) => {
 });
 
 router.put('/:centreKey/visits/:visitId', async (req, res) => {
-  const { visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds } = req.body;
+  const {
+    visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
+    channel, activityType, contactName, opportunityNotes, commitment, nextStepOwner, attendees, checklistCompleted
+  } = req.body;
   try {
     const result = await getDb().execute({
       sql: `UPDATE centre_visits SET
               visit_date = coalesce(?, visit_date), status = coalesce(?, status),
               pre_visit_brief = ?, outcome = ?, notes = ?, next_step = ?, next_step_due_date = ?,
+              channel = coalesce(?, channel), activity_type = ?, contact_name = ?, opportunity_notes = ?,
+              commitment = ?, next_step_owner = ?, attendees = ?, checklist_completed = ?,
               updated_at = now()
             WHERE id = ? AND centre_key = ?`,
       args: [
         visitDate || null, status || null, preVisitBrief || null, outcome || null,
-        notes || null, nextStep || null, nextStepDueDate || null, req.params.visitId, req.params.centreKey
+        notes || null, nextStep || null, nextStepDueDate || null,
+        channel || null, activityType || null, contactName || null, opportunityNotes || null,
+        commitment || null, nextStepOwner || null, attendees || null,
+        typeof checklistCompleted === 'boolean' ? checklistCompleted : null,
+        req.params.visitId, req.params.centreKey
       ]
     });
     if (result.rowsAffected === 0) return res.status(404).json({ error: 'Visit not found' });
@@ -642,9 +672,10 @@ router.get('/:centreKey/activity', async (req, res) => {
       sql: 'SELECT * FROM centre_visits WHERE centre_key = ? ORDER BY visit_date DESC',
       args: [req.params.centreKey]
     })).rows;
-    const { bookings } = await getCentresAndBookings();
-    const forCentre = bookings
-      .filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id))
+    const { centres, bookings } = await getCentresAndBookings();
+    const centre = centres.find(c => c.centreKey === req.params.centreKey);
+    const allForCentre = bookings.filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id));
+    const forCentre = allForCentre
       .sort((a, b) => new Date(b.bookingDate) - new Date(a.bookingDate))
       .slice(0, 10);
 
@@ -653,7 +684,14 @@ router.get('/:centreKey/activity', async (req, res) => {
       ...forCentre.map(b => ({ type: 'booking', date: b.bookingDate, data: b }))
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    res.json(events);
+    // Decision Area 5's "full client timeline" — see
+    // centreMilestoneService.js's header for why these are computed live
+    // here rather than stored. allForCentre (not the sliced-to-10
+    // `forCentre`) so "first/second booking" is genuinely the earliest
+    // ones on record, not whatever happens to be in the 10 most recent.
+    const milestones = computeSystemMilestones(centre, allForCentre);
+
+    res.json({ events, milestones });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
