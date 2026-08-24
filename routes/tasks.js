@@ -9,8 +9,22 @@ const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
 // (see public/index.html's Tasks tab). No role gate at all.
 router.use(requireAuth);
 
-const STATUSES = ['to_do', 'in_progress', 'in_review', 'done'];
+// 'requested_bookings' is Bookings-department-only (2026-08-24) — a
+// booking request that's come in and needs actioning, shown as its own
+// column ahead of To Do on the board. Kept in the same global STATUSES
+// list (not a separate per-department enum) since every other piece of
+// this feature — the modal, the board, notifications — already assumes
+// one flat status set; validateStatusForDepartment() below is what
+// actually restricts it to Bookings, not the list itself.
+const STATUSES = ['requested_bookings', 'to_do', 'in_progress', 'in_review', 'done'];
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+
+function validateStatusForDepartment(status, departmentId) {
+  if (status === 'requested_bookings' && departmentId !== 'bookings') {
+    return '"Requested Bookings" is only a valid status for the Bookings department';
+  }
+  return null;
+}
 
 // Finds @Name mentions in a note body against the known active-user list and
 // returns the matched emails. Matches on full display name (case-insensitive,
@@ -135,6 +149,8 @@ router.post('/', async (req, res) => {
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (status && !STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   if (priority && !PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
+  const deptStatusError = validateStatusForDepartment(status, department_id);
+  if (deptStatusError) return res.status(400).json({ error: deptStatusError });
   try {
     const db = getDb();
     const id = uuidv4();
@@ -170,6 +186,8 @@ router.put('/:id', async (req, res) => {
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
   if (status && !STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   if (priority && !PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
+  const deptStatusError = validateStatusForDepartment(status, department_id);
+  if (deptStatusError) return res.status(400).json({ error: deptStatusError });
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT status, completed_at FROM tasks WHERE id = ?', args: [req.params.id] });

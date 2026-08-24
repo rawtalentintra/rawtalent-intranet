@@ -1266,7 +1266,8 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Task mentions</div>
           ${notifData.taskMentions.map(m => `
-            <div style="background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
+            <div style="position:relative;background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
+              ${notifReadToggleHtml('taskmention', `${m.kind}:${m.mention_id}`, m.is_read)}
               <div style="font-weight:${m.is_read ? '500' : '700'};color:${m.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${escHtml(m.task_title)}"</div>
               <div style="font-size:11px;color:var(--text-muted)">${escHtml(m.body).slice(0,80)}${m.body.length > 80 ? '…' : ''}</div>
             </div>
@@ -1277,7 +1278,8 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
           ${notifData.leaveDecisions.map(l => `
-            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
+            <div style="position:relative;background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
+              ${notifReadToggleHtml('leave', l.id, l.is_read)}
               <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
             </div>
@@ -1288,7 +1290,8 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your feedback</div>
           ${notifData.feedbackDecisions.map(f => `
-            <div style="background:${f.is_read ? 'white' : '#eef2ff'};border:1px solid ${f.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
+            <div style="position:relative;background:${f.is_read ? 'white' : '#eef2ff'};border:1px solid ${f.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
+              ${notifReadToggleHtml('feedback', f.id, f.is_read)}
               <div style="font-weight:${f.is_read ? '500' : '700'};color:${f.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(f.updated_at)}</div>
             </div>
@@ -1335,7 +1338,8 @@
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your Greetings</div>
           ${notifData.receivedGreetings.map(g => `
-            <div style="background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+            <div style="position:relative;background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+              ${notifReadToggleHtml('greeting', g.id, g.is_read)}
               <div style="font-weight:${g.is_read ? '500' : '700'};color:${g.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(g.created_at)}</div>
             </div>
@@ -1436,6 +1440,34 @@
       return fetch('/api/notifications/dismiss', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key })
       }).then(() => loadNotifications());
+    }
+
+    // The ● / ○ toggle on each dismissible bell item — "Mark Unread" so
+    // clearing a notification isn't one-way; you can put something back
+    // if you clicked it by mistake or just want to come back to it later.
+    // Greetings use their own /:id/read|unread pair (is_read lives on
+    // team_greetings itself); everything else goes through the generic
+    // dismiss/undismiss-by-key mechanism (notification_dismissals).
+    // idOrSuffix is the bare id for most types, but for task mentions it's
+    // "kind:mentionId" (see openTaskMention) since that compound key is
+    // what actually identifies the dismissal row.
+    async function toggleNotifRead(event, type, idOrSuffix, isRead) {
+      event.stopPropagation();
+      try {
+        if (type === 'greeting') {
+          await fetch(`/api/notifications/${idOrSuffix}/${isRead ? 'unread' : 'read'}`, { method: 'POST' });
+        } else {
+          const key = `${type}:${idOrSuffix}`;
+          await fetch(`/api/notifications/${isRead ? 'undismiss' : 'dismiss'}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key })
+          });
+        }
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function notifReadToggleHtml(type, idOrSuffix, isRead) {
+      return `<button onclick="toggleNotifRead(event,'${type}','${idOrSuffix}',${isRead})" title="${isRead ? 'Mark unread' : 'Mark read'}" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:2px;color:${isRead ? 'var(--gray-400)' : 'var(--orange)'}">${isRead ? '○' : '●'}</button>`;
     }
 
     function openLeaveDecision(id) {
@@ -1851,7 +1883,15 @@
     // brief: "we do not want to complicate things". Visible to every role
     // (this whole tab lives in index.html, not admin.html, for that reason
     // — see routes/tasks.js).
+    // 'requested_bookings' is Bookings-department-only (2026-08-24) — a
+    // booking request that's come in and needs actioning, shown as its
+    // own column ahead of To Do. Kept out of TASK_STATUS_ORDER (the base
+    // order every department uses) and layered in only where the current
+    // department context actually is Bookings — see
+    // BOOKINGS_ONLY_STATUS/statusOrderForDept/boardStatusOrder below.
+    const BOOKINGS_ONLY_STATUS = 'requested_bookings';
     const TASK_STATUS_META = {
+      requested_bookings: { label: 'Requested Bookings', color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', desc: 'A booking request has come in and needs actioning. Bookings department only.' },
       to_do:       { label: 'To Do',       color: '#475569', bg: '#f1f5f9', border: '#e2e8f0', desc: 'Not started yet.' },
       in_progress: { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', desc: 'Someone is actively working on it right now.' },
       in_review:   { label: 'In Review',   color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', desc: 'Work is done and being checked before it closes out.' },
@@ -1864,6 +1904,21 @@
       urgent: { label: 'Urgent', color: '#dc2626', desc: 'Time-critical — needs attention right away.' }
     };
     const TASK_STATUS_ORDER = ['to_do', 'in_progress', 'in_review', 'done'];
+
+    // Status order for a specific department context (the New/Edit Task
+    // modal's Department field) — Requested Bookings only appears when
+    // that department is actually Bookings.
+    function statusOrderForDept(deptId) {
+      return deptId === 'bookings' ? [BOOKINGS_ONLY_STATUS, ...TASK_STATUS_ORDER] : TASK_STATUS_ORDER;
+    }
+    // Status order for the BOARD, which is scoped by the current
+    // department pill filter rather than one task's own department —
+    // shown on "All" too (not just "Bookings"), otherwise a Bookings task
+    // sitting in Requested Bookings would have nowhere to render while
+    // viewing every department at once.
+    function boardStatusOrder() {
+      return (taskFilterDept === 'bookings' || taskFilterDept === 'all') ? [BOOKINGS_ONLY_STATUS, ...TASK_STATUS_ORDER] : TASK_STATUS_ORDER;
+    }
 
     let taskMeta = { departments: [], classifications: [], users: [] };
     let allTasks = [];
@@ -1941,6 +1996,7 @@
         <div class="task-legend">
           <div>
             <div class="task-legend-heading">Status</div>
+            <div class="task-legend-row"><span class="task-chip" style="background:${TASK_STATUS_META[BOOKINGS_ONLY_STATUS].bg};color:${TASK_STATUS_META[BOOKINGS_ONLY_STATUS].color};border-color:${TASK_STATUS_META[BOOKINGS_ONLY_STATUS].border}">${TASK_STATUS_META[BOOKINGS_ONLY_STATUS].label}</span> ${TASK_STATUS_META[BOOKINGS_ONLY_STATUS].desc}</div>
             ${TASK_STATUS_ORDER.map(s => `<div class="task-legend-row"><span class="task-chip" style="background:${TASK_STATUS_META[s].bg};color:${TASK_STATUS_META[s].color};border-color:${TASK_STATUS_META[s].border}">${TASK_STATUS_META[s].label}</span> ${TASK_STATUS_META[s].desc}</div>`).join('')}
           </div>
           <div>
@@ -2035,6 +2091,14 @@
       if (!taskId) return;
       const t = allTasks.find(x => x.id === taskId);
       if (!t || t.status === status) return;
+      // Requested Bookings only exists for Bookings tasks — reachable
+      // here because the column also shows on the "All" board (so a
+      // Bookings task sitting in it doesn't disappear from view), which
+      // means a non-Bookings card can technically be dragged onto it too.
+      if (status === BOOKINGS_ONLY_STATUS && t.department_id !== 'bookings') {
+        toast('Requested Bookings is only for the Bookings department', 'error');
+        return;
+      }
       const previousStatus = t.status;
       t.status = status; // optimistic — instant visual move, reverted below on failure
       renderTasksView();
@@ -2055,7 +2119,7 @@
     }
 
     function renderTaskBoardHtml(filtered) {
-      const columns = TASK_STATUS_ORDER.map(status => {
+      const columns = boardStatusOrder().map(status => {
         const meta = TASK_STATUS_META[status];
         const items = filtered.filter(t => t.status === status)
           .sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
@@ -2157,8 +2221,21 @@
     function populateTaskSelects() {
       document.getElementById('taskDeptSelect').innerHTML = taskMeta.departments.map(d => `<option value="${d.id}">${d.icon || ''} ${escHtml(d.name)}</option>`).join('');
       document.getElementById('taskAssigneeSelect').innerHTML = '<option value="">Unassigned</option>' + taskMeta.users.map(u => `<option value="${u.email}">${escHtml(u.name || u.email)}</option>`).join('');
-      document.getElementById('taskStatusSelect').innerHTML = TASK_STATUS_ORDER.map(s => `<option value="${s}">${TASK_STATUS_META[s].label}</option>`).join('');
       document.getElementById('taskPrioritySelect').innerHTML = Object.keys(TASK_PRIORITY_META).map(p => `<option value="${p}">${TASK_PRIORITY_META[p].label}</option>`).join('');
+    }
+
+    // Separate from populateTaskSelects() above because the Status options
+    // depend on which department is selected (Requested Bookings only for
+    // Bookings) — needs to be re-run every time Department changes, not
+    // just once when the modal opens. Falls back to 'to_do' if the
+    // previously-selected status doesn't exist for the new department
+    // (e.g. switching away from Bookings while "Requested Bookings" was
+    // selected).
+    function populateTaskStatusSelect(deptId, selectedStatus) {
+      const sel = document.getElementById('taskStatusSelect');
+      const order = statusOrderForDept(deptId);
+      const finalSelected = order.includes(selectedStatus) ? selectedStatus : 'to_do';
+      sel.innerHTML = order.map(s => `<option value="${s}" ${s === finalSelected ? 'selected' : ''}>${TASK_STATUS_META[s].label}</option>`).join('');
     }
 
     function populateTaskClassSelect(deptId, selectedId) {
@@ -2170,7 +2247,12 @@
     }
 
     function onTaskDeptChange() {
-      populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
+      const deptId = document.getElementById('taskDeptSelect').value;
+      populateTaskClassSelect(deptId, null);
+      // Preserves whatever status is currently picked if it's still valid
+      // for the new department; falls back to To Do if not (e.g. leaving
+      // Bookings while "Requested Bookings" was selected).
+      populateTaskStatusSelect(deptId, document.getElementById('taskStatusSelect').value);
     }
 
     async function addTaskClassification() {
@@ -2213,7 +2295,7 @@
         populateTaskClassSelect(t.department_id, t.classification_id);
         document.getElementById('taskAssigneeSelect').value = t.assigned_to || '';
         document.getElementById('taskDueInput').value = t.due_date ? String(t.due_date).slice(0, 10) : '';
-        document.getElementById('taskStatusSelect').value = t.status;
+        populateTaskStatusSelect(t.department_id, t.status);
         document.getElementById('taskPrioritySelect').value = t.priority;
         currentTaskNotes = [];
         loadTaskNotes(taskId);
@@ -2233,7 +2315,7 @@
         populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
         document.getElementById('taskAssigneeSelect').value = '';
         document.getElementById('taskDueInput').value = '';
-        document.getElementById('taskStatusSelect').value = 'to_do';
+        populateTaskStatusSelect(document.getElementById('taskDeptSelect').value, 'to_do');
         document.getElementById('taskPrioritySelect').value = 'normal';
         taskLinkedCandidate = null;
         taskLinkedClient = null;

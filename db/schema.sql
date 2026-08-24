@@ -1358,7 +1358,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   classification_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT NOT NULL DEFAULT 'to_do', -- 'to_do' | 'in_progress' | 'in_review' | 'done' — 'blocked' removed 2026-08-24, see the UPDATE below
+  status TEXT NOT NULL DEFAULT 'to_do', -- 'requested_bookings' | 'to_do' | 'in_progress' | 'in_review' | 'done' — 'blocked' removed 2026-08-24, see the UPDATE below. 'requested_bookings' is Bookings-department-only (routes/tasks.js's validateStatusForDepartment), not enforced at the DB level
   priority TEXT NOT NULL DEFAULT 'normal', -- 'low' | 'normal' | 'high' | 'urgent'
   assigned_to CITEXT, -- users.email; null = unassigned
   due_date DATE,

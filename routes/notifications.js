@@ -546,6 +546,18 @@ router.post('/:id/read', async (req, res) => {
   }
 });
 
+// The other half of the pair above — lets someone put a greeting back
+// into "unread" after clicking it by mistake, or just to come back to it
+// later, rather than read state only ever going one direction.
+router.post('/:id/unread', async (req, res) => {
+  try {
+    await getDb().execute({ sql: 'UPDATE team_greetings SET is_read = false WHERE id = ?', args: [req.params.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Dismisses a single informational bell item the moment the user actually
 // opens it, via the same notification_dismissals mechanism 'read-all' uses
 // per-category — without this, leave-decision and feedback-decision items
@@ -564,6 +576,26 @@ router.post('/dismiss', async (req, res) => {
     await getDb().execute({
       sql: `INSERT INTO notification_dismissals (user_email, notification_key) VALUES (?, ?)
             ON CONFLICT (user_email, notification_key) DO NOTHING`,
+      args: [req.user.email, key]
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// "Mark Unread" — the other half of /dismiss above. Removing the
+// dismissal row is enough on its own: the GET / handler above never
+// filters these buckets by is_read/dismissed, it only styles rows
+// differently and counts them into unreadCount, so undoing a dismissal
+// here is all it takes for the item to look unread again.
+router.post('/undismiss', async (req, res) => {
+  const { key } = req.body;
+  const prefix = key?.split(':')[0];
+  if (!key || !DISMISSIBLE_KEY_PREFIXES.includes(prefix)) return res.status(400).json({ error: 'Invalid notification key' });
+  try {
+    await getDb().execute({
+      sql: 'DELETE FROM notification_dismissals WHERE user_email = ? AND notification_key = ?',
       args: [req.user.email, key]
     });
     res.json({ success: true });
