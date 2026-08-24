@@ -626,6 +626,12 @@
             <div id="salesMonthlyTrend" style="margin-top:14px"></div>
           </div>
         </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div class="sd-card-title">Leads by Rep — this period vs last</div>
+          <div class="sd-card-sub">Same date range as the KPIs above (change it there) — sorted alphabetically by rep.</div>
+          <div id="salesRepBreakdown" style="margin-top:14px;overflow-x:auto"></div>
+        </div>
         </div>
       </div>
       </template>
@@ -7065,6 +7071,7 @@
       renderSalesPartnerCards(current);
       renderSalesSourceBreakdown(current);
       renderSalesMonthlyTrend(trendLeads);
+      renderSalesRepBreakdown(current, previous);
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
@@ -7347,6 +7354,45 @@
               <div class="lead-chart-bar-label">${monthLabel(k)}</div>
             </div>`).join('')}
         </div>`;
+    }
+
+    // Requested live by Liam (2026-08-24 meeting): "how many leads we've
+    // got this month compared to last and an overall of like who they're
+    // by" — sortable alphabetically. `current`/`previous` are the exact
+    // two periods renderSalesDashboard() already computes for the KPI row
+    // above, so this reuses them rather than re-deriving its own month
+    // boundaries — whatever range picker value is selected up top (this
+    // week/month/quarter) is what "this period vs last" compares here too,
+    // not hardcoded to calendar months.
+    function renderSalesRepBreakdown(current, previous) {
+      const box = document.getElementById('salesRepBreakdown');
+      const reps = new Map(); // email -> { name, thisPeriod, lastPeriod }
+      const tally = (leads, key) => {
+        leads.forEach(l => {
+          if (!l.submitted_by_email || LEADS_SUBMITTER_HIDDEN.has(l.submitted_by_email.toLowerCase())) return;
+          const email = l.submitted_by_email.toLowerCase();
+          if (!reps.has(email)) reps.set(email, { name: l.submitted_by_name || email, thisPeriod: 0, lastPeriod: 0 });
+          reps.get(email)[key]++;
+        });
+      };
+      tally(current, 'thisPeriod');
+      tally(previous, 'lastPeriod');
+
+      if (!reps.size) { box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">No leads with a submitter on file for this range.</div>'; return; }
+
+      const rows = [...reps.values()].sort((a, b) => a.name.localeCompare(b.name));
+      box.innerHTML = `
+        <table class="data-table data-table-compact">
+          <thead><tr><th>Rep</th><th>This period</th><th>Last period</th><th>Change</th></tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const delta = r.thisPeriod - r.lastPeriod;
+              const deltaLabel = delta === 0 ? '—' : `${delta > 0 ? '+' : ''}${delta}`;
+              const deltaColor = delta > 0 ? '#15803d' : delta < 0 ? '#c0392b' : 'var(--text-muted)';
+              return `<tr><td>${escHtml(r.name)}</td><td>${r.thisPeriod}</td><td>${r.lastPeriod}</td><td style="color:${deltaColor};font-weight:700">${deltaLabel}</td></tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
     }
 
     // ══════════════════════════════════════════════════════════════
