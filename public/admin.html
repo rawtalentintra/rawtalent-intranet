@@ -6284,15 +6284,9 @@
         submitterSelect.innerHTML = '<option value="">Submitted by: any</option>' +
           sorted.map(([email, name]) => `<option value="${escHtml(email)}">${escHtml(name)}</option>`).join('');
 
-        // Suburb options come from the data itself (no fixed list like
-        // states/partners) — rebuilt on every load same as Submitted By,
-        // so a newly-submitted suburb shows up without a page reload.
-        const suburbSelect = document.getElementById('leadsFilterSuburb');
-        const previousSuburb = suburbSelect.value;
-        const suburbs = Array.from(new Set(allLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-        suburbSelect.innerHTML = '<option value="">Suburb: any</option>' +
-          suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
-        if (suburbs.includes(previousSuburb)) suburbSelect.value = previousSuburb;
+        // Suburb dropdown options are (re)built inside filterLeadsTable()
+        // itself, scoped to whichever territory is active — see
+        // updateLeadsSuburbOptions(). Nothing to do here.
 
         // Defaults a Workforce Partner to their own territory on first
         // visit only — see loadSalesDashboard's identical pattern.
@@ -6377,6 +6371,20 @@
       filterLeadsTable();
     }
 
+    // Rebuilds the Suburb dropdown's options from whatever territory
+    // (Partner/State) is currently active, not the whole leads table —
+    // so picking "Liam - VIC" can't leave Adelaide suburbs sitting in the
+    // list. Keeps the current selection if it's still valid for the new
+    // territory; clears it otherwise rather than silently filtering to a
+    // suburb that's no longer even offered.
+    function updateLeadsSuburbOptions(territoryLeads, currentSuburb) {
+      const suburbSelect = document.getElementById('leadsFilterSuburb');
+      const suburbs = Array.from(new Set(territoryLeads.map(l => l.suburb).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      suburbSelect.innerHTML = '<option value="">Suburb: any</option>' +
+        suburbs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+      suburbSelect.value = suburbs.includes(currentSuburb) ? currentSuburb : '';
+    }
+
     function filterLeadsTable() {
       const centreSearch = document.getElementById('leadsFilterCentre').value.trim().toLowerCase();
       const periodKey = document.getElementById('leadsFilterPeriod').value;
@@ -6398,12 +6406,39 @@
       }
       if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
       if (state) filtered = filtered.filter(l => l.state === state);
-      if (suburb) filtered = filtered.filter(l => l.suburb === suburb);
+
+      // Suburb dropdown options narrow to whichever territory (Partner/
+      // State) is currently active — computed off ONLY those two filters,
+      // not the others (typing in the centre-name search shouldn't reset
+      // an unrelated suburb pick). Without this, "Liam - VIC" still
+      // offered every suburb across every partner's territory, including
+      // ones Liam has zero leads in.
+      let territoryLeads = allLeads;
+      if (partner) territoryLeads = territoryLeads.filter(l => l.assigned_workforce_partner === partner);
+      if (state) territoryLeads = territoryLeads.filter(l => l.state === state);
+      updateLeadsSuburbOptions(territoryLeads, suburb);
+      // Re-read after the update above — it may have just reset the
+      // dropdown back to "any" because the previous suburb doesn't exist
+      // in the new territory, and the table must match what's actually
+      // shown, not the stale value read before that reset happened.
+      const effectiveSuburb = document.getElementById('leadsFilterSuburb').value;
+
+      if (effectiveSuburb) filtered = filtered.filter(l => l.suburb === effectiveSuburb);
       if (submittedBy) filtered = filtered.filter(l => l.submitted_by_email === submittedBy);
       if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
       if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
       if (centreVisited) filtered = filtered.filter(l => l.centre_visited_status === centreVisited);
       if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
+
+      // Geography first, not most-recently-submitted-first — a Workforce
+      // Partner scanning their own territory wants centres grouped by
+      // where they actually are, not buried in reverse-chronological
+      // order. Alphabetical within each level (state, then suburb, then
+      // centre name) so the same centre always lands in the same spot.
+      filtered = filtered.slice().sort((a, b) =>
+        (a.state || '').localeCompare(b.state || '') ||
+        (a.suburb || '').localeCompare(b.suburb || '') ||
+        (a.centre_name || '').localeCompare(b.centre_name || ''));
 
       // Keeps button styling correct even if the State/Partner dropdowns
       // were changed directly rather than via a button click.
