@@ -955,6 +955,30 @@
               </tbody>
             </table>
           </div>
+          <div id="leadsPager" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px"></div>
+        </div>
+
+        <!-- Same performance breakdown as the WFP Dashboard's Sales tab
+             (requested to also live here, 2026-08-24) — reuses the exact
+             same render functions against this section's own already-
+             filtered leads set, so both places can never drift out of
+             sync with each other. -->
+        <div style="display:flex;gap:16px;margin-bottom:20px;margin-top:20px">
+          <div class="admin-table-card" style="padding:20px 24px;flex:1">
+            <div class="sd-card-title">Lead Source Performance</div>
+            <div class="sd-card-sub">Which lead type is converting better — worth knowing where to focus sourcing effort</div>
+            <div id="leadsSourceBreakdown" style="margin-top:14px"></div>
+          </div>
+          <div class="admin-table-card" style="padding:20px 24px;flex:1">
+            <div class="sd-card-title">Leads Received — by month</div>
+            <div class="sd-card-sub">Volume trend across the pipeline</div>
+            <div id="leadsMonthlyTrend" style="margin-top:14px"></div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div class="sd-card-title">Leads by Rep — this period vs last</div>
+          <div class="sd-card-sub">Same filters as the table above (Period dropdown sets both) — sorted alphabetically by rep.</div>
+          <div id="leadsRepBreakdown" style="margin-top:14px;overflow-x:auto"></div>
         </div>
       </div>
       </template>
@@ -6404,14 +6428,23 @@
       const profileCreated = document.getElementById('leadsFilterProfileCreated').value;
       const closedFilter = leadsClosedFilter;
 
-      let filtered = allLeads;
-      if (centreSearch) filtered = filtered.filter(l => (l.centre_name || '').toLowerCase().includes(centreSearch));
-      if (periodKey !== 'all') {
-        const { from, to } = salesDashRange(periodKey);
-        filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
-      }
-      if (partner) filtered = filtered.filter(l => l.assigned_workforce_partner === partner);
-      if (state) filtered = filtered.filter(l => l.state === state);
+      // Everything except the period/date-range filter — reused below both
+      // for the main table (with the period applied) and, unfiltered by
+      // period, to feed the Leads-by-Rep "previous period" comparison and
+      // the monthly trend chart (which wants full history, same as the WFP
+      // Dashboard's own trend card, not just whatever period is selected).
+      const matchesNonPeriodFilters = l => {
+        if (centreSearch && !(l.centre_name || '').toLowerCase().includes(centreSearch)) return false;
+        if (partner && l.assigned_workforce_partner !== partner) return false;
+        if (state && l.state !== state) return false;
+        if (submittedBy && l.submitted_by_email !== submittedBy) return false;
+        if (agencyUsage && l.agency_usage !== agencyUsage) return false;
+        if (leadCalled && l.lead_called_status !== leadCalled) return false;
+        if (centreVisited && l.centre_visited_status !== centreVisited) return false;
+        if (profileCreated && l.signed_status !== profileCreated) return false;
+        return true;
+      };
+      const nonPeriodFiltered = allLeads.filter(matchesNonPeriodFilters);
 
       // Suburb dropdown options narrow to whichever territory (Partner/
       // State) is currently active — computed off ONLY those two filters,
@@ -6429,12 +6462,11 @@
       // shown, not the stale value read before that reset happened.
       const effectiveSuburb = document.getElementById('leadsFilterSuburb').value;
 
-      if (effectiveSuburb) filtered = filtered.filter(l => l.suburb === effectiveSuburb);
-      if (submittedBy) filtered = filtered.filter(l => l.submitted_by_email === submittedBy);
-      if (agencyUsage) filtered = filtered.filter(l => l.agency_usage === agencyUsage);
-      if (leadCalled) filtered = filtered.filter(l => l.lead_called_status === leadCalled);
-      if (centreVisited) filtered = filtered.filter(l => l.centre_visited_status === centreVisited);
-      if (profileCreated) filtered = filtered.filter(l => l.signed_status === profileCreated);
+      let filtered = nonPeriodFiltered.filter(l => !effectiveSuburb || l.suburb === effectiveSuburb);
+      if (periodKey !== 'all') {
+        const { from, to } = salesDashRange(periodKey);
+        filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
+      }
 
       // Geography first, not most-recently-submitted-first — a Workforce
       // Partner scanning their own territory wants centres grouped by
@@ -6464,7 +6496,25 @@
       renderLeadsStatsBar(filtered);
       if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
       else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
+      leadsPage = 1; // any filter change starts back at page 1 — a stale page number from a much larger previous result set would otherwise show "no results" instead of the new filtered set
       renderLeadsTableRows(filtered);
+
+      // Same performance breakdown cards as the WFP Dashboard, now also
+      // here (requested 2026-08-24) — Source Performance/Rep Breakdown
+      // reflect the table's own current filters+period; the monthly trend
+      // deliberately ignores the period filter (same as the WFP
+      // Dashboard's own trend card) so it always shows the real full
+      // history for whatever territory/status filters are active.
+      renderSalesSourceBreakdown(filtered, 'leadsSourceBreakdown');
+      renderSalesMonthlyTrend(nonPeriodFiltered.filter(l => !effectiveSuburb || l.suburb === effectiveSuburb), 'leadsMonthlyTrend');
+      if (periodKey === 'all') {
+        document.getElementById('leadsRepBreakdown').innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">Pick a period above (not "All time") to compare against the period before it.</div>';
+      } else {
+        const { from, to } = salesDashRange(periodKey);
+        const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
+        const previous = nonPeriodFiltered.filter(l => (!effectiveSuburb || l.suburb === effectiveSuburb) && inDateRange(l.created_at, prevFrom, prevTo));
+        renderSalesRepBreakdown(filtered, previous, 'leadsRepBreakdown');
+      }
     }
 
     // Totals react to whatever's currently filtered, not the full dataset —
@@ -6517,12 +6567,33 @@
       return `<span class="badge badge-published" style="cursor:pointer" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">✓ Likely exists</span>`;
     }
 
+    // Client-side pagination, same pattern as My Centres
+    // (renderMyCentresPage) — the whole filtered set is already in hand
+    // from the one /api/leads fetch, so paging is just a slice, no server
+    // round-trip. 15/page (2026-08-24) — the unpaginated table was every
+    // matching lead in one long scroll.
+    const LEADS_PAGE_SIZE = 15;
+    let leadsPage = 1;
+    let leadsFilteredRows = [];
+
     function renderLeadsTableRows(list) {
+      leadsFilteredRows = list;
+      renderLeadsTablePage();
+    }
+
+    function renderLeadsTablePage() {
       const body = document.getElementById('leadsTableBody');
-      if (!list.length) {
+      const total = leadsFilteredRows.length;
+      if (!total) {
         body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        document.getElementById('leadsPager').innerHTML = '';
         return;
       }
+      const totalPages = Math.max(1, Math.ceil(total / LEADS_PAGE_SIZE));
+      leadsPage = Math.min(Math.max(1, leadsPage), totalPages);
+      const start = (leadsPage - 1) * LEADS_PAGE_SIZE;
+      const list = leadsFilteredRows.slice(start, start + LEADS_PAGE_SIZE);
+
       body.innerHTML = list.map(l => `
         <tr style="cursor:pointer${l.closed_at ? ';opacity:.5' : ''}" onclick="openLeadDetail('${l.id}')">
           <td>${fmtDateShort(l.created_at)}</td>
@@ -6541,6 +6612,19 @@
           <td style="white-space:nowrap">${fmtDateShort(l.lead_called_at)}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.centre_visited_at)}</td>
         </tr>`).join('');
+
+      document.getElementById('leadsPager').innerHTML = `
+        <div style="font-size:11.5px;color:var(--text-muted)">${start + 1}–${Math.min(start + LEADS_PAGE_SIZE, total)} of ${total}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeLeadsPage(-1)" ${leadsPage === 1 ? 'disabled' : ''}>← Prev</button>
+          <span style="font-size:12px;color:var(--text-muted)">Page ${leadsPage} of ${totalPages}</span>
+          <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="changeLeadsPage(1)" ${leadsPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>`;
+    }
+
+    function changeLeadsPage(delta) {
+      leadsPage += delta;
+      renderLeadsTablePage();
     }
 
     // ── Lead status popover — single-field editor ───────────────────
@@ -7320,21 +7404,26 @@
       }).join('');
     }
 
-    function renderSalesSourceBreakdown(leads) {
+    // targetId defaults to the WFP Dashboard's own element so its existing
+    // call site doesn't need to change — the Leads section (2026-08-24,
+    // "put these insights on the Leads section too") passes its own
+    // element id instead, reusing this exact same function rather than a
+    // near-duplicate that could drift out of sync with this one.
+    function renderSalesSourceBreakdown(leads, targetId = 'salesSourceBreakdown') {
       const sources = [{ key: 'target_temp', label: 'Target Temp' }, { key: 'high_agency_user', label: 'High Agency User' }];
       const rows = sources.map(s => {
         const subset = leads.filter(l => l.agency_usage === s.key);
         const c = salesFunnelCounts(subset);
         return { ...s, total: c.total, signed: c.signed, rate: pct(c.signed, c.total) };
       });
-      document.getElementById('salesSourceBreakdown').innerHTML = rows.map(r => `
+      document.getElementById(targetId).innerHTML = rows.map(r => `
         <div class="source-row">
           <div class="source-row-head"><span>${escHtml(r.label)}</span><span>${r.signed}/${r.total} signed (${r.rate}%)</span></div>
           <div class="source-row-track"><div class="source-row-fill" style="width:${r.rate}%"></div></div>
         </div>`).join('');
     }
 
-    function renderSalesMonthlyTrend(leads) {
+    function renderSalesMonthlyTrend(leads, targetId = 'salesMonthlyTrend') {
       const counts = {};
       leads.forEach(l => {
         if (!l.created_at) return;
@@ -7345,7 +7434,7 @@
       const keys = Object.keys(counts).sort();
       const max = Math.max(1, ...Object.values(counts));
       const monthLabel = k => new Date(k + '-01').toLocaleDateString('en-AU', { month: 'short' });
-      document.getElementById('salesMonthlyTrend').innerHTML = `
+      document.getElementById(targetId).innerHTML = `
         <div class="lead-chart-bars" style="height:90px">
           ${keys.map(k => `
             <div class="lead-chart-bar-col">
@@ -7364,8 +7453,8 @@
     // boundaries — whatever range picker value is selected up top (this
     // week/month/quarter) is what "this period vs last" compares here too,
     // not hardcoded to calendar months.
-    function renderSalesRepBreakdown(current, previous) {
-      const box = document.getElementById('salesRepBreakdown');
+    function renderSalesRepBreakdown(current, previous, targetId = 'salesRepBreakdown') {
+      const box = document.getElementById(targetId);
       const reps = new Map(); // email -> { name, thisPeriod, lastPeriod }
       const tally = (leads, key) => {
         leads.forEach(l => {
