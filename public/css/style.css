@@ -1793,11 +1793,11 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-pill-count { background: var(--gray-100); color: var(--text-muted); font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 50px; }
 .task-board { display: grid; grid-template-columns: repeat(5, minmax(220px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; }
 @media (max-width: 1200px) { .task-board { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
-.task-column { background: var(--offwhite); border-radius: var(--radius-lg); padding: 10px; min-width: 0; }
+.task-column { background: var(--offwhite); border-radius: var(--radius-lg); padding: 10px; min-width: 0; border: 2px solid transparent; transition: background-color .12s, border-color .12s; }
+.task-column.drag-over { background: rgba(61,111,255,.08); border-color: var(--orange); }
 .task-column-header { font-size: 12px; font-weight: 800; padding: 8px 10px; border-radius: 8px; border: 1px solid; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
-.task-column-body { display: flex; flex-direction: column; gap: 10px; min-height: 40px; border-radius: 8px; transition: background-color .12s, box-shadow .12s; }
-.task-column-body.drag-over { background: rgba(61,111,255,.08); box-shadow: inset 0 0 0 2px var(--orange); }
-.task-column-empty { font-size: 11.5px; color: var(--gray-400); text-align: center; padding: 14px 4px; }
+.task-column-body { display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.task-column-empty { font-size: 11.5px; color: var(--gray-400); text-align: center; padding: 14px 4px; border: 1.5px dashed var(--gray-200); border-radius: 8px; flex: 1; display: flex; align-items: center; justify-content: center; }
 .task-card { background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 12px; cursor: grab; box-shadow: var(--shadow-sm); transition: var(--transition); }
 .task-card:hover { border-color: var(--orange); box-shadow: var(--shadow); }
 .task-card:active { cursor: grabbing; }

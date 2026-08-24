@@ -2000,21 +2000,27 @@
     function handleTaskDragEnd() {
       draggingTaskId = null;
       dragOverColumnStatus = null;
-      document.querySelectorAll('.task-column-body.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('.task-column.drag-over').forEach(el => el.classList.remove('drag-over'));
     }
 
+    // Drop zone is the WHOLE column (header included, via renderTaskBoardHtml
+    // putting the drag handlers on .task-column, not just .task-column-body)
+    // — dropping on a column's label is a natural, easy target, and a
+    // narrow drop area (especially on an empty column) is exactly the kind
+    // of "hard to hit" friction that makes drag-and-drop feel broken.
     function handleTaskDragOverColumn(e, status) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       if (dragOverColumnStatus === status) return;
       dragOverColumnStatus = status;
-      document.querySelectorAll('.task-column-body').forEach(el => el.classList.toggle('drag-over', el.dataset.status === status));
+      document.querySelectorAll('.task-column').forEach(el => el.classList.toggle('drag-over', el.dataset.status === status));
     }
 
     function handleTaskDragLeaveColumn(e) {
-      // Only clear when actually leaving the column body (not just moving
-      // between a card and its parent) — relatedTarget is null on some
-      // browsers when leaving the window entirely, which should also clear.
+      // Only clear when actually leaving the column (not just moving
+      // between a card and its parent, or the header and the body) —
+      // relatedTarget is null on some browsers when leaving the window
+      // entirely, which should also clear.
       if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
       e.currentTarget.classList.remove('drag-over');
       if (dragOverColumnStatus === e.currentTarget.dataset.status) dragOverColumnStatus = null;
@@ -2022,7 +2028,7 @@
 
     async function handleTaskDrop(e, status) {
       e.preventDefault();
-      document.querySelectorAll('.task-column-body.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('.task-column.drag-over').forEach(el => el.classList.remove('drag-over'));
       dragOverColumnStatus = null;
       const taskId = draggingTaskId || e.dataTransfer.getData('text/plain');
       draggingTaskId = null;
@@ -2054,12 +2060,12 @@
         const items = filtered.filter(t => t.status === status)
           .sort((a, b) => (a.due_date || '9999-99-99').localeCompare(b.due_date || '9999-99-99'));
         return `
-          <div class="task-column">
+          <div class="task-column" data-status="${status}" ondragover="handleTaskDragOverColumn(event,'${status}')" ondragleave="handleTaskDragLeaveColumn(event)" ondrop="handleTaskDrop(event,'${status}')">
             <div class="task-column-header" style="color:${meta.color};background:${meta.bg};border-color:${meta.border}">
               <span>${meta.label}</span><span class="task-pill-count">${items.length}</span>
             </div>
-            <div class="task-column-body" data-status="${status}" ondragover="handleTaskDragOverColumn(event,'${status}')" ondragleave="handleTaskDragLeaveColumn(event)" ondrop="handleTaskDrop(event,'${status}')">
-              ${items.length ? items.map(taskCardHtml).join('') : '<div class="task-column-empty">No tasks — drop one here</div>'}
+            <div class="task-column-body">
+              ${items.length ? items.map(taskCardHtml).join('') : '<div class="task-column-empty">Drop a task here</div>'}
             </div>
           </div>
         `;
