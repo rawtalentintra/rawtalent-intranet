@@ -1394,8 +1394,23 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidate_phone TEXT;
 -- link to yet; see taskPersonMatchService.js's clientResult()).
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_client_name TEXT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_client_phone TEXT;
+-- Multiple assignees (2026-08-24) — replaces the single `assigned_to`
+-- column for everything the app reads/writes going forward. `assigned_to`
+-- itself is left in place rather than dropped (non-destructive migration,
+-- matching this file's general style), just no longer written to.
+-- assigned_to_migrated is a one-time-backfill guard, NOT a live "is this
+-- in sync" flag — using `assigned_to_emails = '[]'` as the guard instead
+-- would have re-run the backfill every time someone unassigned everyone
+-- from a task that still had a stale legacy assigned_to value, silently
+-- re-assigning them.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to_emails JSONB DEFAULT '[]';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to_migrated BOOLEAN DEFAULT false;
+UPDATE tasks SET
+  assigned_to_emails = CASE WHEN assigned_to IS NOT NULL THEN jsonb_build_array(LOWER(assigned_to::text)) ELSE '[]'::jsonb END,
+  assigned_to_migrated = true
+WHERE assigned_to_migrated = false;
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to_emails ON tasks USING gin(assigned_to_emails);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
 -- 'blocked' status removed 2026-08-24 — reassigned to 'to_do' rather than

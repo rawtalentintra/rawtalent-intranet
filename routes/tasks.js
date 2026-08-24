@@ -140,9 +140,23 @@ router.post('/classifications', async (req, res) => {
   }
 });
 
+// Normalises the incoming assignee list — dedupes case-insensitively and
+// lowercases for consistent comparison everywhere else (notifications'
+// taskAlerts query, the "assigned to me" filter). Silently drops anything
+// that isn't a non-empty string rather than erroring, since this only
+// ever comes from the assignee picker in practice, not hand-typed input.
+function normalizeAssignees(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  for (const email of list) {
+    if (typeof email === 'string' && email.trim()) seen.add(email.trim().toLowerCase());
+  }
+  return [...seen];
+}
+
 router.post('/', async (req, res) => {
   const {
-    department_id, classification_id, title, description, status, priority, assigned_to, due_date,
+    department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
     linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
@@ -158,12 +172,12 @@ router.post('/', async (req, res) => {
     const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
     await db.execute({
       sql: `INSERT INTO tasks
-            (id, department_id, classification_id, title, description, status, priority, assigned_to, due_date, created_by, created_by_name, completed_at, mentioned_emails,
+            (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, completed_at, mentioned_emails,
              linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         id, department_id, classification_id || null, title.trim(), description || null,
-        finalStatus, priority || 'normal', assigned_to || null, due_date || null,
+        finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null,
         req.user.email, req.user.name || req.user.email,
         finalStatus === 'done' ? new Date().toISOString() : null,
         JSON.stringify(mentioned),
@@ -179,7 +193,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const {
-    department_id, classification_id, title, description, status, priority, assigned_to, due_date,
+    department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
     linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
@@ -203,13 +217,13 @@ router.put('/:id', async (req, res) => {
     await db.execute({
       sql: `UPDATE tasks SET
               department_id=?, classification_id=?, title=?, description=?, status=?, priority=?,
-              assigned_to=?, due_date=?, completed_at=?, mentioned_emails=?,
+              assigned_to_emails=?, due_date=?, completed_at=?, mentioned_emails=?,
               linked_candidate_id=?, linked_candidate_name=?, linked_candidate_phone=?, linked_client_name=?, linked_client_phone=?,
               updated_at=now()
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
-        priority || 'normal', assigned_to || null, due_date || null, completedAt, JSON.stringify(mentioned),
+        priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null, completedAt, JSON.stringify(mentioned),
         linked_candidate_id || null, linked_candidate_name || null, linked_candidate_phone || null,
         linked_client_name || null, linked_client_phone || null,
         req.params.id

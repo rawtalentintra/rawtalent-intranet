@@ -1843,3 +1843,12 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-person-suggestion-row { display: inline-flex; align-items: center; gap: 2px; }
 .task-person-suggestion-view { font-size: 11px; font-weight: 700; color: #1550ff; background: white; border: 1px solid var(--gray-200); border-radius: 50%; width: 22px; height: 22px; cursor: pointer; font-family: inherit; }
 .task-person-suggestion-view:hover { border-color: #1550ff; }
+
+/* Multi-assignee picker — a row of removable pills plus a plain <select>
+   underneath to add another, instead of a native multi-select (small,
+   ctrl/cmd-click-only, poor touch support). */
+.task-assignee-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.task-assignee-chips:empty { display: none; }
+.task-assignee-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: 50px; padding: 4px 6px 4px 10px; font-size: 12px; font-weight: 600; color: var(--navy); }
+.task-assignee-chip button { background: none; border: none; color: var(--gray-400); cursor: pointer; font-size: 12px; padding: 2px 4px; font-family: inherit; line-height: 1; }
+.task-assignee-chip button:hover { color: #dc2626; }

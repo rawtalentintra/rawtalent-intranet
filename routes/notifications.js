@@ -247,7 +247,7 @@ router.get('/', async (req, res) => {
             FROM tasks t
             LEFT JOIN task_classifications tc ON tc.id = t.classification_id
             LEFT JOIN task_departments td ON td.id = t.department_id
-            WHERE LOWER(t.assigned_to) = LOWER(?) AND t.status != 'done'
+            WHERE t.assigned_to_emails @> to_jsonb(LOWER(?)::text) AND t.status != 'done'
               AND t.due_date IS NOT NULL AND t.due_date <= (CURRENT_DATE + INTERVAL '2 days')
             ORDER BY t.due_date ASC`,
       args: [req.user.email]

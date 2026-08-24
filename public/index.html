@@ -1103,7 +1103,8 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:160px">
             <label class="form-label-modal">Assigned to</label>
-            <select id="taskAssigneeSelect" class="form-control"></select>
+            <div id="taskAssigneeChips" class="task-assignee-chips"></div>
+            <select id="taskAssigneeAddSelect" class="form-control" onchange="addTaskAssignee(this.value)"></select>
           </div>
           <div class="form-group-modal" style="flex:1;min-width:140px">
             <label class="form-label-modal">Due date <span class="optional">(optional)</span></label>
@@ -1934,6 +1935,7 @@
     // picking from a "did you mean" list (name-only matches, or duplicate
     // phone matches). null until something is actually confirmed; cleared
     // whenever the modal opens for a different task.
+    let taskAssignees = []; // emails currently picked in the New/Edit Task modal's assignee chips
     let taskLinkedCandidate = null; // { userId, name, phone, portalUrl }
     let taskLinkedClient = null;    // { name, suburb, state, phone }
     // Set when the user clicks ✕ on an auto-selected match — stops the
@@ -2015,8 +2017,9 @@
     }
 
     function assigneeLabelFor(t) {
-      const assignee = taskMeta.users.find(u => (u.email || '').toLowerCase() === (t.assigned_to || '').toLowerCase());
-      return assignee ? (assignee.name || assignee.email.split('@')[0]) : (t.assigned_to ? t.assigned_to.split('@')[0] : 'Unassigned');
+      const emails = Array.isArray(t.assigned_to_emails) ? t.assigned_to_emails : [];
+      if (!emails.length) return 'Unassigned';
+      return emails.map(taskUserLabel).join(', ');
     }
 
     function taskCardHtml(t) {
@@ -2107,7 +2110,7 @@
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             department_id: t.department_id, classification_id: t.classification_id, title: t.title,
-            description: t.description, status, priority: t.priority, assigned_to: t.assigned_to, due_date: t.due_date
+            description: t.description, status, priority: t.priority, assigned_to_emails: t.assigned_to_emails, due_date: t.due_date
           })
         });
         if (!res.ok) throw new Error();
@@ -2180,7 +2183,7 @@
       const visibleAll = allTasks.filter(t => taskShowDone || t.status !== 'done');
       const filtered = visibleAll.filter(t => {
         if (taskFilterDept !== 'all' && t.department_id !== taskFilterDept) return false;
-        if (taskMineOnly && (t.assigned_to || '').toLowerCase() !== (currentUserEmail || '').toLowerCase()) return false;
+        if (taskMineOnly && !(Array.isArray(t.assigned_to_emails) && t.assigned_to_emails.includes((currentUserEmail || '').toLowerCase()))) return false;
         if (taskSearchQuery && !t.title.toLowerCase().includes(taskSearchQuery.toLowerCase())) return false;
         return true;
       });
@@ -2220,8 +2223,39 @@
 
     function populateTaskSelects() {
       document.getElementById('taskDeptSelect').innerHTML = taskMeta.departments.map(d => `<option value="${d.id}">${d.icon || ''} ${escHtml(d.name)}</option>`).join('');
-      document.getElementById('taskAssigneeSelect').innerHTML = '<option value="">Unassigned</option>' + taskMeta.users.map(u => `<option value="${u.email}">${escHtml(u.name || u.email)}</option>`).join('');
       document.getElementById('taskPrioritySelect').innerHTML = Object.keys(TASK_PRIORITY_META).map(p => `<option value="${p}">${TASK_PRIORITY_META[p].label}</option>`).join('');
+    }
+
+    // Multi-assignee picker — a row of removable pills (taskAssignees, the
+    // form's working state) plus a plain <select> to add another, rather
+    // than a native multi-select (small, ctrl/cmd-click-only, poor touch
+    // support). renderTaskAssigneeChips() re-draws both the pills AND the
+    // add-select's options (excluding whoever's already picked) every time
+    // the list changes.
+    function taskUserLabel(email) {
+      const u = taskMeta.users.find(x => x.email.toLowerCase() === email.toLowerCase());
+      return u ? (u.name || u.email.split('@')[0]) : email.split('@')[0];
+    }
+
+    function renderTaskAssigneeChips() {
+      document.getElementById('taskAssigneeChips').innerHTML = taskAssignees.map(email => `
+        <span class="task-assignee-chip">${escHtml(taskUserLabel(email))} <button type="button" onclick="removeTaskAssignee('${email}')" title="Remove">✕</button></span>
+      `).join('');
+      const addSel = document.getElementById('taskAssigneeAddSelect');
+      const available = taskMeta.users.filter(u => !taskAssignees.includes(u.email.toLowerCase()));
+      addSel.innerHTML = `<option value="">${taskAssignees.length ? '+ Add another…' : '+ Add assignee…'}</option>` +
+        available.map(u => `<option value="${u.email.toLowerCase()}">${escHtml(u.name || u.email)}</option>`).join('');
+    }
+
+    function addTaskAssignee(email) {
+      if (!email || taskAssignees.includes(email)) return;
+      taskAssignees.push(email);
+      renderTaskAssigneeChips();
+    }
+
+    function removeTaskAssignee(email) {
+      taskAssignees = taskAssignees.filter(e => e !== email);
+      renderTaskAssigneeChips();
     }
 
     // Separate from populateTaskSelects() above because the Status options
@@ -2293,7 +2327,8 @@
         updateMentionPreview(document.getElementById('taskDescInput'), 'taskDescMentionPreview');
         document.getElementById('taskDeptSelect').value = t.department_id;
         populateTaskClassSelect(t.department_id, t.classification_id);
-        document.getElementById('taskAssigneeSelect').value = t.assigned_to || '';
+        taskAssignees = Array.isArray(t.assigned_to_emails) ? [...t.assigned_to_emails] : [];
+        renderTaskAssigneeChips();
         document.getElementById('taskDueInput').value = t.due_date ? String(t.due_date).slice(0, 10) : '';
         populateTaskStatusSelect(t.department_id, t.status);
         document.getElementById('taskPrioritySelect').value = t.priority;
@@ -2313,7 +2348,8 @@
         document.getElementById('taskDescMentionPreview').style.display = 'none';
         document.getElementById('taskDeptSelect').value = taskFilterDept !== 'all' ? taskFilterDept : (taskMeta.departments[0]?.id || '');
         populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
-        document.getElementById('taskAssigneeSelect').value = '';
+        taskAssignees = [];
+        renderTaskAssigneeChips();
         document.getElementById('taskDueInput').value = '';
         populateTaskStatusSelect(document.getElementById('taskDeptSelect').value, 'to_do');
         document.getElementById('taskPrioritySelect').value = 'normal';
@@ -2498,7 +2534,7 @@
         description: document.getElementById('taskDescInput').value.trim() || null,
         status: document.getElementById('taskStatusSelect').value,
         priority: document.getElementById('taskPrioritySelect').value,
-        assigned_to: document.getElementById('taskAssigneeSelect').value || null,
+        assigned_to_emails: taskAssignees,
         due_date: document.getElementById('taskDueInput').value || null,
         linked_candidate_id: taskLinkedCandidate?.userId || null,
         linked_candidate_name: taskLinkedCandidate?.name || null,
