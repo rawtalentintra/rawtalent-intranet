@@ -40,6 +40,28 @@ function autoAssignWorkforcePartner(suburb, state) {
   return partnerForSuburbState(suburb, state) || STATE_WORKFORCE_PARTNER[state] || null;
 }
 
+// Strips label noise that's been landing in street_address — "Address: 39
+// Smith St" instead of just "39 Smith St" (found live 2026-08-24, traced
+// from a real Smart Routing bug: Liam saw a Frankston lead's map pin sit
+// ~40km off near inner Melbourne, and its stored address turned out to
+// literally start with "Address: "). Confirmed 18 existing leads had this
+// same "Address:" label baked into the field, almost certainly pasted
+// straight from whatever source these leads come from — geocoding
+// "Address: 39–41 Rubenina St, Frankston VIC" sends Mapbox a garbage
+// token ("Address") ahead of the real street name, which is enough to
+// throw off which result it picks as the best match. Also normalises an
+// en-dash in house-number ranges ("39–41") to a plain hyphen, seen in the
+// same contaminated rows — real addresses don't use that character, it's
+// copy-paste noise from wherever these values originated.
+function sanitizeStreetAddress(raw) {
+  if (!raw) return raw;
+  let s = String(raw).trim();
+  const idx = s.toLowerCase().lastIndexOf('address:');
+  if (idx !== -1) s = s.slice(idx + 'address:'.length).trim();
+  s = s.replace(/[‒–—−]/g, '-');
+  return s || null;
+}
+
 // Anyone signed in can submit — consultant identity is always the caller,
 // never a field the client can set, so a lead can't be logged under
 // someone else's name by mistake or on purpose.
@@ -69,7 +91,7 @@ router.post('/', async (req, res) => {
               submitted_by_email, submitted_by_name, assigned_workforce_partner, entry_type
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        id, centreName.trim(), streetAddress?.trim() || null, suburb?.trim() || null, state || null, centrePhone?.trim() || null,
+        id, centreName.trim(), sanitizeStreetAddress(streetAddress), suburb?.trim() || null, state || null, centrePhone?.trim() || null,
         educatorName?.trim() || null, agencyName?.trim() || null, numberOfShifts?.trim() || null, agencyUsage || null, position || null,
         contactFirstName?.trim() || null, contactLastName?.trim() || null, contactEmail?.trim() || null,
         req.user.email, req.user.name || req.user.email, assignedWorkforcePartner, resolvedEntryType
@@ -368,8 +390,16 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
     for (const [column, bodyKey] of Object.entries(fields)) {
       if (bodyKey in req.body) {
         sets.push(`${column} = ?`);
-        args.push(req.body[bodyKey] || null);
+        args.push(column === 'street_address' ? sanitizeStreetAddress(req.body[bodyKey]) : (req.body[bodyKey] || null));
       }
+    }
+    // A corrected street_address/suburb/state makes the cached lat/lng
+    // stale — routePlanner.js only re-geocodes a lead when its coordinates
+    // are null, so without this an address fix would silently keep
+    // routing off the old (possibly wrong) location until someone
+    // happened to clear it by hand.
+    if ('streetAddress' in req.body || 'suburb' in req.body || 'state' in req.body) {
+      sets.push('latitude = NULL', 'longitude = NULL');
     }
     // A lead reaching Profile Created is done, full stop — auto-close it
     // the same way the manual "Close Lead" button already does, instead of
