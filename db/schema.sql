@@ -798,6 +798,66 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_user_email ON leave_requests(user_
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
 
+-- "Log My Hours" — one row per person per Sun-Sat week. Mirrors
+-- leave_requests' two-stage status machine, with one deviation: a
+-- rejected week is NOT terminal — it returns to 'draft' with
+-- rejection_note set, so the employee can fix the day and resubmit,
+-- since timesheet data is correctable, unlike a one-shot leave request.
+-- Routing is scoped to team_members.team IN ('AM Team','PM Team') ONLY —
+-- deliberately NOT leave_requests' generic manager_id walk, since several
+-- people (Vicky, Gwen, Justine, Sophia, Joy) resolve to a manager via the
+-- org chart (often Liam) who must NOT get timesheet-approval rights from
+-- that relationship. See services/timesheetService.js's
+-- TEAM_APPROVAL_CONFIG for the actual routing.
+CREATE TABLE IF NOT EXISTS timesheet_weeks (
+  id TEXT PRIMARY KEY,
+  user_email CITEXT NOT NULL,
+  user_name TEXT,
+  week_start_date DATE NOT NULL,   -- always a Sunday
+  week_end_date DATE NOT NULL,     -- always the following Saturday
+  status TEXT NOT NULL DEFAULT 'draft', -- 'draft' | 'pending_l1' | 'pending_final' | 'approved'
+  total_hours NUMERIC(6,2) NOT NULL DEFAULT 0, -- cached SUM(timesheet_entries.hours), recomputed on every entry write
+  notes TEXT,                      -- optional note attached at submit time
+  l1_approver_email CITEXT,
+  l1_approver_name TEXT,
+  l1_decided_by CITEXT,
+  l1_decided_at TIMESTAMPTZ,
+  final_approver_email CITEXT,     -- specific required approver (e.g. sophia for AM Team); NULL = either of FINAL_APPROVERS suffices
+  final_decided_by CITEXT,
+  final_decided_at TIMESTAMPTZ,
+  rejection_note TEXT,
+  submitted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_email, week_start_date)
+);
+CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_status ON timesheet_weeks(status);
+CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_l1 ON timesheet_weeks(l1_approver_email) WHERE status = 'pending_l1';
+CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_final ON timesheet_weeks(final_approver_email) WHERE status = 'pending_final';
+
+-- Daily start/end entries. user_email + entry_date denormalized off
+-- week_id (same denormalization leave_requests uses for user_email) so
+-- the company-wide summary can SUM(hours) GROUP BY user_email over an
+-- arbitrary date range without joining through timesheet_weeks per row.
+-- hours is computed and stored by the service at write time (not a
+-- generated column), so an end-before-start entry can be rejected with a
+-- clear error instead of silently going negative.
+CREATE TABLE IF NOT EXISTS timesheet_entries (
+  id TEXT PRIMARY KEY,
+  week_id TEXT NOT NULL REFERENCES timesheet_weeks(id) ON DELETE CASCADE,
+  user_email CITEXT NOT NULL,
+  entry_date DATE NOT NULL,
+  start_time TEXT NOT NULL, -- 'HH:MM'
+  end_time TEXT NOT NULL,   -- 'HH:MM'
+  hours NUMERIC(5,2) NOT NULL,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_email, entry_date)
+);
+CREATE INDEX IF NOT EXISTS idx_timesheet_entries_week_id ON timesheet_entries(week_id);
+CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user_date ON timesheet_entries(user_email, entry_date);
+
 -- Team suggestion box. Deliberately flat — one status field admins move
 -- along, one feedback field for their response — no voting/comments,
 -- kept simple on purpose.

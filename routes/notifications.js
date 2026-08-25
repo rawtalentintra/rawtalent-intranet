@@ -9,6 +9,7 @@ const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimet
 const leave = require('../services/leaveService');
 
 const announcementFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const TIMESHEET_TZ = 'Australia/Melbourne'; // same convention as routes/calls.js's MELBOURNE_TZ
 
 router.use(requireAuth);
 
@@ -254,6 +255,27 @@ router.get('/', async (req, res) => {
     });
     const taskAlerts = taskAlertsRes.rows;
 
+    // "Log My Hours" reminder — fires once Melbourne local time has passed
+    // Thursday 8am for the CURRENT week and this user has no timesheet_weeks
+    // row for that week beyond 'draft' (i.e. hasn't submitted yet). No
+    // scheduler/cron exists in this codebase (checked package.json and every
+    // setInterval in server.js), so this is a live pull check on every bell
+    // fetch, not a real push notification — same "stays until the real state
+    // changes" philosophy as taskAlerts, self-clearing the moment they submit.
+    const hoursAlertsRes = await db.execute({
+      sql: `WITH mel AS (SELECT now() AT TIME ZONE '${TIMESHEET_TZ}' AS ts),
+            bounds AS (SELECT (ts::date - EXTRACT(DOW FROM ts)::int) AS week_start, ts FROM mel)
+            SELECT b.week_start::text AS week_start, (b.week_start + 6)::text AS week_end
+            FROM bounds b
+            WHERE b.ts >= (b.week_start + 4)::timestamp + interval '8 hours'
+              AND NOT EXISTS (
+                SELECT 1 FROM timesheet_weeks tw
+                WHERE LOWER(tw.user_email) = LOWER(?) AND tw.week_start_date = b.week_start AND tw.status != 'draft'
+              )`,
+      args: [req.user.email]
+    });
+    const hoursAlerts = hoursAlertsRes.rows;
+
     // Anyone @mentioned either in a task note OR a task description —
     // informational, dismissible via notification_dismissals same as
     // leave/feedback decisions. Two sources unioned together: a note is an
@@ -289,8 +311,9 @@ router.get('/', async (req, res) => {
       + leaveDecisions.filter(l => !l.is_read).length
       + feedbackDecisions.filter(f => !f.is_read).length
       + taskAlerts.length
-      + taskMentions.filter(m => !m.is_read).length;
-    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, feedbackDecisions, taskAlerts, taskMentions, unreadCount });
+      + taskMentions.filter(m => !m.is_read).length
+      + hoursAlerts.length;
+    res.json({ upcomingEvents, receivedGreetings, announcements, trainingAssignments, leaveApprovals, leaveDecisions, feedbackDecisions, taskAlerts, taskMentions, hoursAlerts, unreadCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

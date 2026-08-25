@@ -790,6 +790,7 @@
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
       <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
+      <button class="mode-tab" id="tabHours" onclick="setMode('hours')">🕒 Log My Hours</button>
       <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
       </div>
     </aside>
@@ -1212,7 +1213,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], taskAlerts: [], taskMentions: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], taskAlerts: [], taskMentions: [], hoursAlerts: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -1261,6 +1262,17 @@
               <div style="font-size:12px;color:var(--text-muted)">${escHtml(t.department_name || '')} · ${overdue ? 'Overdue' : 'Due'} ${fmtDate(t.due_date)}</div>
             </div>`;
           }).join('')}
+        `);
+      }
+      if (notifData.hoursAlerts?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Timesheet reminder</div>
+          ${notifData.hoursAlerts.map(h => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();setMode('hours')">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">⏰ Finalize this week's hours</div>
+              <div style="font-size:12px;color:var(--text-muted)">Week of ${fmtDate(h.week_start)} — submit by Thursday EOD</div>
+            </div>
+          `).join('')}
         `);
       }
       if (notifData.taskMentions?.length > 0) {
@@ -1802,8 +1814,10 @@
       const isHome = mode === 'home';
       const isLeads = mode === 'leads';
       const isTasks = mode === 'tasks';
+      const isHours = mode === 'hours';
       document.getElementById('tabHome').classList.toggle('active', isHome);
       document.getElementById('tabTasks').classList.toggle('active', isTasks);
+      document.getElementById('tabHours').classList.toggle('active', isHours);
       document.getElementById('tabSearch').classList.toggle('active', mode === 'search');
       document.getElementById('tabAI').classList.toggle('active', isAI);
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
@@ -1814,7 +1828,7 @@
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
       document.getElementById('tabLeads').classList.toggle('active', isLeads);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -1829,6 +1843,7 @@
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
         : isTasks ? 'Tasks'
+        : isHours ? 'Log My Hours'
         : 'How can we help you?';
       document.getElementById('heroSub').textContent = isHome ? 'The RawTalent intranet — everything that keeps us moving, all in one place'
         : isAI ? 'Ask AI anything — searches across all articles, documents, and reference sites'
@@ -1841,6 +1856,7 @@
         : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
         : isLeads ? 'Log a potential client centre from an educator vetting call'
         : isTasks ? 'Everything the team is working on, by department'
+        : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
       if (isHome) {
@@ -1849,6 +1865,8 @@
         loadLeadsView();
       } else if (isTasks) {
         loadTasksView();
+      } else if (isHours) {
+        loadHoursView();
       } else if (isAI) {
         document.getElementById('resultsList').innerHTML = `
           <div class="empty-wrap">
@@ -4033,6 +4051,395 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // ── Log My Hours ─────────────────────────────────────────────
+    // Daily start/end time logging, submitted weekly. Two-stage approval
+    // scoped ONLY to AM/PM Team (Lorie/Adzi approve their own team first,
+    // then Sophia/Joy) — see services/timesheetService.js's
+    // TEAM_APPROVAL_CONFIG for why this deliberately doesn't reuse the org
+    // chart's generic manager_id chain the way Leave Request does. Company-
+    // wide totals are visible only to Sophia/Joy (isFinalApprover).
+    let hoursPolicy = {};
+    let hoursSubTab = 'mine';
+    let hoursCurrentWeekStart = null;
+    let hoursWeekData = { week: {}, entries: [] };
+    let hoursMyWeeks = [];
+    let hoursPendingApprovals = [];
+    let hoursCompanyGranularity = 'week';
+    let hoursCompanyData = null;
+    let hoursCompanyWeekStart = null;
+    let hoursCompanyPayPeriodStart = null;
+    let hoursCompanyMonthValue = null; // 'YYYY-MM'
+    const HOURS_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    function addDaysClient(dateStr, days) {
+      const d = new Date(`${dateStr}T00:00:00`);
+      d.setDate(d.getDate() + days);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function toDateStrClient(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function hoursStatusLabel(status) {
+      return { draft: 'Draft', pending_l1: 'Pending Manager Approval', pending_final: 'Pending Final Approval', approved: 'Approved' }[status] || status;
+    }
+    function hoursStatusColor(status) {
+      return { draft: 'var(--text-muted)', pending_l1: '#b45309', pending_final: '#b45309', approved: '#15803d' }[status] || 'var(--text-muted)';
+    }
+    function hoursTabBtnStyle(active) {
+      return `padding:8px 16px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ${active ? 'var(--orange)' : 'var(--gray-200)'};background:${active ? 'var(--orange)' : 'white'};color:${active ? 'white' : 'var(--text)'}`;
+    }
+
+    async function loadHoursView() {
+      document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        hoursPolicy = await fetch('/api/timesheets/policy').then(r => r.json());
+        hoursCurrentWeekStart = hoursPolicy.currentWeekStart;
+        hoursCompanyWeekStart = hoursPolicy.currentWeekStart;
+        hoursCompanyPayPeriodStart = hoursPolicy.payPeriodStart;
+        const now = new Date();
+        hoursCompanyMonthValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        hoursSubTab = 'mine';
+        const [week, mine] = await Promise.all([
+          fetch(`/api/timesheets/week?weekStart=${hoursCurrentWeekStart}`).then(r => r.json()),
+          fetch('/api/timesheets/mine').then(r => r.json())
+        ]);
+        hoursWeekData = week;
+        hoursMyWeeks = mine;
+        renderMyHours();
+      } catch {
+        document.getElementById('resultsList').innerHTML = '<div class="empty-wrap"><div class="empty-title">Failed to load timesheets.</div></div>';
+      }
+    }
+
+    function setHoursSubTab(tab) {
+      hoursSubTab = tab;
+      if (tab === 'mine') renderMyHours();
+      else if (tab === 'approvals') loadHoursApprovals();
+      else if (tab === 'company') loadHoursCompany();
+    }
+
+    function hoursSubTabsHtml() {
+      const canApprove = hoursPolicy.isL1Approver || hoursPolicy.isFinalApprover;
+      const canSeeCompany = hoursPolicy.isFinalApprover;
+      if (!canApprove && !canSeeCompany) return '';
+      return `
+        <div style="display:flex;gap:8px;margin-bottom:18px">
+          <button onclick="setHoursSubTab('mine')" style="${hoursTabBtnStyle(hoursSubTab === 'mine')}">My Hours</button>
+          ${canApprove ? `<button onclick="setHoursSubTab('approvals')" style="${hoursTabBtnStyle(hoursSubTab === 'approvals')}">Approvals</button>` : ''}
+          ${canSeeCompany ? `<button onclick="setHoursSubTab('company')" style="${hoursTabBtnStyle(hoursSubTab === 'company')}">Company Totals</button>` : ''}
+        </div>`;
+    }
+
+    async function loadHoursWeek(weekStart) {
+      hoursWeekData = await fetch(`/api/timesheets/week?weekStart=${weekStart}`).then(r => r.json());
+    }
+    async function changeHoursWeek(delta) {
+      hoursCurrentWeekStart = addDaysClient(hoursCurrentWeekStart, delta * 7);
+      await loadHoursWeek(hoursCurrentWeekStart);
+      renderMyHours();
+    }
+    async function jumpToHoursWeek(weekStart) {
+      hoursCurrentWeekStart = weekStart;
+      await loadHoursWeek(weekStart);
+      renderMyHours();
+    }
+
+    async function onHoursTimeChange(el) {
+      const date = el.dataset.date;
+      const startEl = document.querySelector(`input[data-date="${date}"][data-field="start"]`);
+      const endEl = document.querySelector(`input[data-date="${date}"][data-field="end"]`);
+      const notesEl = document.querySelector(`textarea[data-date="${date}"][data-field="notes"]`);
+      const start = startEl.value, end = endEl.value, notes = notesEl ? notesEl.value : '';
+      const existing = hoursWeekData.entries.find(e => e.entry_date === date);
+      try {
+        if (!start || !end) {
+          if (existing) {
+            const res = await fetch(`/api/timesheets/entries/${existing.id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+            hoursWeekData = data;
+            renderMyHours();
+          }
+          return;
+        }
+        const res = await fetch('/api/timesheets/entries', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryDate: date, startTime: start, endTime: end, notes })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        hoursWeekData = data;
+        renderMyHours();
+      } catch { toast('Network error', 'error'); }
+    }
+    async function onHoursNotesBlur(el) {
+      const date = el.dataset.date;
+      const startEl = document.querySelector(`input[data-date="${date}"][data-field="start"]`);
+      const endEl = document.querySelector(`input[data-date="${date}"][data-field="end"]`);
+      if (!startEl.value || !endEl.value) return;
+      try {
+        const res = await fetch('/api/timesheets/entries', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryDate: date, startTime: startEl.value, endTime: endEl.value, notes: el.value })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        hoursWeekData = data;
+        renderMyHours();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function submitHoursWeek() {
+      try {
+        const res = await fetch(`/api/timesheets/weeks/${hoursCurrentWeekStart}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
+        hoursWeekData = data;
+        hoursMyWeeks = await fetch('/api/timesheets/mine').then(r => r.json());
+        toast('Week submitted for approval', 'success');
+        renderMyHours();
+      } catch { toast('Network error', 'error'); }
+    }
+    async function recallHoursWeek() {
+      try {
+        const res = await fetch(`/api/timesheets/weeks/${hoursWeekData.week.id}/recall`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to recall', 'error'); return; }
+        hoursWeekData = data;
+        hoursMyWeeks = await fetch('/api/timesheets/mine').then(r => r.json());
+        toast('Recalled — you can edit it again', 'success');
+        renderMyHours();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function myHoursHtml() {
+      const week = hoursWeekData.week;
+      const entries = hoursWeekData.entries;
+      const editable = week.status === 'draft';
+      const entryByDate = {};
+      entries.forEach(e => { entryByDate[e.entry_date] = e; });
+      const todayStr = toDateStrClient(new Date());
+
+      const dayCards = HOURS_DAY_NAMES.map((label, i) => {
+        const d = addDaysClient(hoursCurrentWeekStart, i);
+        const e = entryByDate[d];
+        const dateObj = new Date(`${d}T00:00:00`);
+        const isToday = d === todayStr;
+        const bg = week.status === 'approved' ? '#f0fdf4' : (week.status !== 'draft' ? '#fff7ed' : (e ? '#eff6ff' : 'white'));
+        const border = week.status === 'approved' ? '#bbf7d0' : (week.status !== 'draft' ? '#fed7aa' : (e ? '#bfdbfe' : 'var(--gray-100)'));
+        return `
+          <div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;flex:1;min-width:130px">
+            <div style="font-size:11px;font-weight:700;color:${isToday ? 'var(--orange)' : 'var(--navy)'};text-transform:uppercase;letter-spacing:.3px">${label} ${dateObj.getDate()}</div>
+            <input type="time" value="${e ? e.start_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="start" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
+            <input type="time" value="${e ? e.end_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="end" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
+            <div style="font-size:12px;font-weight:700;color:${e ? '#15803d' : 'var(--text-muted)'}">${e ? Number(e.hours).toFixed(2) + ' hrs' : '—'}</div>
+            <textarea placeholder="Notes" ${editable ? '' : 'disabled'} data-date="${d}" data-field="notes" onblur="onHoursNotesBlur(this)" style="font-size:11px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;resize:none;min-height:32px;font-family:inherit;width:100%">${escHtml(e ? (e.notes || '') : '')}</textarea>
+          </div>`;
+      }).join('');
+
+      const isCurrentWeek = hoursCurrentWeekStart === hoursPolicy.currentWeekStart;
+
+      return `
+        <div style="background:linear-gradient(135deg,#eef2ff,#f5f7fc);border:1px solid #c7d2fe;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:var(--navy)">
+          <strong>Pay period:</strong> ${fmtDate(hoursPolicy.payPeriodStart)} – ${fmtDate(hoursPolicy.payPeriodEnd)} · Submit each week by <strong>Thursday end of day</strong>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursWeek(-1)">← Prev</button>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCurrentWeekStart)} – ${fmtDate(week.week_end_date)}${isCurrentWeek ? ' (This week)' : ''}</div>
+            <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursWeek(1)">Next →</button>
+          </div>
+          <div style="font-size:11.5px;font-weight:700;color:${hoursStatusColor(week.status)}">${hoursStatusLabel(week.status)}</div>
+        </div>
+
+        ${week.rejection_note ? `
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#b91c1c">
+            <strong>Sent back to fix:</strong> ${escHtml(week.rejection_note)}
+          </div>` : ''}
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">${dayCards}</div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-radius:10px;padding:14px 18px;margin-bottom:24px;flex-wrap:wrap;gap:10px">
+          <div style="font-weight:700;color:var(--navy);font-size:15px">This week: ${Number(week.total_hours || 0).toFixed(2)} hrs</div>
+          ${week.status === 'draft'
+            ? `<button class="btn-add" ${Number(week.total_hours || 0) <= 0 ? 'disabled' : ''} onclick="submitHoursWeek()">Submit for Approval</button>`
+            : `<div style="display:flex;align-items:center;gap:12px">
+                 <span style="font-size:12px;color:var(--text-muted)">Submitted ${fmtDate(week.submitted_at)}</span>
+                 ${week.status !== 'approved' ? `<button class="btn-secondary" onclick="recallHoursWeek()">Recall</button>` : ''}
+               </div>`}
+        </div>
+
+        <div style="font-weight:700;color:var(--navy);font-size:14px;margin-bottom:10px">Recent Weeks</div>
+        ${hoursMyWeeks.length === 0 ? `<div style="font-size:12.5px;color:var(--text-muted)">No history yet.</div>` : hoursMyWeeks.map(w => `
+          <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-radius:10px;padding:10px 16px;margin-bottom:8px;cursor:pointer;gap:10px;flex-wrap:wrap" onclick="jumpToHoursWeek('${w.week_start_date}')">
+            <div style="font-size:12.5px;color:var(--text)">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</div>
+            <div style="font-size:12.5px;font-weight:700;color:var(--text)">${Number(w.total_hours).toFixed(2)} hrs</div>
+            <div style="font-size:11.5px;font-weight:700;color:${hoursStatusColor(w.status)}">${hoursStatusLabel(w.status)}</div>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    function renderMyHours() {
+      document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + myHoursHtml();
+    }
+
+    // ── Approvals (Lorie/Adzi for their own team, then Sophia/Joy) ──
+    async function loadHoursApprovals() {
+      document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        hoursPendingApprovals = await fetch('/api/timesheets/pending').then(r => r.json());
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + approvalsHtml();
+      } catch {
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load approvals.</div></div>';
+      }
+    }
+    function approvalsHtml() {
+      if (!hoursPendingApprovals.length) {
+        return `<div class="empty-wrap"><div class="empty-icon">🕒</div><div class="empty-title">Nothing waiting on you right now</div></div>`;
+      }
+      return hoursPendingApprovals.map(w => {
+        const color = leavePersonColor(w.user_name || w.user_email);
+        const stageLabel = w.status === 'pending_l1' ? 'Awaiting your (manager) approval' : 'Awaiting your final approval';
+        return `
+        <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(w.user_name || w.user_email)}</span>
+              <span style="font-size:12.5px;color:var(--text-muted)">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</span>
+            </div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${Number(w.total_hours).toFixed(2)} hrs</div>
+          </div>
+          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">${stageLabel}</div>
+          <div style="overflow-x:auto;margin-bottom:12px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              ${(w.entries || []).map(e => `
+                <tr>
+                  <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
+                  <td style="padding:4px 8px;color:var(--text);white-space:nowrap">${e.start_time} – ${e.end_time}</td>
+                  <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
+                  <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
+                </tr>
+              `).join('')}
+            </table>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="decideHoursWeek('${w.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+            <button onclick="decideHoursWeek('${w.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    async function decideHoursWeek(id, decision) {
+      let note = '';
+      if (decision === 'reject') {
+        note = prompt('Reason for rejecting (required — the employee will see this):') || '';
+        if (!note.trim()) { toast('A reason is required to reject', 'error'); return; }
+      }
+      try {
+        const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+        toast(decision === 'approve' ? 'Approved' : 'Sent back to them', 'success');
+        loadHoursApprovals();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // ── Company Totals (Sophia/Joy only) ─────────────────────────
+    async function loadHoursCompany() {
+      document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        await fetchHoursCompanyData();
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + companyHtml();
+      } catch {
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load company totals.</div></div>';
+      }
+    }
+    async function fetchHoursCompanyData() {
+      if (hoursCompanyGranularity === 'week') {
+        hoursCompanyData = await fetch(`/api/timesheets/company/week?weekStart=${hoursCompanyWeekStart}`).then(r => r.json());
+      } else if (hoursCompanyGranularity === 'payPeriod') {
+        hoursCompanyData = await fetch(`/api/timesheets/company/pay-period?start=${hoursCompanyPayPeriodStart}`).then(r => r.json());
+      } else {
+        const [year, month] = hoursCompanyMonthValue.split('-').map(Number);
+        hoursCompanyData = await fetch(`/api/timesheets/company/month?year=${year}&month=${month}`).then(r => r.json());
+      }
+    }
+    function setHoursCompanyGranularity(g) {
+      hoursCompanyGranularity = g;
+      loadHoursCompany();
+    }
+    function changeHoursCompanyPeriod(delta) {
+      if (hoursCompanyGranularity === 'week') hoursCompanyWeekStart = addDaysClient(hoursCompanyWeekStart, delta * 7);
+      else if (hoursCompanyGranularity === 'payPeriod') hoursCompanyPayPeriodStart = addDaysClient(hoursCompanyPayPeriodStart, delta * 14);
+      loadHoursCompany();
+    }
+    function onHoursCompanyMonthChange(el) {
+      hoursCompanyMonthValue = el.value;
+      loadHoursCompany();
+    }
+    function companyTotalsTableHtml(totals) {
+      if (!totals.length) return `<div style="font-size:12.5px;color:var(--text-muted);padding:12px 0">No hours logged in this range yet.</div>`;
+      return `
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100)">
+            <th style="padding:8px 6px">Person</th><th style="padding:8px 6px">Total Hours</th>
+            <th style="padding:8px 6px">Approved</th><th style="padding:8px 6px">Pending</th><th style="padding:8px 6px">Draft</th>
+          </tr></thead>
+          <tbody>
+            ${totals.map(t => {
+              const color = leavePersonColor(t.userName || t.userEmail);
+              const sc = t.statusCounts || {};
+              return `
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:8px 6px;white-space:nowrap"><span style="background:${color.bg};color:${color.text};font-weight:700;font-size:11.5px;padding:3px 9px;border-radius:20px">${escHtml(t.userName || t.userEmail)}</span></td>
+                <td style="padding:8px 6px;font-weight:700;color:var(--navy)">${Number(t.totalHours).toFixed(2)} hrs</td>
+                <td style="padding:8px 6px;color:#15803d">${sc.approved || 0}</td>
+                <td style="padding:8px 6px;color:#b45309">${(sc.pending_l1 || 0) + (sc.pending_final || 0)}</td>
+                <td style="padding:8px 6px;color:var(--text-muted)">${sc.draft || 0}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        </div>`;
+    }
+    function companyHtml() {
+      const seg = (key, label) => `<button onclick="setHoursCompanyGranularity('${key}')" style="${hoursTabBtnStyle(hoursCompanyGranularity === key)}">${label}</button>`;
+      let periodNav = '';
+      let body = '';
+      if (hoursCompanyGranularity === 'week') {
+        periodNav = `
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(-1)">← Prev</button>
+          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCompanyData.weekStart)} – ${fmtDate(hoursCompanyData.weekEnd)}</div>
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(1)">Next →</button>`;
+        body = companyTotalsTableHtml(hoursCompanyData.totals);
+      } else if (hoursCompanyGranularity === 'payPeriod') {
+        periodNav = `
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(-1)">← Prev</button>
+          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCompanyData.payPeriodStart)} – ${fmtDate(hoursCompanyData.payPeriodEnd)}</div>
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(1)">Next →</button>`;
+        body = `
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">Week 1: ${fmtDate(hoursCompanyData.weeks[0].weekStart)} – ${fmtDate(hoursCompanyData.weeks[0].weekEnd)}</div>
+          ${companyTotalsTableHtml(hoursCompanyData.weeks[0].totals)}
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Week 2: ${fmtDate(hoursCompanyData.weeks[1].weekStart)} – ${fmtDate(hoursCompanyData.weeks[1].weekEnd)}</div>
+          ${companyTotalsTableHtml(hoursCompanyData.weeks[1].totals)}
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Both weeks combined</div>
+          ${companyTotalsTableHtml(hoursCompanyData.combined)}`;
+      } else {
+        periodNav = `<input type="month" value="${hoursCompanyMonthValue}" onchange="onHoursCompanyMonthChange(this)" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">`;
+        body = companyTotalsTableHtml(hoursCompanyData.totals);
+      }
+      return `
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">${seg('week', 'This Week')}${seg('payPeriod', 'Both Weeks (Pay Period)')}${seg('month', 'Monthly')}</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">${periodNav}</div>
+        <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:16px 18px">${body}</div>
+      `;
+    }
+
     // ── Home ──────────────────────────────────────────────────────
     // Kept in the exact same order as the sidebar tabs (minus Home itself)
     // — these two lists drifting apart is exactly how Glossary/FAQ/Tasks
@@ -4048,6 +4455,7 @@
       { icon: '🎓', label: 'Training', desc: 'Courses assigned to you', mode: 'training' },
       { icon: '💡', label: 'Submit Ideas', desc: "Suggest an improvement", mode: 'ideas' },
       { icon: '🏖️', label: 'Leave Request', desc: 'Request time off', mode: 'leave' },
+      { icon: '🕒', label: 'Log My Hours', desc: 'Log your time, submit weekly', mode: 'hours' },
       { icon: '🧑‍🤝‍🧑', label: 'Our Team', desc: 'Team hierarchy & profiles', mode: 'team' }
     ];
     function loadHomeView() {
