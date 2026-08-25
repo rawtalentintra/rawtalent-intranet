@@ -4085,6 +4085,9 @@
     function hoursStatusColor(status) {
       return { draft: 'var(--text-muted)', pending_l1: '#b45309', pending_final: '#b45309', approved: '#15803d' }[status] || 'var(--text-muted)';
     }
+    function hoursStatusBg(status) {
+      return { draft: 'var(--gray-100)', pending_l1: '#fef3e8', pending_final: '#fef3e8', approved: '#dcfce7' }[status] || 'var(--gray-100)';
+    }
     function hoursTabBtnStyle(active) {
       return `padding:8px 16px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ${active ? 'var(--orange)' : 'var(--gray-200)'};background:${active ? 'var(--orange)' : 'white'};color:${active ? 'white' : 'var(--text)'}`;
     }
@@ -4196,7 +4199,7 @@
         if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
         hoursWeekData = data;
         hoursMyWeeks = await fetch('/api/timesheets/mine').then(r => r.json());
-        toast('Week submitted for approval', 'success');
+        toast(data.week.status === 'approved' ? 'Week approved' : 'Week submitted for approval', 'success');
         renderMyHours();
       } catch { toast('Network error', 'error'); }
     }
@@ -4220,28 +4223,45 @@
       entries.forEach(e => { entryByDate[e.entry_date] = e; });
       const todayStr = toDateStrClient(new Date());
 
+      // A cheerful, distinct color per weekday (reuses the same
+      // LEAVE_PERSON_COLORS palette already used for people-chips
+      // elsewhere) so the week strip has life to it even before any hours
+      // are logged — the status tint (blue/amber/green) still layers on
+      // top once a day has data or the week moves through approval.
       const dayCards = HOURS_DAY_NAMES.map((label, i) => {
         const d = addDaysClient(hoursCurrentWeekStart, i);
         const e = entryByDate[d];
         const dateObj = new Date(`${d}T00:00:00`);
         const isToday = d === todayStr;
+        const accent = LEAVE_PERSON_COLORS[i];
         const bg = week.status === 'approved' ? '#f0fdf4' : (week.status !== 'draft' ? '#fff7ed' : (e ? '#eff6ff' : 'white'));
         const border = week.status === 'approved' ? '#bbf7d0' : (week.status !== 'draft' ? '#fed7aa' : (e ? '#bfdbfe' : 'var(--gray-100)'));
         return `
-          <div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;flex:1;min-width:130px">
-            <div style="font-size:11px;font-weight:700;color:${isToday ? 'var(--orange)' : 'var(--navy)'};text-transform:uppercase;letter-spacing:.3px">${label} ${dateObj.getDate()}</div>
-            <input type="time" value="${e ? e.start_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="start" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
-            <input type="time" value="${e ? e.end_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="end" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
-            <div style="font-size:12px;font-weight:700;color:${e ? '#15803d' : 'var(--text-muted)'}">${e ? Number(e.hours).toFixed(2) + ' hrs' : '—'}</div>
+          <div style="background:${bg};border:1px solid ${border};border-top:4px solid ${accent.text};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1;min-width:140px">
+            <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:4px;background:${accent.bg};color:${accent.text};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:3px 10px;border-radius:20px">${label} ${dateObj.getDate()}${isToday ? ' • Today' : ''}</div>
+            <div>
+              <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Start</div>
+              <input type="time" value="${e ? e.start_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="start" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
+            </div>
+            <div>
+              <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">End</div>
+              <input type="time" value="${e ? e.end_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="end" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
+            </div>
+            <div style="display:inline-block;align-self:flex-start;font-size:11.5px;font-weight:800;padding:3px 9px;border-radius:20px;background:${e ? '#dcfce7' : 'var(--gray-100)'};color:${e ? '#15803d' : 'var(--text-muted)'}">${e ? Number(e.hours).toFixed(2) + ' hrs' : '—'}</div>
             <textarea placeholder="Notes" ${editable ? '' : 'disabled'} data-date="${d}" data-field="notes" onblur="onHoursNotesBlur(this)" style="font-size:11px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;resize:none;min-height:32px;font-family:inherit;width:100%">${escHtml(e ? (e.notes || '') : '')}</textarea>
           </div>`;
       }).join('');
 
       const isCurrentWeek = hoursCurrentWeekStart === hoursPolicy.currentWeekStart;
+      // Sophia/Joy's own hours auto-finalize the instant they submit (see
+      // timesheetService.submitWeek's isFinalApprover branch) — there's no
+      // real "awaiting approval" step for them, so the button and toast
+      // should say what actually happens instead of implying a wait.
+      const isSelfApprove = !!hoursPolicy.isFinalApprover;
 
       return `
-        <div style="background:linear-gradient(135deg,#eef2ff,#f5f7fc);border:1px solid #c7d2fe;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:var(--navy)">
-          <strong>Pay period:</strong> ${fmtDate(hoursPolicy.payPeriodStart)} – ${fmtDate(hoursPolicy.payPeriodEnd)} · Submit each week by <strong>Thursday end of day</strong>
+        <div style="background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:var(--navy)">
+          📅 <strong>Pay period:</strong> ${fmtDate(hoursPolicy.payPeriodStart)} – ${fmtDate(hoursPolicy.payPeriodEnd)} · Submit each week by <strong>Thursday end of day</strong>
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -4250,7 +4270,7 @@
             <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCurrentWeekStart)} – ${fmtDate(week.week_end_date)}${isCurrentWeek ? ' (This week)' : ''}</div>
             <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursWeek(1)">Next →</button>
           </div>
-          <div style="font-size:11.5px;font-weight:700;color:${hoursStatusColor(week.status)}">${hoursStatusLabel(week.status)}</div>
+          <div style="font-size:11.5px;font-weight:800;padding:4px 12px;border-radius:20px;background:${hoursStatusBg(week.status)};color:${hoursStatusColor(week.status)}">${hoursStatusLabel(week.status)}</div>
         </div>
 
         ${week.rejection_note ? `
@@ -4260,19 +4280,19 @@
 
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">${dayCards}</div>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-radius:10px;padding:14px 18px;margin-bottom:24px;flex-wrap:wrap;gap:10px">
-          <div style="font-weight:700;color:var(--navy);font-size:15px">This week: ${Number(week.total_hours || 0).toFixed(2)} hrs</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#eff6ff,#f5f3ff);border:1px solid #ddd6fe;border-radius:10px;padding:14px 18px;margin-bottom:24px;flex-wrap:wrap;gap:10px">
+          <div style="font-weight:800;color:var(--navy);font-size:16px">🕒 This week: <span style="color:#4338ca">${Number(week.total_hours || 0).toFixed(2)} hrs</span></div>
           ${week.status === 'draft'
-            ? `<button class="btn-add" ${Number(week.total_hours || 0) <= 0 ? 'disabled' : ''} onclick="submitHoursWeek()">Submit for Approval</button>`
+            ? `<button class="btn-add" ${Number(week.total_hours || 0) <= 0 ? 'disabled' : ''} onclick="submitHoursWeek()">${isSelfApprove ? '✅ Approve' : '📤 Submit for Approval'}</button>`
             : `<div style="display:flex;align-items:center;gap:12px">
-                 <span style="font-size:12px;color:var(--text-muted)">Submitted ${fmtDate(week.submitted_at)}</span>
+                 <span style="font-size:12px;color:var(--text-muted)">${week.status === 'approved' ? 'Approved' : 'Submitted'} ${fmtDate(week.submitted_at)}</span>
                  ${week.status !== 'approved' ? `<button class="btn-secondary" onclick="recallHoursWeek()">Recall</button>` : ''}
                </div>`}
         </div>
 
         <div style="font-weight:700;color:var(--navy);font-size:14px;margin-bottom:10px">Recent Weeks</div>
         ${hoursMyWeeks.length === 0 ? `<div style="font-size:12.5px;color:var(--text-muted)">No history yet.</div>` : hoursMyWeeks.map(w => `
-          <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-radius:10px;padding:10px 16px;margin-bottom:8px;cursor:pointer;gap:10px;flex-wrap:wrap" onclick="jumpToHoursWeek('${w.week_start_date}')">
+          <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-left:4px solid ${hoursStatusColor(w.status)};border-radius:10px;padding:10px 16px;margin-bottom:8px;cursor:pointer;gap:10px;flex-wrap:wrap" onclick="jumpToHoursWeek('${w.week_start_date}')">
             <div style="font-size:12.5px;color:var(--text)">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</div>
             <div style="font-size:12.5px;font-weight:700;color:var(--text)">${Number(w.total_hours).toFixed(2)} hrs</div>
             <div style="font-size:11.5px;font-weight:700;color:${hoursStatusColor(w.status)}">${hoursStatusLabel(w.status)}</div>
