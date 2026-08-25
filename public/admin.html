@@ -258,6 +258,9 @@
         <div class="admin-nav-item" onclick="showSection('leave-requests', this)">
           <span class="admin-nav-icon">🏖️</span> Leave Requests
         </div>
+        <div class="admin-nav-item" id="navPayroll" style="display:none" onclick="showSection('payroll', this)">
+          <span class="admin-nav-icon">💰</span> Payroll
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Projects</div>
@@ -535,6 +538,60 @@
                 <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- Payroll (Sophia/Joy only — gated to leaveService's FINAL_APPROVERS pool, not a role) -->
+      <template id="__lazy_payroll">
+      <div class="admin-section" id="section-payroll">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Payroll</div>
+            <div class="admin-page-sub">Employee pay details and payslip generation — visible only to payroll admins</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:20px">
+          <button class="btn-secondary" id="payrollTabProfiles" onclick="setPayrollSubTab('profiles')">Payroll Profiles</button>
+          <button class="btn-secondary" id="payrollTabPayslips" onclick="setPayrollSubTab('payslips')">Payslips</button>
+        </div>
+
+        <div id="payrollProfilesView">
+          <div class="admin-table-card">
+            <div style="overflow-x:auto">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Name</th><th>Position</th><th>Hourly Rate (AUD)</th><th>Pays in PHP</th><th>Bank</th><th style="width:30px"></th></tr>
+                </thead>
+                <tbody id="payrollProfilesTableBody">
+                  <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="payrollPayslipsView" style="display:none">
+          <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <button class="btn-secondary" onclick="changePayrollPeriod(-1)">← Prev</button>
+              <div id="payrollPeriodLabel" style="font-weight:700;color:var(--navy);font-size:14px"></div>
+              <button class="btn-secondary" onclick="changePayrollPeriod(1)">Next →</button>
+            </div>
+          </div>
+          <div class="admin-table-card">
+            <div style="overflow-x:auto">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Name</th><th>Position</th><th>Week 1</th><th>Week 2</th><th>Status</th><th style="width:260px"></th></tr>
+                </thead>
+                <tbody id="payrollEligibleTableBody">
+                  <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -3567,6 +3624,99 @@
     </div>
   </div>
 
+  <!-- Payroll Profile Modal -->
+  <div class="modal-overlay" id="payrollProfileModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closePayrollProfileModal()">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div class="modal-title">Edit Payroll Profile</div>
+        <button class="modal-close" onclick="closePayrollProfileModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ppEmail">
+        <div style="font-weight:700;color:var(--navy);margin-bottom:14px" id="ppName"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Hourly Rate (AUD)</label>
+          <input type="number" step="0.01" min="0" id="ppRate" class="form-control">
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal"><input type="checkbox" id="ppPaysInPhp" style="margin-right:6px">Pays in PHP (adds the currency conversion block to their payslip)</label>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Bank Name</label>
+            <input type="text" id="ppBankName" class="form-control">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Account Name</label>
+            <input type="text" id="ppBankAccountName" class="form-control">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Account Number</label>
+            <input type="text" id="ppBankAccountNumber" class="form-control">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Swift Code</label>
+            <input type="text" id="ppBankSwiftCode" class="form-control">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closePayrollProfileModal()">Cancel</button>
+        <button class="btn-add" onclick="savePayrollProfile()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate Payslip Modal -->
+  <div class="modal-overlay" id="payrollGenerateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closePayrollGenerateModal()">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-header">
+        <div class="modal-title">Generate Payslip</div>
+        <button class="modal-close" onclick="closePayrollGenerateModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+        <input type="hidden" id="pgUserEmail">
+        <input type="hidden" id="pgPayPeriodStart">
+        <div style="font-weight:700;color:var(--navy);font-size:15px;margin-bottom:14px" id="pgEmployeeName"></div>
+        <div class="form-row">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Invoice Number</label>
+            <input type="number" id="pgInvoiceNumber" class="form-control">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Date Paid</label>
+            <input type="date" id="pgDatePaid" class="form-control">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Worked Days</label>
+            <input type="number" step="0.5" min="0" id="pgWorkedDays" class="form-control">
+          </div>
+        </div>
+        <div class="form-row" id="pgPhpFields" style="display:none">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Currency Exchange Rate</label>
+            <input type="number" step="0.0001" min="0" id="pgExchangeRate" class="form-control" onchange="recalcPgPhpTotal()">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Total Earnings in PHP</label>
+            <input type="number" step="0.01" min="0" id="pgTotalPhp" class="form-control">
+          </div>
+        </div>
+        <div style="font-weight:700;color:var(--navy);font-size:13px;margin:16px 0 8px">Line Items</div>
+        <div id="pgLineItemsWrap"></div>
+        <button class="btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="addPgLineItem()">+ Add Line Item</button>
+        <div style="text-align:right;font-weight:700;font-size:15px;color:var(--navy);margin-top:16px;padding-top:12px;border-top:1px solid var(--gray-100)">Total Earnings in AUD: $<span id="pgTotalAud">0.00</span></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closePayrollGenerateModal()">Cancel</button>
+        <button class="btn-secondary" onclick="previewPgPayslip()">Preview PDF</button>
+        <button class="btn-add" onclick="generatePayslip()">Generate (Draft)</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add FAQ Modal -->
   <div class="modal-overlay" id="addFaqModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAddFaqModal()">
     <div class="modal" style="max-width:560px">
@@ -3811,6 +3961,7 @@
     let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
     let currentUserCanCreateOutreachLists = false;
+    let currentUserIsPayrollAdmin = false;
     let currentUserWfpLabel = null;
 
     // WFP Dashboard/My Centres/Leads/Micropods all share the same VIC/SA
@@ -3841,6 +3992,7 @@
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
+        currentUserIsPayrollAdmin = !!me.isPayrollAdmin;
         currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
@@ -3990,6 +4142,13 @@
       if (currentUserRole === 'super_admin' || currentUserCanBuildTraining) {
         const navTrainingBuild = document.getElementById('navTrainingBuild');
         if (navTrainingBuild) navTrainingBuild.style.display = '';
+      }
+      // Payroll — not a role (Sophia is plain 'admin'; Liam/Prince/Yuvraj
+      // also hold admin/super_admin but aren't payroll admins) — gated to
+      // the same fixed Sophia/Joy pool the server checks via isFinalApprover.
+      if (currentUserIsPayrollAdmin) {
+        const navPayroll = document.getElementById('navPayroll');
+        if (navPayroll) navPayroll.style.display = '';
       }
       const effectiveAllowed = getEffectiveAllowedSections();
       if (effectiveAllowed) {
@@ -5087,6 +5246,7 @@
       if (id === 'users') { loadUsers(); loadActiveSessions(); }
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
+      if (id === 'payroll') initPayrollSection();
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') loadDocumentCheckHistory();
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
@@ -5964,6 +6124,277 @@
       } catch {
         body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leave requests</td></tr>';
       }
+    }
+
+    // ── Payroll (Sophia/Joy only) ────────────────────────────────
+    // "Payroll approved" = both timesheet_weeks rows for a pay period are
+    // status='approved' — see services/payslipService.listEligibleForPeriod.
+    // Week 1/2 line items auto-fill from those real hours; anything else
+    // (Training, Sunday Shift, bonuses) is added by hand since the
+    // timesheet system has no shift-type tagging to derive it from.
+    let payrollSubTab = 'profiles';
+    let payrollPeriodStart = null;
+    let payrollProfilesCache = [];
+    let pgLineItems = [];
+    let pgPaysInPhp = false;
+    let pgDefaultRate = 0;
+
+    function addDaysAdmin(dateStr, days) {
+      const d = new Date(`${dateStr}T00:00:00`);
+      d.setDate(d.getDate() + days);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    async function initPayrollSection() {
+      if (!payrollPeriodStart) {
+        try {
+          const policy = await fetch('/api/timesheets/policy').then(r => r.json());
+          payrollPeriodStart = policy.payPeriodStart;
+        } catch { payrollPeriodStart = addDaysAdmin(new Date().toISOString().slice(0, 10), 0); }
+      }
+      setPayrollSubTab(payrollSubTab);
+    }
+
+    function setPayrollSubTab(tab) {
+      payrollSubTab = tab;
+      const profilesBtn = document.getElementById('payrollTabProfiles');
+      const payslipsBtn = document.getElementById('payrollTabPayslips');
+      const activeStyle = 'background:var(--orange);color:white;border-color:var(--orange)';
+      profilesBtn.style.cssText = tab === 'profiles' ? activeStyle : '';
+      payslipsBtn.style.cssText = tab === 'payslips' ? activeStyle : '';
+      document.getElementById('payrollProfilesView').style.display = tab === 'profiles' ? '' : 'none';
+      document.getElementById('payrollPayslipsView').style.display = tab === 'payslips' ? '' : 'none';
+      if (tab === 'profiles') loadPayrollProfiles();
+      else loadPayrollEligible();
+    }
+
+    async function loadPayrollProfiles() {
+      const body = document.getElementById('payrollProfilesTableBody');
+      try {
+        const rows = await fetch('/api/payslips/profiles').then(r => r.json());
+        payrollProfilesCache = rows;
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No active team members with a login yet</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${escHtml(r.legal_name || r.name)}</td>
+            <td>${escHtml(r.position || '—')}</td>
+            <td>${r.hourly_rate_aud != null ? '$' + Number(r.hourly_rate_aud).toFixed(2) : '<span style="color:#b45309;font-weight:700">Not set</span>'}</td>
+            <td>${r.pays_in_php ? '✅' : '—'}</td>
+            <td>${r.bank_name ? escHtml(r.bank_name) + ' · ' + escHtml(r.bank_account_number || '') : '<span style="color:#b45309;font-weight:700">Not set</span>'}</td>
+            <td><span title="Edit" style="cursor:pointer" onclick="openPayrollProfileModal('${r.user_email}')">✏️</span></td>
+          </tr>`).join('');
+      } catch {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load payroll profiles</td></tr>';
+      }
+    }
+
+    function openPayrollProfileModal(email) {
+      const row = payrollProfilesCache.find(r => r.user_email === email);
+      if (!row) return;
+      document.getElementById('ppEmail').value = email;
+      document.getElementById('ppName').textContent = row.legal_name || row.name;
+      document.getElementById('ppRate').value = row.hourly_rate_aud != null ? row.hourly_rate_aud : '';
+      document.getElementById('ppPaysInPhp').checked = !!row.pays_in_php;
+      document.getElementById('ppBankName').value = row.bank_name || '';
+      document.getElementById('ppBankAccountName').value = row.bank_account_name || '';
+      document.getElementById('ppBankAccountNumber').value = row.bank_account_number || '';
+      document.getElementById('ppBankSwiftCode').value = row.bank_swift_code || '';
+      document.getElementById('payrollProfileModal').classList.add('open');
+    }
+    function closePayrollProfileModal() { document.getElementById('payrollProfileModal').classList.remove('open'); }
+
+    async function savePayrollProfile() {
+      const email = document.getElementById('ppEmail').value;
+      const row = payrollProfilesCache.find(r => r.user_email === email);
+      try {
+        const res = await fetch(`/api/payslips/profiles/${encodeURIComponent(email)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userName: row?.legal_name || row?.name || email,
+            hourlyRateAud: document.getElementById('ppRate').value === '' ? null : Number(document.getElementById('ppRate').value),
+            paysInPhp: document.getElementById('ppPaysInPhp').checked,
+            bankName: document.getElementById('ppBankName').value.trim(),
+            bankAccountName: document.getElementById('ppBankAccountName').value.trim(),
+            bankAccountNumber: document.getElementById('ppBankAccountNumber').value.trim(),
+            bankSwiftCode: document.getElementById('ppBankSwiftCode').value.trim()
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        toast('Payroll profile saved', 'success');
+        closePayrollProfileModal();
+        loadPayrollProfiles();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function changePayrollPeriod(deltaPeriods) {
+      payrollPeriodStart = addDaysAdmin(payrollPeriodStart, deltaPeriods * 14);
+      loadPayrollEligible();
+    }
+
+    async function loadPayrollEligible() {
+      const body = document.getElementById('payrollEligibleTableBody');
+      const periodEnd = addDaysAdmin(payrollPeriodStart, 13);
+      document.getElementById('payrollPeriodLabel').textContent = `Pay period: ${fmtDate(payrollPeriodStart)} – ${fmtDate(periodEnd)}`;
+      body.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        const rows = await fetch(`/api/payslips/eligible?payPeriodStart=${payrollPeriodStart}`).then(r => r.json());
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No active team members</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(r => {
+          const weekPill = s => `<span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${s === 'approved' ? 'Approved' : s.replace('_', ' ')}</span>`;
+          let statusText, actions;
+          if (!r.hasProfile) {
+            statusText = '<span style="color:#b45309;font-weight:700">Profile incomplete</span>';
+            actions = `<button class="btn-secondary" style="font-size:11.5px;padding:5px 10px" onclick="setPayrollSubTab('profiles')">Set up profile</button>`;
+          } else if (!r.bothApproved) {
+            statusText = '<span style="color:var(--text-muted)">Waiting on approval</span>';
+            actions = '';
+          } else if (!r.existingPayslipId) {
+            statusText = '<span style="color:#15803d;font-weight:700">Ready</span>';
+            actions = `<button class="btn-add" style="font-size:11.5px;padding:5px 10px" onclick="openPayrollGenerateModal('${r.userEmail}')">Generate Payslip</button>`;
+          } else if (!r.alreadyPublished) {
+            statusText = '<span style="color:#b45309;font-weight:700">Draft generated</span>';
+            actions = `
+              <button class="btn-secondary" style="font-size:11.5px;padding:5px 10px" onclick="window.open('/api/payslips/admin/preview/${r.existingPayslipId}','_blank')">Preview</button>
+              <button class="btn-add" style="font-size:11.5px;padding:5px 10px" onclick="publishPayslip('${r.existingPayslipId}')">Publish</button>`;
+          } else {
+            statusText = '<span style="color:#15803d;font-weight:700">Published</span>';
+            actions = `
+              <button class="btn-secondary" style="font-size:11.5px;padding:5px 10px" onclick="window.open('/api/payslips/admin/preview/${r.existingPayslipId}','_blank')">Preview</button>
+              <button class="btn-secondary" style="font-size:11.5px;padding:5px 10px" onclick="unpublishPayslip('${r.existingPayslipId}')">Unpublish</button>`;
+          }
+          return `
+            <tr>
+              <td>${escHtml(r.userName)}</td>
+              <td>${escHtml(r.position || '—')}</td>
+              <td>${weekPill(r.week1Status)}</td>
+              <td>${weekPill(r.week2Status)}</td>
+              <td>${statusText}</td>
+              <td style="white-space:nowrap;display:flex;gap:6px">${actions}</td>
+            </tr>`;
+        }).join('');
+      } catch {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load</td></tr>';
+      }
+    }
+
+    async function publishPayslip(id) {
+      try {
+        const res = await fetch(`/api/payslips/${id}/publish`, { method: 'POST' });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Failed to publish', 'error'); return; }
+        toast('Payslip published', 'success');
+        loadPayrollEligible();
+      } catch { toast('Network error', 'error'); }
+    }
+    async function unpublishPayslip(id) {
+      if (!confirm('Unpublish this payslip? It will disappear from the employee\'s view until republished.')) return;
+      try {
+        const res = await fetch(`/api/payslips/${id}/unpublish`, { method: 'POST' });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Failed to unpublish', 'error'); return; }
+        toast('Payslip unpublished', 'success');
+        loadPayrollEligible();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function openPayrollGenerateModal(userEmail) {
+      try {
+        const [prefill, suggested] = await Promise.all([
+          fetch(`/api/payslips/prefill?userEmail=${encodeURIComponent(userEmail)}&payPeriodStart=${payrollPeriodStart}`).then(r => r.json()),
+          fetch('/api/payslips/suggested-invoice-number').then(r => r.json())
+        ]);
+        const profileRow = payrollProfilesCache.find(r => r.user_email.toLowerCase() === userEmail.toLowerCase())
+          || await fetch('/api/payslips/profiles').then(r => r.json()).then(rows => { payrollProfilesCache = rows; return rows.find(r => r.user_email.toLowerCase() === userEmail.toLowerCase()); });
+        pgPaysInPhp = !!profileRow?.pays_in_php;
+        pgDefaultRate = Number(profileRow?.hourly_rate_aud || 0);
+        document.getElementById('pgUserEmail').value = userEmail;
+        document.getElementById('pgPayPeriodStart').value = payrollPeriodStart;
+        document.getElementById('pgEmployeeName').textContent = profileRow?.legal_name || profileRow?.name || userEmail;
+        document.getElementById('pgInvoiceNumber').value = suggested.invoiceNumber;
+        document.getElementById('pgDatePaid').value = addDaysAdmin(payrollPeriodStart, 13);
+        document.getElementById('pgWorkedDays').value = prefill.workedDays;
+        document.getElementById('pgPhpFields').style.display = pgPaysInPhp ? '' : 'none';
+        document.getElementById('pgExchangeRate').value = '';
+        document.getElementById('pgTotalPhp').value = '';
+        pgLineItems = prefill.lineItems.map(li => ({ ...li }));
+        renderPgLineItems();
+        document.getElementById('payrollGenerateModal').classList.add('open');
+      } catch { toast('Failed to load generation form', 'error'); }
+    }
+    function closePayrollGenerateModal() { document.getElementById('payrollGenerateModal').classList.remove('open'); }
+
+    function renderPgLineItems() {
+      const wrap = document.getElementById('pgLineItemsWrap');
+      wrap.innerHTML = pgLineItems.map((li, i) => `
+        <div style="display:grid;grid-template-columns:1.3fr 1.3fr 70px 70px 80px 22px;gap:6px;align-items:center;margin-bottom:6px">
+          <input type="text" placeholder="Group (e.g. Week 1: ...)" value="${escHtml(li.groupLabel || '')}" onchange="updatePgLineItem(${i},'groupLabel',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
+          <input type="text" placeholder="Label (e.g. a date)" value="${escHtml(li.label || '')}" onchange="updatePgLineItem(${i},'label',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
+          <input type="number" step="0.01" min="0" value="${li.hours}" onchange="updatePgLineItem(${i},'hours',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
+          <input type="number" step="0.01" min="0" value="${li.rate}" onchange="updatePgLineItem(${i},'rate',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
+          <div style="font-size:12px;font-weight:700;text-align:right">${(Number(li.hours || 0) * Number(li.rate || 0)).toFixed(2)}</div>
+          <span title="Remove" style="cursor:pointer;color:#dc2626;text-align:center" onclick="removePgLineItem(${i})">✕</span>
+        </div>
+      `).join('');
+      const total = pgLineItems.reduce((s, li) => s + Number(li.hours || 0) * Number(li.rate || 0), 0);
+      document.getElementById('pgTotalAud').textContent = total.toFixed(2);
+    }
+    function updatePgLineItem(i, field, value) {
+      pgLineItems[i][field] = (field === 'hours' || field === 'rate') ? Number(value) : value;
+      renderPgLineItems();
+    }
+    function addPgLineItem() {
+      pgLineItems.push({ groupLabel: '', label: '', hours: 0, rate: pgDefaultRate, source: 'manual' });
+      renderPgLineItems();
+    }
+    function removePgLineItem(i) {
+      pgLineItems.splice(i, 1);
+      renderPgLineItems();
+    }
+    function recalcPgPhpTotal() {
+      const totalAud = pgLineItems.reduce((s, li) => s + Number(li.hours || 0) * Number(li.rate || 0), 0);
+      const rate = Number(document.getElementById('pgExchangeRate').value) || 0;
+      document.getElementById('pgTotalPhp').value = (totalAud * rate).toFixed(2);
+    }
+
+    function collectPgPayload() {
+      return {
+        userEmail: document.getElementById('pgUserEmail').value,
+        payPeriodStart: document.getElementById('pgPayPeriodStart').value,
+        invoiceNumber: Number(document.getElementById('pgInvoiceNumber').value),
+        datePaid: document.getElementById('pgDatePaid').value,
+        workedDays: Number(document.getElementById('pgWorkedDays').value),
+        lineItems: pgLineItems.map(li => ({
+          groupLabel: li.groupLabel, label: li.label, hours: Number(li.hours) || 0, rate: Number(li.rate) || 0,
+          amount: Math.round((Number(li.hours) || 0) * (Number(li.rate) || 0) * 100) / 100, source: li.source
+        })),
+        exchangeRate: pgPaysInPhp ? Number(document.getElementById('pgExchangeRate').value) : null,
+        totalEarningsPhp: pgPaysInPhp ? Number(document.getElementById('pgTotalPhp').value) : null
+      };
+    }
+
+    async function previewPgPayslip() {
+      try {
+        const res = await fetch('/api/payslips/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collectPgPayload()) });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Preview failed', 'error'); return; }
+        const blob = await res.blob();
+        window.open(URL.createObjectURL(blob), '_blank');
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function generatePayslip() {
+      try {
+        const res = await fetch('/api/payslips/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collectPgPayload()) });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to generate', 'error'); return; }
+        toast('Payslip generated as a draft — preview it, then Publish when ready', 'success');
+        closePayrollGenerateModal();
+        loadPayrollEligible();
+      } catch { toast('Network error', 'error'); }
     }
 
     // super_admin only (route-enforced too) — for testing/cleanup, bypasses

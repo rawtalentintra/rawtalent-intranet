@@ -4119,15 +4119,16 @@
       if (tab === 'mine') renderMyHours();
       else if (tab === 'approvals') loadHoursApprovals();
       else if (tab === 'company') loadHoursCompany();
+      else if (tab === 'payslips') loadHoursPayslips();
     }
 
     function hoursSubTabsHtml() {
       const canApprove = hoursPolicy.isL1Approver || hoursPolicy.isFinalApprover;
       const canSeeCompany = hoursPolicy.isFinalApprover;
-      if (!canApprove && !canSeeCompany) return '';
       return `
-        <div style="display:flex;gap:8px;margin-bottom:18px">
+        <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">
           <button onclick="setHoursSubTab('mine')" style="${hoursTabBtnStyle(hoursSubTab === 'mine')}">My Hours</button>
+          <button onclick="setHoursSubTab('payslips')" style="${hoursTabBtnStyle(hoursSubTab === 'payslips')}">My Payslips</button>
           ${canApprove ? `<button onclick="setHoursSubTab('approvals')" style="${hoursTabBtnStyle(hoursSubTab === 'approvals')}">Approvals</button>` : ''}
           ${canSeeCompany ? `<button onclick="setHoursSubTab('company')" style="${hoursTabBtnStyle(hoursSubTab === 'company')}">Company Totals</button>` : ''}
         </div>`;
@@ -4458,6 +4459,32 @@
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">${periodNav}</div>
         <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:16px 18px">${body}</div>
       `;
+    }
+
+    // ── My Payslips (everyone) ───────────────────────────────────
+    let hoursMyPayslips = [];
+    async function loadHoursPayslips() {
+      document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        hoursMyPayslips = await fetch('/api/payslips/mine').then(r => r.json());
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + payslipsHtml();
+      } catch {
+        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load payslips.</div></div>';
+      }
+    }
+    function payslipsHtml() {
+      if (!hoursMyPayslips.length) {
+        return `<div class="empty-wrap"><div class="empty-icon">💰</div><div class="empty-title">No payslips published yet</div><p style="font-size:13px;color:var(--text-muted);margin-top:4px">They'll show up here once your pay period's hours are approved and a payslip is published.</p></div>`;
+      }
+      return hoursMyPayslips.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;background:white;border:1px solid var(--gray-100);border-left:4px solid #15803d;border-radius:10px;padding:14px 18px;margin-bottom:10px;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px">${fmtDate(p.pay_period_start)} – ${fmtDate(p.pay_period_end)}</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Invoice #${p.invoice_number} · Paid ${fmtDate(p.date_paid)} · $${Number(p.total_earnings_aud).toFixed(2)} AUD</div>
+          </div>
+          <a class="btn-secondary" style="text-decoration:none" href="/api/payslips/${p.id}/download" download="Payslip-${p.pay_period_start}.pdf">⬇️ Download PDF</a>
+        </div>
+      `).join('');
     }
 
     // ── Home ──────────────────────────────────────────────────────

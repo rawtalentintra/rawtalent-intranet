@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { logActivity } = require('../services/activityLog');
+const { isFinalApprover } = require('../services/leaveService');
 
 router.post('/login', (req, res, next) => {
   passport.authenticate('local', (err, user, info) => {
@@ -45,7 +46,7 @@ router.post('/logout', (req, res) => {
 
 router.get('/me', async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
-  const info = { email: req.user.email, name: req.user.name, role: req.user.role, canBuildTraining: !!req.user.can_build_training, canCreateOutreachLists: !!req.user.can_create_outreach_lists, wfpLabel: req.user.wfp_label || null };
+  const info = { email: req.user.email, name: req.user.name, role: req.user.role, canBuildTraining: !!req.user.can_build_training, canCreateOutreachLists: !!req.user.can_create_outreach_lists, wfpLabel: req.user.wfp_label || null, isPayrollAdmin: isFinalApprover(req.user.email) };
   if (req.session.impersonatorId) {
     try {
       const origRes = await getDb().execute({ sql: 'SELECT name, email FROM users WHERE id = ?', args: [req.session.impersonatorId] });

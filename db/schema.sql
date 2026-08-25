@@ -858,6 +858,64 @@ CREATE TABLE IF NOT EXISTS timesheet_entries (
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_week_id ON timesheet_entries(week_id);
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user_date ON timesheet_entries(user_email, entry_date);
 
+-- Payroll-sensitive employee data (hourly rate, bank details, PHP flag).
+-- Deliberately its OWN table, not columns on team_members — team_members
+-- is read via a blind SELECT * for the public "Our Team" org chart
+-- (routes/team.js), visible to every signed-in user. Putting bank account
+-- numbers in that table would be one future SELECT * away from leaking
+-- into a public-facing view. This table is touched ONLY by
+-- routes/payslips.js, gated to the same Sophia/Joy pool as everything
+-- else payroll-related (services/leaveService.js's isFinalApprover).
+-- Matched to team_members/users by email, not an FK, same convention as
+-- timesheet_weeks.
+CREATE TABLE IF NOT EXISTS employee_payroll_profiles (
+  id TEXT PRIMARY KEY,
+  user_email CITEXT NOT NULL UNIQUE,
+  user_name TEXT,
+  hourly_rate_aud NUMERIC(8,2),
+  pays_in_php BOOLEAN NOT NULL DEFAULT false,
+  bank_name TEXT,
+  bank_account_name TEXT,
+  bank_account_number TEXT,
+  bank_swift_code TEXT,
+  updated_by CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- One row per employee per pay period issued. invoice_number is a plain
+-- UNIQUE integer, NOT a Postgres SERIAL/sequence — the real external
+-- numbering (from before this app existed) is already in the 40s, and a
+-- DB sequence starting at 1 would collide with it. The service suggests
+-- MAX(invoice_number)+1 (or 1 if none exist) as a default at generate-
+-- form time; Sophia/Joy can type over it to align the first in-app
+-- payslip with wherever the real numbering left off. The UNIQUE
+-- constraint is the actual collision guard, not a sequence object.
+-- published_at mirrors announcements.send_at: NULL = draft (admin-only
+-- preview), set = visible to the employee — no separate status enum.
+CREATE TABLE IF NOT EXISTS payslips (
+  id TEXT PRIMARY KEY,
+  invoice_number INTEGER NOT NULL UNIQUE,
+  user_email CITEXT NOT NULL,
+  user_name TEXT,
+  pay_period_start DATE NOT NULL,
+  pay_period_end DATE NOT NULL,
+  date_paid DATE NOT NULL,
+  worked_days NUMERIC(4,1) NOT NULL DEFAULT 0,
+  line_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total_earnings_aud NUMERIC(10,2) NOT NULL,
+  exchange_rate NUMERIC(10,4),
+  total_earnings_php NUMERIC(12,2),
+  storage_path TEXT,
+  published_at TIMESTAMPTZ,
+  created_by CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_email, pay_period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_payslips_user_email ON payslips(user_email);
+CREATE INDEX IF NOT EXISTS idx_payslips_published_at ON payslips(published_at);
+
 -- Team suggestion box. Deliberately flat — one status field admins move
 -- along, one feedback field for their response — no voting/comments,
 -- kept simple on purpose.

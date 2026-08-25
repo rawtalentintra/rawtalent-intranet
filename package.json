@@ -23,6 +23,7 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.20.1",
     "pg": "^8.22.0",
     "tesseract.js": "^7.0.0",
     "uuid": "^9.0.0"
