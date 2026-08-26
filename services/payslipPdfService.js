@@ -73,7 +73,7 @@ function buildPayslipPdf(payslip, profile) {
       .text('PAYSLIP', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 3 });
     doc.y += 22;
     doc.font('Helvetica-Bold').fontSize(10).fillColor(ACCENT)
-      .text('RAW TALENT RECRUITMENT', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 0.5 });
+      .text('RawTalent Recruitment', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 0.5 });
     doc.y += 13;
     doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
       .text('Level 5|111, Cecil St, South Melbourne VIC 3205, Australia', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center' });
