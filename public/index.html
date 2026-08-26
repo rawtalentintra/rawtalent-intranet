@@ -1083,27 +1083,34 @@
         <div id="taskCreatorInfo" style="display:none;font-size:12px;color:var(--text-muted);margin:-6px 0 12px"></div>
         <div class="form-group-modal">
           <label class="form-label-modal">Title</label>
-          <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done? e.g. Kirandeep Kaur | 0455 534 510 — WWCC check" maxlength="200" oninput="handleTaskTitleInput(this.value)">
+          <div id="taskTitleViewWrap" style="display:none">
+            <div id="taskTitleViewText" class="task-title-view"></div>
+            <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted);margin-top:6px;display:inline-block" onclick="setTaskTitleEditMode(true)">✏️ Edit</span>
+          </div>
+          <div id="taskTitleEditWrap">
+            <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done? e.g. Kirandeep Kaur | 0455 534 510 — WWCC check" maxlength="200" oninput="handleTaskTitleInput(this.value)">
+          </div>
           <div id="taskPersonMatchPanel" style="display:none;margin-top:8px"></div>
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Linked Educators <span class="optional">(optional)</span></label>
           <div id="taskLinkedCandidateChips"></div>
-          <div style="position:relative">
-            <input type="text" id="taskAddCandidateInput" class="form-control" placeholder="+ Add another educator (name or phone)" autocomplete="off" oninput="handleAddCandidateInput(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('taskAddCandidateDropdown'); if(d) d.style.display='none';},150)">
+          <span id="taskAddCandidateToggle" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--orange);display:inline-block" onclick="showAddCandidateInput()">+ Add Linked Educator</span>
+          <div id="taskAddCandidateInputWrap" style="display:none;position:relative;margin-top:6px">
+            <input type="text" id="taskAddCandidateInput" class="form-control" placeholder="Name or phone" autocomplete="off" oninput="handleAddCandidateInput(this.value)" onblur="hideAddCandidateInputIfEmpty()">
             <div id="taskAddCandidateDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20;padding:6px"></div>
           </div>
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
-          <div id="taskDescViewWrap" style="display:none">
+          <div id="taskDescViewWrap" class="task-desc-highlight" style="display:none">
             <div id="taskDescViewText" class="task-desc-view"></div>
             <div id="taskDescAttachmentsView" style="margin-top:8px"></div>
             <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted);margin-top:6px;display:inline-block" onclick="setTaskDescEditMode(true)">✏️ Edit</span>
           </div>
-          <div id="taskDescEditWrap">
+          <div id="taskDescEditWrap" class="task-desc-highlight">
             <div style="position:relative">
-              <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
+              <textarea id="taskDescInput" class="form-control" style="min-height:150px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
               <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
             </div>
             <div id="taskDescMentionPreview" class="task-mention-live-preview" style="display:none"></div>
@@ -2038,6 +2045,7 @@
     // object-URL preview for images, uploaded only once the surface it
     // belongs to is actually saved (submitTask/submitTaskNote/saveTaskNoteEdit).
     let taskDescEditMode = true;
+    let taskTitleEditMode = true;
     let taskAttachments = []; // every real (already-uploaded) attachment for the open task, both description's and every note's
     let pendingDescAttachments = [];
     let pendingNoteAttachments = [];
@@ -2535,6 +2543,38 @@
       document.getElementById('taskDescEditWrap').style.display = edit ? 'block' : 'none';
       if (!edit) document.getElementById('taskDescViewText').innerHTML = renderNoteBody(document.getElementById('taskDescInput').value);
     }
+
+    // ── Title view/edit toggle — same pattern as the description above,
+    // so a title that's already set reads as plain text, not an
+    // always-open input, until "Edit" is explicitly clicked. ──────
+    function setTaskTitleEditMode(edit) {
+      taskTitleEditMode = edit;
+      document.getElementById('taskTitleViewWrap').style.display = edit ? 'none' : 'block';
+      document.getElementById('taskTitleEditWrap').style.display = edit ? 'block' : 'none';
+      if (!edit) document.getElementById('taskTitleViewText').textContent = document.getElementById('taskTitleInput').value;
+      else document.getElementById('taskTitleInput').focus();
+    }
+
+    // ── Linked Educators add-field toggle — the free-text search box
+    // stays hidden behind a "+ Add Linked Educator" affordance until
+    // clicked, rather than sitting open at all times; collapses back to
+    // the button on blur if nothing was typed. ─────────────────────
+    function showAddCandidateInput() {
+      document.getElementById('taskAddCandidateToggle').style.display = 'none';
+      document.getElementById('taskAddCandidateInputWrap').style.display = 'block';
+      document.getElementById('taskAddCandidateInput').focus();
+    }
+    function hideAddCandidateInputIfEmpty() {
+      setTimeout(() => {
+        const dropdown = document.getElementById('taskAddCandidateDropdown');
+        if (dropdown) dropdown.style.display = 'none';
+        const input = document.getElementById('taskAddCandidateInput');
+        if (input && !input.value.trim()) {
+          document.getElementById('taskAddCandidateInputWrap').style.display = 'none';
+          document.getElementById('taskAddCandidateToggle').style.display = 'inline-block';
+        }
+      }, 150);
+    }
     function renderTaskDescAttachmentAreas() {
       const existing = taskAttachments.filter(a => a.note_id == null);
       const existingHtml = existing.map(savedAttachmentChipHtml).join('');
@@ -2585,6 +2625,9 @@
       pendingDescAttachments = [];
       pendingNoteAttachments = [];
       pendingNoteEditAttachments = [];
+      document.getElementById('taskAddCandidateInput').value = '';
+      document.getElementById('taskAddCandidateInputWrap').style.display = 'none';
+      document.getElementById('taskAddCandidateToggle').style.display = 'inline-block';
       populateTaskSelects();
       const deleteBtn = document.getElementById('taskDeleteBtn');
       const notesSection = document.getElementById('taskNotesSection');
@@ -2619,6 +2662,7 @@
         // an open textarea) with an explicit way to edit it; an empty
         // description has nothing to view, so it starts in edit mode.
         setTaskDescEditMode(!t.description);
+        setTaskTitleEditMode(!t.title);
         taskAttachments = [];
         fetch(`/api/tasks/${taskId}/attachments`).then(r => r.json()).then(list => {
           taskAttachments = Array.isArray(list) ? list : [];
@@ -2646,6 +2690,7 @@
         taskLinkedClient = null;
         renderTaskPersonMatchPanel(null);
         setTaskDescEditMode(true);
+        setTaskTitleEditMode(true);
         taskAttachments = [];
         renderTaskDescAttachmentAreas();
       }

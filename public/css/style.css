@@ -1858,6 +1858,16 @@ body:has(> .navbar) { padding-top: 64px; }
    "Edit" is clicked. */
 .task-desc-view { font-size: 13.5px; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
 
+/* Light-blue highlight around the description section (both its view and
+   edit states) so it stands out from the rest of the task form — reuses
+   the same light-blue tone already used for filled-draft day-cards in Log
+   My Hours, rather than inventing a new one. */
+.task-desc-highlight { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px; }
+
+/* Title read-only view (2026-08-26) — mirrors .task-desc-view's toggle
+   pattern; plain text (no mentions in a title), bold to read as a heading. */
+.task-title-view { font-size: 15px; font-weight: 700; color: var(--navy); line-height: 1.35; }
+
 /* Attachments — same shape for the description and every note, both
    already-saved (clickable to preview) and staged-but-not-uploaded-yet
    (dimmed, never clickable). */
