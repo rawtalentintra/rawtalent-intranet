@@ -58,13 +58,14 @@ function payPeriodStartOf(dateStr) {
 }
 function payPeriodEndOf(ppStartStr) { return addDays(ppStartStr, 13); }
 
-function computeHours(startTime, endTime) {
-  const [sh, sm] = startTime.split(':').map(Number);
-  const [eh, em] = endTime.split(':').map(Number);
-  const startMin = sh * 60 + sm;
-  const endMin = eh * 60 + em;
-  if (endMin <= startMin) throw new Error('End time must be after start time');
-  return Math.round(((endMin - startMin) / 60) * 100) / 100;
+// Simplified 2026-08-26 from a start/end-time pair to a directly-entered
+// total, per Joy's ask — just validates the number is sane for a single
+// day rather than deriving it from clock-in/out.
+function validateHours(hours) {
+  const n = Number(hours);
+  if (!Number.isFinite(n) || n <= 0) throw new Error('Enter the total hours worked');
+  if (n > 24) throw new Error('That\'s more hours than a day has — double-check the number');
+  return Math.round(n * 100) / 100;
 }
 
 async function resolveTeam(db, userEmail) {
@@ -92,20 +93,19 @@ async function getOrCreateDraftWeek(db, { id, userEmail, userName, weekStartDate
   return normalizeWeek(res.rows[0]);
 }
 
-async function upsertEntry({ id, userEmail, userName, entryDate, startTime, endTime, notes }) {
+async function upsertEntry({ id, userEmail, userName, entryDate, hours, notes }) {
   const db = getDb();
-  const hours = computeHours(startTime, endTime);
+  const validHours = validateHours(hours);
   const weekStartDate = weekStartOf(entryDate);
   const week = await getOrCreateDraftWeek(db, { id: uuidv4(), userEmail, userName, weekStartDate });
   if (week.status !== 'draft') throw new Error('This week has already been submitted — recall it before editing');
 
   await db.execute({
-    sql: `INSERT INTO timesheet_entries (id, week_id, user_email, entry_date, start_time, end_time, hours, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO timesheet_entries (id, week_id, user_email, entry_date, hours, notes)
+          VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT (user_email, entry_date) DO UPDATE SET
-            start_time = excluded.start_time, end_time = excluded.end_time,
             hours = excluded.hours, notes = excluded.notes, updated_at = now()`,
-    args: [id, week.id, userEmail, entryDate, startTime, endTime, hours, notes || null]
+    args: [id, week.id, userEmail, entryDate, validHours, notes || null]
   });
   await recomputeWeekTotal(db, week.id);
   return getWeek(userEmail, weekStartDate);
@@ -340,7 +340,7 @@ async function deleteWeek(id) {
 
 module.exports = {
   MELBOURNE_TZ, WEEK_ANCHOR, TEAM_APPROVAL_CONFIG,
-  weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, computeHours, resolveTeam,
+  weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, validateHours, resolveTeam,
   upsertEntry, deleteEntry, getWeek, listMyWeeks, submitWeek, recall, decide, listPendingFor,
   companyWeekSummary, companyPayPeriodSummary, companyMonthSummary, listAll, deleteWeek
 };

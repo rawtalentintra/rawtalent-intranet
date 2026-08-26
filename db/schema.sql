@@ -835,26 +835,33 @@ CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_status ON timesheet_weeks(status)
 CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_l1 ON timesheet_weeks(l1_approver_email) WHERE status = 'pending_l1';
 CREATE INDEX IF NOT EXISTS idx_timesheet_weeks_final ON timesheet_weeks(final_approver_email) WHERE status = 'pending_final';
 
--- Daily start/end entries. user_email + entry_date denormalized off
--- week_id (same denormalization leave_requests uses for user_email) so
--- the company-wide summary can SUM(hours) GROUP BY user_email over an
--- arbitrary date range without joining through timesheet_weeks per row.
--- hours is computed and stored by the service at write time (not a
--- generated column), so an end-before-start entry can be rejected with a
--- clear error instead of silently going negative.
+-- Daily entries. user_email + entry_date denormalized off week_id (same
+-- denormalization leave_requests uses for user_email) so the company-wide
+-- summary can SUM(hours) GROUP BY user_email over an arbitrary date range
+-- without joining through timesheet_weeks per row.
+-- start_time/end_time were the original input (a shift's clock-in/out) —
+-- simplified 2026-08-26 to a single directly-entered "total hours for the
+-- day" instead, per Joy's ask to make logging simpler. Left as nullable
+-- rather than dropped so historical entries logged the old way keep their
+-- values (harmless, just unused going forward) — nothing reads them
+-- anymore, only `hours`.
 CREATE TABLE IF NOT EXISTS timesheet_entries (
   id TEXT PRIMARY KEY,
   week_id TEXT NOT NULL REFERENCES timesheet_weeks(id) ON DELETE CASCADE,
   user_email CITEXT NOT NULL,
   entry_date DATE NOT NULL,
-  start_time TEXT NOT NULL, -- 'HH:MM'
-  end_time TEXT NOT NULL,   -- 'HH:MM'
+  start_time TEXT, -- legacy, unused — see comment above
+  end_time TEXT,   -- legacy, unused — see comment above
   hours NUMERIC(5,2) NOT NULL,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (user_email, entry_date)
 );
+-- CREATE TABLE ... IF NOT EXISTS won't relax an already-existing
+-- production table's NOT NULL constraint — this covers that case.
+ALTER TABLE timesheet_entries ALTER COLUMN start_time DROP NOT NULL;
+ALTER TABLE timesheet_entries ALTER COLUMN end_time DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_week_id ON timesheet_entries(week_id);
 CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user_date ON timesheet_entries(user_email, entry_date);
 

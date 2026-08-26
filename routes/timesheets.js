@@ -79,12 +79,12 @@ router.get('/mine', async (req, res) => {
 
 router.post('/entries', async (req, res) => {
   try {
-    const { id, entryDate, startTime, endTime, notes } = req.body;
-    if (!entryDate || !startTime || !endTime) return res.status(400).json({ error: 'entryDate, startTime and endTime are required' });
+    const { id, entryDate, hours, notes } = req.body;
+    if (!entryDate || hours == null) return res.status(400).json({ error: 'entryDate and hours are required' });
     const result = await timesheet.upsertEntry({
       id: id || uuidv4(),
       userEmail: req.user.email, userName: req.user.name,
-      entryDate, startTime, endTime, notes
+      entryDate, hours, notes
     });
     res.json(result);
   } catch (err) {

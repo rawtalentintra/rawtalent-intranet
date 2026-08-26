@@ -1077,6 +1077,7 @@
         <button class="modal-close" onclick="closeTaskModal()">×</button>
       </div>
       <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+        <div id="taskCreatorInfo" style="display:none;font-size:12px;color:var(--text-muted);margin:-6px 0 12px"></div>
         <div class="form-group-modal">
           <label class="form-label-modal">Title</label>
           <input type="text" id="taskTitleInput" class="form-control" placeholder="What needs to be done? e.g. Kirandeep Kaur | 0455 534 510 — WWCC check" maxlength="200" oninput="handleTaskTitleInput(this.value)">
@@ -1972,6 +1973,7 @@
     // stale/wrong matches — or, worse, land in a modal that's since been
     // closed or reopened for a different task entirely.
     let taskMatchRequestId = 0;
+    let taskNotesRequestId = 0;
     let currentTaskNotes = [];
     let taskMentionCandidates = [];
 
@@ -2053,6 +2055,7 @@
           </div>
           <div class="task-card-title">${escHtml(t.title)}</div>
           ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+          <div class="task-card-class">✍️ Created by ${escHtml(t.created_by_name || t.created_by)}</div>
           ${t.linked_candidate_id ? `<div class="task-card-linked" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
           <div class="task-card-bottom">
             <span class="task-card-assignee">👤 ${escHtml(assigneeLabelFor(t))}</span>
@@ -2179,6 +2182,7 @@
               ${t.classification_name ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
               ${t.linked_candidate_id ? `<div class="task-card-linked" style="margin-top:4px" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="margin-top:4px">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
             </td>
+            <td>${escHtml(t.created_by_name || t.created_by)}</td>
             <td>👤 ${escHtml(assigneeLabelFor(t))}</td>
             <td>${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : '<span style="color:var(--gray-400)">—</span>'}</td>
             <td><span class="task-chip" style="background:${pr.color}1a;color:${pr.color};border-color:${pr.color}">${pr.label}</span></td>
@@ -2189,7 +2193,7 @@
       return `
         <div style="overflow-x:auto">
           <table class="data-table" style="width:100%">
-            <thead><tr><th>Department</th><th>Task</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead>
+            <thead><tr><th>Department</th><th>Task</th><th>Created by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -2340,6 +2344,9 @@
         document.getElementById('taskModalTitle').textContent = 'Edit Task';
         deleteBtn.style.display = 'inline-flex';
         notesSection.style.display = 'block';
+        const creatorInfo = document.getElementById('taskCreatorInfo');
+        creatorInfo.textContent = `✍️ Created by ${t.created_by_name || t.created_by} · ${fmtMelbourne(t.created_at)}`;
+        creatorInfo.style.display = 'block';
         document.getElementById('taskTitleInput').value = t.title || '';
         document.getElementById('taskDescInput').value = t.description || '';
         updateMentionPreview(document.getElementById('taskDescInput'), 'taskDescMentionPreview');
@@ -2361,6 +2368,7 @@
         document.getElementById('taskModalTitle').textContent = 'New Task';
         deleteBtn.style.display = 'none';
         notesSection.style.display = 'none';
+        document.getElementById('taskCreatorInfo').style.display = 'none';
         document.getElementById('taskTitleInput').value = '';
         document.getElementById('taskDescInput').value = '';
         document.getElementById('taskDescMentionPreview').style.display = 'none';
@@ -2538,6 +2546,7 @@
       hideMentionDropdown('taskDescMentionDropdown');
       clearTimeout(taskMatchTimer);
       taskMatchRequestId++; // invalidate any in-flight lookup so it can't render after the modal's gone
+      taskNotesRequestId++; // same for any in-flight notes fetch
       editingTaskId = null;
       currentTaskNotes = [];
     }
@@ -2624,12 +2633,23 @@
       return html.replace(re, m => `<span class="task-mention">${m}</span>`);
     }
 
+    // Guarded by a request-id token, same pattern as the educator/centre
+    // match lookup's taskMatchRequestId — without it, opening task A then
+    // clicking into task B before A's notes finish loading could let A's
+    // slower response land AFTER B's and silently overwrite B's notes
+    // list with A's notes. This is exactly what would show up as "the
+    // same note appearing on every task" when clicking through several
+    // tasks in the same classification in quick succession.
     async function loadTaskNotes(taskId) {
+      const requestId = ++taskNotesRequestId;
       document.getElementById('taskNotesList').innerHTML = '<div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div>';
       try {
-        currentTaskNotes = await fetch(`/api/tasks/${taskId}/notes`).then(r => r.json());
+        const notes = await fetch(`/api/tasks/${taskId}/notes`).then(r => r.json());
+        if (requestId !== taskNotesRequestId) return; // a newer task's notes request has since started
+        currentTaskNotes = notes;
         renderTaskNotes();
       } catch {
+        if (requestId !== taskNotesRequestId) return;
         document.getElementById('taskNotesList').innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Failed to load notes.</div>';
       }
     }
@@ -4148,15 +4168,16 @@
       renderMyHours();
     }
 
-    async function onHoursTimeChange(el) {
+    // Simplified 2026-08-26 — one "total hours for the day" number instead
+    // of a start/end time pair, per Joy's ask to make logging simpler.
+    async function onHoursValueChange(el) {
       const date = el.dataset.date;
-      const startEl = document.querySelector(`input[data-date="${date}"][data-field="start"]`);
-      const endEl = document.querySelector(`input[data-date="${date}"][data-field="end"]`);
+      const hoursEl = document.querySelector(`input[data-date="${date}"][data-field="hours"]`);
       const notesEl = document.querySelector(`textarea[data-date="${date}"][data-field="notes"]`);
-      const start = startEl.value, end = endEl.value, notes = notesEl ? notesEl.value : '';
+      const hours = hoursEl.value, notes = notesEl ? notesEl.value : '';
       const existing = hoursWeekData.entries.find(e => e.entry_date === date);
       try {
-        if (!start || !end) {
+        if (!hours || Number(hours) <= 0) {
           if (existing) {
             const res = await fetch(`/api/timesheets/entries/${existing.id}`, { method: 'DELETE' });
             const data = await res.json();
@@ -4168,7 +4189,7 @@
         }
         const res = await fetch('/api/timesheets/entries', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entryDate: date, startTime: start, endTime: end, notes })
+          body: JSON.stringify({ entryDate: date, hours: Number(hours), notes })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
@@ -4178,13 +4199,12 @@
     }
     async function onHoursNotesBlur(el) {
       const date = el.dataset.date;
-      const startEl = document.querySelector(`input[data-date="${date}"][data-field="start"]`);
-      const endEl = document.querySelector(`input[data-date="${date}"][data-field="end"]`);
-      if (!startEl.value || !endEl.value) return;
+      const hoursEl = document.querySelector(`input[data-date="${date}"][data-field="hours"]`);
+      if (!hoursEl.value || Number(hoursEl.value) <= 0) return;
       try {
         const res = await fetch('/api/timesheets/entries', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entryDate: date, startTime: startEl.value, endTime: endEl.value, notes: el.value })
+          body: JSON.stringify({ entryDate: date, hours: Number(hoursEl.value), notes: el.value })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
@@ -4241,14 +4261,9 @@
           <div style="background:${bg};border:1px solid ${border};border-top:4px solid ${accent.text};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1;min-width:140px">
             <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:4px;background:${accent.bg};color:${accent.text};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:3px 10px;border-radius:20px">${label} ${dateObj.getDate()}${isToday ? ' • Today' : ''}</div>
             <div>
-              <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Start</div>
-              <input type="time" value="${e ? e.start_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="start" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
+              <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Total Hours</div>
+              <input type="number" min="0" max="24" step="0.25" placeholder="e.g. 8" value="${e ? Number(e.hours) : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="hours" onchange="onHoursValueChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
             </div>
-            <div>
-              <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">End</div>
-              <input type="time" value="${e ? e.end_time : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="end" onchange="onHoursTimeChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
-            </div>
-            <div style="display:inline-block;align-self:flex-start;font-size:11.5px;font-weight:800;padding:3px 9px;border-radius:20px;background:${e ? '#dcfce7' : 'var(--gray-100)'};color:${e ? '#15803d' : 'var(--text-muted)'}">${e ? Number(e.hours).toFixed(2) + ' hrs' : '—'}</div>
             <textarea placeholder="Notes" ${editable ? '' : 'disabled'} data-date="${d}" data-field="notes" onblur="onHoursNotesBlur(this)" style="font-size:11px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;resize:none;min-height:32px;font-family:inherit;width:100%">${escHtml(e ? (e.notes || '') : '')}</textarea>
           </div>`;
       }).join('');
@@ -4338,7 +4353,6 @@
               ${(w.entries || []).map(e => `
                 <tr>
                   <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
-                  <td style="padding:4px 8px;color:var(--text);white-space:nowrap">${e.start_time} – ${e.end_time}</td>
                   <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
                   <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
                 </tr>
