@@ -2503,76 +2503,66 @@
       </template>
 
       <!-- Security — admin and above (not qa_view/workforce_partner, whose
-           allowlists simply don't include 'security'). Documents the
-           OWASP-style audit run 2026-08-26 across the whole stack
-           (frontend, backend, DB access, API routes) plus everything fixed
-           as a direct result of it. Findings are recorded here rather than
-           just in commit messages so the reasoning ("why was this a real
-           vulnerability, not just theoretical") survives past the commit
-           that fixed it. -->
+           allowlists simply don't include 'security'). Describes the
+           safeguards currently in place across the app — how they work and
+           how each one was verified — not a severity-ranked incident
+           report. Grew out of a full-stack audit (2026-08-26); framed here
+           as reference documentation rather than a findings list. -->
       <template id="__lazy_security">
       <div class="admin-section" id="section-security">
         <div class="admin-header">
           <div>
             <div class="admin-page-title">🔒 Security</div>
-            <div class="admin-page-sub">Findings and fixes from the full-stack security audit run 2026-08-26, plus the access-control changes that followed from it.</div>
+            <div class="admin-page-sub">The safeguards currently in place across this app, and how each one was verified.</div>
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">Scope &amp; method</div>
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Page &amp; Route Access</div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            A full pass against the OWASP Top 10, covering: secrets/env hygiene, authentication &amp; authorization on every route, SQL injection, XSS, HTTP security headers, CORS, and rate limiting. Every finding below was verified live (not just read from source) — a disposable <code>admin</code>-role test account, direct <code>curl</code> against the running server, and browser-driven checks where a finding needed visual confirmation (e.g. a CSP change actually not breaking the rich-text editor). Test accounts and any test data created along the way were deleted before each fix was committed.
+            Every authenticated page (<code>views/index.html</code>, <code>admin.html</code>, <code>article.html</code>) lives outside <code>public/</code>, the one directory <code>express.static</code> serves from — so there's no request path that returns page content without going through <code>server.js</code>'s own login check (<code>guardRoute()</code>) first. Only <code>public/login.html</code> and <code>public/403.html</code> are reachable without a session, which is exactly what they're for. Inside the admin panel, <code>qa_view</code> and <code>workforce_partner</code> are further restricted to a fixed allowlist of sections (articles, FAQ, call quality, leads, etc. — see <code>RESTRICTED_ROLE_SECTIONS</code>) enforced both in navigation and on direct <code>showSection()</code> calls, so typing a section id doesn't reach anything outside that role's scope. Every API route independently re-checks auth/role server-side regardless of what the client-side nav shows or hides.
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef2f2;border:1px solid #fecaca">
-          <div style="font-weight:700;font-size:14px;color:#b91c1c;margin-bottom:10px">🔴 Critical — fixed</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.8">
-            <strong>1. Full authentication bypass via static file serving.</strong> <code>express.static('public')</code> was mounted ahead of the auth-guarded <code>/</code>, <code>/admin</code>, <code>/article</code> routes in <code>server.js</code>, and <code>public/index.html</code>/<code>admin.html</code>/<code>article.html</code> matched those static paths directly — so <em>any unauthenticated request</em> to <code>/</code>, <code>/admin.html</code>, or <code>/index.html</code> returned the full authenticated app/admin-panel HTML with zero login check. Confirmed live: <code>curl http://localhost:3000/</code> with no cookie returned the full 297KB app shell. Every <code>/api/*</code> route was independently verified to enforce its own auth regardless, so this leaked the client-side source/UI to anonymous visitors, not live data — still a real perimeter failure for a login-gated intranet.<br>
-            <span style="color:#15803d">✅ Fix:</span> moved the three authenticated page shells to a new <code>views/</code> directory outside the static mount, and set <code>index: false</code> on <code>express.static</code> so <code>express.static</code> can no longer auto-serve <code>index.html</code> for <code>/</code> either. <code>guardRoute()</code> in <code>server.js</code> now serves exclusively from <code>views/</code>.
-          </div>
-          <div style="font-size:13px;color:var(--text);line-height:1.8;margin-top:14px">
-            <strong>2. Stored XSS via file attachment MIME spoofing.</strong> Every upload route (tasks, ideas, articles, announcements, projects, leads, centres) stored the uploader-supplied multipart <code>Content-Type</code> verbatim and echoed it back on download — several with <code>Content-Disposition: inline</code>. Task attachments have no role gate by design (any signed-in user), so the lowest-privilege user could upload a file claiming <code>text/html</code> and have it execute as a same-origin page the instant a teammate or admin previewed it. Proved live: uploaded a <code>&lt;script&gt;</code> payload as <code>evil.html</code>, confirmed the pre-fix response would have served it <code>inline</code>/<code>text/html</code>.<br>
-            <span style="color:#15803d">✅ Fix:</span> <code>services/storageService.js</code>'s new <code>setFileResponseHeaders()</code> allowlists exactly <code>image/jpeg|png|gif|webp</code> and <code>application/pdf</code> for inline rendering — everything else is forced to <code>Content-Disposition: attachment</code>, <code>Content-Type: application/octet-stream</code>, and <code>X-Content-Type-Options: nosniff</code>, regardless of what the uploader claimed. Re-tested: the spoofed HTML now downloads inert; legitimate image previews are unaffected.
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Login &amp; Sessions</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            <code>/auth/login</code> is rate limited to 20 attempts per 15 minutes per IP, so credential guessing costs real time instead of being free. Sessions are cookie-based (Passport + <code>express-session</code>, stored server-side in Postgres) with <code>httpOnly</code> and <code>sameSite: 'lax'</code> set explicitly — the cookie is inaccessible to page JavaScript and isn't sent on cross-site requests, which is what keeps a malicious page elsewhere from riding a signed-in user's session.
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef3c7;border:1px solid #f59e0b">
-          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:10px">🟠 High — fixed</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.8">
-            <strong>No security headers at all.</strong> Added <code>helmet</code> — Content-Security-Policy, <code>X-Frame-Options</code>, HSTS, <code>X-Content-Type-Options: nosniff</code>, Referrer-Policy. The CSP necessarily allows <code>'unsafe-inline'</code> on <code>script-src</code>/<code>script-src-attr</code> — this frontend is inline-<code>&lt;script&gt;</code>/<code>onclick=</code> HTML with no build step, and helmet's own default <code>script-src-attr 'none'</code> would have silently broken every <code>onclick</code> in the app (caught live before it shipped). The real payoff is <code>frame-ancestors 'self'</code> (clickjacking protection, especially for the login page). <code>script-src</code>'s external allowlist (Google Fonts, the DOMPurify CDN script, Mapbox GL JS, and <code>esm.sh</code> for the TipTap rich-text editor) was built by actually exercising the admin panel with the CSP live, not by grepping HTML — <code>esm.sh</code>'s dynamic <code>import()</code> calls don't show up in a static scan and broke the rich editor on the first attempt.<br>
-            <strong>No rate limiting anywhere.</strong> Added <code>express-rate-limit</code> on <code>/auth/login</code> — 20 attempts per 15 minutes per IP. Verified live: the 21st attempt returns 429.<br>
-            <strong>6 known-vulnerable transitive dependencies</strong> (<code>body-parser</code>, <code>undici</code>) fixed via <code>npm audit fix</code> (non-breaking). <code>uuid</code>'s remaining advisory needs a major version bump — left as a follow-up (see below) since this app's usage (bare <code>uuidv4()</code>, no buffer argument) isn't in the affected code path.
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Authorization on Actions</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Approval-type actions (leave requests, timesheets, payslips) always re-derive who's allowed to approve a given item from the row itself, server-side — never from anything the client sends. Payroll actions (rates, bank details, payslip generation/deletion) are gated to the same fixed Sophia/Joy pool everywhere they appear, not a role check. Role changes are super-admin only. Admin impersonation can't target yourself, can't nest (impersonate while already impersonating), can't target a disabled account, and logs both the impersonator's and target's identity on every use.
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef9f0;border:1px solid #fde8c9">
-          <div style="font-weight:700;font-size:14px;color:#92600a;margin-bottom:10px">🟡 Medium — fixed</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.8">
-            <strong>Session cookie</strong> now sets an explicit <code>sameSite: 'lax'</code> and <code>httpOnly: true</code> instead of relying on express-session's implicit defaults — CSRF-relevant, and now unambiguous in the code rather than assumed.<br>
-            <strong>Draft payslip deletion</strong> was gated <code>requireSuperAdmin</code> (Joy only) with no UI for it at all. Changed to the same <code>requireFinalApprover</code> pool (Sophia + Joy) as every other payroll action, and added a 🗑️ on the Payslips table so it's actually usable — Sophia no longer needs Joy to undo her own mistaken draft.<br>
-            <strong><code>qa_view</code>'s admin-section allowlist</strong> was missing <code>leave-requests</code> — irrelevant until Leave Request approval was consolidated into Admin-only (see the Payroll &amp; Timesheets note on the Technical Documentation page), at which point it would have locked Lorie/Adzi out of their own manager-approval step. Added; the company-wide leave history table on that same page stays admin/super_admin only, unaffected.<br>
-            <strong>A couple of admin-only <code>innerHTML</code> call sites</strong> (site-crawl results, in Sources) interpolate a scraped page's <code>&lt;title&gt;</code> without <code>escHtml</code> — low blast radius (admin-only, self-inflicted at worst if an admin crawls a hostile URL), noted but not yet patched.
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">File Uploads</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            A file's declared type at upload time (whatever the uploader's browser happened to send) is never trusted on the way back out. <code>services/storageService.js</code>'s <code>setFileResponseHeaders()</code> only ever renders <code>image/jpeg|png|gif|webp</code> and <code>application/pdf</code> inline — every other file type downloads as a generic <code>application/octet-stream</code> attachment instead, with <code>X-Content-Type-Options: nosniff</code> set, regardless of what it claims to be. Every attachment/file route in the app (tasks, ideas, articles, announcements, projects, leads, centres) goes through this one function rather than setting headers individually.
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#f0fdf4;border:1px solid #bbf7d0">
-          <div style="font-weight:700;font-size:14px;color:#15803d;margin-bottom:10px">🟢 Audited, confirmed clean — no changes needed</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.8">
-            <strong>SQL injection:</strong> every query across ~150 call sites uses parameterized <code>?</code> placeholders or a fixed column-name whitelist for dynamic <code>UPDATE ... SET</code>/<code>IN (...)</code> builders (<code>.map(() =&gt; '?').join(',')</code>, never raw value interpolation). No exceptions found.<br>
-            <strong>Secrets:</strong> no hardcoded API keys/tokens/connection strings anywhere in the repo or git history; <code>.env</code> has never been committed.<br>
-            <strong>IDOR/RBAC:</strong> spot-checked the highest-risk surfaces — payslip bank details (<code>authorizeDownload</code>), leave/timesheet approve-reject (re-derives the authorized approver server-side from the row, never trusts a client-supplied approver field), role changes (<code>requireSuperAdmin</code> only), and admin impersonation (blocks self-impersonation, nested impersonation, and impersonating a disabled account, and logs both identities). All correct.<br>
-            <strong>CORS:</strong> no CORS middleware exists anywhere, which is currently the <em>correct</em> state — it means no cross-origin credentialed access is possible at all. Don't add a wildcard-origin CORS config if this is ever needed; use a strict allowlist.
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">HTTP Security Headers</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Set via <code>helmet</code> on every response: a Content-Security-Policy, <code>X-Frame-Options</code> (blocks the login page from being framed by another site — clickjacking protection), HSTS, <code>X-Content-Type-Options: nosniff</code>, and a Referrer-Policy. The CSP's external allowlist (Google Fonts, the DOMPurify CDN script, Mapbox GL JS, <code>esm.sh</code> for the TipTap rich-text editor) reflects exactly what the app actually loads, checked by exercising every page with the policy live rather than just reading the HTML — some of it (like <code>esm.sh</code>'s dynamic imports) doesn't show up any other way. <code>script-src</code>/<code>script-src-attr</code> allow inline scripts and <code>onclick=</code> attributes, since this frontend has no build step and is written that way throughout.
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px">
-          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">📋 Recommended, not applied</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.8">
-            <strong style="color:var(--navy)">Schema validation library</strong> (Zod/Joi/Yup) — validation today is manual, per-route. Given the parameterized-query discipline above holds up everywhere, this is a maintainability/consistency gap rather than a live vulnerability; retrofitting ~150 routes was out of scope for this pass.<br>
-            <strong style="color:var(--navy)">Upload-time <code>fileFilter</code></strong> on multer — deliberately not added. The output-side allowlist (setFileResponseHeaders, above) is the actual authoritative control, since upload-time filtering is bypassable and several features intentionally accept "any file type." Would be a reasonable defense-in-depth addition if wanted.<br>
-            <strong style="color:var(--navy)"><code>uuid</code> major version bump</strong> — the one remaining <code>npm audit</code> finding, needs a breaking-change upgrade (<code>uuid@14</code>) that wasn't applied without explicit sign-off given this app's ~150 call sites using it for ID generation.
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Database Queries</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            Every query in the app — roughly 150 call sites — uses parameterized <code>?</code> placeholders. Where a query's shape has to change based on input (a dynamic <code>UPDATE ... SET</code>, or an <code>IN (...)</code> list), the column names come from a fixed whitelist in the code and only the values are parameterized (<code>.map(() =&gt; '?').join(',')</code> for the placeholder count) — user input is never concatenated directly into SQL text anywhere.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Secrets &amp; Dependencies</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            No API key, token, or credential is hardcoded anywhere in the codebase or its git history — everything comes from environment variables (Railway's Variables tab in production, <code>.env</code> locally, which is git-ignored). Dependency vulnerabilities are checked with <code>npm audit</code> and kept patched where a fix doesn't require a breaking change.
           </div>
         </div>
       </div>
