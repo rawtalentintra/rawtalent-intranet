@@ -387,7 +387,7 @@
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('rt-api-reference', this)">
           <span class="admin-nav-icon">🗂️</span> RT API Data Reference
         </div>
-        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('security', this)">
+        <div class="admin-nav-item" onclick="showSection('security', this)">
           <span class="admin-nav-icon">🔒</span> Security
         </div>
       </div>
@@ -2502,18 +2502,20 @@
       </div>
       </template>
 
-      <!-- Security — super_admin only. Documents the OWASP-style audit run
-           2026-08-26 across the whole stack (frontend, backend, DB access,
-           API routes) plus everything fixed as a direct result of it.
-           Findings are recorded here rather than just in commit messages
-           so the reasoning ("why was this a real vulnerability, not just
-           theoretical") survives past the commit that fixed it. -->
+      <!-- Security — admin and above (not qa_view/workforce_partner, whose
+           allowlists simply don't include 'security'). Documents the
+           OWASP-style audit run 2026-08-26 across the whole stack
+           (frontend, backend, DB access, API routes) plus everything fixed
+           as a direct result of it. Findings are recorded here rather than
+           just in commit messages so the reasoning ("why was this a real
+           vulnerability, not just theoretical") survives past the commit
+           that fixed it. -->
       <template id="__lazy_security">
       <div class="admin-section" id="section-security">
         <div class="admin-header">
           <div>
             <div class="admin-page-title">🔒 Security</div>
-            <div class="admin-page-sub">Findings and fixes from the full-stack security audit run 2026-08-26, plus the access-control changes that followed from it. Super admin only.</div>
+            <div class="admin-page-sub">Findings and fixes from the full-stack security audit run 2026-08-26, plus the access-control changes that followed from it.</div>
           </div>
         </div>
 
@@ -5266,7 +5268,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'security'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
