@@ -37,6 +37,18 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Source-of-truth people list for the owner picker — same active-users
+// query as routes/tasks.js's /meta endpoint. Registered before /:id so
+// Express doesn't swallow "meta" as a project id.
+router.get('/meta', async (req, res) => {
+  try {
+    const users = await getDb().execute("SELECT email, name, role FROM users WHERE active = true ORDER BY name ASC NULLS LAST, email ASC");
+    res.json({ users: users.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
@@ -130,19 +142,32 @@ router.delete('/milestones/:milestoneId', async (req, res) => {
   }
 });
 
+// Same dedupe-and-drop-junk discipline as routes/tasks.js's
+// normalizeAssignees — a project can have several owners now (real
+// existing data already listed multiple people in free text, e.g.
+// "Yuv, Gwen, Justine, Sophia & Joy").
+function normalizeOwnerEmails(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  for (const email of list) {
+    if (typeof email === 'string' && email.trim()) seen.add(email.trim().toLowerCase());
+  }
+  return [...seen];
+}
+
 router.post('/', async (req, res) => {
-  const { name, icon, color, description, status, ownerName, ownerEmail, startDate, targetDate, successCriteria } = req.body;
+  const { name, icon, color, description, status, ownerEmails, startDate, targetDate, successCriteria } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Project name is required' });
   if (status && !STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status' });
   try {
     const id = uuidv4();
     await getDb().execute({
       sql: `INSERT INTO projects
-            (id, name, icon, color, description, status, owner_name, owner_email, start_date, target_date, success_criteria, created_by_email)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, name, icon, color, description, status, owner_emails, start_date, target_date, success_criteria, created_by_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id, name.trim(), icon || '🚀', color || '#3d6fff', description || null, status || 'planning',
-        ownerName || null, ownerEmail || null, startDate || null, targetDate || null, successCriteria || null,
+        JSON.stringify(normalizeOwnerEmails(ownerEmails)), startDate || null, targetDate || null, successCriteria || null,
         req.user.email
       ]
     });
@@ -153,9 +178,11 @@ router.post('/', async (req, res) => {
 });
 
 // Request-body key -> column name, in the order they should appear in SET.
+// ownerEmails is handled separately below (needs JSON.stringify, unlike
+// every other plain-value column here).
 const PROJECT_FIELD_COLUMNS = {
   name: 'name', icon: 'icon', color: 'color', description: 'description',
-  status: 'status', ownerName: 'owner_name', ownerEmail: 'owner_email',
+  status: 'status',
   startDate: 'start_date', targetDate: 'target_date',
   successCriteria: 'success_criteria', sopContent: 'sop_content',
   priorityOverride: 'priority_override'
@@ -186,6 +213,10 @@ router.put('/:id', async (req, res) => {
       if (key === 'name') value = value?.trim() || null;
       setClauses.push(`${column} = ?`);
       args.push(value);
+    }
+    if ('ownerEmails' in body) {
+      setClauses.push('owner_emails = ?');
+      args.push(JSON.stringify(normalizeOwnerEmails(body.ownerEmails)));
     }
     if (setClauses.length) {
       setClauses.push('updated_at = now()');

@@ -604,6 +604,25 @@ CREATE TABLE IF NOT EXISTS projects (
 -- queue, or a soon-due one that's actually fine to leave be.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS priority_override TEXT;
 
+-- Multiple owners (2026-08-26) — a project is very often co-owned in
+-- practice (real owner_name data before this: "Sophia & Joy", "Yuv, Gwen,
+-- Justine, Sophia & Joy", etc., already free-text-listing several people).
+-- Same non-destructive pattern as tasks.assigned_to -> assigned_to_emails:
+-- owner_name/owner_email are frozen in place, not dropped, just no longer
+-- written to. The mechanical backfill here only captures owner_email
+-- (a single address, when one happened to be set) — it can't reliably
+-- parse "Yuv, Gwen, Justine, Sophia & Joy" into real user emails, so a
+-- one-off manual data-repair pass (not a recurring migration) reconciled
+-- the real multi-owner projects separately; new projects going forward
+-- only ever populate owner_emails via the picker.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_emails JSONB DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_emails_migrated BOOLEAN DEFAULT false;
+UPDATE projects SET
+  owner_emails = CASE WHEN owner_email IS NOT NULL AND owner_email != '' THEN jsonb_build_array(LOWER(owner_email::text)) ELSE '[]'::jsonb END,
+  owner_emails_migrated = true
+WHERE owner_emails_migrated = false;
+CREATE INDEX IF NOT EXISTS idx_projects_owner_emails ON projects USING gin(owner_emails);
+
 CREATE TABLE IF NOT EXISTS project_files (
   id SERIAL PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1576,3 +1595,12 @@ CREATE TABLE IF NOT EXISTS task_notes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_task_notes_task ON task_notes(task_id);
+-- Edit/delete support (2026-08-26) — edited_at/edited_by/edited_by_name
+-- stay NULL for a note that's never been touched since creation; set
+-- together the moment someone edits it, so the UI can show "edited by X"
+-- without a separate boolean. Deleting a note is a hard DELETE (no
+-- soft-delete/audit row) — see routes/tasks.js's ownership check for who
+-- may edit/delete (the author, or an admin/super_admin).
+ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_by CITEXT;
+ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_by_name TEXT;

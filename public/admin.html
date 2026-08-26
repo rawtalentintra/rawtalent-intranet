@@ -3194,15 +3194,10 @@
             <div class="form-hint">Overrides the dashboard's deadline-based badge — leave on Auto unless this needs to jump (or drop) the queue.</div>
           </div>
         </div>
-        <div style="display:flex;gap:12px">
-          <div class="form-group-modal" style="flex:1">
-            <label class="form-label-modal">Owner Name</label>
-            <input type="text" id="projectOwnerName" class="form-control" placeholder="Who runs this project">
-          </div>
-          <div class="form-group-modal" style="flex:1">
-            <label class="form-label-modal">Owner Email</label>
-            <input type="email" id="projectOwnerEmail" class="form-control" placeholder="owner@rawtalent.com.au">
-          </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Owner(s)</label>
+          <div id="projectOwnerChips" class="task-assignee-chips"></div>
+          <select id="projectOwnerAddSelect" class="form-control" onchange="addProjectOwner(this.value)"></select>
         </div>
         <div style="display:flex;gap:12px">
           <div class="form-group-modal" style="flex:1">
@@ -13359,36 +13354,14 @@
       return (tmp.textContent || '').trim();
     }
     let projectStatusFilter = 'all';
-    // 'all' means every owner; any other value is one person's name as it
-    // appears in owner_name (see splitOwnerNames). Defaults to whoever's
-    // logged in, once, the first time their own name turns out to be one
-    // of the project owners — set by loadProjects() below, then left
-    // alone so a manual change to "All Owners" (or anyone else) sticks
-    // across re-loads within the session.
+    // 'all' means every owner; any other value is one owner's email (see
+    // owner_emails). Defaults to whoever's logged in, once, the first
+    // time their own email turns out to be one of the project owners —
+    // set by loadProjects() below, then left alone so a manual change to
+    // "All Owners" (or anyone else) sticks across re-loads within the
+    // session.
     let projectOwnerFilter = 'all';
     let projectOwnerFilterDefaulted = false;
-
-    // owner_name is free text like "Joy & Adzi" or "Yuv, Gwen, Justine,
-    // Sophia & Joy" — split on the separators actually used in real data
-    // (&, comma, " and ") rather than assuming a single delimiter.
-    function splitOwnerNames(ownerName) {
-      return (ownerName || '').split(/\s*(?:&|,| and )\s*/i).map(s => s.trim()).filter(Boolean);
-    }
-
-    // Matches the logged-in user against however they're named in
-    // owner_name — team_members.name is the nickname projects actually
-    // use ("Yuv", not "Yuvraj"), matched via email since that's the one
-    // reliable join key between users and team_members. Falls back to the
-    // account's own first name for the rare case a team_members row has
-    // no email on file (confirmed live: Prince, Yuv).
-    async function resolveMyOwnerName() {
-      try {
-        const team = await fetch('/api/team').then(r => r.json());
-        const mine = (team || []).find(m => m.email && currentUserEmail && m.email.toLowerCase() === currentUserEmail.toLowerCase());
-        if (mine?.name) return mine.name;
-      } catch { /* falls through to the account name below */ }
-      return currentUserFirstName || null;
-    }
 
     const PROJECT_STATUS_META = {
       planning:   { label: 'Planning',   color: '#6b7280', bg: 'rgba(107,114,128,.12)' },
@@ -13402,6 +13375,7 @@
     async function loadProjects() {
       try {
         allProjects = await fetch('/api/projects').then(r => r.json());
+        await ensureProjectOwnerUsers();
         // Default the Owner filter to "my projects" the first time this
         // loads, but only if the logged-in user is actually listed as an
         // owner on something — otherwise "All Owners" is the more useful
@@ -13409,9 +13383,9 @@
         // already picked (e.g. a re-load after adding a project).
         if (!projectOwnerFilterDefaulted) {
           projectOwnerFilterDefaulted = true;
-          const myName = await resolveMyOwnerName();
-          const allOwnerNames = new Set(allProjects.flatMap(p => splitOwnerNames(p.owner_name)));
-          if (myName && allOwnerNames.has(myName)) projectOwnerFilter = myName;
+          const myEmail = currentUserEmail?.toLowerCase();
+          const allOwnerEmails = new Set(allProjects.flatMap(p => Array.isArray(p.owner_emails) ? p.owner_emails : []));
+          if (myEmail && allOwnerEmails.has(myEmail)) projectOwnerFilter = myEmail;
         }
         renderProjectStatusFilters();
         renderProjectOwnerFilter();
@@ -13441,12 +13415,13 @@
 
     function renderProjectOwnerFilter() {
       const sel = document.getElementById('projectOwnerFilter');
-      const owners = [...new Set(allProjects.flatMap(p => splitOwnerNames(p.owner_name)))].sort((a, b) => a.localeCompare(b));
+      const owners = [...new Set(allProjects.flatMap(p => Array.isArray(p.owner_emails) ? p.owner_emails : []))]
+        .sort((a, b) => projectUserLabel(a).localeCompare(projectUserLabel(b)));
       // If the current filter value (e.g. from the default-to-mine logic
       // above) isn't among today's real owners, fall back to "all" rather
       // than silently rendering a selected option that doesn't exist.
       if (projectOwnerFilter !== 'all' && !owners.includes(projectOwnerFilter)) projectOwnerFilter = 'all';
-      sel.innerHTML = `<option value="all">All Owners</option>` + owners.map(o => `<option value="${escHtml(o)}">${escHtml(o)}</option>`).join('');
+      sel.innerHTML = `<option value="all">All Owners</option>` + owners.map(o => `<option value="${escHtml(o)}">${escHtml(projectUserLabel(o))}</option>`).join('');
       sel.value = projectOwnerFilter;
     }
 
@@ -13696,7 +13671,7 @@
       let filtered = projectStatusFilter === 'all'
         ? allProjects.filter(p => p.status !== 'completed')
         : allProjects.filter(p => p.status === projectStatusFilter);
-      if (projectOwnerFilter !== 'all') filtered = filtered.filter(p => splitOwnerNames(p.owner_name).includes(projectOwnerFilter));
+      if (projectOwnerFilter !== 'all') filtered = filtered.filter(p => Array.isArray(p.owner_emails) && p.owner_emails.includes(projectOwnerFilter));
       if (!filtered.length) {
         body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">No projects here yet.</td></tr>`;
         return;
@@ -13744,7 +13719,7 @@
             </div>
           </td>
           <td><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${meta.bg};color:${meta.color};white-space:nowrap">${meta.label}</span></td>
-          <td style="font-size:12px;color:${p.owner_name ? 'var(--text)' : 'var(--gray-400)'}">${p.owner_name ? escHtml(p.owner_name) : 'No owner assigned'}</td>
+          <td style="font-size:12px;color:${(p.owner_emails || []).length ? 'var(--text)' : 'var(--gray-400)'}">${(p.owner_emails || []).length ? escHtml(p.owner_emails.map(projectUserLabel).join(', ')) : 'No owner assigned'}</td>
           <td>${renderProgressCell(p)}</td>
           <td>${timelineHtml}</td>
           <td style="font-size:11.5px;color:var(--text-muted);max-width:230px">
@@ -13797,8 +13772,7 @@
           </div>
           <div>
             <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Owner</div>
-            <div style="font-size:13.5px;color:var(--navy);font-weight:600">${p.owner_name ? escHtml(p.owner_name) : '—'}</div>
-            ${p.owner_email ? `<div style="font-size:11.5px;color:var(--text-muted)">${escHtml(p.owner_email)}</div>` : ''}
+            <div style="font-size:13.5px;color:var(--navy);font-weight:600">${(p.owner_emails || []).length ? escHtml(p.owner_emails.map(projectUserLabel).join(', ')) : '—'}</div>
           </div>
           <div style="min-width:200px">
             <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Timeline</div>
@@ -13923,6 +13897,40 @@
       document.getElementById('confirmModal').classList.add('open');
     }
 
+    // ── Project owner picker — mirrors Tasks' assignee chip-picker
+    // (taskAssignees/renderTaskAssigneeChips in index.html) exactly, just
+    // sourced from GET /api/projects/meta instead of /api/tasks/meta. A
+    // project is very often co-owned in practice (real data already had
+    // "Sophia & Joy", "Yuv, Gwen, Justine, Sophia & Joy" as free text). ──
+    let projectOwnerUsers = [];
+    let projectOwners = []; // emails currently picked in the New/Edit Project modal
+    function projectUserLabel(email) {
+      const u = projectOwnerUsers.find(x => x.email.toLowerCase() === email.toLowerCase());
+      return u ? (u.name || u.email.split('@')[0]) : email.split('@')[0];
+    }
+    function renderProjectOwnerChips() {
+      document.getElementById('projectOwnerChips').innerHTML = projectOwners.map(email => `
+        <span class="task-assignee-chip">${escHtml(projectUserLabel(email))} <button type="button" onclick="removeProjectOwner('${email}')" title="Remove">✕</button></span>
+      `).join('');
+      const addSel = document.getElementById('projectOwnerAddSelect');
+      const available = projectOwnerUsers.filter(u => !projectOwners.includes(u.email.toLowerCase()));
+      addSel.innerHTML = `<option value="">${projectOwners.length ? '+ Add another owner…' : '+ Add owner…'}</option>` +
+        available.map(u => `<option value="${u.email.toLowerCase()}">${escHtml(u.name || u.email)}</option>`).join('');
+    }
+    function addProjectOwner(email) {
+      if (!email || projectOwners.includes(email)) return;
+      projectOwners.push(email);
+      renderProjectOwnerChips();
+    }
+    function removeProjectOwner(email) {
+      projectOwners = projectOwners.filter(e => e !== email);
+      renderProjectOwnerChips();
+    }
+    async function ensureProjectOwnerUsers() {
+      if (projectOwnerUsers.length) return;
+      try { projectOwnerUsers = await fetch('/api/projects/meta').then(r => r.json()).then(d => d.users || []); } catch { /* falls back to raw email labels */ }
+    }
+
     // ── Project Create/Edit Modal ──
     async function openProjectFormModal(id) {
       document.getElementById('editProjectId').value = id || '';
@@ -13933,8 +13941,9 @@
       document.getElementById('projectName').value = p?.name || '';
       document.getElementById('projectStatus').value = p?.status || 'planning';
       document.getElementById('projectPriority').value = p?.priority_override || '';
-      document.getElementById('projectOwnerName').value = p?.owner_name || '';
-      document.getElementById('projectOwnerEmail').value = p?.owner_email || '';
+      await ensureProjectOwnerUsers();
+      projectOwners = Array.isArray(p?.owner_emails) ? [...p.owner_emails] : [];
+      renderProjectOwnerChips();
       document.getElementById('projectStartDate').value = p?.start_date ? String(p.start_date).slice(0, 10) : '';
       document.getElementById('projectTargetDate').value = p?.target_date ? String(p.target_date).slice(0, 10) : '';
       document.getElementById('projectFormModal').classList.add('open');
@@ -13989,8 +13998,7 @@
         description: projectDescRTE ? projectDescRTE.value : '',
         status: document.getElementById('projectStatus').value,
         priorityOverride: document.getElementById('projectPriority').value || null,
-        ownerName: document.getElementById('projectOwnerName').value.trim(),
-        ownerEmail: document.getElementById('projectOwnerEmail').value.trim(),
+        ownerEmails: projectOwners,
         startDate: document.getElementById('projectStartDate').value || null,
         targetDate: document.getElementById('projectTargetDate').value || null,
         successCriteria: projectSuccessRTE ? projectSuccessRTE.value : ''

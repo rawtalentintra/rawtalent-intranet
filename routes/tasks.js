@@ -300,4 +300,50 @@ router.post('/:id/notes', async (req, res) => {
   }
 });
 
+// Author, or admin/super_admin, may edit/delete — otherwise anyone could
+// alter or remove someone else's note. Same shape as
+// routes/outreachLists.js's delete-ownership check.
+function canModifyNote(note, user) {
+  return note.author_email.toLowerCase() === user.email.toLowerCase() || ['admin', 'super_admin'].includes(user.role);
+}
+
+router.put('/:id/notes/:noteId', async (req, res) => {
+  const { body } = req.body;
+  if (!body?.trim()) return res.status(400).json({ error: 'Note text is required' });
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ? AND task_id = ?', args: [req.params.noteId, req.params.id] });
+    const note = existing.rows[0];
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    if (!canModifyNote(note, req.user)) return res.status(403).json({ error: 'Only the author or an admin can edit this note' });
+
+    const usersRes = await db.execute("SELECT email, name FROM users WHERE active = true");
+    const mentioned = extractMentions(body, usersRes.rows).filter(e => e.toLowerCase() !== note.author_email.toLowerCase());
+
+    await db.execute({
+      sql: `UPDATE task_notes SET body = ?, mentioned_emails = ?, edited_at = now(), edited_by = ?, edited_by_name = ? WHERE id = ?`,
+      args: [body.trim(), JSON.stringify(mentioned), req.user.email, req.user.name || req.user.email, req.params.noteId]
+    });
+    const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [req.params.noteId] });
+    res.json({ success: true, note: row.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/notes/:noteId', async (req, res) => {
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ? AND task_id = ?', args: [req.params.noteId, req.params.id] });
+    const note = existing.rows[0];
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    if (!canModifyNote(note, req.user)) return res.status(403).json({ error: 'Only the author or an admin can delete this note' });
+
+    await db.execute({ sql: 'DELETE FROM task_notes WHERE id = ?', args: [req.params.noteId] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

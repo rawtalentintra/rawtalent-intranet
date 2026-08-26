@@ -2719,6 +2719,7 @@
     // same note appearing on every task" when clicking through several
     // tasks in the same classification in quick succession.
     async function loadTaskNotes(taskId) {
+      editingNoteId = null; // never carry a stale edit box into a different task's notes
       const requestId = ++taskNotesRequestId;
       document.getElementById('taskNotesList').innerHTML = '<div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div>';
       try {
@@ -2732,16 +2733,78 @@
       }
     }
 
+    // Edit/delete (2026-08-26) — only the author or an admin/super_admin
+    // sees the actions (server-enforced too, this is just hiding what
+    // would 403 anyway). editingNoteId tracks which single note (if any)
+    // is currently showing its inline edit box, reset whenever a
+    // different task's notes load so it can never leak across tasks.
+    let editingNoteId = null;
+
     function renderTaskNotes() {
       const el = document.getElementById('taskNotesList');
       if (!currentTaskNotes.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No notes yet — be the first to add one.</div>'; return; }
-      el.innerHTML = currentTaskNotes.map(n => `
-        <div class="task-note">
-          <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span></div>
-          <div class="task-note-body">${renderNoteBody(n.body)}</div>
-        </div>
-      `).join('');
+      el.innerHTML = currentTaskNotes.map(n => {
+        const canModify = currentUserEmail && (n.author_email.toLowerCase() === currentUserEmail.toLowerCase() || ['admin', 'super_admin'].includes(currentUserRole));
+        const editedTag = n.edited_at ? ` <span style="font-weight:400;color:var(--text-muted)" title="Edited ${fmtMelbourne(n.edited_at)}">· edited by ${escHtml(n.edited_by_name || n.edited_by)}</span>` : '';
+        if (editingNoteId === n.id) {
+          return `
+            <div class="task-note">
+              <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
+              <textarea id="taskNoteEditInput_${n.id}" class="form-control" style="min-height:60px;resize:vertical;margin-top:6px;font-size:13px">${escHtml(n.body)}</textarea>
+              <div style="display:flex;gap:12px;margin-top:6px">
+                <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--orange)" onclick="saveTaskNoteEdit('${n.id}')">Save</span>
+                <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted)" onclick="cancelTaskNoteEdit()">Cancel</span>
+              </div>
+            </div>`;
+        }
+        return `
+          <div class="task-note">
+            <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
+            <div class="task-note-body">${renderNoteBody(n.body)}</div>
+            ${canModify ? `<div style="display:flex;gap:12px;margin-top:4px">
+              <span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted)" onclick="startTaskNoteEdit('${n.id}')">Edit</span>
+              <span style="cursor:pointer;font-size:11px;font-weight:700;color:#dc2626" onclick="deleteTaskNoteConfirm('${n.id}')">Delete</span>
+            </div>` : ''}
+          </div>`;
+      }).join('');
       el.scrollTop = el.scrollHeight;
+    }
+
+    function startTaskNoteEdit(id) {
+      editingNoteId = id;
+      renderTaskNotes();
+      const ta = document.getElementById(`taskNoteEditInput_${id}`);
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    }
+    function cancelTaskNoteEdit() {
+      editingNoteId = null;
+      renderTaskNotes();
+    }
+    async function saveTaskNoteEdit(id) {
+      const ta = document.getElementById(`taskNoteEditInput_${id}`);
+      const body = ta.value.trim();
+      if (!body) { toast('Note text is required', 'error'); return; }
+      try {
+        const res = await fetch(`/api/tasks/${editingTaskId}/notes/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save note', 'error'); return; }
+        const idx = currentTaskNotes.findIndex(n => n.id === id);
+        if (idx !== -1) currentTaskNotes[idx] = data.note;
+        editingNoteId = null;
+        renderTaskNotes();
+      } catch { toast('Network error', 'error'); }
+    }
+    async function deleteTaskNoteConfirm(id) {
+      if (!confirm('Delete this note? This cannot be undone.')) return;
+      try {
+        const res = await fetch(`/api/tasks/${editingTaskId}/notes/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to delete note', 'error'); return; }
+        currentTaskNotes = currentTaskNotes.filter(n => n.id !== id);
+        renderTaskNotes();
+      } catch { toast('Network error', 'error'); }
     }
 
     async function submitTaskNote() {
