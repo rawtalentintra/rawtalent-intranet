@@ -78,7 +78,6 @@ function buildPayslipPdf(payslip, profile) {
     doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
       .text('Level 5|111, Cecil St, South Melbourne VIC 3205, Australia', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center' });
     doc.y += 20;
-    doc.fillColor('black');
 
     // label/value pair at an explicit (x,y) — returns the row height
     // taken (at least ROW_H, more if the value wraps). measure=true only
@@ -94,7 +93,7 @@ function buildPayslipPdf(payslip, profile) {
       if (measure) return h;
       doc.font('Helvetica').fontSize(9).fillColor(MUTED);
       doc.text(label, x, y, { width: labelWidth, lineBreak: false });
-      doc.font('Helvetica-Bold').fontSize(9).fillColor('black');
+      doc.font('Helvetica').fontSize(9).fillColor(NAVY);
       doc.text(text, x + labelWidth, y, { width: valueWidth });
       return h;
     }
@@ -135,7 +134,7 @@ function buildPayslipPdf(payslip, profile) {
       if (!measure) {
         doc.font('Helvetica').fontSize(9).fillColor(MUTED)
           .text('Pay Period', LEFT_X + COL_PAD, columnsBottom, { width: ppLabelW, lineBreak: false });
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY)
+        doc.font('Helvetica').fontSize(9).fillColor(NAVY)
           .text(`${fmtDateLong(payslip.payPeriodStart)}  –  ${fmtDateLong(payslip.payPeriodEnd)}`, LEFT_X + COL_PAD + ppLabelW, columnsBottom, { width: CONTENT_WIDTH - 2 * COL_PAD - ppLabelW, lineBreak: false });
       }
       return (columnsBottom + ROW_H + 8) - top;
@@ -160,7 +159,6 @@ function buildPayslipPdf(payslip, profile) {
     sectionCard(infoTop, infoHeight, 'Payslip Details');
     layoutInfoBlock(infoTop, false);
     doc.y = infoTop + infoHeight + 12;
-    doc.fillColor('black');
 
     // ── Bank Details card — same accent as above; it's a separate card
     // because it's a separate, more sensitive fact set, not because it
@@ -170,7 +168,6 @@ function buildPayslipPdf(payslip, profile) {
     sectionCard(bankTop, bankHeight, 'Bank Details');
     layoutBankBlock(bankTop, false);
     doc.y = bankTop + bankHeight + 16;
-    doc.fillColor('black');
 
     // ── Shift Details table ────────────────────────────────────────
     const colHourX = LEFT_X + 330;
@@ -195,9 +192,9 @@ function buildPayslipPdf(payslip, profile) {
     for (const item of payslip.lineItems) {
       if (doc.y > 760) { doc.addPage(); doc.y = 40; drawTableHeader('Shift Details', true); prevGroup = null; }
       const rowY = doc.y;
+      doc.font('Helvetica').fontSize(9).fillColor(NAVY);
       const showGroup = item.groupLabel && item.groupLabel !== prevGroup;
-      if (showGroup) doc.font('Helvetica-Bold').fillColor(NAVY).text(item.groupLabel, LEFT_X + 10, rowY, { width: 145, lineBreak: false });
-      doc.font('Helvetica').fillColor('black');
+      if (showGroup) doc.text(item.groupLabel, LEFT_X + 10, rowY, { width: 145, lineBreak: false });
       if (item.label) doc.text(item.label, LEFT_X + 160, rowY, { width: 165, lineBreak: false });
       doc.text(Number(item.hours).toFixed(2), colHourX, rowY, { width: 70, align: 'right', lineBreak: false });
       doc.text(fmtMoney(item.amount), colAmountX, rowY, { width: 75, align: 'right', lineBreak: false });
@@ -214,27 +211,32 @@ function buildPayslipPdf(payslip, profile) {
       doc.text(fmtMoney(payslip.totalEarningsAud), colAmountX, totalY, { width: 75, align: 'right', lineBreak: false });
       doc.y = totalY + 20;
     }
-    doc.font('Helvetica').fontSize(9).fillColor('black');
 
+    // No separate header/divider for the PHP conversion — it's just two
+    // more rows directly under Total Earnings in AUD, same as the request:
+    // AUD total, then exchange rate, then PHP total, nothing else.
     if (payslip.paysInPhp) {
-      drawTableHeader('Currency Conversion');
       {
         const rateY = doc.y;
-        doc.text('Currency Exchange Rate', LEFT_X + 10, rateY, { width: 330, lineBreak: false });
+        doc.font('Helvetica').fontSize(9).fillColor(NAVY);
+        doc.text('Currency Exchange Rate', LEFT_X, rateY, { width: 340, lineBreak: false });
         doc.text(Number(payslip.exchangeRate).toFixed(2), colAmountX, rateY, { width: 75, align: 'right', lineBreak: false });
-        doc.y = rateY + 18;
+        doc.y = rateY + 16;
       }
       {
         const phpY = doc.y;
         doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY);
         doc.text('Total Earnings in PHP', LEFT_X, phpY, { width: 340, lineBreak: false });
         doc.text(fmtMoney(payslip.totalEarningsPhp), colAmountX, phpY, { width: 75, align: 'right', lineBreak: false });
-        doc.y = phpY + 18;
+        doc.y = phpY + 20;
       }
-      doc.fillColor('black');
     }
 
-    doc.y += 20;
+    // Footer is pinned near the actual bottom of the page rather than
+    // trailing right after whatever content happens to end above it —
+    // falls back to right-after-content only if a long payslip would
+    // otherwise run into it.
+    doc.y = Math.max(doc.y + 16, 750);
     doc.moveTo(LEFT_X, doc.y).lineTo(LEFT_X + CONTENT_WIDTH, doc.y).strokeColor('#e2e8f0').stroke();
     doc.y += 10;
     doc.font('Helvetica-BoldOblique').fontSize(8.5).fillColor(MUTED)
