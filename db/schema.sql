@@ -1534,6 +1534,23 @@ UPDATE tasks SET
   assigned_to_emails = CASE WHEN assigned_to IS NOT NULL THEN jsonb_build_array(LOWER(assigned_to::text)) ELSE '[]'::jsonb END,
   assigned_to_migrated = true
 WHERE assigned_to_migrated = false;
+-- Multiple linked educators (2026-08-26) — a centre often requests
+-- several educators for the same booking at once. Same non-destructive
+-- pattern as assigned_to_emails above: linked_candidate_id/name/phone are
+-- frozen in place, not dropped, just no longer written to; a dedicated
+-- migrated guard (not "linked_candidates = '[]'") since an empty array is
+-- a legitimate live state (a task can genuinely have zero linked
+-- educators) and must not re-trigger the backfill. Client/centre linking
+-- stays singular on purpose — a task is about one centre requesting
+-- possibly-several educators, not several centres.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidates JSONB DEFAULT '[]';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidates_migrated BOOLEAN DEFAULT false;
+UPDATE tasks SET
+  linked_candidates = CASE WHEN linked_candidate_id IS NOT NULL
+    THEN jsonb_build_array(jsonb_build_object('userId', linked_candidate_id, 'name', linked_candidate_name, 'phone', linked_candidate_phone))
+    ELSE '[]'::jsonb END,
+  linked_candidates_migrated = true
+WHERE linked_candidates_migrated = false;
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to_emails ON tasks USING gin(assigned_to_emails);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

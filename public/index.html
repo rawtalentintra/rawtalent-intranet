@@ -1084,6 +1084,14 @@
           <div id="taskPersonMatchPanel" style="display:none;margin-top:8px"></div>
         </div>
         <div class="form-group-modal">
+          <label class="form-label-modal">Linked Educators <span class="optional">(optional)</span></label>
+          <div id="taskLinkedCandidateChips"></div>
+          <div style="position:relative">
+            <input type="text" id="taskAddCandidateInput" class="form-control" placeholder="+ Add another educator (name or phone)" autocomplete="off" oninput="handleAddCandidateInput(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('taskAddCandidateDropdown'); if(d) d.style.display='none';},150)">
+            <div id="taskAddCandidateDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20;padding:6px"></div>
+          </div>
+        </div>
+        <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
           <div style="position:relative">
             <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
@@ -1955,15 +1963,22 @@
     // phone matches). null until something is actually confirmed; cleared
     // whenever the modal opens for a different task.
     let taskAssignees = []; // emails currently picked in the New/Edit Task modal's assignee chips
-    let taskLinkedCandidate = null; // { userId, name, phone, portalUrl }
+    // A centre often requests several educators for one booking at once —
+    // linked educators are an array (2026-08-26), mirroring taskAssignees'
+    // own array-of-chips shape. Each entry: { userId, name, phone }.
+    // Client/centre linking stays singular on purpose: a task is about
+    // one centre, which may request several educators.
+    let taskLinkedCandidates = [];
     let taskLinkedClient = null;    // { name, suburb, state, phone }
-    // Set when the user clicks ✕ on an auto-selected match — stops the
-    // very next debounced lookup from silently re-selecting the same
-    // thing just because it's still a confident phone match. Reset
-    // whenever the modal opens/closes or a suggestion is explicitly
-    // picked from the list.
-    let taskCandidateDismissed = false;
+    // Tracks userIds explicitly removed (✕) from the linked-educator list
+    // this modal session — stops the very next debounced title lookup
+    // from silently re-adding the same person just because it's still a
+    // confident phone match. Reset whenever the modal opens/closes or a
+    // suggestion is explicitly picked from the list.
+    let taskDismissedCandidateIds = new Set();
     let taskClientDismissed = false;
+    let taskAddCandidateTimer = null;
+    let taskAddCandidateRequestId = 0;
     let taskMatchTimer = null;
     // Bumped on every new lookup and every modal open/close — an in-flight
     // fetch checks this when it resolves and drops its result if a newer
@@ -2042,6 +2057,19 @@
       return emails.map(taskUserLabel).join(', ');
     }
 
+    // Shared by the board card and the list row — a task can now link
+    // several educators (a centre often requests more than one for the
+    // same booking) plus at most one centre/client, so this renders one
+    // badge per linked educator followed by the client badge, instead of
+    // the old either/or ternary that only ever showed a single link.
+    function taskLinkedBadgesHtml(t, extraStyle = '') {
+      const candidateBadges = (Array.isArray(t.linked_candidates) ? t.linked_candidates : [])
+        .map(c => `<div class="task-card-linked" style="${extraStyle}" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(c.userId)}')">🎓 ${escHtml(c.name || 'Educator')} ↗</div>`)
+        .join('');
+      const clientBadge = t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="${extraStyle}">🏢 ${escHtml(t.linked_client_name)}</div>` : '';
+      return candidateBadges + clientBadge;
+    }
+
     function taskCardHtml(t) {
       const dept = taskDeptMeta(t.department_id);
       const pr = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META.normal;
@@ -2056,7 +2084,7 @@
           <div class="task-card-title">${escHtml(t.title)}</div>
           ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
           <div class="task-card-class">✍️ Created by ${escHtml(t.created_by_name || t.created_by)}</div>
-          ${t.linked_candidate_id ? `<div class="task-card-linked" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
+          ${taskLinkedBadgesHtml(t)}
           <div class="task-card-bottom">
             <span class="task-card-assignee">👤 ${escHtml(assigneeLabelFor(t))}</span>
             ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
@@ -2180,7 +2208,7 @@
             <td>
               <div style="font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
               ${t.classification_name ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
-              ${t.linked_candidate_id ? `<div class="task-card-linked" style="margin-top:4px" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(t.linked_candidate_id)}')">🎓 ${escHtml(t.linked_candidate_name || 'Educator')} ↗</div>` : t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="margin-top:4px">🏢 ${escHtml(t.linked_client_name)}</div>` : ''}
+              ${taskLinkedBadgesHtml(t, 'margin-top:4px')}
             </td>
             <td>${escHtml(t.created_by_name || t.created_by)}</td>
             <td>👤 ${escHtml(assigneeLabelFor(t))}</td>
@@ -2333,7 +2361,7 @@
       if (!taskMeta.departments.length) return; // meta still loading — card click race, harmless no-op
       clearTimeout(taskMatchTimer);
       taskMatchRequestId++; // invalidate any in-flight lookup from whatever was open before
-      taskCandidateDismissed = false;
+      taskDismissedCandidateIds = new Set();
       taskClientDismissed = false;
       populateTaskSelects();
       const deleteBtn = document.getElementById('taskDeleteBtn');
@@ -2359,9 +2387,8 @@
         document.getElementById('taskPrioritySelect').value = t.priority;
         currentTaskNotes = [];
         loadTaskNotes(taskId);
-        taskLinkedCandidate = t.linked_candidate_id
-          ? { userId: t.linked_candidate_id, name: t.linked_candidate_name, phone: t.linked_candidate_phone, portalUrl: candidatePortalUrl(t.linked_candidate_id) }
-          : null;
+        taskLinkedCandidates = Array.isArray(t.linked_candidates) ? [...t.linked_candidates] : [];
+        renderTaskLinkedCandidateChips();
         taskLinkedClient = t.linked_client_name ? { name: t.linked_client_name, phone: t.linked_client_phone } : null;
         renderTaskPersonMatchPanel(null);
       } else {
@@ -2379,7 +2406,8 @@
         document.getElementById('taskDueInput').value = '';
         populateTaskStatusSelect(document.getElementById('taskDeptSelect').value, 'to_do');
         document.getElementById('taskPrioritySelect').value = 'normal';
-        taskLinkedCandidate = null;
+        taskLinkedCandidates = [];
+        renderTaskLinkedCandidateChips();
         taskLinkedClient = null;
         renderTaskPersonMatchPanel(null);
       }
@@ -2424,42 +2452,103 @@
       `;
     }
 
+    // Renders into the always-visible "Linked Educators" chip list —
+    // separate from the transient title-driven suggestion panel below, so
+    // confirmed links stay visible regardless of what's currently typed.
+    function renderTaskLinkedCandidateChips() {
+      const wrap = document.getElementById('taskLinkedCandidateChips');
+      if (!wrap) return;
+      wrap.innerHTML = taskLinkedCandidates.map(c => taskPersonChipHtml('candidate', c.name,
+        c.phone ? `📞 ${c.phone}` : '',
+        `openCandidatePortal('${candidatePortalUrl(c.userId)}')`,
+        `removeTaskLinkedCandidate(${JSON.stringify(String(c.userId))})`
+      )).join('');
+    }
+    function isCandidateLinked(userId) {
+      return taskLinkedCandidates.some(c => String(c.userId) === String(userId));
+    }
+    function addTaskLinkedCandidate(c) {
+      if (isCandidateLinked(c.userId)) return;
+      taskLinkedCandidates.push({ userId: c.userId, name: c.name, phone: c.phone });
+      taskDismissedCandidateIds.delete(String(c.userId));
+      renderTaskLinkedCandidateChips();
+    }
+    function removeTaskLinkedCandidate(userId) {
+      taskLinkedCandidates = taskLinkedCandidates.filter(c => String(c.userId) !== String(userId));
+      taskDismissedCandidateIds.add(String(userId));
+      renderTaskLinkedCandidateChips();
+    }
+
+    // Free-text search for adding an educator beyond the one the title
+    // auto-matched — same live-lookup endpoint as the title field, just a
+    // second independent debounce/staleness guard so the two searches
+    // can't race each other's results into the wrong place.
+    function handleAddCandidateInput(value) {
+      clearTimeout(taskAddCandidateTimer);
+      const q = value.trim();
+      const requestId = ++taskAddCandidateRequestId;
+      const dropdown = document.getElementById('taskAddCandidateDropdown');
+      if (q.length < 3) { dropdown.style.display = 'none'; dropdown.innerHTML = ''; return; }
+      taskAddCandidateTimer = setTimeout(async () => {
+        try {
+          const data = await fetch(`/api/tasks/match-person?q=${encodeURIComponent(q)}`).then(r => r.json());
+          if (requestId !== taskAddCandidateRequestId) return;
+          const results = (data?.candidates || []).filter(c => !isCandidateLinked(c.userId));
+          if (!results.length) { dropdown.style.display = 'none'; dropdown.innerHTML = ''; return; }
+          window.__taskAddCandidateResults = results;
+          dropdown.style.display = 'block';
+          dropdown.innerHTML = results.map((c, i) => `
+            <button type="button" class="task-person-suggestion" style="display:block;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCandidateResult(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+          `).join('');
+        } catch { /* best-effort */ }
+      }, 400);
+    }
+    function pickAddCandidateResult(i) {
+      const c = (window.__taskAddCandidateResults || [])[i];
+      if (!c) return;
+      addTaskLinkedCandidate(c);
+      const input = document.getElementById('taskAddCandidateInput');
+      input.value = '';
+      const dropdown = document.getElementById('taskAddCandidateDropdown');
+      dropdown.style.display = 'none';
+      dropdown.innerHTML = '';
+    }
+
     function renderTaskPersonMatchPanel(data) {
       const panel = document.getElementById('taskPersonMatchPanel');
       const sections = [];
 
-      if (taskLinkedCandidate) {
-        sections.push(taskPersonChipHtml('candidate', taskLinkedCandidate.name,
-          taskLinkedCandidate.phone ? `📞 ${taskLinkedCandidate.phone}` : '',
-          `openCandidatePortal('${taskLinkedCandidate.portalUrl}')`, 'clearTaskCandidate()'));
-      } else if (data?.candidates?.length) {
-        // A single confident phone match auto-selects — UNLESS the user
+      if (data?.candidates?.length) {
+        // A single confident phone match auto-adds — UNLESS the user
         // already explicitly removed (✕) this exact suggestion earlier in
         // this same modal session, in which case it's offered as a pick
         // again rather than silently re-linking itself the next time they
-        // type. Without this, dismissing a wrong auto-match and then
-        // typing one more character would just bring it right back.
+        // type. Without this, removing a wrong auto-match and then typing
+        // one more character would just bring it right back.
         const singleConfidentPhone = !data.candidateDuplicates && data.candidates[0].confidence === 'phone';
-        if (singleConfidentPhone && !taskCandidateDismissed) {
-          selectTaskCandidateFromData(data.candidates[0]);
-          sections.push(taskPersonChipHtml('candidate', data.candidates[0].name,
-            data.candidates[0].phone ? `📞 ${data.candidates[0].phone}` : '',
-            `openCandidatePortal('${data.candidates[0].portalUrl}')`, 'clearTaskCandidate()'));
-        } else {
-          if (data.candidateDuplicates) {
-            sections.push(`<div class="task-person-warning">⚠️ Possible duplicate educator profiles found — pick the right one:</div>`);
+        const alreadyLinked = isCandidateLinked(data.candidates[0].userId);
+        if (singleConfidentPhone && !alreadyLinked && !taskDismissedCandidateIds.has(String(data.candidates[0].userId))) {
+          addTaskLinkedCandidate(data.candidates[0]);
+        } else if (!singleConfidentPhone) {
+          // Duplicates or name-only matches — exclude anything already
+          // linked so a resolved pick doesn't linger in its own picker.
+          const pickable = data.candidates.filter(c => !isCandidateLinked(c.userId));
+          if (pickable.length) {
+            if (data.candidateDuplicates) {
+              sections.push(`<div class="task-person-warning">⚠️ Possible duplicate educator profiles found — pick the right one:</div>`);
+            }
+            window.__taskCandidateCandidates = pickable;
+            // Each duplicate is independently viewable (real, distinct
+            // people — RT already confirms that via the phone match), not
+            // just selectable, so the user can actually check which one is
+            // right before committing to a pick.
+            sections.push(`<div class="task-person-suggestions">${pickable.map((c, i) => `
+              <span class="task-person-suggestion-row">
+                <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+                <button type="button" class="task-person-suggestion-view" onclick="event.stopPropagation();openCandidatePortal('${c.portalUrl}')" title="View profile">↗</button>
+              </span>
+            `).join('')}</div>`);
           }
-          window.__taskCandidateCandidates = data.candidates;
-          // Each duplicate is independently viewable (real, distinct
-          // people — RT already confirms that via the phone match), not
-          // just selectable, so the user can actually check which one is
-          // right before committing to a pick.
-          sections.push(`<div class="task-person-suggestions">${data.candidates.map((c, i) => `
-            <span class="task-person-suggestion-row">
-              <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
-              <button type="button" class="task-person-suggestion-view" onclick="event.stopPropagation();openCandidatePortal('${c.portalUrl}')" title="View profile">↗</button>
-            </span>
-          `).join('')}</div>`);
         }
       }
 
@@ -2488,19 +2577,10 @@
       panel.innerHTML = sections.join('');
     }
 
-    function selectTaskCandidateFromData(c) {
-      taskLinkedCandidate = { userId: c.userId, name: c.name, phone: c.phone, portalUrl: c.portalUrl };
-    }
     function selectTaskCandidateByIndex(i) {
       const c = (window.__taskCandidateCandidates || [])[i];
       if (!c) return;
-      selectTaskCandidateFromData(c);
-      taskCandidateDismissed = false; // an explicit pick overrides any earlier dismissal
-      renderTaskPersonMatchPanel(null);
-    }
-    function clearTaskCandidate() {
-      taskLinkedCandidate = null;
-      taskCandidateDismissed = true;
+      addTaskLinkedCandidate(c); // an explicit pick already clears any earlier dismissal for this id
       renderTaskPersonMatchPanel(null);
     }
     function selectTaskClientFromData(c) {
@@ -2563,9 +2643,7 @@
         priority: document.getElementById('taskPrioritySelect').value,
         assigned_to_emails: taskAssignees,
         due_date: document.getElementById('taskDueInput').value || null,
-        linked_candidate_id: taskLinkedCandidate?.userId || null,
-        linked_candidate_name: taskLinkedCandidate?.name || null,
-        linked_candidate_phone: taskLinkedCandidate?.phone || null,
+        linked_candidates: taskLinkedCandidates,
         linked_client_name: taskLinkedClient?.name || null,
         linked_client_phone: taskLinkedClient?.phone || null
       };

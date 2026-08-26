@@ -154,10 +154,27 @@ function normalizeAssignees(list) {
   return [...seen];
 }
 
+// Same dedupe-and-drop-junk discipline as normalizeAssignees, keyed by
+// userId (a candidate's RT id) instead of email. Silently drops anything
+// malformed rather than erroring, since this only ever comes from the
+// match-picker/add-another UI in practice, not hand-typed input.
+function normalizeLinkedCandidates(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    if (!c || typeof c !== 'object' || c.userId == null) continue;
+    if (seen.has(c.userId)) continue;
+    seen.add(c.userId);
+    out.push({ userId: c.userId, name: typeof c.name === 'string' ? c.name : null, phone: typeof c.phone === 'string' ? c.phone : null });
+  }
+  return out;
+}
+
 router.post('/', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
-    linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
+    linked_candidates, linked_client_name, linked_client_phone
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -173,15 +190,15 @@ router.post('/', async (req, res) => {
     await db.execute({
       sql: `INSERT INTO tasks
             (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, completed_at, mentioned_emails,
-             linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             linked_candidates, linked_client_name, linked_client_phone)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         id, department_id, classification_id || null, title.trim(), description || null,
         finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null,
         req.user.email, req.user.name || req.user.email,
         finalStatus === 'done' ? new Date().toISOString() : null,
         JSON.stringify(mentioned),
-        linked_candidate_id || null, linked_candidate_name || null, linked_candidate_phone || null,
+        JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
         linked_client_name || null, linked_client_phone || null
       ]
     });
@@ -194,7 +211,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
-    linked_candidate_id, linked_candidate_name, linked_candidate_phone, linked_client_name, linked_client_phone
+    linked_candidates, linked_client_name, linked_client_phone
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -218,13 +235,13 @@ router.put('/:id', async (req, res) => {
       sql: `UPDATE tasks SET
               department_id=?, classification_id=?, title=?, description=?, status=?, priority=?,
               assigned_to_emails=?, due_date=?, completed_at=?, mentioned_emails=?,
-              linked_candidate_id=?, linked_candidate_name=?, linked_candidate_phone=?, linked_client_name=?, linked_client_phone=?,
+              linked_candidates=?, linked_client_name=?, linked_client_phone=?,
               updated_at=now()
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
         priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null, completedAt, JSON.stringify(mentioned),
-        linked_candidate_id || null, linked_candidate_name || null, linked_candidate_phone || null,
+        JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
         linked_client_name || null, linked_client_phone || null,
         req.params.id
       ]
