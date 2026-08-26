@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const payslip = require('../services/payslipService');
 const { isFinalApprover } = require('../services/leaveService');
 
@@ -124,7 +124,12 @@ router.get('/admin/all', requireAdmin, async (req, res) => {
   }
 });
 
-router.delete('/admin/:id', requireSuperAdmin, async (req, res) => {
+// Draft-only (deleteDraft itself throws on a published payslip) — gated to
+// the same Sophia/Joy final-approver pool as every other payroll action
+// here, not requireSuperAdmin. A draft is a correctable mistake either of
+// them can make generating it, not a destructive action that needs to be
+// restricted beyond the people who already handle payroll.
+router.delete('/admin/:id', requireFinalApprover, async (req, res) => {
   try {
     await payslip.deleteDraft(req.params.id);
     res.json({ success: true });
