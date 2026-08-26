@@ -4125,7 +4125,6 @@
     // ── Leave Request ────────────────────────────────────────────
     let leavePolicy = { minNoticeDays: 14, earliestSelectableDate: null };
     let myLeaveRequests = [];
-    let pendingLeaveApprovals = [];
     let leaveModalMonth = new Date();
     let leaveRangeStart = null;
     let leaveRangeEnd = null;
@@ -4160,14 +4159,12 @@
     async function loadLeaveRequestView() {
       document.getElementById('resultsList').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
       try {
-        const [policy, mine, pending] = await Promise.all([
+        const [policy, mine] = await Promise.all([
           fetch('/api/leave-requests/policy').then(r => r.json()),
-          fetch('/api/leave-requests/my').then(r => r.json()),
-          fetch('/api/leave-requests/pending').then(r => r.json())
+          fetch('/api/leave-requests/my').then(r => r.json())
         ]);
         leavePolicy = policy;
         myLeaveRequests = mine;
-        pendingLeaveApprovals = pending;
         renderLeaveRequestView();
         leaveTeamMonth = new Date();
         loadLeaveTeamCalendar();
@@ -4176,22 +4173,12 @@
       }
     }
 
+    // Approving/rejecting leave lives in Admin → HR → Leave Requests now
+    // (2026-08-26), not here — same move as Log My Hours' Approvals/Company
+    // Totals, consolidating approval actions in one admin-only place
+    // instead of duplicating them in the general app too.
     function renderLeaveRequestView() {
       const list = document.getElementById('resultsList');
-      const approvalsHtml = pendingLeaveApprovals.length ? `
-        <div style="font-weight:700;color:var(--navy);font-size:14px;margin:4px 0 10px">Pending Your Approval</div>
-        ${pendingLeaveApprovals.map(l => `
-          <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:10px">
-            <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:4px">${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
-            <div style="font-size:12.5px;color:var(--text);margin-bottom:10px">${escHtml(l.reason)}</div>
-            <div style="display:flex;gap:8px">
-              <button onclick="decideLeaveRequest('${l.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
-              <button onclick="decideLeaveRequest('${l.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
-            </div>
-          </div>
-        `).join('')}
-      ` : '';
-
       const myHtml = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px">
           <div style="font-weight:700;color:var(--navy);font-size:14px">My Requests</div>
@@ -4219,23 +4206,7 @@
         <div id="leaveTeamCalendarWrap"><div class="spinner-wrap"><div class="spinner"></div></div></div>
       `;
 
-      list.innerHTML = approvalsHtml + myHtml + calendarHtml;
-    }
-
-    async function decideLeaveRequest(id, decision) {
-      let note = '';
-      if (decision === 'reject') note = prompt('Reason for rejecting (optional):') || '';
-      try {
-        const res = await fetch(`/api/leave-requests/${id}/${decision}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ note })
-        });
-        const data = await res.json();
-        if (!res.ok) { toast(data.error || 'Failed to submit decision', 'error'); return; }
-        toast(decision === 'approve' ? 'Leave approved' : 'Leave rejected', 'success');
-        loadLeaveRequestView();
-        loadNotifications();
-      } catch { toast('Network error', 'error'); }
+      list.innerHTML = myHtml + calendarHtml;
     }
 
     async function loadLeaveTeamCalendar() {
@@ -4542,11 +4513,6 @@
     let hoursWeekData = { week: {}, entries: [] };
     let hoursMyWeeks = [];
     let hoursPendingApprovals = [];
-    let hoursCompanyGranularity = 'week';
-    let hoursCompanyData = null;
-    let hoursCompanyWeekStart = null;
-    let hoursCompanyPayPeriodStart = null;
-    let hoursCompanyMonthValue = null; // 'YYYY-MM'
     const HOURS_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     function addDaysClient(dateStr, days) {
@@ -4575,10 +4541,6 @@
       try {
         hoursPolicy = await fetch('/api/timesheets/policy').then(r => r.json());
         hoursCurrentWeekStart = hoursPolicy.currentWeekStart;
-        hoursCompanyWeekStart = hoursPolicy.currentWeekStart;
-        hoursCompanyPayPeriodStart = hoursPolicy.payPeriodStart;
-        const now = new Date();
-        hoursCompanyMonthValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         hoursSubTab = 'mine';
         const [week, mine] = await Promise.all([
           fetch(`/api/timesheets/week?weekStart=${hoursCurrentWeekStart}`).then(r => r.json()),
@@ -4596,19 +4558,22 @@
       hoursSubTab = tab;
       if (tab === 'mine') renderMyHours();
       else if (tab === 'approvals') loadHoursApprovals();
-      else if (tab === 'company') loadHoursCompany();
       else if (tab === 'payslips') loadHoursPayslips();
     }
 
+    // Only the manager (pending_l1) approval stage lives here — Lorie/Adzi
+    // approving their own team. Final approval (Sophia/Joy), Company
+    // Totals, and the payslip PDF preview all moved to Admin → Payroll →
+    // Approvals/Company Totals (2026-08-26): that's where rates/bank
+    // details already live, and it keeps everything payroll-sensitive out
+    // of the general app rather than split across two places.
     function hoursSubTabsHtml() {
-      const canApprove = hoursPolicy.isL1Approver || hoursPolicy.isFinalApprover;
-      const canSeeCompany = hoursPolicy.isFinalApprover;
+      const canApprove = hoursPolicy.isL1Approver;
       return `
         <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">
           <button onclick="setHoursSubTab('mine')" style="${hoursTabBtnStyle(hoursSubTab === 'mine')}">My Hours</button>
           <button onclick="setHoursSubTab('payslips')" style="${hoursTabBtnStyle(hoursSubTab === 'payslips')}">My Payslips</button>
           ${canApprove ? `<button onclick="setHoursSubTab('approvals')" style="${hoursTabBtnStyle(hoursSubTab === 'approvals')}">Approvals</button>` : ''}
-          ${canSeeCompany ? `<button onclick="setHoursSubTab('company')" style="${hoursTabBtnStyle(hoursSubTab === 'company')}">Company Totals</button>` : ''}
         </div>`;
     }
 
@@ -4789,218 +4754,55 @@
         document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load approvals.</div></div>';
       }
     }
-    // A pay period is two weeks, and both commonly land in pending_final at
-    // once (anyone with no AM/PM team goes straight there for both weeks,
-    // per timesheetService's routing) — showing that as two separate cards
-    // reads as "double" when it's really one pay period. Group by
-    // person + pay_period_start (added server-side in listPendingFor
-    // specifically so this doesn't have to reimplement the week-anchor
-    // math here) and collapse a same-status pending_final pair into one
-    // card with one Approve/Reject that acts on both weeks together.
-    // pending_l1 rows (Lorie/Adzi's world) are left ungrouped — L1 approval
-    // happens per-week as each is submitted, so a pair rarely lines up the
-    // same way, and the payslip-preview ask below is final-approver-only.
-    function groupedApprovals() {
-      const groups = new Map();
-      for (const w of hoursPendingApprovals) {
-        const key = `${w.user_email}::${w.pay_period_start}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(w);
-      }
-      const result = [];
-      for (const weeks of groups.values()) {
-        if (weeks.length === 2 && weeks.every(w => w.status === 'pending_final')) {
-          result.push({ combined: true, weeks: weeks.slice().sort((a, b) => a.week_start_date.localeCompare(b.week_start_date)) });
-        } else {
-          for (const w of weeks) result.push({ combined: false, weeks: [w] });
-        }
-      }
-      return result;
-    }
     function approvalsHtml() {
       if (!hoursPendingApprovals.length) {
         return `<div class="empty-wrap"><div class="empty-icon">🕒</div><div class="empty-title">Nothing waiting on you right now</div></div>`;
       }
-      return groupedApprovals().map(group => {
-        const weeks = group.weeks;
-        const first = weeks[0];
-        const color = leavePersonColor(first.user_name || first.user_email);
-        const stageLabel = first.status === 'pending_l1' ? 'Awaiting your (manager) approval' : 'Awaiting your final approval';
-        const rangeLabel = group.combined
-          ? `${fmtDate(weeks[0].week_start_date)} – ${fmtDate(weeks[1].week_end_date)} (pay period)`
-          : `${fmtDate(first.week_start_date)} – ${fmtDate(first.week_end_date)}`;
-        const totalHours = weeks.reduce((sum, w) => sum + Number(w.total_hours), 0);
-        const ids = JSON.stringify(weeks.map(w => w.id));
-        const canPreviewPayslip = hoursPolicy.isFinalApprover && first.status === 'pending_final';
+      return hoursPendingApprovals.map(w => {
+        const color = leavePersonColor(w.user_name || w.user_email);
         return `
         <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:10px">
-              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(first.user_name || first.user_email)}</span>
-              <span style="font-size:12.5px;color:var(--text-muted)">${rangeLabel}</span>
+              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(w.user_name || w.user_email)}</span>
+              <span style="font-size:12.5px;color:var(--text-muted)">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</span>
             </div>
-            <div style="font-weight:700;color:var(--navy);font-size:14px">${totalHours.toFixed(2)} hrs</div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${Number(w.total_hours).toFixed(2)} hrs</div>
           </div>
-          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">${stageLabel}</div>
-          ${weeks.map(w => `
-            <div style="overflow-x:auto;margin-bottom:12px">
-              ${group.combined ? `<div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</div>` : ''}
-              <table style="width:100%;border-collapse:collapse;font-size:12px">
-                ${(w.entries || []).map(e => `
-                  <tr>
-                    <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
-                    <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
-                    <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
-                  </tr>
-                `).join('')}
-              </table>
-            </div>
-          `).join('')}
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button onclick="decideHoursWeekGroup('${escHtml(ids)}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
-            <button onclick="decideHoursWeekGroup('${escHtml(ids)}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
-            ${canPreviewPayslip ? `<button onclick="viewPayslipPreview('${encodeURIComponent(first.user_email)}','${first.pay_period_start}')" style="background:white;color:var(--navy);border:1px solid var(--gray-300);padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">📄 View Payslip PDF</button>` : ''}
+          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">Awaiting your (manager) approval</div>
+          <div style="overflow-x:auto;margin-bottom:12px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              ${(w.entries || []).map(e => `
+                <tr>
+                  <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
+                  <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
+                  <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
+                </tr>
+              `).join('')}
+            </table>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="decideHoursWeek('${w.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+            <button onclick="decideHoursWeek('${w.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
           </div>
         </div>`;
       }).join('');
     }
-    async function decideHoursWeekGroup(idsJson, decision) {
-      const ids = JSON.parse(idsJson);
+    async function decideHoursWeek(id, decision) {
       let note = '';
       if (decision === 'reject') {
         note = prompt('Reason for rejecting (required — the employee will see this):') || '';
         if (!note.trim()) { toast('A reason is required to reject', 'error'); return; }
       }
       try {
-        for (const id of ids) {
-          const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
-          });
-          const data = await res.json();
-          if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
-        }
+        const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
         toast(decision === 'approve' ? 'Approved' : 'Sent back to them', 'success');
         loadHoursApprovals();
       } catch { toast('Network error', 'error'); }
-    }
-
-    // Final-approver-only (route itself is gated requireFinalApprover, this
-    // just also hides the button for anyone else) — lets Sophia/Joy see
-    // exactly what the payslip will look like off the timesheet data
-    // that's currently entered, before they even approve the hours, not
-    // just after generating a real payslip later. Zero DB/storage writes —
-    // same prefill+preview calls the admin Payslips generator uses, just
-    // reached from here instead.
-    async function viewPayslipPreview(userEmailEncoded, payPeriodStart) {
-      const userEmail = decodeURIComponent(userEmailEncoded);
-      try {
-        const [prefill, invoiceRes] = await Promise.all([
-          fetch(`/api/payslips/prefill?userEmail=${encodeURIComponent(userEmail)}&payPeriodStart=${payPeriodStart}`).then(r => r.json()),
-          fetch('/api/payslips/suggested-invoice-number').then(r => r.json())
-        ]);
-        const res = await fetch('/api/payslips/preview', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEmail, payPeriodStart, invoiceNumber: invoiceRes.invoiceNumber,
-            datePaid: new Date().toISOString().slice(0, 10), workedDays: prefill.workedDays, lineItems: prefill.lineItems
-          })
-        });
-        if (!res.ok) { const data = await res.json().catch(() => ({})); toast(data.error || 'Failed to build payslip preview', 'error'); return; }
-        const blob = await res.blob();
-        window.open(URL.createObjectURL(blob), '_blank');
-      } catch { toast('Network error', 'error'); }
-    }
-
-    // ── Company Totals (Sophia/Joy only) ─────────────────────────
-    async function loadHoursCompany() {
-      document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="spinner-wrap"><div class="spinner"></div></div>';
-      try {
-        await fetchHoursCompanyData();
-        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + companyHtml();
-      } catch {
-        document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load company totals.</div></div>';
-      }
-    }
-    async function fetchHoursCompanyData() {
-      if (hoursCompanyGranularity === 'week') {
-        hoursCompanyData = await fetch(`/api/timesheets/company/week?weekStart=${hoursCompanyWeekStart}`).then(r => r.json());
-      } else if (hoursCompanyGranularity === 'payPeriod') {
-        hoursCompanyData = await fetch(`/api/timesheets/company/pay-period?start=${hoursCompanyPayPeriodStart}`).then(r => r.json());
-      } else {
-        const [year, month] = hoursCompanyMonthValue.split('-').map(Number);
-        hoursCompanyData = await fetch(`/api/timesheets/company/month?year=${year}&month=${month}`).then(r => r.json());
-      }
-    }
-    function setHoursCompanyGranularity(g) {
-      hoursCompanyGranularity = g;
-      loadHoursCompany();
-    }
-    function changeHoursCompanyPeriod(delta) {
-      if (hoursCompanyGranularity === 'week') hoursCompanyWeekStart = addDaysClient(hoursCompanyWeekStart, delta * 7);
-      else if (hoursCompanyGranularity === 'payPeriod') hoursCompanyPayPeriodStart = addDaysClient(hoursCompanyPayPeriodStart, delta * 14);
-      loadHoursCompany();
-    }
-    function onHoursCompanyMonthChange(el) {
-      hoursCompanyMonthValue = el.value;
-      loadHoursCompany();
-    }
-    function companyTotalsTableHtml(totals) {
-      if (!totals.length) return `<div style="font-size:12.5px;color:var(--text-muted);padding:12px 0">No hours logged in this range yet.</div>`;
-      return `
-        <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100)">
-            <th style="padding:8px 6px">Person</th><th style="padding:8px 6px">Total Hours</th>
-            <th style="padding:8px 6px">Approved</th><th style="padding:8px 6px">Pending</th><th style="padding:8px 6px">Draft</th>
-          </tr></thead>
-          <tbody>
-            ${totals.map(t => {
-              const color = leavePersonColor(t.userName || t.userEmail);
-              const sc = t.statusCounts || {};
-              return `
-              <tr style="border-bottom:1px solid var(--gray-100)">
-                <td style="padding:8px 6px;white-space:nowrap"><span style="background:${color.bg};color:${color.text};font-weight:700;font-size:11.5px;padding:3px 9px;border-radius:20px">${escHtml(t.userName || t.userEmail)}</span></td>
-                <td style="padding:8px 6px;font-weight:700;color:var(--navy)">${Number(t.totalHours).toFixed(2)} hrs</td>
-                <td style="padding:8px 6px;color:#15803d">${sc.approved || 0}</td>
-                <td style="padding:8px 6px;color:#b45309">${(sc.pending_l1 || 0) + (sc.pending_final || 0)}</td>
-                <td style="padding:8px 6px;color:var(--text-muted)">${sc.draft || 0}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-        </div>`;
-    }
-    function companyHtml() {
-      const seg = (key, label) => `<button onclick="setHoursCompanyGranularity('${key}')" style="${hoursTabBtnStyle(hoursCompanyGranularity === key)}">${label}</button>`;
-      let periodNav = '';
-      let body = '';
-      if (hoursCompanyGranularity === 'week') {
-        periodNav = `
-          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(-1)">← Prev</button>
-          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCompanyData.weekStart)} – ${fmtDate(hoursCompanyData.weekEnd)}</div>
-          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(1)">Next →</button>`;
-        body = companyTotalsTableHtml(hoursCompanyData.totals);
-      } else if (hoursCompanyGranularity === 'payPeriod') {
-        periodNav = `
-          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(-1)">← Prev</button>
-          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCompanyData.payPeriodStart)} – ${fmtDate(hoursCompanyData.payPeriodEnd)}</div>
-          <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursCompanyPeriod(1)">Next →</button>`;
-        body = `
-          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">Week 1: ${fmtDate(hoursCompanyData.weeks[0].weekStart)} – ${fmtDate(hoursCompanyData.weeks[0].weekEnd)}</div>
-          ${companyTotalsTableHtml(hoursCompanyData.weeks[0].totals)}
-          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Week 2: ${fmtDate(hoursCompanyData.weeks[1].weekStart)} – ${fmtDate(hoursCompanyData.weeks[1].weekEnd)}</div>
-          ${companyTotalsTableHtml(hoursCompanyData.weeks[1].totals)}
-          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Both weeks combined</div>
-          ${companyTotalsTableHtml(hoursCompanyData.combined)}`;
-      } else {
-        periodNav = `<input type="month" value="${hoursCompanyMonthValue}" onchange="onHoursCompanyMonthChange(this)" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">`;
-        body = companyTotalsTableHtml(hoursCompanyData.totals);
-      }
-      return `
-        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">${seg('week', 'This Week')}${seg('payPeriod', 'Both Weeks (Pay Period)')}${seg('month', 'Monthly')}</div>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">${periodNav}</div>
-        <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:16px 18px">${body}</div>
-      `;
     }
 
     // ── My Payslips (everyone) ───────────────────────────────────

@@ -553,9 +553,19 @@
           </div>
         </div>
 
-        <div style="display:flex;gap:8px;margin-bottom:20px">
+        <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
           <button class="btn-secondary" id="payrollTabProfiles" onclick="setPayrollSubTab('profiles')">Payroll Profiles</button>
           <button class="btn-secondary" id="payrollTabPayslips" onclick="setPayrollSubTab('payslips')">Payslips</button>
+          <button class="btn-secondary" id="payrollTabApprovals" onclick="setPayrollSubTab('approvals')">Approvals</button>
+          <button class="btn-secondary" id="payrollTabCompany" onclick="setPayrollSubTab('company')">Company Totals</button>
+        </div>
+
+        <div id="payrollApprovalsView" style="display:none">
+          <div id="payrollApprovalsWrap"></div>
+        </div>
+
+        <div id="payrollCompanyView" style="display:none">
+          <div id="payrollCompanyWrap"></div>
         </div>
 
         <div id="payrollProfilesView">
@@ -4105,7 +4115,15 @@
     // localStorage or the URL — the real enforcement is server-side per
     // route regardless.
     const RESTRICTED_ROLE_SECTIONS = {
-      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue'],
+      // 'leave-requests' added 2026-08-26 — Lorie/Adzi are real qa_view
+      // managers with their own direct reports (both for leave's generic
+      // manager_id chain and timesheets' AM/PM-team L1 stage), so they
+      // need to reach this page to do their own manager-approval step now
+      // that the main app no longer duplicates approval actions itself.
+      // The full company-wide history table below the approvals list
+      // still 403s for them server-side (requireAdmin on /admin/all) —
+      // intentional, that's more than their own team's approvals.
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue', 'leave-requests'],
       // 'educator-outreach', 'report-candidates' (Educators), 'report-clients'
       // (Centres), 'document-checker', and 'advertising-opportunities' —
       // Onboarding's items — are deliberately left out of both allowlists
@@ -6092,6 +6110,14 @@
       leaveTeamMonthAdmin = new Date();
       loadLeaveTeamCalendarAdmin();
       const body = document.getElementById('leaveRequestsTableBody');
+      // The full company-wide history is admin/super_admin only server-side
+      // (requireAdmin on /admin/all) — qa_view managers (Lorie/Adzi) can
+      // still reach this page for their own team's approvals above, but
+      // don't attempt this fetch for them; it would just 403.
+      if (currentUserRole === 'qa_view') {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Full leave history is visible to admins only</td></tr>';
+        return;
+      }
       if (!hasRenderedContent(body)) {
         body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       }
@@ -6133,6 +6159,20 @@
     let pgLineItems = [];
     let pgPaysInPhp = false;
     let pgDefaultRate = 0;
+    // Final-approval-stage timesheet approvals + company-wide totals —
+    // moved here from the main app's Log My Hours (2026-08-26) so
+    // everything payroll-sensitive (rates, bank details, approvals,
+    // company totals) lives in one Sophia/Joy-only place instead of
+    // being split across the general app and admin. Lorie/Adzi's
+    // manager-stage (pending_l1) approvals stay in the main app — they
+    // aren't payroll admins and shouldn't gain visibility into this
+    // section just to do their own approval step.
+    let payrollPendingApprovals = [];
+    let payrollCompanyGranularity = 'week';
+    let payrollCompanyData = null;
+    let payrollCompanyWeekStart = null;
+    let payrollCompanyPayPeriodStart = null;
+    let payrollCompanyMonthValue = null; // 'YYYY-MM'
 
     function addDaysAdmin(dateStr, days) {
       const d = new Date(`${dateStr}T00:00:00`);
@@ -6145,22 +6185,232 @@
         try {
           const policy = await fetch('/api/timesheets/policy').then(r => r.json());
           payrollPeriodStart = policy.payPeriodStart;
+          payrollCompanyWeekStart = policy.currentWeekStart;
+          payrollCompanyPayPeriodStart = policy.payPeriodStart;
         } catch { payrollPeriodStart = addDaysAdmin(new Date().toISOString().slice(0, 10), 0); }
+        const now = new Date();
+        payrollCompanyMonthValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       }
       setPayrollSubTab(payrollSubTab);
     }
 
     function setPayrollSubTab(tab) {
       payrollSubTab = tab;
-      const profilesBtn = document.getElementById('payrollTabProfiles');
-      const payslipsBtn = document.getElementById('payrollTabPayslips');
       const activeStyle = 'background:var(--orange);color:white;border-color:var(--orange)';
-      profilesBtn.style.cssText = tab === 'profiles' ? activeStyle : '';
-      payslipsBtn.style.cssText = tab === 'payslips' ? activeStyle : '';
-      document.getElementById('payrollProfilesView').style.display = tab === 'profiles' ? '' : 'none';
-      document.getElementById('payrollPayslipsView').style.display = tab === 'payslips' ? '' : 'none';
+      const tabs = { profiles: 'payrollTabProfiles', payslips: 'payrollTabPayslips', approvals: 'payrollTabApprovals', company: 'payrollTabCompany' };
+      for (const [t, btnId] of Object.entries(tabs)) {
+        document.getElementById(btnId).style.cssText = tab === t ? activeStyle : '';
+        document.getElementById(`payroll${t[0].toUpperCase()}${t.slice(1)}View`).style.display = tab === t ? '' : 'none';
+      }
       if (tab === 'profiles') loadPayrollProfiles();
-      else loadPayrollEligible();
+      else if (tab === 'payslips') loadPayrollEligible();
+      else if (tab === 'approvals') loadPayrollApprovals();
+      else if (tab === 'company') loadPayrollCompany();
+    }
+
+    // ── Payroll → Approvals (final-approval stage only) ────────────
+    async function loadPayrollApprovals() {
+      const wrap = document.getElementById('payrollApprovalsWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        payrollPendingApprovals = await fetch('/api/timesheets/pending').then(r => r.json());
+        wrap.innerHTML = payrollApprovalsHtml();
+      } catch {
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load approvals.</div>';
+      }
+    }
+    // A pay period is two weeks, and anyone with no AM/PM team lands both
+    // weeks in pending_final at once (timesheetService skips L1 entirely
+    // for them) — group by person + pay_period_start (added to
+    // listPendingFor's rows for exactly this) and collapse a same-status
+    // pair into one card with one Approve/Reject acting on both weeks.
+    function groupedPayrollApprovals() {
+      const groups = new Map();
+      for (const w of payrollPendingApprovals) {
+        const key = `${w.user_email}::${w.pay_period_start}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(w);
+      }
+      const result = [];
+      for (const weeks of groups.values()) {
+        if (weeks.length === 2 && weeks.every(w => w.status === 'pending_final')) {
+          result.push({ combined: true, weeks: weeks.slice().sort((a, b) => a.week_start_date.localeCompare(b.week_start_date)) });
+        } else {
+          for (const w of weeks) result.push({ combined: false, weeks: [w] });
+        }
+      }
+      return result;
+    }
+    function payrollApprovalsHtml() {
+      if (!payrollPendingApprovals.length) {
+        return `<div style="color:var(--text-muted);padding:20px;text-align:center">Nothing waiting on final approval right now</div>`;
+      }
+      return groupedPayrollApprovals().map(group => {
+        const weeks = group.weeks;
+        const first = weeks[0];
+        const color = leavePersonColor(first.user_name || first.user_email);
+        const rangeLabel = group.combined
+          ? `${fmtDate(weeks[0].week_start_date)} – ${fmtDate(weeks[1].week_end_date)} (pay period)`
+          : `${fmtDate(first.week_start_date)} – ${fmtDate(first.week_end_date)}`;
+        const totalHours = weeks.reduce((sum, w) => sum + Number(w.total_hours), 0);
+        const ids = JSON.stringify(weeks.map(w => w.id));
+        return `
+        <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(first.user_name || first.user_email)}</span>
+              <span style="font-size:12.5px;color:var(--text-muted)">${rangeLabel}</span>
+            </div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${totalHours.toFixed(2)} hrs</div>
+          </div>
+          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">Awaiting your final approval</div>
+          ${weeks.map(w => `
+            <div style="overflow-x:auto;margin-bottom:12px">
+              ${group.combined ? `<div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</div>` : ''}
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                ${(w.entries || []).map(e => `
+                  <tr>
+                    <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
+                    <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
+                    <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            </div>
+          `).join('')}
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="decidePayrollWeekGroup('${escHtml(ids)}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+            <button onclick="decidePayrollWeekGroup('${escHtml(ids)}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+            <button onclick="viewPayslipFromApproval('${encodeURIComponent(first.user_email)}','${first.pay_period_start}')" style="background:white;color:var(--navy);border:1px solid var(--gray-300);padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">📄 View Payslip PDF</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    async function decidePayrollWeekGroup(idsJson, decision) {
+      const ids = JSON.parse(idsJson);
+      let note = '';
+      if (decision === 'reject') {
+        note = prompt('Reason for rejecting (required — the employee will see this):') || '';
+        if (!note.trim()) { toast('A reason is required to reject', 'error'); return; }
+      }
+      try {
+        for (const id of ids) {
+          const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
+          });
+          const data = await res.json();
+          if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+        }
+        toast(decision === 'approve' ? 'Approved' : 'Sent back to them', 'success');
+        loadPayrollApprovals();
+      } catch { toast('Network error', 'error'); }
+    }
+    // Reuses the existing Payslips generation modal (openPayrollGenerateModal)
+    // rather than building a separate preview — it already has editable
+    // rate/line-item fields (the actual answer to "let us set their rate
+    // before this shows an amount") and its own zero-write Preview button.
+    // generate() re-validates both weeks are approved server-side, so
+    // opening this ahead of approval can't accidentally create a real
+    // payslip even if Generate gets clicked instead of Preview.
+    function viewPayslipFromApproval(userEmailEncoded, payPeriodStart) {
+      payrollPeriodStart = payPeriodStart;
+      openPayrollGenerateModal(decodeURIComponent(userEmailEncoded));
+    }
+
+    // ── Payroll → Company Totals (final-approval stage only) ───────
+    async function loadPayrollCompany() {
+      const wrap = document.getElementById('payrollCompanyWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        await fetchPayrollCompanyData();
+        wrap.innerHTML = payrollCompanyHtml();
+      } catch {
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load company totals.</div>';
+      }
+    }
+    async function fetchPayrollCompanyData() {
+      if (payrollCompanyGranularity === 'week') {
+        payrollCompanyData = await fetch(`/api/timesheets/company/week?weekStart=${payrollCompanyWeekStart}`).then(r => r.json());
+      } else if (payrollCompanyGranularity === 'payPeriod') {
+        payrollCompanyData = await fetch(`/api/timesheets/company/pay-period?start=${payrollCompanyPayPeriodStart}`).then(r => r.json());
+      } else {
+        const [year, month] = payrollCompanyMonthValue.split('-').map(Number);
+        payrollCompanyData = await fetch(`/api/timesheets/company/month?year=${year}&month=${month}`).then(r => r.json());
+      }
+    }
+    function setPayrollCompanyGranularity(g) {
+      payrollCompanyGranularity = g;
+      loadPayrollCompany();
+    }
+    function changePayrollCompanyPeriod(delta) {
+      if (payrollCompanyGranularity === 'week') payrollCompanyWeekStart = addDaysAdmin(payrollCompanyWeekStart, delta * 7);
+      else if (payrollCompanyGranularity === 'payPeriod') payrollCompanyPayPeriodStart = addDaysAdmin(payrollCompanyPayPeriodStart, delta * 14);
+      loadPayrollCompany();
+    }
+    function onPayrollCompanyMonthChange(el) {
+      payrollCompanyMonthValue = el.value;
+      loadPayrollCompany();
+    }
+    function payrollCompanyTabBtnStyle(active) {
+      return `padding:8px 16px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ${active ? 'var(--orange)' : 'var(--gray-200)'};background:${active ? 'var(--orange)' : 'white'};color:${active ? 'white' : 'var(--text)'}`;
+    }
+    function payrollCompanyTotalsTableHtml(totals) {
+      if (!totals.length) return `<div style="font-size:12.5px;color:var(--text-muted);padding:12px 0">No hours logged in this range yet.</div>`;
+      return `
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100)">
+            <th style="padding:8px 6px">Person</th><th style="padding:8px 6px">Total Hours</th>
+            <th style="padding:8px 6px">Approved</th><th style="padding:8px 6px">Pending</th><th style="padding:8px 6px">Draft</th>
+          </tr></thead>
+          <tbody>
+            ${totals.map(t => {
+              const color = leavePersonColor(t.userName || t.userEmail);
+              const sc = t.statusCounts || {};
+              return `
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:8px 6px;white-space:nowrap"><span style="background:${color.bg};color:${color.text};font-weight:700;font-size:11.5px;padding:3px 9px;border-radius:20px">${escHtml(t.userName || t.userEmail)}</span></td>
+                <td style="padding:8px 6px;font-weight:700;color:var(--navy)">${Number(t.totalHours).toFixed(2)} hrs</td>
+                <td style="padding:8px 6px;color:#15803d">${sc.approved || 0}</td>
+                <td style="padding:8px 6px;color:#b45309">${(sc.pending_l1 || 0) + (sc.pending_final || 0)}</td>
+                <td style="padding:8px 6px;color:var(--text-muted)">${sc.draft || 0}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        </div>`;
+    }
+    function payrollCompanyHtml() {
+      const seg = (key, label) => `<button onclick="setPayrollCompanyGranularity('${key}')" style="${payrollCompanyTabBtnStyle(payrollCompanyGranularity === key)}">${label}</button>`;
+      let periodNav = '';
+      let body = '';
+      if (payrollCompanyGranularity === 'week') {
+        periodNav = `
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changePayrollCompanyPeriod(-1)">← Prev</button>
+          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(payrollCompanyData.weekStart)} – ${fmtDate(payrollCompanyData.weekEnd)}</div>
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changePayrollCompanyPeriod(1)">Next →</button>`;
+        body = payrollCompanyTotalsTableHtml(payrollCompanyData.totals);
+      } else if (payrollCompanyGranularity === 'payPeriod') {
+        periodNav = `
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changePayrollCompanyPeriod(-1)">← Prev</button>
+          <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(payrollCompanyData.payPeriodStart)} – ${fmtDate(payrollCompanyData.payPeriodEnd)}</div>
+          <button class="btn-secondary" style="padding:6px 12px" onclick="changePayrollCompanyPeriod(1)">Next →</button>`;
+        body = `
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">Week 1: ${fmtDate(payrollCompanyData.weeks[0].weekStart)} – ${fmtDate(payrollCompanyData.weeks[0].weekEnd)}</div>
+          ${payrollCompanyTotalsTableHtml(payrollCompanyData.weeks[0].totals)}
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Week 2: ${fmtDate(payrollCompanyData.weeks[1].weekStart)} – ${fmtDate(payrollCompanyData.weeks[1].weekEnd)}</div>
+          ${payrollCompanyTotalsTableHtml(payrollCompanyData.weeks[1].totals)}
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin:20px 0 8px">Both weeks combined</div>
+          ${payrollCompanyTotalsTableHtml(payrollCompanyData.combined)}`;
+      } else {
+        periodNav = `<input type="month" value="${payrollCompanyMonthValue}" onchange="onPayrollCompanyMonthChange(this)" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">`;
+        body = payrollCompanyTotalsTableHtml(payrollCompanyData.totals);
+      }
+      return `
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">${seg('week', 'This Week')}${seg('payPeriod', 'Both Weeks (Pay Period)')}${seg('month', 'Monthly')}</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">${periodNav}</div>
+        <div style="background:white;border:1px solid var(--gray-100);border-radius:10px;padding:16px 18px">${body}</div>
+      `;
     }
 
     async function loadPayrollProfiles() {
