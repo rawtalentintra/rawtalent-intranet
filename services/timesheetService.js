@@ -272,6 +272,10 @@ async function listPendingFor(approverEmail) {
   for (const week of weeks) {
     const entriesRes = await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE week_id = ? ORDER BY entry_date ASC', args: [week.id] });
     week.entries = normalizeEntries(entriesRes.rows);
+    // Lets the frontend group a person's two pay-period weeks into one
+    // approval card instead of two — without this it has to reimplement
+    // the anchor-week math itself just to tell they're the same period.
+    week.pay_period_start = payPeriodStartOf(week.week_start_date);
   }
   return weeks;
 }

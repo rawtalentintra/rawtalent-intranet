@@ -4789,55 +4789,125 @@
         document.getElementById('resultsList').innerHTML = hoursSubTabsHtml() + '<div class="empty-wrap"><div class="empty-title">Failed to load approvals.</div></div>';
       }
     }
+    // A pay period is two weeks, and both commonly land in pending_final at
+    // once (anyone with no AM/PM team goes straight there for both weeks,
+    // per timesheetService's routing) — showing that as two separate cards
+    // reads as "double" when it's really one pay period. Group by
+    // person + pay_period_start (added server-side in listPendingFor
+    // specifically so this doesn't have to reimplement the week-anchor
+    // math here) and collapse a same-status pending_final pair into one
+    // card with one Approve/Reject that acts on both weeks together.
+    // pending_l1 rows (Lorie/Adzi's world) are left ungrouped — L1 approval
+    // happens per-week as each is submitted, so a pair rarely lines up the
+    // same way, and the payslip-preview ask below is final-approver-only.
+    function groupedApprovals() {
+      const groups = new Map();
+      for (const w of hoursPendingApprovals) {
+        const key = `${w.user_email}::${w.pay_period_start}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(w);
+      }
+      const result = [];
+      for (const weeks of groups.values()) {
+        if (weeks.length === 2 && weeks.every(w => w.status === 'pending_final')) {
+          result.push({ combined: true, weeks: weeks.slice().sort((a, b) => a.week_start_date.localeCompare(b.week_start_date)) });
+        } else {
+          for (const w of weeks) result.push({ combined: false, weeks: [w] });
+        }
+      }
+      return result;
+    }
     function approvalsHtml() {
       if (!hoursPendingApprovals.length) {
         return `<div class="empty-wrap"><div class="empty-icon">🕒</div><div class="empty-title">Nothing waiting on you right now</div></div>`;
       }
-      return hoursPendingApprovals.map(w => {
-        const color = leavePersonColor(w.user_name || w.user_email);
-        const stageLabel = w.status === 'pending_l1' ? 'Awaiting your (manager) approval' : 'Awaiting your final approval';
+      return groupedApprovals().map(group => {
+        const weeks = group.weeks;
+        const first = weeks[0];
+        const color = leavePersonColor(first.user_name || first.user_email);
+        const stageLabel = first.status === 'pending_l1' ? 'Awaiting your (manager) approval' : 'Awaiting your final approval';
+        const rangeLabel = group.combined
+          ? `${fmtDate(weeks[0].week_start_date)} – ${fmtDate(weeks[1].week_end_date)} (pay period)`
+          : `${fmtDate(first.week_start_date)} – ${fmtDate(first.week_end_date)}`;
+        const totalHours = weeks.reduce((sum, w) => sum + Number(w.total_hours), 0);
+        const ids = JSON.stringify(weeks.map(w => w.id));
+        const canPreviewPayslip = hoursPolicy.isFinalApprover && first.status === 'pending_final';
         return `
         <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:10px">
-              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(w.user_name || w.user_email)}</span>
-              <span style="font-size:12.5px;color:var(--text-muted)">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</span>
+              <span style="background:${color.bg};color:${color.text};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px">${escHtml(first.user_name || first.user_email)}</span>
+              <span style="font-size:12.5px;color:var(--text-muted)">${rangeLabel}</span>
             </div>
-            <div style="font-weight:700;color:var(--navy);font-size:14px">${Number(w.total_hours).toFixed(2)} hrs</div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${totalHours.toFixed(2)} hrs</div>
           </div>
           <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">${stageLabel}</div>
-          <div style="overflow-x:auto;margin-bottom:12px">
-            <table style="width:100%;border-collapse:collapse;font-size:12px">
-              ${(w.entries || []).map(e => `
-                <tr>
-                  <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
-                  <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
-                  <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
-                </tr>
-              `).join('')}
-            </table>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button onclick="decideHoursWeek('${w.id}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
-            <button onclick="decideHoursWeek('${w.id}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+          ${weeks.map(w => `
+            <div style="overflow-x:auto;margin-bottom:12px">
+              ${group.combined ? `<div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px">${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</div>` : ''}
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                ${(w.entries || []).map(e => `
+                  <tr>
+                    <td style="padding:4px 8px 4px 0;color:var(--text-muted);white-space:nowrap">${fmtDate(e.entry_date)}</td>
+                    <td style="padding:4px 8px;font-weight:700;color:var(--text);white-space:nowrap">${Number(e.hours).toFixed(2)} hrs</td>
+                    <td style="padding:4px 0;color:var(--text-muted)">${escHtml(e.notes || '')}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            </div>
+          `).join('')}
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="decideHoursWeekGroup('${escHtml(ids)}','approve')" style="background:#16a34a;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Approve</button>
+            <button onclick="decideHoursWeekGroup('${escHtml(ids)}','reject')" style="background:#dc2626;color:white;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Reject</button>
+            ${canPreviewPayslip ? `<button onclick="viewPayslipPreview('${encodeURIComponent(first.user_email)}','${first.pay_period_start}')" style="background:white;color:var(--navy);border:1px solid var(--gray-300);padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">📄 View Payslip PDF</button>` : ''}
           </div>
         </div>`;
       }).join('');
     }
-    async function decideHoursWeek(id, decision) {
+    async function decideHoursWeekGroup(idsJson, decision) {
+      const ids = JSON.parse(idsJson);
       let note = '';
       if (decision === 'reject') {
         note = prompt('Reason for rejecting (required — the employee will see this):') || '';
         if (!note.trim()) { toast('A reason is required to reject', 'error'); return; }
       }
       try {
-        const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
-        });
-        const data = await res.json();
-        if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+        for (const id of ids) {
+          const res = await fetch(`/api/timesheets/weeks/${id}/${decision}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note })
+          });
+          const data = await res.json();
+          if (!res.ok) { toast(data.error || 'Failed to update', 'error'); return; }
+        }
         toast(decision === 'approve' ? 'Approved' : 'Sent back to them', 'success');
         loadHoursApprovals();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // Final-approver-only (route itself is gated requireFinalApprover, this
+    // just also hides the button for anyone else) — lets Sophia/Joy see
+    // exactly what the payslip will look like off the timesheet data
+    // that's currently entered, before they even approve the hours, not
+    // just after generating a real payslip later. Zero DB/storage writes —
+    // same prefill+preview calls the admin Payslips generator uses, just
+    // reached from here instead.
+    async function viewPayslipPreview(userEmailEncoded, payPeriodStart) {
+      const userEmail = decodeURIComponent(userEmailEncoded);
+      try {
+        const [prefill, invoiceRes] = await Promise.all([
+          fetch(`/api/payslips/prefill?userEmail=${encodeURIComponent(userEmail)}&payPeriodStart=${payPeriodStart}`).then(r => r.json()),
+          fetch('/api/payslips/suggested-invoice-number').then(r => r.json())
+        ]);
+        const res = await fetch('/api/payslips/preview', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userEmail, payPeriodStart, invoiceNumber: invoiceRes.invoiceNumber,
+            datePaid: new Date().toISOString().slice(0, 10), workedDays: prefill.workedDays, lineItems: prefill.lineItems
+          })
+        });
+        if (!res.ok) { const data = await res.json().catch(() => ({})); toast(data.error || 'Failed to build payslip preview', 'error'); return; }
+        const blob = await res.blob();
+        window.open(URL.createObjectURL(blob), '_blank');
       } catch { toast('Network error', 'error'); }
     }
 
