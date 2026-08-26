@@ -116,7 +116,7 @@ function buildPayslipPdf(payslip, profile) {
       const bodyTop = top + 22;
       let leftY = bodyTop;
       let rightY = bodyTop;
-      leftY += field(LEFT_X + COL_PAD, leftY, 'Invoice No.', payslip.invoiceNumber, LEFT_VALUE_W, LEFT_LABEL_W, measure) + 3;
+      leftY += field(LEFT_X + COL_PAD, leftY, 'Invoice No.', String(payslip.invoiceNumber).padStart(4, '0'), LEFT_VALUE_W, LEFT_LABEL_W, measure) + 3;
       leftY += field(LEFT_X + COL_PAD, leftY, 'Reference/PO', payslip.referenceNo, LEFT_VALUE_W, LEFT_LABEL_W, measure) + 3;
       leftY += field(LEFT_X + COL_PAD, leftY, 'Date Paid', fmtDateLong(payslip.datePaid), LEFT_VALUE_W, LEFT_LABEL_W, measure) + 3;
       leftY += field(LEFT_X + COL_PAD, leftY, 'Worked Days', String(payslip.workedDays), LEFT_VALUE_W, LEFT_LABEL_W, measure);
@@ -145,11 +145,11 @@ function buildPayslipPdf(payslip, profile) {
     function layoutBankBlock(top, measure) {
       const bodyTop = top + 22;
       let bankY = bodyTop;
-      bankY += field(LEFT_X + COL_PAD, bankY, 'Bank Name', profile.bankName || '-', LEFT_VALUE_W + bankColGap, LEFT_LABEL_W, measure) + 3;
-      bankY += field(LEFT_X + COL_PAD, bankY, 'Account Name', profile.bankAccountName || '-', LEFT_VALUE_W + bankColGap, LEFT_LABEL_W, measure) + 3;
+      bankY += field(LEFT_X + COL_PAD, bankY, 'Bank Name', profile.bank_name || '-', LEFT_VALUE_W + bankColGap, LEFT_LABEL_W, measure) + 3;
+      bankY += field(LEFT_X + COL_PAD, bankY, 'Account Name', profile.bank_account_name || '-', LEFT_VALUE_W + bankColGap, LEFT_LABEL_W, measure) + 3;
       let bankY2 = bodyTop;
-      bankY2 += field(RIGHT_X, bankY2, 'Account No.', profile.bankAccountNumber || '-', RIGHT_VALUE_W, RIGHT_LABEL_W, measure) + 3;
-      bankY2 += field(RIGHT_X, bankY2, 'Swift Code', profile.bankSwiftCode || '-', RIGHT_VALUE_W, RIGHT_LABEL_W, measure) + 3;
+      bankY2 += field(RIGHT_X, bankY2, 'Account No.', profile.bank_account_number || '-', RIGHT_VALUE_W, RIGHT_LABEL_W, measure) + 3;
+      bankY2 += field(RIGHT_X, bankY2, 'Swift Code', profile.bank_swift_code || '-', RIGHT_VALUE_W, RIGHT_LABEL_W, measure) + 3;
       return (Math.max(bankY, bankY2) + 6) - top;
     }
 

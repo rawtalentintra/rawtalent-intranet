@@ -594,6 +594,24 @@
               <button class="btn-secondary" onclick="changePayrollPeriod(1)">Next →</button>
             </div>
           </div>
+          <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
+            <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:2px">Batch Defaults — this pay run</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Set once here, applied automatically to every payslip you generate below for this pay period — still editable per person in the generate form if one needs to differ. Invoice Number is the same number on every payslip in this run (RawTalent issues one invoice per pay run, not per person) — it's used as-is, not incremented as you generate each person's payslip.</div>
+            <div style="display:flex;gap:20px;flex-wrap:wrap">
+              <div class="form-group-modal" style="margin:0">
+                <label class="form-label-modal">Exchange Rate <span class="optional">(1 AUD = ? PHP)</span></label>
+                <input type="number" step="0.0001" min="0" id="payrollBatchExchangeRateInput" class="form-control" style="max-width:140px" placeholder="e.g. 35.50" onchange="setPayrollBatchExchangeRate(this.value)">
+              </div>
+              <div class="form-group-modal" style="margin:0">
+                <label class="form-label-modal">Date Paid</label>
+                <input type="date" id="payrollBatchDatePaidInput" class="form-control" style="max-width:160px" onchange="setPayrollBatchDatePaid(this.value)">
+              </div>
+              <div class="form-group-modal" style="margin:0">
+                <label class="form-label-modal">Invoice Number <span class="optional">(one per pay run)</span></label>
+                <input type="number" id="payrollBatchInvoiceNumberInput" class="form-control" style="max-width:120px" onchange="setPayrollBatchInvoiceNumber(this.value)">
+              </div>
+            </div>
+          </div>
           <div class="admin-table-card">
             <div style="overflow-x:auto">
               <table class="data-table">
@@ -6248,6 +6266,21 @@
     let pgLineItems = [];
     let pgPaysInPhp = false;
     let pgDefaultRate = 0;
+    // Batch defaults for the Payslips tab (2026-08-27) — set once per pay
+    // period, applied automatically every time openPayrollGenerateModal
+    // opens, instead of Sophia/Joy re-entering the same exchange rate/date
+    // paid/invoice number for every single person in the batch. Still
+    // fully editable per-person in the generate form itself; this only
+    // changes what it's pre-filled with. Invoice number specifically is
+    // NOT a per-person counter — confirmed with Joy 2026-08-27, RawTalent
+    // issues one invoice number per PAY RUN, the same number on every
+    // payslip generated in that run (e.g. 0050 for everyone this period),
+    // so it deliberately stays fixed across the whole batch rather than
+    // incrementing after each generate. invoice_number's DB uniqueness
+    // constraint was dropped for exactly this reason (see db/schema.sql).
+    let payrollBatchExchangeRate = null;
+    let payrollBatchDatePaid = null;
+    let payrollBatchInvoiceNumber = null;
     // Final-approval-stage timesheet approvals + company-wide totals —
     // moved here from the main app's Log My Hours (2026-08-26) so
     // everything payroll-sensitive (rates, bank details, approvals,
@@ -6566,13 +6599,43 @@
 
     function changePayrollPeriod(deltaPeriods) {
       payrollPeriodStart = addDaysAdmin(payrollPeriodStart, deltaPeriods * 14);
+      // Date Paid and Invoice Number are both specific to one pay run —
+      // a new period is a new run, so both reset to a fresh default for
+      // it. Exchange Rate deliberately carries over across period
+      // navigation: it's "today's rate" for whoever's processing pay
+      // right now, not tied to which period happens to be showing.
+      payrollBatchDatePaid = null;
+      payrollBatchInvoiceNumber = null;
       loadPayrollEligible();
     }
+
+    // Seeds the Batch Defaults panel for this pay run. Invoice Number
+    // suggests MAX(invoice_number)+1 the same way the old per-person
+    // modal always did — since invoice_number is no longer unique per
+    // payslip (one number is shared by every payslip in a run), this
+    // still correctly means "one more than the last run used," not "one
+    // more than the last payslip." Both only recompute when null, so
+    // switching sub-tabs and back doesn't stomp on a value Sophia/Joy
+    // already typed over for this run.
+    async function initPayrollBatchDefaults() {
+      if (payrollBatchDatePaid == null) payrollBatchDatePaid = addDaysAdmin(payrollPeriodStart, 13);
+      if (payrollBatchInvoiceNumber == null) {
+        try { payrollBatchInvoiceNumber = (await fetch('/api/payslips/suggested-invoice-number').then(r => r.json())).invoiceNumber; }
+        catch { /* left null — openPayrollGenerateModal falls back to its own per-person fetch */ }
+      }
+      document.getElementById('payrollBatchExchangeRateInput').value = payrollBatchExchangeRate ?? '';
+      document.getElementById('payrollBatchDatePaidInput').value = payrollBatchDatePaid ?? '';
+      document.getElementById('payrollBatchInvoiceNumberInput').value = payrollBatchInvoiceNumber ?? '';
+    }
+    function setPayrollBatchExchangeRate(value) { payrollBatchExchangeRate = value === '' ? null : Number(value); }
+    function setPayrollBatchDatePaid(value) { payrollBatchDatePaid = value || null; }
+    function setPayrollBatchInvoiceNumber(value) { payrollBatchInvoiceNumber = value === '' ? null : Number(value); }
 
     async function loadPayrollEligible() {
       const body = document.getElementById('payrollEligibleTableBody');
       const periodEnd = addDaysAdmin(payrollPeriodStart, 13);
       document.getElementById('payrollPeriodLabel').textContent = `Pay period: ${fmtDate(payrollPeriodStart)} – ${fmtDate(periodEnd)}`;
+      await initPayrollBatchDefaults();
       body.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
         const rows = await fetch(`/api/payslips/eligible?payPeriodStart=${payrollPeriodStart}`).then(r => r.json());
@@ -6653,10 +6716,18 @@
 
     async function openPayrollGenerateModal(userEmail) {
       try {
-        const [prefill, suggested] = await Promise.all([
-          fetch(`/api/payslips/prefill?userEmail=${encodeURIComponent(userEmail)}&payPeriodStart=${payrollPeriodStart}`).then(r => r.json()),
-          fetch('/api/payslips/suggested-invoice-number').then(r => r.json())
-        ]);
+        // Invoice Number, Date Paid, and (when this person is paid in PHP)
+        // Exchange Rate all come from the Batch Defaults panel above the
+        // table rather than being looked up fresh per person — Invoice
+        // Number in particular must come from there, not a fresh
+        // suggested-invoice-number call, since that's a per-run number
+        // Sophia/Joy may have already typed over (e.g. to continue the
+        // real external sequence) and every payslip in this run needs to
+        // share the exact same value, not each get its own suggestion.
+        if (payrollBatchInvoiceNumber == null) {
+          try { payrollBatchInvoiceNumber = (await fetch('/api/payslips/suggested-invoice-number').then(r => r.json())).invoiceNumber; } catch {}
+        }
+        const prefill = await fetch(`/api/payslips/prefill?userEmail=${encodeURIComponent(userEmail)}&payPeriodStart=${payrollPeriodStart}`).then(r => r.json());
         const profileRow = payrollProfilesCache.find(r => r.user_email.toLowerCase() === userEmail.toLowerCase())
           || await fetch('/api/payslips/profiles').then(r => r.json()).then(rows => { payrollProfilesCache = rows; return rows.find(r => r.user_email.toLowerCase() === userEmail.toLowerCase()); });
         pgPaysInPhp = !!profileRow?.pays_in_php;
@@ -6664,14 +6735,15 @@
         document.getElementById('pgUserEmail').value = userEmail;
         document.getElementById('pgPayPeriodStart').value = payrollPeriodStart;
         document.getElementById('pgEmployeeName').textContent = profileRow?.legal_name || profileRow?.name || userEmail;
-        document.getElementById('pgInvoiceNumber').value = suggested.invoiceNumber;
-        document.getElementById('pgDatePaid').value = addDaysAdmin(payrollPeriodStart, 13);
+        document.getElementById('pgInvoiceNumber').value = payrollBatchInvoiceNumber ?? '';
+        document.getElementById('pgDatePaid').value = payrollBatchDatePaid || addDaysAdmin(payrollPeriodStart, 13);
         document.getElementById('pgWorkedDays').value = prefill.workedDays;
         document.getElementById('pgPhpFields').style.display = pgPaysInPhp ? '' : 'none';
-        document.getElementById('pgExchangeRate').value = '';
+        document.getElementById('pgExchangeRate').value = pgPaysInPhp && payrollBatchExchangeRate != null ? payrollBatchExchangeRate : '';
         document.getElementById('pgTotalPhp').value = '';
         pgLineItems = prefill.lineItems.map(li => ({ ...li }));
         renderPgLineItems();
+        if (pgPaysInPhp && payrollBatchExchangeRate != null) recalcPgPhpTotal();
         document.getElementById('payrollGenerateModal').classList.add('open');
       } catch { toast('Failed to load generation form', 'error'); }
     }

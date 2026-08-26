@@ -910,18 +910,23 @@ CREATE TABLE IF NOT EXISTS employee_payroll_profiles (
 );
 
 -- One row per employee per pay period issued. invoice_number is a plain
--- UNIQUE integer, NOT a Postgres SERIAL/sequence — the real external
--- numbering (from before this app existed) is already in the 40s, and a
--- DB sequence starting at 1 would collide with it. The service suggests
--- MAX(invoice_number)+1 (or 1 if none exist) as a default at generate-
--- form time; Sophia/Joy can type over it to align the first in-app
--- payslip with wherever the real numbering left off. The UNIQUE
--- constraint is the actual collision guard, not a sequence object.
+-- integer, NOT a Postgres SERIAL/sequence — the real external numbering
+-- (from before this app existed) is already in the 40s, and a DB
+-- sequence starting at 1 would collide with it. It's also NOT unique per
+-- row — confirmed with Joy 2026-08-27: RawTalent issues one invoice
+-- number per PAY RUN, shared by every employee's payslip generated in
+-- that run (e.g. everyone paid in the 2026-08-16 period gets invoice
+-- 0050), not one per person. The service suggests MAX(invoice_number)+1
+-- (or 1 if none exist) as a default at generate-form time; Sophia/Joy can
+-- type over it, and it's expected to repeat across every payslip in the
+-- same run. Reference/PO is derived from it at render time as
+-- "RawTalent" + the number zero-padded to 4 digits (e.g. "RawTalent0050")
+-- — see services/payslipService.js — not a separately stored field.
 -- published_at mirrors announcements.send_at: NULL = draft (admin-only
 -- preview), set = visible to the employee — no separate status enum.
 CREATE TABLE IF NOT EXISTS payslips (
   id TEXT PRIMARY KEY,
-  invoice_number INTEGER NOT NULL UNIQUE,
+  invoice_number INTEGER NOT NULL,
   user_email CITEXT NOT NULL,
   user_name TEXT,
   pay_period_start DATE NOT NULL,
@@ -939,6 +944,11 @@ CREATE TABLE IF NOT EXISTS payslips (
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (user_email, pay_period_start)
 );
+-- Dropped 2026-08-27 — invoice_number is shared across every payslip in
+-- the same pay run (see the comment above), so it can no longer be
+-- unique per row. user_email+pay_period_start above is still the real
+-- one-payslip-per-person-per-period guard and is untouched.
+ALTER TABLE payslips DROP CONSTRAINT IF EXISTS payslips_invoice_number_key;
 CREATE INDEX IF NOT EXISTS idx_payslips_user_email ON payslips(user_email);
 CREATE INDEX IF NOT EXISTS idx_payslips_published_at ON payslips(published_at);
 

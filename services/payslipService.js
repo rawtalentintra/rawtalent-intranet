@@ -147,7 +147,7 @@ async function previewPdf(draft) {
   const payPeriodEnd = timesheet.payPeriodEndOf(payPeriodStart);
   const totalEarningsAud = lineItems.reduce((sum, li) => sum + Number(li.amount || 0), 0);
   return buildPayslipPdf({
-    invoiceNumber, referenceNo: `RawTalentPM-${invoiceNumber}`, userName: meta.legalNameOrName, designation: meta.position, address: meta.address,
+    invoiceNumber, referenceNo: `RawTalent${String(invoiceNumber).padStart(4, '0')}`, userName: meta.legalNameOrName, designation: meta.position, address: meta.address,
     payPeriodStart, payPeriodEnd, datePaid, workedDays, lineItems, totalEarningsAud,
     exchangeRate: p.pays_in_php ? exchangeRate : null, totalEarningsPhp: p.pays_in_php ? totalEarningsPhp : null, paysInPhp: !!p.pays_in_php
   }, p);
@@ -181,7 +181,7 @@ async function generate({ userEmail, payPeriodStart, invoiceNumber, datePaid, wo
   const totalEarningsAud = round2(lineItems.reduce((sum, li) => sum + Number(li.amount || 0), 0));
 
   const pdfBuffer = await buildPayslipPdf({
-    invoiceNumber, referenceNo: `RawTalentPM-${invoiceNumber}`, userName: meta.legalNameOrName, designation: meta.position, address: meta.address,
+    invoiceNumber, referenceNo: `RawTalent${String(invoiceNumber).padStart(4, '0')}`, userName: meta.legalNameOrName, designation: meta.position, address: meta.address,
     payPeriodStart, payPeriodEnd, datePaid, workedDays, lineItems, totalEarningsAud,
     exchangeRate: profile.pays_in_php ? exchangeRate : null, totalEarningsPhp: profile.pays_in_php ? totalEarningsPhp : null, paysInPhp: profile.pays_in_php
   }, profile);
@@ -200,7 +200,9 @@ async function generate({ userEmail, payPeriodStart, invoiceNumber, datePaid, wo
     });
   } catch (err) {
     await removeFile(BUCKETS.payslips, storagePath).catch(() => {});
-    if (/duplicate key/i.test(err.message) && /invoice_number/i.test(err.message)) throw new Error('That invoice number is already in use');
+    // invoice_number is deliberately not unique (see schema comment) — the
+    // same number repeats across every payslip in a pay run — so the only
+    // real collision guard left is one payslip per person per period.
     if (/duplicate key/i.test(err.message) && /pay_period_start/i.test(err.message)) throw new Error('A payslip for this employee and pay period already exists');
     throw err;
   }
@@ -256,9 +258,34 @@ async function downloadBuffer(storagePath) {
   return downloadAsBuffer(BUCKETS.payslips, storagePath);
 }
 
+// For a DRAFT payslip, re-renders the PDF live using the row's own stored
+// numbers (invoice number, line items, dates, total — never re-derived
+// from timesheets, since line items may have been hand-edited before
+// generating) but a FRESH profile/employee-meta fetch — so a bank-details
+// or rate correction made after generating shows up on Preview right
+// away, without a delete-and-regenerate round trip just to see it.
+// Deliberately NOT used for a published payslip — see the /admin/preview
+// route, which keeps serving that one's originally-stored PDF unchanged.
+// Once issued, the document is finalized; the correction path there is
+// still unpublish + generate a replacement, not a live re-render.
+async function previewStoredPdf(id) {
+  const row = await getById(id);
+  if (!row) throw new Error('Payslip not found');
+  const [profile, meta] = await Promise.all([getProfile(row.user_email), getEmployeeMeta(row.user_email)]);
+  const p = profile || {};
+  return buildPayslipPdf({
+    invoiceNumber: row.invoice_number, referenceNo: `RawTalent${String(row.invoice_number).padStart(4, '0')}`,
+    userName: meta.legalNameOrName, designation: meta.position, address: meta.address,
+    payPeriodStart: row.pay_period_start, payPeriodEnd: row.pay_period_end, datePaid: row.date_paid,
+    workedDays: row.worked_days, lineItems: row.line_items, totalEarningsAud: row.total_earnings_aud,
+    exchangeRate: p.pays_in_php ? row.exchange_rate : null, totalEarningsPhp: p.pays_in_php ? row.total_earnings_php : null,
+    paysInPhp: !!p.pays_in_php
+  }, p);
+}
+
 module.exports = {
   getProfile, listProfiles, upsertProfile, getEmployeeMeta, suggestedInvoiceNumber,
   listEligibleForPeriod, buildLineItemsFromTimesheets, previewPdf, generate,
   publish, unpublish, listMine, listAllForAdmin, authorizeDownload, deleteDraft,
-  getById, downloadBuffer
+  getById, downloadBuffer, previewStoredPdf
 };

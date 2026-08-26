@@ -87,11 +87,17 @@ router.post('/generate', requireFinalApprover, async (req, res) => {
   }
 });
 
+// A draft re-renders live (picks up a bank-details/rate correction made
+// to the profile after the draft was generated); a published payslip
+// keeps serving its originally-stored PDF unchanged — see
+// payslipService.previewStoredPdf for why.
 router.get('/admin/preview/:id', requireFinalApprover, async (req, res) => {
   try {
     const row = await payslip.getById(req.params.id);
     if (!row || !row.storage_path) return res.status(404).json({ error: 'Payslip not found' });
-    const buffer = await payslip.downloadBuffer(row.storage_path);
+    const buffer = row.published_at
+      ? await payslip.downloadBuffer(row.storage_path)
+      : await payslip.previewStoredPdf(req.params.id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="payslip.pdf"');
     res.send(buffer);
