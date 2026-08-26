@@ -1074,7 +1074,10 @@
     <div class="modal" style="max-width:560px;width:92vw">
       <div class="modal-header">
         <div class="modal-title" id="taskModalTitle">New Task</div>
-        <button class="modal-close" onclick="closeTaskModal()">×</button>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span id="taskCopyLinkBtn" style="display:none;cursor:pointer;font-size:12px;font-weight:700;color:var(--orange)" onclick="copyTaskLink()">🔗 Copy Link</span>
+          <button class="modal-close" onclick="closeTaskModal()">×</button>
+        </div>
       </div>
       <div class="modal-body" style="max-height:75vh;overflow-y:auto">
         <div id="taskCreatorInfo" style="display:none;font-size:12px;color:var(--text-muted);margin:-6px 0 12px"></div>
@@ -1093,11 +1096,24 @@
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
-          <div style="position:relative">
-            <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
-            <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
+          <div id="taskDescViewWrap" style="display:none">
+            <div id="taskDescViewText" class="task-desc-view"></div>
+            <div id="taskDescAttachmentsView" style="margin-top:8px"></div>
+            <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted);margin-top:6px;display:inline-block" onclick="setTaskDescEditMode(true)">✏️ Edit</span>
           </div>
-          <div id="taskDescMentionPreview" class="task-mention-live-preview" style="display:none"></div>
+          <div id="taskDescEditWrap">
+            <div style="position:relative">
+              <textarea id="taskDescInput" class="form-control" style="min-height:70px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
+              <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
+            </div>
+            <div id="taskDescMentionPreview" class="task-mention-live-preview" style="display:none"></div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+              <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted)" onclick="document.getElementById('taskDescFileInput').click()">📎 Attach File</span>
+              <input type="file" id="taskDescFileInput" style="display:none" onchange="handleAttachmentFilesSelected(this.files,'desc');this.value=''">
+              <span style="font-size:11px;color:var(--gray-400)">or paste an image</span>
+            </div>
+            <div id="taskDescAttachmentsEdit" style="margin-top:8px"></div>
+          </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:160px">
@@ -1139,15 +1155,35 @@
             <div id="taskMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
           </div>
           <div id="taskNoteMentionPreview" class="task-mention-live-preview" style="display:none"></div>
-          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted)" onclick="document.getElementById('taskNoteFileInput').click()">📎 Attach File</span>
+              <input type="file" id="taskNoteFileInput" style="display:none" onchange="handleAttachmentFilesSelected(this.files,'note');this.value=''">
+              <span style="font-size:11px;color:var(--gray-400)">or paste an image</span>
+            </div>
             <button class="btn-add" style="font-size:12px;padding:6px 14px" onclick="submitTaskNote()">Add Note</button>
           </div>
+          <div id="taskNoteAttachmentsEdit" style="margin-top:8px"></div>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" id="taskDeleteBtn" style="display:none;margin-right:auto;border-color:rgba(239,68,68,.3);color:#dc2626" onclick="deleteTaskConfirm()">Delete</button>
         <button class="btn-secondary" onclick="closeTaskModal()">Cancel</button>
         <button class="btn-add" onclick="submitTask()">Save Task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attachment Preview Modal -->
+  <div class="modal-overlay" id="attachmentPreviewModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeAttachmentPreview()">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-header">
+        <div class="modal-title" id="attachmentPreviewTitle">Attachment</div>
+        <button class="modal-close" onclick="closeAttachmentPreview()">×</button>
+      </div>
+      <div class="modal-body" style="text-align:center" id="attachmentPreviewBody"></div>
+      <div class="modal-footer">
+        <a id="attachmentPreviewDownload" class="btn-secondary" href="#" style="text-decoration:none" download>⬇️ Download</a>
       </div>
     </div>
   </div>
@@ -1213,11 +1249,22 @@
       // toggleNotifPanel) re-fetches too, so nothing goes stale for longer
       // than "next time you check it".
       loadNotifications();
-      const tabParam = new URLSearchParams(location.search).get('tab');
+      const params = new URLSearchParams(location.search);
+      const tabParam = params.get('tab');
+      const taskParam = params.get('task');
       if (tabParam) {
         setMode(tabParam);
       } else {
         setMode('home');
+      }
+      // "Copy Link" on a task builds this exact URL shape — open straight
+      // into that task's modal, then strip both params (mirrors
+      // admin.html's ?openCentre= convention) so a refresh doesn't
+      // re-trigger it forever.
+      if (taskParam) {
+        setMode('tasks');
+        setTimeout(() => openTaskDetail(taskParam), 300);
+        history.replaceState(null, '', location.pathname);
       }
     }
 
@@ -1979,6 +2026,22 @@
     let taskClientDismissed = false;
     let taskAddCandidateTimer = null;
     let taskAddCandidateRequestId = 0;
+
+    // ── Attachments (2026-08-26) ──────────────────────────────────
+    // Already-saved attachments (fetched once per modal open) plus three
+    // separate "not uploaded yet" staging lists — one per compose/edit
+    // surface, since a description edit, a brand-new note, and an
+    // existing note's edit can all be in progress independently (though
+    // only one note is ever in edit mode at a time, per taskNotesRequestId's
+    // existing single-editingNoteId convention). Nothing in a pending list
+    // has touched the server; it's just a File object + an optional
+    // object-URL preview for images, uploaded only once the surface it
+    // belongs to is actually saved (submitTask/submitTaskNote/saveTaskNoteEdit).
+    let taskDescEditMode = true;
+    let taskAttachments = []; // every real (already-uploaded) attachment for the open task, both description's and every note's
+    let pendingDescAttachments = [];
+    let pendingNoteAttachments = [];
+    let pendingNoteEditAttachments = [];
     let taskMatchTimer = null;
     // Bumped on every new lookup and every modal open/close — an in-flight
     // fetch checks this when it resolves and drops its result if a newer
@@ -2356,6 +2419,162 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // ── Attachments ───────────────────────────────────────────────
+    function isImageMime(m) { return typeof m === 'string' && m.startsWith('image/'); }
+    function canModifyAttachment(a) {
+      return !!currentUserEmail && (a.uploaded_by.toLowerCase() === currentUserEmail.toLowerCase() || ['admin', 'super_admin'].includes(currentUserRole));
+    }
+
+    // An already-uploaded attachment — image files show a clickable
+    // thumbnail, everything else a clickable filename chip. Both open the
+    // same preview modal.
+    function savedAttachmentChipHtml(a) {
+      const removeBtn = canModifyAttachment(a) ? `<button type="button" onclick="event.stopPropagation();deleteTaskAttachmentConfirm('${a.id}')" title="Remove">✕</button>` : '';
+      if (isImageMime(a.mimetype)) {
+        return `<span class="task-attachment-thumb" onclick="openAttachmentPreview('${a.id}')"><img src="/api/tasks/attachments/${a.id}/download" loading="lazy">${removeBtn}</span>`;
+      }
+      return `<span class="task-attachment-file" onclick="openAttachmentPreview('${a.id}')">📄 ${escHtml(a.filename)}${removeBtn}</span>`;
+    }
+    // A staged (not-yet-uploaded) attachment — never clickable to preview
+    // (nothing's on the server yet), always removable since removing it
+    // is free — no upload has happened.
+    function pendingAttachmentChipHtml(p, index, listName) {
+      const removeBtn = `<button type="button" onclick="removePendingAttachment('${listName}',${index})" title="Remove">✕</button>`;
+      if (p.previewUrl) return `<span class="task-attachment-thumb task-attachment-pending"><img src="${p.previewUrl}">${removeBtn}</span>`;
+      return `<span class="task-attachment-file task-attachment-pending">📄 ${escHtml(p.file.name)}${removeBtn}</span>`;
+    }
+    function pendingListByName(name) {
+      if (name === 'desc') return pendingDescAttachments;
+      if (name === 'note') return pendingNoteAttachments;
+      if (name === 'noteEdit') return pendingNoteEditAttachments;
+      return [];
+    }
+    function stagePendingAttachment(listName, file) {
+      pendingListByName(listName).push({ file, previewUrl: isImageMime(file.type) ? URL.createObjectURL(file) : null });
+    }
+    function removePendingAttachment(listName, index) {
+      const removed = pendingListByName(listName).splice(index, 1)[0];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      if (listName === 'desc') renderTaskDescAttachmentAreas();
+      else if (listName === 'note') renderTaskNoteComposerAttachments();
+      else renderTaskNotes();
+    }
+    // Shared by the "Attach File" button's onchange and the paste
+    // handler below — both just resolve to a real File and hand it here.
+    function handleAttachmentFilesSelected(fileList, target) {
+      for (const file of fileList) stagePendingAttachment(target, file);
+      if (target === 'desc') renderTaskDescAttachmentAreas();
+      else if (target === 'note') renderTaskNoteComposerAttachments();
+      else renderTaskNotes();
+    }
+
+    async function uploadTaskAttachment(taskId, file, noteId) {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (noteId) fd.append('noteId', noteId);
+      try {
+        const res = await fetch(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || `Failed to upload ${file.name}`, 'error'); return null; }
+        return data.attachment;
+      } catch { toast(`Network error uploading ${file.name}`, 'error'); return null; }
+    }
+    // Uploads every staged file in a pending list against a now-real
+    // task/note id, called only at the moment that task/note is actually
+    // saved (submitTask/submitTaskNote/saveTaskNoteEdit) — nothing in the
+    // list has touched the server before this.
+    async function uploadPendingList(taskId, list, noteId) {
+      const uploaded = [];
+      for (const entry of list) {
+        const att = await uploadTaskAttachment(taskId, entry.file, noteId);
+        if (att) uploaded.push(att);
+        if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+      }
+      list.length = 0;
+      return uploaded;
+    }
+    async function deleteTaskAttachmentConfirm(id) {
+      if (!confirm('Remove this attachment? This cannot be undone.')) return;
+      try {
+        const res = await fetch(`/api/tasks/attachments/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to remove attachment', 'error'); return; }
+        taskAttachments = taskAttachments.filter(a => a.id !== id);
+        renderTaskDescAttachmentAreas();
+        renderTaskNotes();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    function openAttachmentPreview(id) {
+      const a = taskAttachments.find(x => x.id === id);
+      if (!a) return;
+      document.getElementById('attachmentPreviewTitle').textContent = a.filename;
+      const url = `/api/tasks/attachments/${a.id}/download`;
+      const body = document.getElementById('attachmentPreviewBody');
+      if (isImageMime(a.mimetype)) {
+        body.innerHTML = `<img src="${url}" style="max-width:100%;max-height:70vh">`;
+      } else if (a.mimetype === 'application/pdf') {
+        body.innerHTML = `<iframe src="${url}" style="width:100%;height:70vh;border:none"></iframe>`;
+      } else {
+        body.innerHTML = `<div style="padding:30px 10px;color:var(--text-muted);font-size:13px">No preview available for this file type.<br>Use the Download button below.</div>`;
+      }
+      const dl = document.getElementById('attachmentPreviewDownload');
+      dl.href = url;
+      dl.setAttribute('download', a.filename);
+      document.getElementById('attachmentPreviewModal').classList.add('open');
+    }
+    function closeAttachmentPreview() {
+      document.getElementById('attachmentPreviewModal').classList.remove('open');
+      document.getElementById('attachmentPreviewBody').innerHTML = '';
+    }
+
+    // ── Description view/edit toggle ─────────────────────────────
+    function setTaskDescEditMode(edit) {
+      taskDescEditMode = edit;
+      document.getElementById('taskDescViewWrap').style.display = edit ? 'none' : 'block';
+      document.getElementById('taskDescEditWrap').style.display = edit ? 'block' : 'none';
+      if (!edit) document.getElementById('taskDescViewText').innerHTML = renderNoteBody(document.getElementById('taskDescInput').value);
+    }
+    function renderTaskDescAttachmentAreas() {
+      const existing = taskAttachments.filter(a => a.note_id == null);
+      const existingHtml = existing.map(savedAttachmentChipHtml).join('');
+      document.getElementById('taskDescAttachmentsView').innerHTML = existingHtml;
+      document.getElementById('taskDescAttachmentsEdit').innerHTML = existingHtml + pendingDescAttachments.map((p, i) => pendingAttachmentChipHtml(p, i, 'desc')).join('');
+    }
+    function renderTaskNoteComposerAttachments() {
+      document.getElementById('taskNoteAttachmentsEdit').innerHTML = pendingNoteAttachments.map((p, i) => pendingAttachmentChipHtml(p, i, 'note')).join('');
+    }
+
+    // Bound once to the modal (not a specific field) — mirrors the Submit
+    // Idea modal's exact paste-handling approach. Routes the pasted image
+    // into whichever surface currently has focus: the description
+    // textarea, the compose-new-note textarea, or (if a note is being
+    // edited) that note's inline edit textarea.
+    document.getElementById('taskModal').addEventListener('paste', (e) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageItems = items.filter(it => it.type && it.type.startsWith('image/'));
+      if (!imageItems.length) return;
+      const active = document.activeElement;
+      let target = null;
+      if (active && active.id === 'taskDescInput') target = 'desc';
+      else if (active && active.id === 'taskNoteInput') target = 'note';
+      else if (active && active.id && active.id.startsWith('taskNoteEditInput_')) target = 'noteEdit';
+      if (!target) return;
+      imageItems.forEach(it => { const file = it.getAsFile(); if (file) stagePendingAttachment(target, file); });
+      if (target === 'desc') renderTaskDescAttachmentAreas();
+      else if (target === 'note') renderTaskNoteComposerAttachments();
+      else renderTaskNotes();
+    });
+
+    function copyTaskLink() {
+      if (!editingTaskId) return;
+      const url = `${location.origin}${location.pathname}?tab=tasks&task=${editingTaskId}`;
+      navigator.clipboard.writeText(url).then(
+        () => toast('Link copied', 'success'),
+        () => toast('Failed to copy link', 'error')
+      );
+    }
+
     function openTaskModal(taskId) {
       editingTaskId = taskId || null;
       if (!taskMeta.departments.length) return; // meta still loading — card click race, harmless no-op
@@ -2363,15 +2582,20 @@
       taskMatchRequestId++; // invalidate any in-flight lookup from whatever was open before
       taskDismissedCandidateIds = new Set();
       taskClientDismissed = false;
+      pendingDescAttachments = [];
+      pendingNoteAttachments = [];
+      pendingNoteEditAttachments = [];
       populateTaskSelects();
       const deleteBtn = document.getElementById('taskDeleteBtn');
       const notesSection = document.getElementById('taskNotesSection');
+      const copyLinkBtn = document.getElementById('taskCopyLinkBtn');
       if (taskId) {
         const t = allTasks.find(x => x.id === taskId);
         if (!t) return;
         document.getElementById('taskModalTitle').textContent = 'Edit Task';
         deleteBtn.style.display = 'inline-flex';
         notesSection.style.display = 'block';
+        copyLinkBtn.style.display = 'inline';
         const creatorInfo = document.getElementById('taskCreatorInfo');
         creatorInfo.textContent = `✍️ Created by ${t.created_by_name || t.created_by} · ${fmtMelbourne(t.created_at)}`;
         creatorInfo.style.display = 'block';
@@ -2391,10 +2615,21 @@
         renderTaskLinkedCandidateChips();
         taskLinkedClient = t.linked_client_name ? { name: t.linked_client_name, phone: t.linked_client_phone } : null;
         renderTaskPersonMatchPanel(null);
+        // Content already exists — show it as plain text by default (not
+        // an open textarea) with an explicit way to edit it; an empty
+        // description has nothing to view, so it starts in edit mode.
+        setTaskDescEditMode(!t.description);
+        taskAttachments = [];
+        fetch(`/api/tasks/${taskId}/attachments`).then(r => r.json()).then(list => {
+          taskAttachments = Array.isArray(list) ? list : [];
+          renderTaskDescAttachmentAreas();
+          renderTaskNotes();
+        }).catch(() => {});
       } else {
         document.getElementById('taskModalTitle').textContent = 'New Task';
         deleteBtn.style.display = 'none';
         notesSection.style.display = 'none';
+        copyLinkBtn.style.display = 'none';
         document.getElementById('taskCreatorInfo').style.display = 'none';
         document.getElementById('taskTitleInput').value = '';
         document.getElementById('taskDescInput').value = '';
@@ -2410,6 +2645,9 @@
         renderTaskLinkedCandidateChips();
         taskLinkedClient = null;
         renderTaskPersonMatchPanel(null);
+        setTaskDescEditMode(true);
+        taskAttachments = [];
+        renderTaskDescAttachmentAreas();
       }
       document.getElementById('taskModal').classList.add('open');
     }
@@ -2629,6 +2867,14 @@
       taskNotesRequestId++; // same for any in-flight notes fetch
       editingTaskId = null;
       currentTaskNotes = [];
+      // Discard anything staged but never saved — nothing in these lists
+      // ever touched the server, so there's no cleanup beyond freeing the
+      // object URLs used for image previews.
+      [...pendingDescAttachments, ...pendingNoteAttachments, ...pendingNoteEditAttachments].forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+      pendingDescAttachments = [];
+      pendingNoteAttachments = [];
+      pendingNoteEditAttachments = [];
+      taskAttachments = [];
     }
 
     async function submitTask() {
@@ -2655,6 +2901,11 @@
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to save task', 'error'); return; }
+        // The task now definitely has a real id (either just-created, or
+        // editingTaskId already) — only now is it safe to actually upload
+        // whatever was staged in the description while composing/editing.
+        const savedTaskId = editingTaskId || data.id;
+        if (pendingDescAttachments.length) await uploadPendingList(savedTaskId, pendingDescAttachments, null);
         toast(editingTaskId ? 'Task updated' : 'Task created', 'success');
         closeTaskModal();
         loadTasksView();
@@ -2746,21 +2997,28 @@
       el.innerHTML = currentTaskNotes.map(n => {
         const canModify = currentUserEmail && (n.author_email.toLowerCase() === currentUserEmail.toLowerCase() || ['admin', 'super_admin'].includes(currentUserRole));
         const editedTag = n.edited_at ? ` <span style="font-weight:400;color:var(--text-muted)" title="Edited ${fmtMelbourne(n.edited_at)}">· edited by ${escHtml(n.edited_by_name || n.edited_by)}</span>` : '';
+        const noteAttachments = taskAttachments.filter(a => a.note_id === n.id);
         if (editingNoteId === n.id) {
+          const attHtml = noteAttachments.map(savedAttachmentChipHtml).join('') + pendingNoteEditAttachments.map((p, i) => pendingAttachmentChipHtml(p, i, 'noteEdit')).join('');
           return `
             <div class="task-note">
               <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
               <textarea id="taskNoteEditInput_${n.id}" class="form-control" style="min-height:60px;resize:vertical;margin-top:6px;font-size:13px">${escHtml(n.body)}</textarea>
-              <div style="display:flex;gap:12px;margin-top:6px">
+              <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
                 <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--orange)" onclick="saveTaskNoteEdit('${n.id}')">Save</span>
                 <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted)" onclick="cancelTaskNoteEdit()">Cancel</span>
+                <span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted)" onclick="document.getElementById('taskNoteEditFileInput_${n.id}').click()">📎 Attach</span>
+                <input type="file" id="taskNoteEditFileInput_${n.id}" style="display:none" onchange="handleAttachmentFilesSelected(this.files,'noteEdit');this.value=''">
               </div>
+              ${attHtml ? `<div style="margin-top:8px">${attHtml}</div>` : ''}
             </div>`;
         }
+        const viewAttHtml = noteAttachments.map(savedAttachmentChipHtml).join('');
         return `
           <div class="task-note">
             <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
             <div class="task-note-body">${renderNoteBody(n.body)}</div>
+            ${viewAttHtml ? `<div style="margin-top:6px">${viewAttHtml}</div>` : ''}
             ${canModify ? `<div style="display:flex;gap:12px;margin-top:4px">
               <span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted)" onclick="startTaskNoteEdit('${n.id}')">Edit</span>
               <span style="cursor:pointer;font-size:11px;font-weight:700;color:#dc2626" onclick="deleteTaskNoteConfirm('${n.id}')">Delete</span>
@@ -2772,12 +3030,15 @@
 
     function startTaskNoteEdit(id) {
       editingNoteId = id;
+      pendingNoteEditAttachments = [];
       renderTaskNotes();
       const ta = document.getElementById(`taskNoteEditInput_${id}`);
       if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
     }
     function cancelTaskNoteEdit() {
       editingNoteId = null;
+      pendingNoteEditAttachments.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+      pendingNoteEditAttachments = [];
       renderTaskNotes();
     }
     async function saveTaskNoteEdit(id) {
@@ -2792,6 +3053,10 @@
         if (!res.ok) { toast(data.error || 'Failed to save note', 'error'); return; }
         const idx = currentTaskNotes.findIndex(n => n.id === id);
         if (idx !== -1) currentTaskNotes[idx] = data.note;
+        if (pendingNoteEditAttachments.length) {
+          const uploaded = await uploadPendingList(editingTaskId, pendingNoteEditAttachments, id);
+          taskAttachments.push(...uploaded);
+        }
         editingNoteId = null;
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
@@ -2822,6 +3087,13 @@
         hideMentionDropdown('taskMentionDropdown');
         document.getElementById('taskNoteMentionPreview').style.display = 'none';
         currentTaskNotes.push(data.note);
+        // The note now has a real id — only now is it safe to upload
+        // whatever was staged while composing it.
+        if (pendingNoteAttachments.length) {
+          const uploaded = await uploadPendingList(editingTaskId, pendingNoteAttachments, data.note.id);
+          taskAttachments.push(...uploaded);
+          document.getElementById('taskNoteAttachmentsEdit').innerHTML = '';
+        }
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
     }

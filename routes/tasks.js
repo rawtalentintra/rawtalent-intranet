@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
+const { BUCKETS, ensureBucket, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype } = require('../services/storageService');
+
+// Same limit as announcements/projects — any file type, not just images.
+const taskFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // Every signed-in user, any role — this is the whole point of the feature
 // (see public/index.html's Tasks tab). No role gate at all.
@@ -340,6 +345,99 @@ router.delete('/:id/notes/:noteId', async (req, res) => {
     if (!canModifyNote(note, req.user)) return res.status(403).json({ error: 'Only the author or an admin can delete this note' });
 
     await db.execute({ sql: 'DELETE FROM task_notes WHERE id = ?', args: [req.params.noteId] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// All attachments for the task in one call (description's and every
+// note's together) — the modal fetches once on open, same call-shape as
+// GET /:id/notes, and the frontend buckets by note_id client-side.
+router.get('/:id/attachments', async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC', args: [req.params.id] });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// body.noteId (optional, form field) — omitted/null attaches to the
+// task's description, a real task_notes.id attaches to that note. Any
+// file type (unlike Idea's images-only paste flow) — this is a plain
+// multipart upload rather than idea-files' base64 path, since by the
+// time this is ever called the task/note the file belongs to already
+// exists as a real row (see public/index.html's staging design: nothing
+// uploads until the task/note itself is actually saved).
+router.post('/:id/attachments', taskFileUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const db = getDb();
+    const task = await db.execute({ sql: 'SELECT id FROM tasks WHERE id = ?', args: [req.params.id] });
+    if (!task.rows[0]) return res.status(404).json({ error: 'Task not found' });
+    const noteId = req.body.noteId || null;
+    if (noteId) {
+      const note = await db.execute({ sql: 'SELECT id FROM task_notes WHERE id = ? AND task_id = ?', args: [noteId, req.params.id] });
+      if (!note.rows[0]) return res.status(404).json({ error: 'Note not found' });
+    }
+
+    const id = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO task_attachments (id, task_id, note_id, filename, mimetype, filesize, uploaded_by, uploaded_by_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, req.params.id, noteId, req.file.originalname, req.file.mimetype, req.file.size, req.user.email, req.user.name || req.user.email]
+    });
+    const storagePath = `${req.params.id}/${id}.${extForMimetype(req.file.mimetype)}`;
+    await ensureBucket(BUCKETS.taskFiles);
+    await uploadBuffer(BUCKETS.taskFiles, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE task_attachments SET storage_path = ? WHERE id = ?', args: [storagePath, id] });
+
+    const row = await db.execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [id] });
+    res.json({ success: true, attachment: row.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Content-Disposition: inline (not attachment) — lets an <img>/<iframe>
+// preview render the bytes directly, same as routes/notifications.js's
+// announcement-file download; a real "Save As" still works via the
+// browser's own inline-preview save option, or the preview modal's
+// separate Download link.
+router.get('/attachments/:attachmentId/download', async (req, res) => {
+  try {
+    const file = (await getDb().execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] })).rows[0];
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
+    const buffer = await downloadAsBuffer(BUCKETS.taskFiles, file.storage_path);
+    res.setHeader('Content-Type', file.mimetype);
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.filename)}"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Uploader, or admin/super_admin, may delete — same shape as
+// canModifyNote above.
+function canModifyAttachment(attachment, user) {
+  return attachment.uploaded_by.toLowerCase() === user.email.toLowerCase() || ['admin', 'super_admin'].includes(user.role);
+}
+
+router.delete('/attachments/:attachmentId', async (req, res) => {
+  try {
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] });
+    const attachment = existing.rows[0];
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+    if (!canModifyAttachment(attachment, req.user)) return res.status(403).json({ error: 'Only the uploader or an admin can delete this attachment' });
+
+    await db.execute({ sql: 'DELETE FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] });
+    if (attachment.storage_path) {
+      try { await removeFile(BUCKETS.taskFiles, attachment.storage_path); } catch { /* orphaned storage object, non-fatal */ }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

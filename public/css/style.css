@@ -1852,3 +1852,19 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-assignee-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: 50px; padding: 4px 6px 4px 10px; font-size: 12px; font-weight: 600; color: var(--navy); }
 .task-assignee-chip button { background: none; border: none; color: var(--gray-400); cursor: pointer; font-size: 12px; padding: 2px 4px; font-family: inherit; line-height: 1; }
 .task-assignee-chip button:hover { color: #dc2626; }
+
+/* Description read-only view (2026-08-26) — same escaping/mention
+   treatment as .task-note-body, shown instead of the textarea until
+   "Edit" is clicked. */
+.task-desc-view { font-size: 13.5px; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
+
+/* Attachments — same shape for the description and every note, both
+   already-saved (clickable to preview) and staged-but-not-uploaded-yet
+   (dimmed, never clickable). */
+.task-attachment-thumb, .task-attachment-file { display: inline-flex; align-items: center; gap: 6px; background: var(--offwhite); border: 1px solid var(--gray-200); border-radius: 8px; margin: 0 6px 6px 0; cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--text); vertical-align: top; }
+.task-attachment-thumb { padding: 3px; }
+.task-attachment-thumb img { width: 40px; height: 40px; object-fit: cover; border-radius: 5px; display: block; }
+.task-attachment-file { padding: 6px 8px; }
+.task-attachment-thumb button, .task-attachment-file button { background: none; border: none; color: var(--gray-400); cursor: pointer; font-size: 11px; padding: 2px 6px 2px 0; font-family: inherit; line-height: 1; }
+.task-attachment-thumb button:hover, .task-attachment-file button:hover { color: #dc2626; }
+.task-attachment-pending { opacity: .6; cursor: default; border-style: dashed; }

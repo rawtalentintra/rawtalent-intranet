@@ -1604,3 +1604,26 @@ CREATE INDEX IF NOT EXISTS idx_task_notes_task ON task_notes(task_id);
 ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_by CITEXT;
 ALTER TABLE task_notes ADD COLUMN IF NOT EXISTS edited_by_name TEXT;
+
+-- Attachments (2026-08-26) — a separate list, not embedded inline in the
+-- description/note text (both stay plain TEXT, no rich-text rewrite),
+-- mirroring how Announcements/Idea images already work in this codebase.
+-- note_id NULL means the attachment belongs to the task's description;
+-- a real task_notes.id means it belongs to that specific note. No FK on
+-- note_id (a note can be deleted independently; an orphaned attachment
+-- row is harmless and just stops showing up once its note is gone, same
+-- "no FK, per this file's header convention" reasoning as linked_candidates).
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  note_id TEXT,
+  filename TEXT NOT NULL,
+  mimetype TEXT NOT NULL,
+  filesize INTEGER,
+  storage_path TEXT,
+  uploaded_by CITEXT NOT NULL,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_note ON task_attachments(note_id);
