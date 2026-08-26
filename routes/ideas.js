@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
-const { BUCKETS, uploadBase64, downloadAsBuffer, ensureBucket, parseDataUri, extForMimetype } = require('../services/storageService');
+const { BUCKETS, uploadBase64, downloadAsBuffer, ensureBucket, parseDataUri, extForMimetype, setFileResponseHeaders } = require('../services/storageService');
 
 // Pasted/attached screenshots only — not a general file-attachment feature,
 // so a plain image-count cap is enough (no need for a size config knob).
@@ -72,9 +72,8 @@ router.get('/file/:fileId', async (req, res) => {
     const file = (await getDb().execute({ sql: 'SELECT * FROM idea_files WHERE id = ?', args: [req.params.fileId] })).rows[0];
     if (!file || !file.storage_path) return res.status(404).json({ error: 'File not found' });
     const buffer = await downloadAsBuffer(BUCKETS.ideaFiles, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: true });
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });

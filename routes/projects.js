@@ -4,7 +4,7 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAdmin } = require('../middleware/authMiddleware');
-const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 
 const projectFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -274,9 +274,8 @@ router.get('/files/:fileId/download', async (req, res) => {
     if (!file) return res.status(404).json({ error: 'File not found' });
     if (!file.storage_path) return res.status(404).json({ error: 'This file has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.projectFiles, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: false });
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });

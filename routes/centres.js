@@ -12,7 +12,7 @@ const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
-const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 const { MELBOURNE_SUBURB_PARTNER } = require('../services/melbourneTerritoryService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
@@ -652,9 +652,8 @@ router.get('/recordings/:recordingId/download', async (req, res) => {
     if (!file) return res.status(404).json({ error: 'Recording not found' });
     if (!file.storage_path) return res.status(404).json({ error: 'This recording has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.centreRecordings, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: false });
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -1914,7 +1914,7 @@
             <strong style="color:var(--navy)">Backend:</strong> Node.js + Express 4. Sessions via <code>express-session</code> with a custom Postgres-backed session store (<code>services/sessionStore.js</code>), auth via Passport (local email/password + Google OAuth).<br>
             <strong style="color:var(--navy)">Database:</strong> Postgres, hosted on Supabase (session pooler connection). Accessed through a small wrapper in <code>db/database.js</code> that exposes a single <code>getDb().execute({ sql, args })</code> call — <code>?</code> placeholders are translated to Postgres <code>$1, $2…</code> under the hood. This wrapper is a holdover from an earlier SQLite/Turso version of the app and is intentionally not meant to be extended further — new queries should move toward native <code>pg</code> usage over time.<br>
             <strong style="color:var(--navy)">File storage:</strong> Supabase Storage (private buckets, signed URLs only — team photos, article attachments, call recording audio, project SOP files, announcement attachments).<br>
-            <strong style="color:var(--navy)">Frontend:</strong> No framework, no build step. Plain HTML/CSS/vanilla JS — <code>public/index.html</code> (public KB) and <code>public/admin.html</code> (admin panel) are each a single large file with inline <code>&lt;script&gt;</code>. Styling is one shared stylesheet, <code>public/css/style.css</code>.<br>
+            <strong style="color:var(--navy)">Frontend:</strong> No framework, no build step. Plain HTML/CSS/vanilla JS — <code>views/index.html</code> (public KB) and <code>views/admin.html</code> (admin panel) are each a single large file with inline <code>&lt;script&gt;</code>. Styling is one shared stylesheet, <code>public/css/style.css</code>.<br>
             <strong style="color:var(--navy)">AI:</strong> Anthropic Claude API (<code>@anthropic-ai/sdk</code>) powers Ask AI, FAQ candidate classification, call grading, meeting Q&amp;A, and report generation.<br>
             <strong style="color:var(--navy)">Deployment:</strong> Railway — project <code>rawtalent-knowledgebase</code>, service <code>web</code>, <code>production</code> environment, deployed automatically from the GitHub repo on every push to <code>main</code>. Live at <code>rawtalent-internal.app</code>. (The <code>fly.toml</code>/<code>Procfile</code> in the repo root are unused leftovers from an earlier, abandoned Fly.io setup — Railway ignores them and auto-detects the Node app on its own. Safe to delete, just hasn't been cleaned up yet.)
           </div>
@@ -1932,8 +1932,8 @@
                 <tr><td><code>db/schema.sql</code></td><td>Full Postgres schema — applied automatically on every server boot (idempotent <code>CREATE TABLE IF NOT EXISTS</code> statements), so schema changes ship just by editing this file and redeploying.</td></tr>
                 <tr><td><code>db/database.js</code></td><td>Postgres connection pool + the <code>execute()</code> query wrapper described above.</td></tr>
                 <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
-                <tr><td><code>public/index.html</code></td><td>The public HeartBeat site — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
-                <tr><td><code>public/admin.html</code></td><td>The admin panel — everything in this document lives inside this one file (nav, all sections, all client-side JS).</td></tr>
+                <tr><td><code>views/index.html</code></td><td>The public HeartBeat site — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
+                <tr><td><code>views/admin.html</code></td><td>The admin panel — everything in this document lives inside this one file (nav, all sections, all client-side JS).</td></tr>
                 <tr><td><code>public/css/style.css</code></td><td>Single shared stylesheet for both pages.</td></tr>
               </tbody>
             </table>
@@ -12872,7 +12872,7 @@
         <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92600a">
           ⚠️ <strong>This might already be an existing centre:</strong> ${escHtml(existingMatch.clientName)} — ${escHtml(existingMatch.locationLabel)}.
           <div style="margin-top:4px">Why: ${escHtml(existingMatch.reasons.join(', '))}</div>
-          <a href="/admin.html?openCentre=${encodeURIComponent(existingMatchCentreKey)}" target="_blank" rel="noopener" style="color:var(--orange);font-weight:600;text-decoration:underline">View this centre in My Centres (opens in a new tab) →</a>
+          <a href="/admin?openCentre=${encodeURIComponent(existingMatchCentreKey)}" target="_blank" rel="noopener" style="color:var(--orange);font-weight:600;text-decoration:underline">View this centre in My Centres (opens in a new tab) →</a>
         </div>` : '';
 
       // HeartBeat signed this lead on its own (leadAutoSignService), from

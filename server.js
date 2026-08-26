@@ -4,6 +4,8 @@ const session = require('express-session');
 const passport = require('passport');
 const path = require('path');
 const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const { initDatabase, getDb } = require('./db/database');
 const { syncFromDrive } = require('./services/driveService');
@@ -19,6 +21,64 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', 1);
+
+// Security headers (X-Frame-Options, X-Content-Type-Options, HSTS,
+// Referrer-Policy, etc. all come from helmet's defaults). CSP is hand-built
+// rather than left default because the frontend is plain inline-<script>
+// HTML with no build step — 'unsafe-inline' on script-src is a deliberate,
+// known trade-off, not an oversight: a real nonce/hash-based policy would
+// need every inline handler in views/*.html rewritten first. What this
+// still buys us: frame-ancestors blocks clickjacking (the login page is the
+// obvious target), object-src/base-uri close two classic injection
+// sideChannels, and everything else is restricted to the small, real list
+// of external hosts this app actually loads (Google Fonts, the DOMPurify
+// CDN script, Mapbox GL JS for Smart Routing). COEP/CORP are turned off —
+// their strict defaults block cross-origin font/tile loads from the hosts
+// above and this app has no cross-origin isolation requirement to justify
+// the breakage.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      // esm.sh is where public/js/richEditor.js imports TipTap (the rich
+      // text editor for articles/SOPs) as native ES modules — found by
+      // actually exercising the admin panel with the CSP live, not by
+      // grepping HTML for <script src>, since these are JS-level import
+      // statements.
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net', 'https://api.mapbox.com', 'https://esm.sh'],
+      // helmet's own defaults set this to 'none', which would silently break
+      // every onclick="..." (and similar) attribute in views/*.html — this
+      // whole app is built on inline event-handler attributes. Must match
+      // scriptSrc's 'unsafe-inline' trade-off, not the stricter default.
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://api.mapbox.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'", 'https://api.mapbox.com', 'https://events.mapbox.com', 'https://*.tiles.mapbox.com'],
+      workerSrc: ["'self'", 'blob:'],
+      frameAncestors: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
+}));
+
+// Login is the one endpoint an attacker can hammer without already holding
+// a valid session — cap attempts per IP so credential stuffing/brute force
+// costs real time instead of being free. Counts failed AND successful
+// attempts the same way (simplest correct option); a legitimate user
+// mistyping their password a few times in 15 minutes is not meaningfully
+// affected by a 20-attempt window.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please wait a few minutes and try again.' }
+});
+
 // Skip compression for SSE (Ask AI streaming) — gzip buffers chunks until it
 // has enough data to compress, which would turn the token-by-token typing
 // effect into occasional large bursts instead of a smooth stream.
@@ -38,6 +98,12 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
+    // Explicit rather than relying on the browser's own unset-cookie
+    // default — 'lax' still allows normal top-level navigation (clicking a
+    // link into the app) while blocking the cookie from being sent on
+    // cross-site requests a malicious page might trigger (CSRF).
+    sameSite: 'lax',
+    httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000
   }
 }));
@@ -46,8 +112,16 @@ require('./config/passport');
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(express.static(path.join(__dirname, 'public')));
+// `index: false` matters here, not just cosmetically — without it,
+// express.static auto-serves public/index.html for GET '/' itself, before
+// the request ever reaches the guardRoute-protected app.get('/') below,
+// which would silently defeat the entire app's authentication check. The
+// three authenticated page shells (index/admin/article) deliberately live
+// outside public/, in views/, and are only ever served via guardRoute()'s
+// own res.sendFile below — never through this static mount.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
+app.use('/auth/login', loginLimiter);
 app.use('/auth', require('./routes/auth'));
 app.use('/api/articles', require('./routes/articles'));
 app.use('/api/admin', require('./routes/admin'));
@@ -83,7 +157,10 @@ function guardRoute(req, res, file, adminOnly = false) {
   if (adminOnly && !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role)) {
     return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
   }
-  res.sendFile(path.join(__dirname, 'public', file));
+  // These three page shells live in views/, not public/, specifically so
+  // they can never be reached by a direct static-file request that skips
+  // this auth check (see the express.static comment above).
+  res.sendFile(path.join(__dirname, 'views', file));
 }
 
 // Safety net: an unwrapped `await` in a route handler that rejects becomes

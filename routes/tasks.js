@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
-const { BUCKETS, ensureBucket, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype } = require('../services/storageService');
+const { BUCKETS, ensureBucket, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, setFileResponseHeaders } = require('../services/storageService');
 
 // Same limit as announcements/projects — any file type, not just images.
 const taskFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -411,9 +411,8 @@ router.get('/attachments/:attachmentId/download', async (req, res) => {
     if (!file) return res.status(404).json({ error: 'File not found' });
     if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.taskFiles, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: true });
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });

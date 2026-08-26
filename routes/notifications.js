@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
 const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
-const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket } = require('../services/storageService');
+const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 const leave = require('../services/leaveService');
 
 const announcementFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -503,11 +503,8 @@ router.get('/announcements/file/:fileId', async (req, res) => {
     if (!file) return res.status(404).json({ error: 'File not found' });
     if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.announcementFiles, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: file.display_mode !== 'download' });
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', file.display_mode === 'download'
-      ? `attachment; filename="${encodeURIComponent(file.filename)}"`
-      : `inline; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });

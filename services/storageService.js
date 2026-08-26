@@ -86,4 +86,24 @@ function parseDataUri(uri) {
   return { mimetype: m[1], base64: m[2] };
 }
 
-module.exports = { BUCKETS, uploadBuffer, uploadBase64, getSignedUrl, downloadAsBuffer, remove, extForMimetype, parseDataUri, ensureBucket };
+// Security-critical: every uploaded attachment's stored `mimetype` is
+// whatever Content-Type the uploader's browser happened to send with that
+// multipart field — not sniffed or verified server-side, so it's entirely
+// attacker-controlled. A download route that echoes it back verbatim with
+// `Content-Disposition: inline` lets anyone upload a file claiming to be
+// text/html (or image/svg+xml, which can carry <script>) and have it
+// execute as a same-origin page the moment another signed-in user previews
+// it — stored XSS with full access to that user's session. Only these
+// types are ever safe to render inline in a browser; everything else is
+// forced to download instead, regardless of what the caller asked for or
+// what the uploader claimed. Every attachment/file download route in this
+// app must go through this rather than setting the headers by hand.
+const INLINE_SAFE_MIMETYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']);
+function setFileResponseHeaders(res, { mimetype, filename, wantInline }) {
+  const safeInline = !!wantInline && INLINE_SAFE_MIMETYPES.has(mimetype);
+  res.setHeader('Content-Type', safeInline ? mimetype : 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', `${safeInline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(filename || 'file')}"`);
+}
+
+module.exports = { BUCKETS, uploadBuffer, uploadBase64, getSignedUrl, downloadAsBuffer, remove, extForMimetype, parseDataUri, ensureBucket, setFileResponseHeaders, INLINE_SAFE_MIMETYPES };

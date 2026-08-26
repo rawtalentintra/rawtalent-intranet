@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
-const { BUCKETS, downloadAsBuffer } = require('../services/storageService');
+const { BUCKETS, downloadAsBuffer, setFileResponseHeaders } = require('../services/storageService');
 
 // Search articles
 router.get('/search', requireAuth, async (req, res) => {
@@ -75,13 +75,8 @@ router.get('/file/:fileId', requireAuth, async (req, res) => {
     if (!file) return res.status(404).json({ error: 'File not found' });
     if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.articleFiles, file.storage_path);
-    res.setHeader('Content-Type', file.mimetype);
+    setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: file.display_mode !== 'download' });
     res.setHeader('Content-Length', buffer.length);
-    if (file.display_mode === 'download') {
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.filename)}"`);
-    } else {
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.filename)}"`);
-    }
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
