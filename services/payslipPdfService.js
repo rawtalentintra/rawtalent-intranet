@@ -204,13 +204,20 @@ function buildPayslipPdf(payslip, profile) {
 
     doc.moveTo(LEFT_X, doc.y + 4).lineTo(LEFT_X + CONTENT_WIDTH, doc.y + 4).strokeColor('#d1d5db').stroke();
     doc.y += 12;
-    {
-      const totalY = doc.y;
-      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY);
-      doc.text('Total Earnings in AUD', LEFT_X, totalY, { width: 340, lineBreak: false });
-      doc.text(fmtMoney(payslip.totalEarningsAud), colAmountX, totalY, { width: 75, align: 'right', lineBreak: false });
-      doc.y = totalY + 20;
+
+    // Shared by both the AUD and PHP totals so they can never drift apart
+    // in size/weight — one font size for "this is a total" everywhere it
+    // appears on the document, not set independently at each call site.
+    const TOTAL_FONT_SIZE = 10.5;
+    function drawTotalLine(label, amount) {
+      const y = doc.y;
+      doc.font('Helvetica-Bold').fontSize(TOTAL_FONT_SIZE).fillColor(NAVY);
+      doc.text(label, LEFT_X, y, { width: 340, lineBreak: false });
+      doc.text(fmtMoney(amount), colAmountX, y, { width: 75, align: 'right', lineBreak: false });
+      doc.y = y + 20;
     }
+
+    drawTotalLine('Total Earnings in AUD', payslip.totalEarningsAud);
 
     // No separate header/divider for the PHP conversion — it's just two
     // more rows directly under Total Earnings in AUD, same as the request:
@@ -223,13 +230,7 @@ function buildPayslipPdf(payslip, profile) {
         doc.text(Number(payslip.exchangeRate).toFixed(2), colAmountX, rateY, { width: 75, align: 'right', lineBreak: false });
         doc.y = rateY + 16;
       }
-      {
-        const phpY = doc.y;
-        doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY);
-        doc.text('Total Earnings in PHP', LEFT_X, phpY, { width: 340, lineBreak: false });
-        doc.text(fmtMoney(payslip.totalEarningsPhp), colAmountX, phpY, { width: 75, align: 'right', lineBreak: false });
-        doc.y = phpY + 20;
-      }
+      drawTotalLine('Total Earnings in PHP', payslip.totalEarningsPhp);
     }
 
     // Footer is pinned near the actual bottom of the page rather than
