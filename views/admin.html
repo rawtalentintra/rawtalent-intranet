@@ -387,6 +387,9 @@
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('rt-api-reference', this)">
           <span class="admin-nav-icon">🗂️</span> RT API Data Reference
         </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('security', this)">
+          <span class="admin-nav-icon">🔒</span> Security
+        </div>
       </div>
       <div class="admin-nav-section super-admin-only" style="display:none">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Private</div>
@@ -1936,15 +1939,15 @@
             <table class="data-table" style="font-size:12.5px">
               <thead><tr><th style="width:170px">Path</th><th>What's there</th></tr></thead>
               <tbody>
-                <tr><td><code>server.js</code></td><td>App entry point — Express setup, session config, route mounting, static-file serving, the background Webex agent-status poller, and the session-cleanup interval.</td></tr>
-                <tr><td><code>routes/*.js</code></td><td>One file per API area (articles, admin, faq, calls, team, notifications, workforce, training, projects, meetings, auth). Each mounts under <code>/api/&lt;name&gt;</code> in <code>server.js</code> and applies its own auth middleware.</td></tr>
-                <tr><td><code>services/*.js</code></td><td>Business logic and third-party integrations, called by routes — e.g. <code>webexService.js</code>, <code>fathomService.js</code>, <code>dubberService.js</code>, <code>aiService.js</code>, <code>callGradingService.js</code>, <code>driveService.js</code>, <code>storageService.js</code>.</td></tr>
+                <tr><td><code>server.js</code></td><td>App entry point — Express setup, session config, route mounting, security headers (helmet) and login rate limiting, static-file serving (scoped to <code>public/</code> only — see the Security page), the background Webex agent-status poller, and the session-cleanup interval.</td></tr>
+                <tr><td><code>routes/*.js</code></td><td>One file per API area (articles, admin, faq, calls, team, notifications, workforce, training, projects, meetings, tasks, timesheets, payslips, leave-requests, auth). Each mounts under <code>/api/&lt;name&gt;</code> in <code>server.js</code> and applies its own auth middleware.</td></tr>
+                <tr><td><code>services/*.js</code></td><td>Business logic and third-party integrations, called by routes — e.g. <code>webexService.js</code>, <code>fathomService.js</code>, <code>dubberService.js</code>, <code>aiService.js</code>, <code>callGradingService.js</code>, <code>driveService.js</code>, <code>storageService.js</code>, <code>timesheetService.js</code>, <code>payslipService.js</code>, <code>payslipPdfService.js</code>.</td></tr>
                 <tr><td><code>db/schema.sql</code></td><td>Full Postgres schema — applied automatically on every server boot (idempotent <code>CREATE TABLE IF NOT EXISTS</code> statements), so schema changes ship just by editing this file and redeploying.</td></tr>
                 <tr><td><code>db/database.js</code></td><td>Postgres connection pool + the <code>execute()</code> query wrapper described above.</td></tr>
-                <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
-                <tr><td><code>views/index.html</code></td><td>The public HeartBeat site — search, Ask AI, FAQ, glossary, announcements, team directory, training. Open to any signed-in user.</td></tr>
-                <tr><td><code>views/admin.html</code></td><td>The admin panel — everything in this document lives inside this one file (nav, all sections, all client-side JS).</td></tr>
-                <tr><td><code>public/css/style.css</code></td><td>Single shared stylesheet for both pages.</td></tr>
+                <tr><td><code>middleware/authMiddleware.js</code></td><td><code>requireAuth</code>, <code>requireAdmin</code>, <code>requireSuperAdmin</code>, and <code>requireRole(...roles)</code> — every protected route uses one of these.</td></tr>
+                <tr><td><code>views/index.html</code>, <code>views/admin.html</code>, <code>views/article.html</code></td><td>The three authenticated page shells (public HeartBeat site, admin panel, article reader) — each a single large file with inline <code>&lt;script&gt;</code>. Deliberately live outside <code>public/</code> — see the Security page for why.</td></tr>
+                <tr><td><code>public/login.html</code>, <code>public/403.html</code></td><td>The two pages that genuinely need to be reachable without a session — sign-in and the access-denied page.</td></tr>
+                <tr><td><code>public/css/style.css</code></td><td>Single shared stylesheet for every page.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1979,6 +1982,9 @@
             <strong style="color:var(--navy)">Training:</strong> training_courses, training_modules, training_questions, training_attempts, training_answers, training_assignments<br>
             <strong style="color:var(--navy)">Projects:</strong> projects, project_files, project_milestones<br>
             <strong style="color:var(--navy)">Meetings:</strong> fathom_meetings, fathom_transcript_sync_state<br>
+            <strong style="color:var(--navy)">Tasks:</strong> tasks, task_notes, task_attachments, task_departments, task_classifications<br>
+            <strong style="color:var(--navy)">Leave &amp; Timesheets:</strong> leave_requests, timesheet_weeks, timesheet_entries<br>
+            <strong style="color:var(--navy)">Payroll:</strong> employee_payroll_profiles, payslips<br>
             <strong style="color:var(--navy)">Infrastructure:</strong> sessions, notification_dismissals
           </div>
         </div>
@@ -2013,7 +2019,24 @@
             <strong style="color:var(--navy)">Workforce Management:</strong> live agent presence (Webex), background-polled every 20s server-side independent of who has the page open.<br>
             <strong style="color:var(--navy)">Training:</strong> course builder, assignment, attempts/scoring.<br>
             <strong style="color:var(--navy)">Projects:</strong> internal project tracking with milestones and SOP file attachments.<br>
+            <strong style="color:var(--navy)">Tasks:</strong> a department-scoped kanban board (<code>views/index.html</code>'s Tasks tab, open to every signed-in user — no role gate) with notes, file attachments, @mentions, and multi-educator linking against RT's candidate data.<br>
+            <strong style="color:var(--navy)">Log My Hours &amp; Payroll:</strong> daily time entry, submitted weekly, with a two-stage approval chain — team manager approval (Lorie/Adzi, their own AM/PM team only) happens in the main app; final approval (Sophia/Joy), company-wide totals, and payslip generation/preview/PDF all live in Admin → HR → Payroll, kept separate from the general app since it's where hourly rates and bank details are entered. See "Payroll &amp; Timesheets" below for the full shape.<br>
+            <strong style="color:var(--navy)">Leave Request:</strong> submission (any user) in the main app; approval — both the team-manager and final stages — lives in Admin → HR → Leave Requests only, not duplicated in the main app.<br>
             <strong style="color:var(--navy)">Meetings:</strong> Fathom transcript archive with Claude-powered Q&amp;A across all past meetings — a private, restricted-access area.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Payroll &amp; Timesheets (added 2026-08-26)</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:10px">
+            Pay periods are computed, not stored — two-week periods anchored at <code>2026-08-16</code> (a Sunday), weeks run Sunday–Saturday. No pay-period table; <code>services/timesheetService.js</code>'s <code>payPeriodStartOf()</code>/<code>payPeriodEndOf()</code> derive everything from that anchor, so nothing needs manual upkeep as time passes.
+          </div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
+            <strong style="color:var(--navy)">Approval routing:</strong> scoped strictly to <code>team_members.team IN ('AM Team','PM Team')</code> — deliberately <em>not</em> a generic <code>manager_id</code> walk, since several people resolve to a manager in the org chart for unrelated reasons and must not gain timesheet-approval rights from that. AM Team → Lorie approves first, then Sophia; PM Team → Adzi first, then Joy. Anyone on neither team skips straight to final approval (open to either Sophia or Joy).<br>
+            <strong style="color:var(--navy)">Where each stage lives:</strong> team-manager approval (Lorie/Adzi) stays in the main app's Log My Hours → Approvals tab. Final approval (Sophia/Joy) moved to Admin → HR → Payroll → Approvals, alongside Payroll Profiles/Payslips/Company Totals — everything rate-sensitive and approval-sensitive for payroll now lives in one place, gated the same way (<code>leaveService.isFinalApprover</code>, not a role). A person's two pay-period weeks that both land in final-approval status at once (anyone with no AM/PM team) render as a single combined card with one Approve/Reject, not two separate ones.<br>
+            <strong style="color:var(--navy)">Payslip PDF:</strong> <code>services/payslipPdfService.js</code>, pure function (no DB/storage access) so the same code backs both a zero-write Preview and the persisted Generate flow. "View Payslip PDF" on an Approvals card reuses the existing Payslips generation modal directly — it already has editable per-line-item rate fields, and <code>generate()</code> re-validates both weeks are approved server-side, so opening it before approval can't accidentally create a real payslip.<br>
+            <strong style="color:var(--navy)">Draft payslips</strong> can be deleted (undo) straight from the Payslips table via 🗑️ — gated to the same Sophia/Joy final-approver pool as everything else here, not <code>requireSuperAdmin</code>. Refuses to delete a published payslip; the correction path there is unpublish + regenerate, to keep an audit trail on an issued financial document.<br>
+            <strong style="color:var(--navy)">Leave Request approval</strong> used to be duplicated in both the main app and here — the main app's copy was removed (2026-08-26) so approval only ever happens in one place. <code>qa_view</code>'s admin-section allowlist was extended to include <code>leave-requests</code> so Lorie/Adzi (real managers with their own direct reports) aren't locked out of their own approval step by that move; the company-wide leave history table on that page stays admin/super_admin only.
           </div>
         </div>
 
@@ -2293,8 +2316,8 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:2px">↳ Candidate Qualifications <span style="font-weight:400;color:var(--text-muted);font-size:12px">(nested inside each Candidate's <code>qualifications[]</code>)</span></div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><code>CandidateQualificationResponse</code> — newly added since Micropods was scoped</div>
-          <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#92600a">
-            ⚠️ <strong>This array appears to only ever hold one entry per candidate</strong> — confirmed live against 5 real educators (2026-08-22): fetched each one directly from RT right now, bypassing every cache, and the API returned the exact same single qualification record it always has. For 3 of those 5, that one record didn't match what RT's own staff app currently shows as their qualification (e.g. the API returned "Childcare Cook" for someone RT's app shows as "Certificate III Educator"). Most likely explanation: these educators hold more than one real qualification, but this endpoint only ever surfaces one — and nothing in the payload (no "primary"/"current" flag) would let a caller pick correctly even if it returned all of them. Not a HeartBeat display bug or a stale sync — it's what RT's own reporting API returns, verified live. Worth raising directly with RT's dev team: does this endpoint intentionally return only one qualification, and if so, which one?
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#15803d">
+            ✅ <strong>Fixed by RT's dev team — reverified live 2026-08-27.</strong> Originally flagged 2026-08-22: this array appeared to only ever hold one entry per candidate, and for several educators that one entry didn't match what RT's own staff app showed as their current qualification (e.g. Certificate III Educator returned for someone who'd since qualified as Diploma Educator, or nothing returned at all for someone who should show Early Childhood Teacher). Raised directly with RT's dev team, who said it was fixed. Reverified today by fetching all three of the originally-reported affected candidates (<code>arial@hotmail.com.au</code>, <code>magburton@hotmail.com</code>, <code>tharanaga09@gmail.com</code>) straight from the live API, bypassing every cache — all three now return the correct, current qualification. Not independently reverified against a candidate who holds more than one real qualification (none of the three original examples happened to be a multi-qualification case) — worth a follow-up spot-check if a fuller list of affected candidates turns up a multi-qualification one.
           </div>
           <div style="overflow-x:auto">
             <table class="data-table" style="font-size:12px">
@@ -2474,6 +2497,80 @@
                 <tr><td><code>approvedRejectedUserId</code></td><td>int</td><td class="rtapi-vague">⚠ Vague code</td><td>See master list above — confirmed it correlates with <code>status</code> (see above), but still can't tell approved from rejected without a label.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- Security — super_admin only. Documents the OWASP-style audit run
+           2026-08-26 across the whole stack (frontend, backend, DB access,
+           API routes) plus everything fixed as a direct result of it.
+           Findings are recorded here rather than just in commit messages
+           so the reasoning ("why was this a real vulnerability, not just
+           theoretical") survives past the commit that fixed it. -->
+      <template id="__lazy_security">
+      <div class="admin-section" id="section-security">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🔒 Security</div>
+            <div class="admin-page-sub">Findings and fixes from the full-stack security audit run 2026-08-26, plus the access-control changes that followed from it. Super admin only.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">Scope &amp; method</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
+            A full pass against the OWASP Top 10, covering: secrets/env hygiene, authentication &amp; authorization on every route, SQL injection, XSS, HTTP security headers, CORS, and rate limiting. Every finding below was verified live (not just read from source) — a disposable <code>admin</code>-role test account, direct <code>curl</code> against the running server, and browser-driven checks where a finding needed visual confirmation (e.g. a CSP change actually not breaking the rich-text editor). Test accounts and any test data created along the way were deleted before each fix was committed.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef2f2;border:1px solid #fecaca">
+          <div style="font-weight:700;font-size:14px;color:#b91c1c;margin-bottom:10px">🔴 Critical — fixed</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.8">
+            <strong>1. Full authentication bypass via static file serving.</strong> <code>express.static('public')</code> was mounted ahead of the auth-guarded <code>/</code>, <code>/admin</code>, <code>/article</code> routes in <code>server.js</code>, and <code>public/index.html</code>/<code>admin.html</code>/<code>article.html</code> matched those static paths directly — so <em>any unauthenticated request</em> to <code>/</code>, <code>/admin.html</code>, or <code>/index.html</code> returned the full authenticated app/admin-panel HTML with zero login check. Confirmed live: <code>curl http://localhost:3000/</code> with no cookie returned the full 297KB app shell. Every <code>/api/*</code> route was independently verified to enforce its own auth regardless, so this leaked the client-side source/UI to anonymous visitors, not live data — still a real perimeter failure for a login-gated intranet.<br>
+            <span style="color:#15803d">✅ Fix:</span> moved the three authenticated page shells to a new <code>views/</code> directory outside the static mount, and set <code>index: false</code> on <code>express.static</code> so <code>express.static</code> can no longer auto-serve <code>index.html</code> for <code>/</code> either. <code>guardRoute()</code> in <code>server.js</code> now serves exclusively from <code>views/</code>.
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.8;margin-top:14px">
+            <strong>2. Stored XSS via file attachment MIME spoofing.</strong> Every upload route (tasks, ideas, articles, announcements, projects, leads, centres) stored the uploader-supplied multipart <code>Content-Type</code> verbatim and echoed it back on download — several with <code>Content-Disposition: inline</code>. Task attachments have no role gate by design (any signed-in user), so the lowest-privilege user could upload a file claiming <code>text/html</code> and have it execute as a same-origin page the instant a teammate or admin previewed it. Proved live: uploaded a <code>&lt;script&gt;</code> payload as <code>evil.html</code>, confirmed the pre-fix response would have served it <code>inline</code>/<code>text/html</code>.<br>
+            <span style="color:#15803d">✅ Fix:</span> <code>services/storageService.js</code>'s new <code>setFileResponseHeaders()</code> allowlists exactly <code>image/jpeg|png|gif|webp</code> and <code>application/pdf</code> for inline rendering — everything else is forced to <code>Content-Disposition: attachment</code>, <code>Content-Type: application/octet-stream</code>, and <code>X-Content-Type-Options: nosniff</code>, regardless of what the uploader claimed. Re-tested: the spoofed HTML now downloads inert; legitimate image previews are unaffected.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef3c7;border:1px solid #f59e0b">
+          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:10px">🟠 High — fixed</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.8">
+            <strong>No security headers at all.</strong> Added <code>helmet</code> — Content-Security-Policy, <code>X-Frame-Options</code>, HSTS, <code>X-Content-Type-Options: nosniff</code>, Referrer-Policy. The CSP necessarily allows <code>'unsafe-inline'</code> on <code>script-src</code>/<code>script-src-attr</code> — this frontend is inline-<code>&lt;script&gt;</code>/<code>onclick=</code> HTML with no build step, and helmet's own default <code>script-src-attr 'none'</code> would have silently broken every <code>onclick</code> in the app (caught live before it shipped). The real payoff is <code>frame-ancestors 'self'</code> (clickjacking protection, especially for the login page). <code>script-src</code>'s external allowlist (Google Fonts, the DOMPurify CDN script, Mapbox GL JS, and <code>esm.sh</code> for the TipTap rich-text editor) was built by actually exercising the admin panel with the CSP live, not by grepping HTML — <code>esm.sh</code>'s dynamic <code>import()</code> calls don't show up in a static scan and broke the rich editor on the first attempt.<br>
+            <strong>No rate limiting anywhere.</strong> Added <code>express-rate-limit</code> on <code>/auth/login</code> — 20 attempts per 15 minutes per IP. Verified live: the 21st attempt returns 429.<br>
+            <strong>6 known-vulnerable transitive dependencies</strong> (<code>body-parser</code>, <code>undici</code>) fixed via <code>npm audit fix</code> (non-breaking). <code>uuid</code>'s remaining advisory needs a major version bump — left as a follow-up (see below) since this app's usage (bare <code>uuidv4()</code>, no buffer argument) isn't in the affected code path.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#fef9f0;border:1px solid #fde8c9">
+          <div style="font-weight:700;font-size:14px;color:#92600a;margin-bottom:10px">🟡 Medium — fixed</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.8">
+            <strong>Session cookie</strong> now sets an explicit <code>sameSite: 'lax'</code> and <code>httpOnly: true</code> instead of relying on express-session's implicit defaults — CSRF-relevant, and now unambiguous in the code rather than assumed.<br>
+            <strong>Draft payslip deletion</strong> was gated <code>requireSuperAdmin</code> (Joy only) with no UI for it at all. Changed to the same <code>requireFinalApprover</code> pool (Sophia + Joy) as every other payroll action, and added a 🗑️ on the Payslips table so it's actually usable — Sophia no longer needs Joy to undo her own mistaken draft.<br>
+            <strong><code>qa_view</code>'s admin-section allowlist</strong> was missing <code>leave-requests</code> — irrelevant until Leave Request approval was consolidated into Admin-only (see the Payroll &amp; Timesheets note on the Technical Documentation page), at which point it would have locked Lorie/Adzi out of their own manager-approval step. Added; the company-wide leave history table on that same page stays admin/super_admin only, unaffected.<br>
+            <strong>A couple of admin-only <code>innerHTML</code> call sites</strong> (site-crawl results, in Sources) interpolate a scraped page's <code>&lt;title&gt;</code> without <code>escHtml</code> — low blast radius (admin-only, self-inflicted at worst if an admin crawls a hostile URL), noted but not yet patched.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px;background:#f0fdf4;border:1px solid #bbf7d0">
+          <div style="font-weight:700;font-size:14px;color:#15803d;margin-bottom:10px">🟢 Audited, confirmed clean — no changes needed</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.8">
+            <strong>SQL injection:</strong> every query across ~150 call sites uses parameterized <code>?</code> placeholders or a fixed column-name whitelist for dynamic <code>UPDATE ... SET</code>/<code>IN (...)</code> builders (<code>.map(() =&gt; '?').join(',')</code>, never raw value interpolation). No exceptions found.<br>
+            <strong>Secrets:</strong> no hardcoded API keys/tokens/connection strings anywhere in the repo or git history; <code>.env</code> has never been committed.<br>
+            <strong>IDOR/RBAC:</strong> spot-checked the highest-risk surfaces — payslip bank details (<code>authorizeDownload</code>), leave/timesheet approve-reject (re-derives the authorized approver server-side from the row, never trusts a client-supplied approver field), role changes (<code>requireSuperAdmin</code> only), and admin impersonation (blocks self-impersonation, nested impersonation, and impersonating a disabled account, and logs both identities). All correct.<br>
+            <strong>CORS:</strong> no CORS middleware exists anywhere, which is currently the <em>correct</em> state — it means no cross-origin credentialed access is possible at all. Don't add a wildcard-origin CORS config if this is ever needed; use a strict allowlist.
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px">
+          <div style="font-weight:700;font-size:14px;color:var(--navy);margin-bottom:10px">📋 Recommended, not applied</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.8">
+            <strong style="color:var(--navy)">Schema validation library</strong> (Zod/Joi/Yup) — validation today is manual, per-route. Given the parameterized-query discipline above holds up everywhere, this is a maintainability/consistency gap rather than a live vulnerability; retrofitting ~150 routes was out of scope for this pass.<br>
+            <strong style="color:var(--navy)">Upload-time <code>fileFilter</code></strong> on multer — deliberately not added. The output-side allowlist (setFileResponseHeaders, above) is the actual authoritative control, since upload-time filtering is bypassable and several features intentionally accept "any file type." Would be a reasonable defense-in-depth addition if wanted.<br>
+            <strong style="color:var(--navy)"><code>uuid</code> major version bump</strong> — the one remaining <code>npm audit</code> finding, needs a breaking-change upgrade (<code>uuid@14</code>) that wasn't applied without explicit sign-off given this app's ~150 call sites using it for ID generation.
           </div>
         </div>
       </div>
@@ -5169,7 +5266,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'security'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
