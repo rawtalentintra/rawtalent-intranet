@@ -1,5 +1,6 @@
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const { registerUnicodeFonts, REGULAR, BOLD } = require('./pdfUnicodeFonts');
 
 const LOGO_PATH = path.join(__dirname, '../public/images/RawTalent-LOGO.png');
 const NAVY = '#0b1d3e';
@@ -56,6 +57,7 @@ function fmtDateLong(d) {
 function buildPayslipPdf(payslip, profile) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margins: { top: 40, left: 50, right: 50, bottom: 40 } });
+    registerUnicodeFonts(doc);
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -69,13 +71,13 @@ function buildPayslipPdf(payslip, profile) {
     doc.moveTo(LEFT_X, doc.y).lineTo(LEFT_X + CONTENT_WIDTH, doc.y).lineWidth(1).strokeColor('#e2e8f0').stroke();
     doc.y += 16;
 
-    doc.font('Helvetica-Bold').fontSize(20).fillColor(NAVY)
+    doc.font(BOLD).fontSize(20).fillColor(NAVY)
       .text('PAYSLIP', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 3 });
     doc.y += 22;
-    doc.font('Helvetica-Bold').fontSize(10).fillColor(ACCENT)
+    doc.font(BOLD).fontSize(10).fillColor(ACCENT)
       .text('RawTalent Recruitment', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 0.5 });
     doc.y += 13;
-    doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
+    doc.font(REGULAR).fontSize(8.5).fillColor(MUTED)
       .text('Level 5|111, Cecil St, South Melbourne VIC 3205, Australia', LEFT_X, doc.y, { width: CONTENT_WIDTH, align: 'center' });
     doc.y += 20;
 
@@ -91,9 +93,9 @@ function buildPayslipPdf(payslip, profile) {
       const text = String(value);
       const h = Math.max(ROW_H, doc.heightOfString(text, { width: valueWidth }));
       if (measure) return h;
-      doc.font('Helvetica').fontSize(9).fillColor(MUTED);
+      doc.font(REGULAR).fontSize(9).fillColor(MUTED);
       doc.text(label, x, y, { width: labelWidth, lineBreak: false });
-      doc.font('Helvetica').fontSize(9).fillColor(NAVY);
+      doc.font(REGULAR).fontSize(9).fillColor(NAVY);
       doc.text(text, x + labelWidth, y, { width: valueWidth });
       return h;
     }
@@ -105,7 +107,7 @@ function buildPayslipPdf(payslip, profile) {
     function sectionCard(y, height, label) {
       doc.roundedRect(LEFT_X, y, CONTENT_WIDTH, height, 6).fill('#eff6ff');
       doc.roundedRect(LEFT_X, y, 4, height, 2).fill(ACCENT);
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(ACCENT)
+      doc.font(BOLD).fontSize(7.5).fillColor(ACCENT)
         .text(label.toUpperCase(), LEFT_X + COL_PAD, y + 9, { characterSpacing: 0.5 });
     }
 
@@ -132,9 +134,9 @@ function buildPayslipPdf(payslip, profile) {
       const columnsBottom = Math.max(leftY, rightY) + 6;
       const ppLabelW = 85;
       if (!measure) {
-        doc.font('Helvetica').fontSize(9).fillColor(MUTED)
+        doc.font(REGULAR).fontSize(9).fillColor(MUTED)
           .text('Pay Period', LEFT_X + COL_PAD, columnsBottom, { width: ppLabelW, lineBreak: false });
-        doc.font('Helvetica').fontSize(9).fillColor(NAVY)
+        doc.font(REGULAR).fontSize(9).fillColor(NAVY)
           .text(`${fmtDateLong(payslip.payPeriodStart)}  –  ${fmtDateLong(payslip.payPeriodEnd)}`, LEFT_X + COL_PAD + ppLabelW, columnsBottom, { width: CONTENT_WIDTH - 2 * COL_PAD - ppLabelW, lineBreak: false });
       }
       return (columnsBottom + ROW_H + 8) - top;
@@ -176,12 +178,12 @@ function buildPayslipPdf(payslip, profile) {
     function drawTableHeader(label, showHourColumn) {
       doc.roundedRect(LEFT_X, doc.y, CONTENT_WIDTH, 20, 4).fill(NAVY);
       const hy = doc.y + 6;
-      doc.fillColor('white').font('Helvetica-Bold').fontSize(9);
+      doc.fillColor('white').font(BOLD).fontSize(9);
       doc.text(label, LEFT_X + 10, hy, { width: 300, lineBreak: false });
       if (showHourColumn) doc.text('Total Hour', colHourX, hy, { width: 70, align: 'right', lineBreak: false });
       doc.text('Amount', colAmountX, hy, { width: 75, align: 'right', lineBreak: false });
       doc.y += 24;
-      doc.fillColor('black').font('Helvetica').fontSize(9);
+      doc.fillColor('black').font(REGULAR).fontSize(9);
     }
     drawTableHeader('Shift Details', true);
 
@@ -192,7 +194,7 @@ function buildPayslipPdf(payslip, profile) {
     for (const item of payslip.lineItems) {
       if (doc.y > 760) { doc.addPage(); doc.y = 40; drawTableHeader('Shift Details', true); prevGroup = null; }
       const rowY = doc.y;
-      doc.font('Helvetica').fontSize(9).fillColor(NAVY);
+      doc.font(REGULAR).fontSize(9).fillColor(NAVY);
       const showGroup = item.groupLabel && item.groupLabel !== prevGroup;
       if (showGroup) doc.text(item.groupLabel, LEFT_X + 10, rowY, { width: 145, lineBreak: false });
       if (item.label) doc.text(item.label, LEFT_X + 160, rowY, { width: 165, lineBreak: false });
@@ -211,7 +213,7 @@ function buildPayslipPdf(payslip, profile) {
     const TOTAL_FONT_SIZE = 10.5;
     function drawTotalLine(label, amount) {
       const y = doc.y;
-      doc.font('Helvetica-Bold').fontSize(TOTAL_FONT_SIZE).fillColor(NAVY);
+      doc.font(BOLD).fontSize(TOTAL_FONT_SIZE).fillColor(NAVY);
       doc.text(label, LEFT_X, y, { width: 340, lineBreak: false });
       doc.text(fmtMoney(amount), colAmountX, y, { width: 75, align: 'right', lineBreak: false });
       doc.y = y + 20;
@@ -225,7 +227,7 @@ function buildPayslipPdf(payslip, profile) {
     if (payslip.paysInPhp) {
       {
         const rateY = doc.y;
-        doc.font('Helvetica').fontSize(9).fillColor(NAVY);
+        doc.font(REGULAR).fontSize(9).fillColor(NAVY);
         doc.text('Currency Exchange Rate', LEFT_X, rateY, { width: 340, lineBreak: false });
         doc.text(Number(payslip.exchangeRate).toFixed(2), colAmountX, rateY, { width: 75, align: 'right', lineBreak: false });
         doc.y = rateY + 16;

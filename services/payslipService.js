@@ -75,7 +75,15 @@ async function upsertProfile({ userEmail, userName, hourlyRateAud, paysInPhp, ba
 async function getEmployeeMeta(userEmail) {
   const res = await getDb().execute({ sql: 'SELECT name, legal_name, position, address FROM team_members WHERE LOWER(email) = LOWER(?)', args: [userEmail] });
   const row = res.rows[0] || {};
-  return { legalNameOrName: row.legal_name || row.name || userEmail, position: row.position || '', address: row.address || '' };
+  // legalNameOrName is what individual payslips print as "Employee" —
+  // deliberately unchanged, that's the correct field for a formal
+  // document. shortName (team_members.name, e.g. "Gelliane"/"Adzi"/
+  // "Joy") is what the Team Invoice's line items use instead — splitting
+  // the first word off a full legal_name isn't reliable for a "known as"
+  // name at all (e.g. Gelliane's legal_name starts "Mary Gelliane...",
+  // which would otherwise print as "Mary" and collide with the actual
+  // Mary Almodal on the same invoice).
+  return { legalNameOrName: row.legal_name || row.name || userEmail, shortName: row.name || '', position: row.position || '', address: row.address || '' };
 }
 
 // Real external numbering (from before this app existed) was already at
@@ -111,7 +119,11 @@ async function listEligibleForPeriod(payPeriodStart) {
     const hasProfile = person.hourly_rate_aud != null;
     const existing = existingRes.rows[0];
     results.push({
-      userEmail: person.user_email, userName: person.legal_name || person.name, position: person.position,
+      // userName (legal-first) stays what the Payslips table/generate
+      // modal already show; userShortName (team_members.name) is what
+      // the Team Invoice's line items use — see getEmployeeMeta's
+      // comment for why those need to be different fields.
+      userEmail: person.user_email, userName: person.legal_name || person.name, userShortName: person.name, position: person.position,
       week1Status: w1.week.status, week2Status: w2.week.status, bothApproved, hasProfile,
       existingPayslipId: existing?.id || null, alreadyPublished: !!existing?.published_at,
       eligible: bothApproved && hasProfile
@@ -307,10 +319,33 @@ const TEAM_INVOICE_RECIPIENT_EMAIL = 'sophia@rawtalent.com.au';
 // correctly without this needing an update. Matches every position on
 // the real sample invoice exactly: Operations Manager/Team Manager (and
 // Founder, not present on that sample but the same kind of role) read as
-// "Managements"; everything else (Talent Consultant, Sr Consultant,
+// "Management"; everything else (Talent Consultant, Sr Consultant,
 // Workforce Partner, Email Marketer, ...) reads as "Consultants".
 function teamInvoiceSectionFor(position) {
-  return /manager|founder/i.test(position || '') ? 'Managements' : 'Consultants';
+  return /manager|founder/i.test(position || '') ? 'Management' : 'Consultants';
+}
+
+// Fixed display order within each section, confirmed with Joy
+// 2026-08-27 — not alphabetical or query order. Keyed by team_members'
+// short name (the same field the invoice line itself displays), case-
+// sensitive-insensitive lookup. Anyone not listed (a new hire, or a
+// position outside the usual roster) is appended after the named ones,
+// in whatever order they were already in — so this never silently drops
+// someone just because they're not in the list yet.
+const TEAM_INVOICE_ORDER = {
+  Management: ['sophia', 'joy', 'lorie', 'adzi'],
+  Consultants: ['vicky', 'marsha', 'mary', 'gelliane', 'shienna', 'dona', 'izza']
+};
+function sortByTeamInvoiceOrder(sectionLabel, rows) {
+  const order = TEAM_INVOICE_ORDER[sectionLabel] || [];
+  return rows.slice().sort((a, b) => {
+    const ai = order.indexOf((a.firstName || '').toLowerCase());
+    const bi = order.indexOf((b.firstName || '').toLowerCase());
+    if (ai === -1 && bi === -1) return 0; // both unlisted — keep original relative order
+    if (ai === -1) return 1; // unlisted always sorts after every named entry
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
 }
 
 // Built from every person who's "Ready" for this pay period (both
@@ -343,8 +378,8 @@ async function buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid } 
   const existingByEmail = {};
   existingRes.rows.map(normalizePayslip).forEach(r => { existingByEmail[r.user_email.toLowerCase()] = r; });
 
-  const sectionOrder = ['Managements', 'Consultants'];
-  const sectionsByLabel = { Managements: [], Consultants: [] };
+  const sectionOrder = ['Management', 'Consultants'];
+  const sectionsByLabel = { Management: [], Consultants: [] };
   let totalAud = 0;
   let resolvedInvoiceNumber = invoiceNumber;
   for (const person of ready) {
@@ -359,7 +394,7 @@ async function buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid } 
       totalHours = prefill.lineItems.reduce((sum, li) => sum + Number(li.hours || 0), 0);
       amount = round2(prefill.lineItems.reduce((sum, li) => sum + Number(li.amount || 0), 0));
     }
-    const firstName = (person.userName || person.userEmail).trim().split(/\s+/)[0];
+    const firstName = (person.userShortName || person.userName || person.userEmail).trim().split(/\s+/)[0];
     sectionsByLabel[teamInvoiceSectionFor(person.position)].push({ position: person.position || '', firstName, totalHours, amount });
     totalAud += amount;
   }
@@ -370,7 +405,7 @@ async function buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid } 
     referenceNo: `RawTalent${String(resolvedInvoiceNumber).padStart(4, '0')}`,
     payPeriodStart, payPeriodEnd,
     datePaid: datePaid || addDays(payPeriodStart, 12),
-    sections: sectionOrder.map(label => ({ label, rows: sectionsByLabel[label] })),
+    sections: sectionOrder.map(label => ({ label, rows: sortByTeamInvoiceOrder(label, sectionsByLabel[label]) })),
     totalAud: round2(totalAud)
   };
 }
