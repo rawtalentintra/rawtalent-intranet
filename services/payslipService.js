@@ -125,6 +125,11 @@ async function listEligibleForPeriod(payPeriodStart) {
       // comment for why those need to be different fields.
       userEmail: person.user_email, userName: person.legal_name || person.name, userShortName: person.name, position: person.position,
       week1Status: w1.week.status, week2Status: w2.week.status, bothApproved, hasProfile,
+      // Exposed so the admin table can show/edit the actual number, not
+      // just the status pill — see routes/timesheets.js's
+      // admin/weeks/set-hours (Sophia/Joy only).
+      week1Hours: Number(w1.week.total_hours || 0), week2Hours: Number(w2.week.total_hours || 0),
+      week1Start: payPeriodStart, week2Start,
       existingPayslipId: existing?.id || null, alreadyPublished: !!existing?.published_at,
       eligible: bothApproved && hasProfile
     });

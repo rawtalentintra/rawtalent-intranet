@@ -141,6 +141,21 @@ router.post('/weeks/:id/reject', async (req, res) => {
   }
 });
 
+// Direct payroll-level hours correction from the admin Payslips table —
+// only Sophia/Joy, works on any status (draft/pending/approved) without
+// forcing a week back through the approval chain. See
+// timesheetService.adminSetTotalHours for why this overrides the total
+// without touching the employee's own day-by-day entries.
+router.post('/admin/weeks/set-hours', requireFinalApprover, async (req, res) => {
+  try {
+    const { userEmail, userName, weekStartDate, totalHours } = req.body;
+    if (!userEmail || !weekStartDate) return res.status(400).json({ error: 'userEmail and weekStartDate are required' });
+    res.json(await timesheet.adminSetTotalHours(userEmail, userName, weekStartDate, req.user.email, totalHours));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/company/week', requireFinalApprover, async (req, res) => {
   try {
     const weekStart = req.query.weekStart || timesheet.weekStartOf(new Date().toISOString().slice(0, 10));

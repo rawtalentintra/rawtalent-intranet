@@ -124,6 +124,32 @@ async function deleteEntry(entryId, userEmail) {
   return getWeek(userEmail, toDateOnly(entry.entry_date));
 }
 
+// Sophia/Joy can directly correct a week's total hours from the Payroll
+// admin table, regardless of its current status (draft, pending either
+// stage, or already approved) — requested as a simpler alternative to a
+// separate "un-approve" step, since they're the final approval authority
+// anyway; their own correction here doesn't need to go through the chain
+// again. Status is deliberately left exactly as it was — editing an
+// already-approved week's hours keeps it 'approved' with the corrected
+// number, rather than being forced back to draft/pending.
+//
+// This overrides timesheet_weeks.total_hours directly WITHOUT touching
+// the underlying timesheet_entries rows, which stay exactly as the
+// employee logged them day-by-day — this is a payroll-level override of
+// the total (e.g. "this should really be 38, not 35"), not a rewrite of
+// their own daily log. Creates the week as a fresh draft first if the
+// person hasn't logged anything at all yet for this period (same lazy-
+// creation getOrCreateDraftWeek already does for a normal entry).
+async function adminSetTotalHours(userEmail, userName, weekStartDate, approverEmail, totalHours) {
+  if (!isFinalApprover(approverEmail)) throw new Error('Only Sophia or Joy can edit hours here');
+  const hours = Number(totalHours);
+  if (!Number.isFinite(hours) || hours < 0) throw new Error('Enter a valid number of hours');
+  const db = getDb();
+  const week = await getOrCreateDraftWeek(db, { id: uuidv4(), userEmail, userName, weekStartDate });
+  await db.execute({ sql: 'UPDATE timesheet_weeks SET total_hours = ?, updated_at = now() WHERE id = ?', args: [hours, week.id] });
+  return getWeek(userEmail, weekStartDate);
+}
+
 async function getWeek(userEmail, weekStartDate) {
   const db = getDb();
   const weekRes = await db.execute({ sql: 'SELECT * FROM timesheet_weeks WHERE user_email = ? AND week_start_date = ?', args: [userEmail, weekStartDate] });
@@ -381,5 +407,6 @@ module.exports = {
   MELBOURNE_TZ, WEEK_ANCHOR, TEAM_APPROVAL_CONFIG,
   weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, validateHours, resolveTeam,
   upsertEntry, deleteEntry, getWeek, listMyWeeks, submitWeek, recall, decide, listPendingFor,
-  companyWeekSummary, companyPayPeriodSummary, companyMonthSummary, listAll, deleteWeek
+  companyWeekSummary, companyPayPeriodSummary, companyMonthSummary, listAll, deleteWeek,
+  adminSetTotalHours
 };

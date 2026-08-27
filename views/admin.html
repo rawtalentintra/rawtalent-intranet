@@ -6884,6 +6884,11 @@
     function setPayrollBatchDatePaid(value) { payrollBatchDatePaid = value || null; }
     function setPayrollBatchInvoiceNumber(value) { payrollBatchInvoiceNumber = value === '' ? null : Number(value); }
 
+    // Cached so the Week 1/Week 2 click handlers below can look up a
+    // row's full details (current hours, week start date, user name)
+    // without embedding strings — including apostrophes/quotes in a
+    // real name — directly into an onclick attribute.
+    let payrollEligibleRows = [];
     async function loadPayrollEligible() {
       const body = document.getElementById('payrollEligibleTableBody');
       const periodEnd = addDaysAdmin(payrollPeriodStart, 13);
@@ -6892,12 +6897,23 @@
       body.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       try {
         const rows = await fetch(`/api/payslips/eligible?payPeriodStart=${payrollPeriodStart}`).then(r => r.json());
+        payrollEligibleRows = rows;
         if (!rows.length) {
           body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No active team members</td></tr>';
           return;
         }
         body.innerHTML = rows.map(r => {
-          const weekPill = s => `<span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${s === 'approved' ? 'Approved' : s.replace('_', ' ')}</span>`;
+          // Shows the actual hours, not just the status — and doubles as
+          // the edit trigger (Sophia/Joy only, but this whole page
+          // already is): click either week to correct its total hours
+          // directly, on any status including already-Approved, without
+          // forcing a fresh approval cycle. See adminSetTotalHours's own
+          // comment for why this doesn't touch the employee's daily log.
+          const weekPill = (s, hours, weekNum) => `
+            <span style="cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="editPayrollWeekHours('${r.userEmail}',${weekNum})" title="Click to correct this week's total hours">
+              <span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${Number(hours).toFixed(2)} hrs${s !== 'draft' ? ` · ${s === 'approved' ? 'Approved' : s.replace('_', ' ')}` : ''}</span>
+              <span style="font-size:10px;color:var(--gray-400)">✏️</span>
+            </span>`;
           let statusText, actions;
           if (!r.hasProfile) {
             statusText = '<span style="color:#b45309;font-weight:700">Profile incomplete</span>';
@@ -6924,8 +6940,8 @@
             <tr>
               <td>${escHtml(r.userName)}</td>
               <td>${escHtml(r.position || '—')}</td>
-              <td>${weekPill(r.week1Status)}</td>
-              <td>${weekPill(r.week2Status)}</td>
+              <td>${weekPill(r.week1Status, r.week1Hours, 1)}</td>
+              <td>${weekPill(r.week2Status, r.week2Hours, 2)}</td>
               <td>${statusText}</td>
               <td style="white-space:nowrap;display:flex;gap:6px">${actions}</td>
             </tr>`;
@@ -6933,6 +6949,27 @@
       } catch {
         body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load</td></tr>';
       }
+    }
+
+    async function editPayrollWeekHours(userEmail, weekNum) {
+      const r = payrollEligibleRows.find(x => x.userEmail === userEmail);
+      if (!r) return;
+      const currentHours = weekNum === 1 ? r.week1Hours : r.week2Hours;
+      const weekStartDate = weekNum === 1 ? r.week1Start : r.week2Start;
+      const input = prompt(`${r.userName} — Week ${weekNum} total hours:`, Number(currentHours).toFixed(2));
+      if (input == null) return; // cancelled
+      const hours = Number(input);
+      if (!Number.isFinite(hours) || hours < 0) { toast('Enter a valid number of hours', 'error'); return; }
+      try {
+        const res = await fetch('/api/timesheets/admin/weeks/set-hours', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userEmail, userName: r.userName, weekStartDate, totalHours: hours })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to update hours', 'error'); return; }
+        toast('Hours updated', 'success');
+        loadPayrollEligible();
+      } catch { toast('Network error', 'error'); }
     }
 
     async function publishPayslip(id) {
