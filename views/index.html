@@ -2625,6 +2625,21 @@
       pendingDescAttachments = [];
       pendingNoteAttachments = [];
       pendingNoteEditAttachments = [];
+      // The notes composer is one shared DOM textarea reused for every
+      // task's modal — unlike taskTitleInput/taskDescInput (which are
+      // re-filled from the task record a few lines below regardless),
+      // nothing else ever repopulates this one, so unsent draft text
+      // left over from a previous task stays sitting in the box and
+      // reappears here, looking exactly like a "note" that leaked onto
+      // this task. Same story for its mention-preview and staged-
+      // attachment-chip areas, which render from state but are never
+      // re-rendered on open. Reset all three explicitly on every open.
+      document.getElementById('taskNoteInput').value = '';
+      hideMentionDropdown('taskMentionDropdown');
+      const noteMentionPreview = document.getElementById('taskNoteMentionPreview');
+      noteMentionPreview.style.display = 'none';
+      noteMentionPreview.innerHTML = '';
+      document.getElementById('taskNoteAttachmentsEdit').innerHTML = '';
       document.getElementById('taskAddCandidateInput').value = '';
       document.getElementById('taskAddCandidateInputWrap').style.display = 'none';
       document.getElementById('taskAddCandidateToggle').style.display = 'inline-block';
@@ -2920,6 +2935,14 @@
       pendingNoteAttachments = [];
       pendingNoteEditAttachments = [];
       taskAttachments = [];
+      // Belt-and-suspenders alongside the same reset in openTaskModal()
+      // (see the comment there) — an unsent note draft should never
+      // outlive the modal it was typed in, whichever way it closes.
+      document.getElementById('taskNoteInput').value = '';
+      const noteMentionPreview = document.getElementById('taskNoteMentionPreview');
+      noteMentionPreview.style.display = 'none';
+      noteMentionPreview.innerHTML = '';
+      document.getElementById('taskNoteAttachmentsEdit').innerHTML = '';
     }
 
     async function submitTask() {
