@@ -741,10 +741,29 @@
       <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
       <div style="display:flex;gap:10px;align-items:center">
         <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
+        <button onclick="openNotifHistoryModal()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">See all</button>
         <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
       </div>
     </div>
     <div id="notifPanelBody" style="padding:8px"></div>
+  </div>
+
+  <!-- Notifications history — see admin.html's identical block for the
+       full rationale (kept in sync between the two views on purpose,
+       this was previously admin-only which is exactly the inconsistency
+       being fixed here). Task mentions are included here (unlike
+       admin.html) since this is the one place they're ever shown at
+       all. -->
+  <div class="modal-overlay" id="notifHistoryModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNotifHistoryModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header" style="padding:14px 16px">
+        <div class="modal-title" style="font-size:14px">All Notifications</div>
+        <button class="modal-close" onclick="closeNotifHistoryModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:0">
+        <div id="notifHistoryBody"><div class="loading-spinner" style="padding:28px"><div class="spinner"></div></div></div>
+      </div>
+    </div>
   </div>
 
   <!-- Quick Links -->
@@ -1300,6 +1319,17 @@
       return repeatLabels[Math.floor(Math.random() * repeatLabels.length)];
     }
 
+    // Genuinely passive, binary-read-state notifications (leave/feedback
+    // decisions, task mentions, greetings) default to unread-only in the
+    // compact bell dropdown — "See all" (the history modal) is where an
+    // already-read one still lives. Announcements are deliberately NOT
+    // filtered here even though they carry an is_read flag too — that
+    // flag only means "dismissed from the bell," not "genuinely
+    // acknowledged" (the real compliance tickbox is on the Announcements
+    // tab), so an announcement stays visible until truly acted on, same
+    // as the standing to-do sections. Same helper/logic as admin.html's
+    // renderNotifPanel — keep both in sync if this changes.
+    function unreadOnly(arr) { return (arr || []).filter(x => !x.is_read); }
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
@@ -1338,37 +1368,40 @@
           `).join('')}
         `);
       }
-      if (notifData.taskMentions?.length > 0) {
+      const mentionsUnread = unreadOnly(notifData.taskMentions);
+      if (mentionsUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Task mentions</div>
-          ${notifData.taskMentions.map(m => `
-            <div style="position:relative;background:${m.is_read ? 'white' : '#eef2ff'};border:1px solid ${m.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
-              ${notifReadToggleHtml('taskmention', `${m.kind}:${m.mention_id}`, m.is_read)}
-              <div style="font-weight:${m.is_read ? '500' : '700'};color:${m.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${escHtml(m.task_title)}"</div>
+          ${mentionsUnread.map(m => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
+              ${notifReadToggleHtml('taskmention', `${m.kind}:${m.mention_id}`, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${escHtml(m.task_title)}"</div>
               <div style="font-size:11px;color:var(--text-muted)">${escHtml(m.body).slice(0,80)}${m.body.length > 80 ? '…' : ''}</div>
             </div>
           `).join('')}
         `);
       }
-      if (notifData.leaveDecisions?.length > 0) {
+      const leaveUnread = unreadOnly(notifData.leaveDecisions);
+      if (leaveUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
-          ${notifData.leaveDecisions.map(l => `
-            <div style="position:relative;background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
-              ${notifReadToggleHtml('leave', l.id, l.is_read)}
-              <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+          ${leaveUnread.map(l => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
+              ${notifReadToggleHtml('leave', l.id, false)}
+              <div style="font-weight:700;color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
             </div>
           `).join('')}
         `);
       }
-      if (notifData.feedbackDecisions?.length > 0) {
+      const feedbackUnread = unreadOnly(notifData.feedbackDecisions);
+      if (feedbackUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your feedback</div>
-          ${notifData.feedbackDecisions.map(f => `
-            <div style="position:relative;background:${f.is_read ? 'white' : '#eef2ff'};border:1px solid ${f.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
-              ${notifReadToggleHtml('feedback', f.id, f.is_read)}
-              <div style="font-weight:${f.is_read ? '500' : '700'};color:${f.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
+          ${feedbackUnread.map(f => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
+              ${notifReadToggleHtml('feedback', f.id, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(f.updated_at)}</div>
             </div>
           `).join('')}
@@ -1410,19 +1443,22 @@
           `).join('')}
         `);
       }
-      if (notifData.receivedGreetings?.length > 0) {
+      const greetingsUnread = unreadOnly(notifData.receivedGreetings);
+      if (greetingsUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your Greetings</div>
-          ${notifData.receivedGreetings.map(g => `
-            <div style="position:relative;background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
-              ${notifReadToggleHtml('greeting', g.id, g.is_read)}
-              <div style="font-weight:${g.is_read ? '500' : '700'};color:${g.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
+          ${greetingsUnread.map(g => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+              ${notifReadToggleHtml('greeting', g.id, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(g.created_at)}</div>
             </div>
           `).join('')}
         `);
       }
-      body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
+      body.innerHTML = sections.length
+        ? sections.join('') + `<div style="text-align:center;padding:6px 0 2px"><span style="cursor:pointer;color:var(--orange);font-size:11.5px;font-weight:600" onclick="openNotifHistoryModal()">See all notifications</span></div>`
+        : `<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.<br><span style="cursor:pointer;color:var(--orange);font-weight:600" onclick="openNotifHistoryModal()">See all notifications</span></div>`;
     }
 
     // Panel lives outside <nav> now (see the HTML comment above #notifPanel
@@ -1595,6 +1631,110 @@
 
     function markAllNotificationsRead() {
       fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    // ── Notifications history — see admin.html's identical feature for
+    // the full rationale. A flat, chronological list across every
+    // informational notification type, including already-read/
+    // acknowledged ones the bell dropdown itself no longer shows once
+    // dismissed/acked. Task mentions are included here (admin.html's
+    // copy doesn't have them — that view never shows task mentions in
+    // the dropdown either, since admins don't get assigned task work the
+    // same way). Keep both files' copies in sync if this changes.
+    let notifHistoryItems = [];
+    async function openNotifHistoryModal() {
+      document.getElementById('notifPanel').style.display = 'none';
+      document.getElementById('notifHistoryModal').classList.add('open');
+      document.getElementById('notifHistoryBody').innerHTML = '<div class="loading-spinner" style="padding:28px"><div class="spinner"></div></div>';
+      await refreshNotifHistory();
+    }
+    function closeNotifHistoryModal() {
+      document.getElementById('notifHistoryModal').classList.remove('open');
+    }
+    async function refreshNotifHistory() {
+      try {
+        const [fresh, allAnnouncements] = await Promise.all([
+          fetch('/api/notifications').then(r => r.json()),
+          fetch('/api/notifications/announcements/all').then(r => r.json())
+        ]);
+        notifData = fresh; // keeps the bell badge/dropdown in sync too
+        renderNotifPanel();
+        const items = [];
+        allAnnouncements.forEach(a => items.push({
+          type: 'announcement', id: a.id,
+          title: a.title || (a.message.length > 80 ? a.message.slice(0, 80) + '…' : a.message),
+          date: a.send_at, isRead: a.is_acked
+        }));
+        (notifData.leaveDecisions || []).forEach(l => items.push({
+          type: 'leave', id: l.id,
+          title: `${l.status === 'approved' ? 'Approved' : 'Rejected'}: leave ${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`,
+          date: l.updated_at, isRead: l.is_read
+        }));
+        (notifData.feedbackDecisions || []).forEach(f => items.push({
+          type: 'feedback', id: f.id, title: `Feedback on "${f.article_title}" actioned`, date: f.updated_at, isRead: f.is_read
+        }));
+        (notifData.receivedGreetings || []).forEach(g => items.push({
+          type: 'greeting', id: g.id,
+          title: `${g.sent_by_name || 'A teammate'} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} greeting`,
+          date: g.created_at, isRead: g.is_read
+        }));
+        (notifData.taskMentions || []).forEach(m => items.push({
+          type: 'taskmention', id: `${m.kind}:${m.mention_id}`, kind: m.kind, mentionId: m.mention_id, taskId: m.task_id,
+          title: `${m.author_name} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${m.task_title}"`,
+          date: m.created_at, isRead: m.is_read
+        }));
+        items.sort((a, b) => new Date(b.date) - new Date(a.date));
+        notifHistoryItems = items;
+        renderNotifHistory();
+      } catch {
+        document.getElementById('notifHistoryBody').innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">Failed to load notifications.</div>';
+      }
+    }
+    // Deliberately NOT a <table> — a tight flex row per item (dot, title
+    // truncated with ellipsis, date), nothing else. See admin.html's
+    // identical function for the full rationale.
+    function renderNotifHistory() {
+      const body = document.getElementById('notifHistoryBody');
+      if (!notifHistoryItems.length) {
+        body.innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications yet.</div>';
+        return;
+      }
+      body.innerHTML = notifHistoryItems.map((item, i) => `
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--gray-100)">
+          ${item.isRead
+            ? '<span title="Read" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gray-200)"></span>'
+            : item.type === 'announcement'
+              ? '<span title="Unread — click the title to review and acknowledge it" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>'
+              : `<span title="Click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
+          }
+          <span style="flex:1;min-width:0;cursor:pointer;font-size:12.5px;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNotifHistoryItem(${i})" title="${escHtml(item.title)}">${escHtml(item.title)}</span>
+          <span style="flex-shrink:0;font-size:11px;color:var(--text-muted)">${fmtDate(item.date)}</span>
+        </div>
+      `).join('');
+    }
+    function openNotifHistoryItem(i) {
+      const item = notifHistoryItems[i];
+      if (!item) return;
+      closeNotifHistoryModal();
+      if (item.type === 'announcement') openAnnouncementRead(item.id);
+      else if (item.type === 'leave') openLeaveDecision(item.id);
+      else if (item.type === 'feedback') openFeedbackDecision(item.id);
+      else if (item.type === 'greeting') openGreetingCelebration(item.id);
+      else if (item.type === 'taskmention') openTaskMention(item.kind, item.mentionId, item.taskId);
+    }
+    // Marks read without opening/navigating — announcements are excluded
+    // (no dot rendered for them when unread, see renderNotifHistory)
+    // since the only real "read" for one is the compliance tickbox on
+    // the Announcements tab; faking that from here would undermine the
+    // whole point of tracking who's actually reviewed it.
+    async function markNotifHistoryItemRead(i) {
+      const item = notifHistoryItems[i];
+      if (!item) return;
+      if (item.type === 'leave') await dismissNotification(`leave:${item.id}`);
+      else if (item.type === 'feedback') await dismissNotification(`feedback:${item.id}`);
+      else if (item.type === 'greeting') await fetch(`/api/notifications/${item.id}/read`, { method: 'POST' });
+      else if (item.type === 'taskmention') await dismissNotification(`taskmention:${item.kind}:${item.mentionId}`);
+      await refreshNotifHistory();
     }
 
     function openAnnouncementRead(id) {

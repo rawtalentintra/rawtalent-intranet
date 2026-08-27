@@ -225,9 +225,10 @@
        longer a CSS-positioned descendant of .notif-bell-wrap. -->
   <div id="notifPanel" style="display:none;position:fixed;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
     <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
-      <span style="font-weight:700;color:var(--navy);font-size:14px;cursor:pointer" onclick="openNotifHistoryModal()" title="View all notifications">Notifications</span>
+      <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
       <div style="display:flex;gap:10px;align-items:center">
         <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
+        <button onclick="openNotifHistoryModal()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">See all</button>
         <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
       </div>
     </div>
@@ -246,9 +247,9 @@
        to-dos that clear on their own once the underlying thing is done,
        not something with a meaningful "read" state to browse here. -->
   <div class="modal-overlay" id="notifHistoryModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNotifHistoryModal()">
-    <div class="modal" style="max-width:640px">
-      <div class="modal-header">
-        <div class="modal-title">All Notifications</div>
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header" style="padding:14px 16px">
+        <div class="modal-title" style="font-size:14px">All Notifications</div>
         <button class="modal-close" onclick="closeNotifHistoryModal()">×</button>
       </div>
       <div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:0">
@@ -4439,6 +4440,17 @@
       return repeatLabels[Math.floor(Math.random() * repeatLabels.length)];
     }
 
+    // Genuinely passive, binary-read-state notifications (leave/feedback
+    // decisions, greetings) default to unread-only in the compact bell
+    // dropdown — "See all" (the history modal) is where an already-read
+    // one still lives. Announcements are deliberately NOT filtered here
+    // even though they carry an is_read flag too — that flag only means
+    // "dismissed from the bell," not "genuinely acknowledged" (the real
+    // compliance tickbox is on the Announcements tab), so an announcement
+    // stays visible in the dropdown until truly acted on, same as the
+    // standing to-do sections below it. Same helper/logic as index.html's
+    // renderNotifPanel — keep both in sync if this changes.
+    function unreadOnly(arr) { return (arr || []).filter(x => !x.is_read); }
     function renderNotifPanel() {
       const body = document.getElementById('notifPanelBody');
       const sections = [];
@@ -4453,23 +4465,27 @@
           `).join('')}
         `);
       }
-      if (notifData.leaveDecisions?.length > 0) {
+      const leaveUnread = unreadOnly(notifData.leaveDecisions);
+      if (leaveUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your leave requests</div>
-          ${notifData.leaveDecisions.map(l => `
-            <div style="background:${l.is_read ? 'white' : '#eef2ff'};border:1px solid ${l.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
-              <div style="font-weight:${l.is_read ? '500' : '700'};color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
+          ${leaveUnread.map(l => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openLeaveDecision('${l.id}')">
+              ${notifReadToggleHtml('leave', l.id, false)}
+              <div style="font-weight:700;color:${l.status === 'approved' ? '#15803d' : '#b91c1c'};font-size:12.5px;margin-bottom:4px">${l.status === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(l.updated_at)}</div>
             </div>
           `).join('')}
         `);
       }
-      if (notifData.feedbackDecisions?.length > 0) {
+      const feedbackUnread = unreadOnly(notifData.feedbackDecisions);
+      if (feedbackUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your feedback</div>
-          ${notifData.feedbackDecisions.map(f => `
-            <div style="background:${f.is_read ? 'white' : '#eef2ff'};border:1px solid ${f.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
-              <div style="font-weight:${f.is_read ? '500' : '700'};color:${f.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
+          ${feedbackUnread.map(f => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openFeedbackDecision(${f.id})">
+              ${notifReadToggleHtml('feedback', f.id, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">✅ Your feedback on "${escHtml(f.article_title)}" was actioned!</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(f.updated_at)}</div>
             </div>
           `).join('')}
@@ -4511,18 +4527,22 @@
           `).join('')}
         `);
       }
-      if (notifData.receivedGreetings?.length > 0) {
+      const greetingsUnread = unreadOnly(notifData.receivedGreetings);
+      if (greetingsUnread.length > 0) {
         sections.push(`
           <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Your Greetings</div>
-          ${notifData.receivedGreetings.map(g => `
-            <div style="background:${g.is_read ? 'white' : '#eef2ff'};border:1px solid ${g.is_read ? 'var(--gray-100)' : '#c7d2fe'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
-              <div style="font-weight:${g.is_read ? '500' : '700'};color:${g.is_read ? 'var(--text-muted)' : 'var(--navy)'};font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
+          ${greetingsUnread.map(g => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openGreetingCelebration('${g.id}')">
+              ${notifReadToggleHtml('greeting', g.id, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">${escHtml(g.sent_by_name || 'A teammate')} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} Greeting! ${g.greeting_type === 'birthday' ? '🎂' : '🎉'}</div>
               <div style="font-size:11px;color:var(--text-muted)">${fmtDate(g.created_at)}</div>
             </div>
           `).join('')}
         `);
       }
-      body.innerHTML = sections.length ? sections.join('') : '<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.</div>';
+      body.innerHTML = sections.length
+        ? sections.join('') + `<div style="text-align:center;padding:6px 0 2px"><span style="cursor:pointer;color:var(--orange);font-size:11.5px;font-weight:600" onclick="openNotifHistoryModal()">See all notifications</span></div>`
+        : `<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications right now.<br><span style="cursor:pointer;color:var(--orange);font-weight:600" onclick="openNotifHistoryModal()">See all notifications</span></div>`;
     }
 
     // Panel lives outside <nav> now (see the HTML comment above #notifPanel
@@ -4616,6 +4636,28 @@
       return fetch('/api/notifications/dismiss', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key })
       }).then(() => loadNotifications());
+    }
+
+    // The ● / ○ toggle on each dismissible bell item — same as
+    // index.html's (keep both in sync). Greetings use their own
+    // /:id/read|unread pair; everything else goes through the generic
+    // dismiss/undismiss-by-key mechanism.
+    async function toggleNotifRead(event, type, idOrSuffix, isRead) {
+      event.stopPropagation();
+      try {
+        if (type === 'greeting') {
+          await fetch(`/api/notifications/${idOrSuffix}/${isRead ? 'unread' : 'read'}`, { method: 'POST' });
+        } else {
+          const key = `${type}:${idOrSuffix}`;
+          await fetch(`/api/notifications/${isRead ? 'undismiss' : 'dismiss'}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key })
+          });
+        }
+        loadNotifications();
+      } catch { toast('Network error', 'error'); }
+    }
+    function notifReadToggleHtml(type, idOrSuffix, isRead) {
+      return `<button onclick="toggleNotifRead(event,'${type}','${idOrSuffix}',${isRead})" title="${isRead ? 'Mark unread' : 'Mark read'}" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:2px;color:${isRead ? 'var(--gray-400)' : 'var(--orange)'}">${isRead ? '○' : '●'}</button>`;
     }
 
     function openLeaveDecision(id) {
@@ -4719,31 +4761,31 @@
         document.getElementById('notifHistoryBody').innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">Failed to load notifications.</div>';
       }
     }
+    // Deliberately NOT a <table> — this used to reuse .data-table (the
+    // same styling as a full admin data grid: thick header row, generous
+    // cell padding) which read as far heavier than a notification list
+    // has any business being. Each row here is one tight flex line: a
+    // small read/unread dot, the title (truncated with an ellipsis
+    // rather than wrapping to a second line), and the date — nothing
+    // else, no header row at all.
     function renderNotifHistory() {
       const body = document.getElementById('notifHistoryBody');
       if (!notifHistoryItems.length) {
         body.innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications yet.</div>';
         return;
       }
-      body.innerHTML = `
-        <table class="data-table" style="font-size:12.5px">
-          <thead><tr><th style="width:34px"></th><th>Title</th><th style="width:130px">Date</th></tr></thead>
-          <tbody>
-            ${notifHistoryItems.map((item, i) => `
-              <tr>
-                <td>${item.isRead
-                  ? '<span title="Read" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--gray-200)"></span>'
-                  : item.type === 'announcement'
-                    ? '<span title="Unread — click the title to review and acknowledge it" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc2626"></span>'
-                    : `<span title="Click to mark read" style="cursor:pointer;display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
-                }</td>
-                <td style="cursor:pointer;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'}" onclick="openNotifHistoryItem(${i})">${escHtml(item.title)}</td>
-                <td style="color:var(--text-muted);white-space:nowrap">${fmtDate(item.date)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
+      body.innerHTML = notifHistoryItems.map((item, i) => `
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--gray-100)">
+          ${item.isRead
+            ? '<span title="Read" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gray-200)"></span>'
+            : item.type === 'announcement'
+              ? '<span title="Unread — click the title to review and acknowledge it" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>'
+              : `<span title="Click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
+          }
+          <span style="flex:1;min-width:0;cursor:pointer;font-size:12.5px;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNotifHistoryItem(${i})" title="${escHtml(item.title)}">${escHtml(item.title)}</span>
+          <span style="flex-shrink:0;font-size:11px;color:var(--text-muted)">${fmtDate(item.date)}</span>
+        </div>
+      `).join('');
     }
     function openNotifHistoryItem(i) {
       const item = notifHistoryItems[i];
