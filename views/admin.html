@@ -299,14 +299,14 @@
         <div class="admin-nav-item" onclick="showSection('report-timesheets', this)">
           <span class="admin-nav-icon">🕒</span> Timesheets
         </div>
+        <div class="admin-nav-item" onclick="showSection('report-clients', this)">
+          <span class="admin-nav-icon">🏢</span> Centres
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Onboarding</div>
         <div class="admin-nav-item" onclick="showSection('report-candidates', this)">
           <span class="admin-nav-icon">🧑‍🎓</span> Educators
-        </div>
-        <div class="admin-nav-item" onclick="showSection('report-clients', this)">
-          <span class="admin-nav-icon">🏢</span> Centres
         </div>
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
@@ -4306,12 +4306,14 @@
       // still 403s for them server-side (requireAdmin on /admin/all) —
       // intentional, that's more than their own team's approvals.
       qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue', 'leave-requests'],
-      // 'educator-outreach', 'report-candidates' (Educators), 'report-clients'
-      // (Centres), 'document-checker', and 'advertising-opportunities' —
-      // Onboarding's items — are deliberately left out of both allowlists
-      // below. They stayed admin/super_admin-only before this section
-      // existed and this move doesn't change that; qa_view/workforce_partner
-      // access can be added later if Ops needs it.
+      // 'educator-outreach', 'report-candidates' (Educators),
+      // 'document-checker', and 'advertising-opportunities' — Onboarding's
+      // remaining items — plus 'report-clients' (Centres, moved to the
+      // Reports nav group 2026-08-27 but still the same section id) are
+      // deliberately left out of both allowlists below. They stayed
+      // admin/super_admin-only before this section existed and this move
+      // doesn't change that; qa_view/workforce_partner access can be added
+      // later if Ops needs it.
       workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
