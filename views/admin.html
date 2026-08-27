@@ -8581,6 +8581,33 @@
       `;
     }
 
+    // A client's own nickName is rarely populated (27% of real active
+    // clients, confirmed via a live sweep of the actual RT sync — most
+    // real clients just have an empty string there) and isn't a contact
+    // person's name anyway. Every RT location, on the other hand, always
+    // carries a real contactName plus its own contactNo — often a
+    // different number from the client-level one above it (a head-office/
+    // billing line vs. the actual site), confirmed on real records. Centre
+    // Contact and Contact No below both read from the SAME location (its
+    // primary one, or the first if none is flagged primary) on purpose —
+    // showing a name from one place next to a number from another would
+    // just be a different, subtler version of the same accuracy problem.
+    function primaryCentreLocation(r) {
+      const locs = r.locations || [];
+      if (!locs.length) return null;
+      return locs.find(l => l.isPrimary) || locs[0];
+    }
+    function centreContactCell(r) {
+      const locs = r.locations || [];
+      const name = primaryCentreLocation(r)?.contactName?.trim();
+      if (!name) return '<span style="color:var(--gray-400)">—</span>';
+      return escHtml(name) + (locs.length > 1 ? ` <span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap" title="This client has ${locs.length} locations, each with its own contact — open the client to see them all">(+${locs.length - 1} more)</span>` : '');
+    }
+    function centreContactNoCell(r) {
+      const primary = primaryCentreLocation(r);
+      return escHtml((primary?.contactNo || r.contactNo || '').trim() || '—');
+    }
+
     // Only actual placeholder/test records — "test", "dummy", "delete",
     // etc. as whole words in the name. Deliberately does NOT match on
     // nickName, since ~917 of the ~1,100 real RT clients carry a
@@ -11607,9 +11634,9 @@
           ],
           columns: [
             { header: 'Name', render: r => escHtml(r.name || '—') },
-            { header: 'Nickname', render: r => escHtml(r.nickName || '—') },
+            { header: 'Centre Contact', render: r => centreContactCell(r) },
             { header: 'Suburb(s)', render: r => escHtml(clientSuburbs(r).join(', ') || '—') },
-            { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+            { header: 'Contact No', render: r => centreContactNoCell(r) },
             { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
             { header: 'Locations', render: r => String((r.locations || []).length) },
             { header: 'Health', render: r => clientHealthCell(r) },
@@ -11635,9 +11662,9 @@
         ],
         columns: [
           { header: 'Name', render: r => escHtml(r.name || '—') },
-          { header: 'Nickname', render: r => escHtml(r.nickName || '—') },
+          { header: 'Centre Contact', render: r => centreContactCell(r) },
           { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
-          { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
+          { header: 'Contact No', render: r => centreContactNoCell(r) },
           { header: 'Assignment Type', render: r => escHtml(r.clientAssignmentTypeId ?? '—') },
           { header: 'Preference', render: r => escHtml(r.clientPreferenceId ?? '—') },
           { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
