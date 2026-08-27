@@ -2006,6 +2006,7 @@
     let allTasks = [];
     let editingTaskId = null;
     let taskFilterDept = 'all';
+    let taskFilterClass = 'all'; // 'all' | '__none__' | a task_classifications.id
     let taskShowDone = false;
     let taskMineOnly = true; // default view for everyone is "Assigned to me"
     let taskSearchQuery = '';
@@ -2095,7 +2096,13 @@
       return taskMeta.departments.find(d => d.id === id) || { name: id || 'Unknown', color: '#64748b', icon: '📁' };
     }
 
-    function setTaskDeptFilter(id) { taskFilterDept = id; renderTasksView(); }
+    // Resets the classification filter on every department change — a
+    // classification belongs to exactly one department (see
+    // populateTaskClassSelect), so a previously-picked one is almost
+    // never valid for the newly-selected department and would otherwise
+    // silently filter the board down to nothing.
+    function setTaskDeptFilter(id) { taskFilterDept = id; taskFilterClass = 'all'; renderTasksView(); }
+    function setTaskClassFilter(id) { taskFilterClass = id; renderTasksView(); }
     function toggleTaskLegend() { taskLegendOpen = !taskLegendOpen; renderTasksView(); }
     function setTaskViewMode(mode) { taskViewMode = mode; renderTasksView(); }
 
@@ -2230,7 +2237,14 @@
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             department_id: t.department_id, classification_id: t.classification_id, title: t.title,
-            description: t.description, status, priority: t.priority, assigned_to_emails: t.assigned_to_emails, due_date: t.due_date
+            description: t.description, status, priority: t.priority, assigned_to_emails: t.assigned_to_emails, due_date: t.due_date,
+            // PUT /api/tasks/:id is a full-column overwrite, not a partial
+            // patch (see normalizeLinkedCandidates(undefined) => [] in
+            // routes/tasks.js) — omitting these here silently wiped every
+            // task's Linked Educators and linked client back to empty on
+            // its very next drag between board columns. Always echo back
+            // whatever the task already had; a drag only ever changes status.
+            linked_candidates: t.linked_candidates, linked_client_name: t.linked_client_name, linked_client_phone: t.linked_client_phone
           })
         });
         if (!res.ok) throw new Error();
@@ -2304,6 +2318,8 @@
       const visibleAll = allTasks.filter(t => taskShowDone || t.status !== 'done');
       const filtered = visibleAll.filter(t => {
         if (taskFilterDept !== 'all' && t.department_id !== taskFilterDept) return false;
+        if (taskFilterClass === '__none__' && t.classification_id) return false;
+        if (taskFilterClass !== 'all' && taskFilterClass !== '__none__' && t.classification_id !== taskFilterClass) return false;
         if (taskMineOnly && !(Array.isArray(t.assigned_to_emails) && t.assigned_to_emails.includes((currentUserEmail || '').toLowerCase()))) return false;
         if (taskSearchQuery && !t.title.toLowerCase().includes(taskSearchQuery.toLowerCase())) return false;
         return true;
@@ -2316,12 +2332,14 @@
         `).join('')}
       `;
 
+      const classFilterHtml = taskClassFilterSelectHtml(visibleAll);
       const viewHtml = taskViewMode === 'list' ? renderTaskListHtml(filtered) : renderTaskBoardHtml(filtered);
 
       list.innerHTML = `
         <div class="task-toolbar">
           <button class="btn-add" onclick="openTaskModal()">+ New Task</button>
           <input type="text" class="form-control" id="taskSearchInput" placeholder="Search tasks…" style="max-width:220px" value="${escHtml(taskSearchQuery)}" oninput="taskSearchQuery=this.value;renderTasksView()">
+          ${classFilterHtml}
           <label class="task-toggle"><input type="checkbox" ${taskMineOnly ? 'checked' : ''} onchange="taskMineOnly=this.checked;renderTasksView()"> Assigned to me</label>
           <label class="task-toggle"><input type="checkbox" ${taskShowDone ? 'checked' : ''} onchange="taskShowDone=this.checked;renderTasksView()"> Show done</label>
           <div class="task-view-toggle" style="margin-left:auto">
@@ -2340,6 +2358,44 @@
         const input = document.getElementById('taskSearchInput');
         if (input && taskSearchQuery) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
       }
+    }
+
+    // Classification filter dropdown for the Tasks toolbar (distinct from
+    // populateTaskClassSelect, which fills the <select> inside the task
+    // modal for setting one classification). Scoped to whichever
+    // department is currently filtered — a classification belongs to
+    // exactly one department (see task_classifications), and names
+    // collide across departments (e.g. "Handover" exists under both
+    // Bookings and Onboarding), so "All Departments" groups by
+    // department via <optgroup> rather than showing one flat, ambiguous
+    // list. Hidden entirely once a department filter narrows things down
+    // to zero classifications, rather than showing a useless dropdown
+    // with only "All Classifications" in it.
+    function taskClassFilterSelectHtml(visibleAll) {
+      const inScope = taskFilterDept === 'all'
+        ? taskMeta.classifications
+        : taskMeta.classifications.filter(c => c.department_id === taskFilterDept);
+      if (!inScope.length) return '';
+      const countFor = id => visibleAll.filter(t => t.classification_id === id).length;
+      const noneCount = visibleAll.filter(t => !t.classification_id && (taskFilterDept === 'all' || t.department_id === taskFilterDept)).length;
+      let optionsHtml;
+      if (taskFilterDept === 'all') {
+        optionsHtml = taskMeta.departments.map(d => {
+          const opts = inScope.filter(c => c.department_id === d.id).sort((a, b) => a.name.localeCompare(b.name));
+          if (!opts.length) return '';
+          return `<optgroup label="${escHtml(d.name)}">${opts.map(c => `<option value="${c.id}" ${taskFilterClass === c.id ? 'selected' : ''}>${escHtml(c.name)} (${countFor(c.id)})</option>`).join('')}</optgroup>`;
+        }).join('');
+      } else {
+        optionsHtml = [...inScope].sort((a, b) => a.name.localeCompare(b.name))
+          .map(c => `<option value="${c.id}" ${taskFilterClass === c.id ? 'selected' : ''}>${escHtml(c.name)} (${countFor(c.id)})</option>`).join('');
+      }
+      return `
+        <select class="form-control" id="taskClassFilterSelect" style="max-width:200px" onchange="setTaskClassFilter(this.value)">
+          <option value="all" ${taskFilterClass === 'all' ? 'selected' : ''}>All Classifications</option>
+          <option value="__none__" ${taskFilterClass === '__none__' ? 'selected' : ''}>— No classification (${noneCount}) —</option>
+          ${optionsHtml}
+        </select>
+      `;
     }
 
     function populateTaskSelects() {
