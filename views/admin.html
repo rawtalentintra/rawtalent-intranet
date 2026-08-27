@@ -225,13 +225,36 @@
        longer a CSS-positioned descendant of .notif-bell-wrap. -->
   <div id="notifPanel" style="display:none;position:fixed;width:360px;max-height:480px;overflow-y:auto;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:200">
     <div style="padding:14px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white">
-      <span style="font-weight:700;color:var(--navy);font-size:14px">Notifications</span>
+      <span style="font-weight:700;color:var(--navy);font-size:14px;cursor:pointer" onclick="openNotifHistoryModal()" title="View all notifications">Notifications</span>
       <div style="display:flex;gap:10px;align-items:center">
         <button id="newAnnouncementBtn" onclick="openAnnouncementModal()" style="display:none;background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">+ Announce</button>
         <button onclick="markAllNotificationsRead()" style="background:none;border:none;color:var(--orange);font-size:11.5px;font-weight:600;cursor:pointer">Mark all read</button>
       </div>
     </div>
     <div id="notifPanelBody" style="padding:8px"></div>
+  </div>
+
+  <!-- Notifications history — everything the bell has ever shown you
+       (informational types only: announcements, your leave decisions,
+       your feedback decisions, greetings received), including ones
+       already read, since the bell dropdown itself only ever shows a
+       short recent/unread-weighted slice and "Mark all read" (or ticking
+       an announcement's real acknowledgment box) makes items disappear
+       from it — this is the place to find something again afterward.
+       Task alerts, pending leave approvals, training assignments, and
+       hours reminders are deliberately left out: those are standing
+       to-dos that clear on their own once the underlying thing is done,
+       not something with a meaningful "read" state to browse here. -->
+  <div class="modal-overlay" id="notifHistoryModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNotifHistoryModal()">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header">
+        <div class="modal-title">All Notifications</div>
+        <button class="modal-close" onclick="closeNotifHistoryModal()">×</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:0">
+        <div id="notifHistoryBody"><div class="loading-spinner" style="padding:28px"><div class="spinner"></div></div></div>
+      </div>
+    </div>
   </div>
 
   <div id="impersonationBanner" style="display:none;background:#fef2f2;border-bottom:1px solid #fecaca;padding:9px 24px;text-align:center;font-size:13.5px;color:#991b1b;font-weight:600">
@@ -4565,6 +4588,109 @@
 
     function markAllNotificationsRead() {
       fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    // ── Notifications history (2026-08-27) ─────────────────────────
+    // A flat, chronological table across every informational notification
+    // type — including already-read/acknowledged ones, which the bell
+    // dropdown itself never shows once dismissed. Reuses /api/notifications
+    // (leave/feedback/greetings there already include recently-read items,
+    // not just unread ones) plus /announcements/all specifically for
+    // announcements, since the bell's own copy is filtered to unread-only.
+    let notifHistoryItems = [];
+    async function openNotifHistoryModal() {
+      document.getElementById('notifPanel').style.display = 'none';
+      document.getElementById('notifHistoryModal').classList.add('open');
+      document.getElementById('notifHistoryBody').innerHTML = '<div class="loading-spinner" style="padding:28px"><div class="spinner"></div></div>';
+      await refreshNotifHistory();
+    }
+    function closeNotifHistoryModal() {
+      document.getElementById('notifHistoryModal').classList.remove('open');
+    }
+    async function refreshNotifHistory() {
+      try {
+        const [fresh, allAnnouncements] = await Promise.all([
+          fetch('/api/notifications').then(r => r.json()),
+          fetch('/api/notifications/announcements/all').then(r => r.json())
+        ]);
+        notifData = fresh; // keeps the bell badge/dropdown in sync too
+        renderNotifPanel();
+        const items = [];
+        allAnnouncements.forEach(a => items.push({
+          // Older announcements predate the title field and have none set —
+          // fall back to the message, truncated so one long-message row
+          // doesn't blow out an otherwise compact table.
+          type: 'announcement', id: a.id,
+          title: a.title || (a.message.length > 80 ? a.message.slice(0, 80) + '…' : a.message),
+          date: a.send_at, isRead: a.is_acked
+        }));
+        (notifData.leaveDecisions || []).forEach(l => items.push({
+          type: 'leave', id: l.id,
+          title: `${l.status === 'approved' ? 'Approved' : 'Rejected'}: leave ${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`,
+          date: l.updated_at, isRead: l.is_read
+        }));
+        (notifData.feedbackDecisions || []).forEach(f => items.push({
+          type: 'feedback', id: f.id, title: `Feedback on "${f.article_title}" actioned`, date: f.updated_at, isRead: f.is_read
+        }));
+        (notifData.receivedGreetings || []).forEach(g => items.push({
+          type: 'greeting', id: g.id,
+          title: `${g.sent_by_name || 'A teammate'} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} greeting`,
+          date: g.created_at, isRead: g.is_read
+        }));
+        items.sort((a, b) => new Date(b.date) - new Date(a.date));
+        notifHistoryItems = items;
+        renderNotifHistory();
+      } catch {
+        document.getElementById('notifHistoryBody').innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">Failed to load notifications.</div>';
+      }
+    }
+    function renderNotifHistory() {
+      const body = document.getElementById('notifHistoryBody');
+      if (!notifHistoryItems.length) {
+        body.innerHTML = '<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:12.5px">No notifications yet.</div>';
+        return;
+      }
+      body.innerHTML = `
+        <table class="data-table" style="font-size:12.5px">
+          <thead><tr><th style="width:34px"></th><th>Title</th><th style="width:130px">Date</th></tr></thead>
+          <tbody>
+            ${notifHistoryItems.map((item, i) => `
+              <tr>
+                <td>${item.isRead
+                  ? '<span title="Read" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--gray-200)"></span>'
+                  : item.type === 'announcement'
+                    ? '<span title="Unread — click the title to review and acknowledge it" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc2626"></span>'
+                    : `<span title="Click to mark read" style="cursor:pointer;display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
+                }</td>
+                <td style="cursor:pointer;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'}" onclick="openNotifHistoryItem(${i})">${escHtml(item.title)}</td>
+                <td style="color:var(--text-muted);white-space:nowrap">${fmtDate(item.date)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+    function openNotifHistoryItem(i) {
+      const item = notifHistoryItems[i];
+      if (!item) return;
+      closeNotifHistoryModal();
+      if (item.type === 'announcement') openAnnouncementRead(item.id);
+      else if (item.type === 'leave') openLeaveDecision(item.id);
+      else if (item.type === 'feedback') openFeedbackDecision(item.id);
+      else if (item.type === 'greeting') openGreetingCelebration(item.id);
+    }
+    // Marks read without opening/navigating — announcements are excluded
+    // (no dot rendered for them when unread, see renderNotifHistory) since
+    // the only real "read" for one is the compliance tickbox on the
+    // Announcements tab; faking that from here would undermine the whole
+    // point of tracking who's actually reviewed it.
+    async function markNotifHistoryItemRead(i) {
+      const item = notifHistoryItems[i];
+      if (!item) return;
+      if (item.type === 'leave') await dismissNotification(`leave:${item.id}`);
+      else if (item.type === 'feedback') await dismissNotification(`feedback:${item.id}`);
+      else if (item.type === 'greeting') await fetch(`/api/notifications/${item.id}/read`, { method: 'POST' });
+      await refreshNotifHistory();
     }
 
     function openAnnouncementRead(id) {
