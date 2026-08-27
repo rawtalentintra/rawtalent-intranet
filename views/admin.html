@@ -8567,18 +8567,24 @@
       dormant: 'No booking in 12+ months, or marked inactive in RT.'
     };
     function centreHealthLegendHtml() {
+      // A fixed 2-column grid of [badge | definition] pairs, each pair its
+      // own nested grid with a fixed-width badge column — this is what
+      // actually fixes the "too messy" flex-wrap version, where badges of
+      // different label lengths threw every row's alignment off. Every
+      // badge now starts at the same x-position in its column regardless
+      // of how long its own label is.
       return `
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">
-          <div style="font-weight:700;color:var(--navy);margin-bottom:6px">What "Health" means</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px 20px">
+          <div style="font-weight:700;color:var(--navy);margin-bottom:8px">What "Health" means</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px 28px">
             ${CENTRE_HEALTH_ORDER.map(cat => `
-              <div style="display:flex;align-items:baseline;gap:6px;max-width:300px">
-                ${centreHealthBadge(cat)}
-                <span>${escHtml(CENTRE_HEALTH_DEFINITIONS[cat])}</span>
+              <div style="display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:baseline">
+                <div>${centreHealthBadge(cat)}</div>
+                <div>${escHtml(CENTRE_HEALTH_DEFINITIONS[cat])}</div>
               </div>
             `).join('')}
           </div>
-          <div style="margin-top:8px">Computed live from each centre's real booking/visit history in RT, same as <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\\'my-centres\\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> — not editable here. A client with no tracked centre yet (too new, no bookings, or every location inactive) shows "Not tracked" rather than a category.</div>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Computed live from each centre's real booking/visit history in RT, same as <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\\'my-centres\\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> — not editable here. A client with no tracked centre yet (too new, no bookings, or every location inactive) shows "Not tracked" rather than a category.</div>
         </div>
       `;
     }
@@ -8649,6 +8655,30 @@
       const worst = entries.slice().sort((a, b) => CENTRE_HEALTH_ORDER.indexOf(a.health) - CENTRE_HEALTH_ORDER.indexOf(b.health))[0];
       const badge = centreHealthBadge(worst.health, worst.healthReasons, worst.isStrategic, worst.isEscalated);
       return entries.length > 1 ? `${badge} <span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap">(${entries.length} locations)</span>` : badge;
+    }
+    // Backs the Health filter — every category a client's locations
+    // actually carry (usually one; a multi-location client can have
+    // several), plus the same "not_tracked" pseudo-category the column
+    // itself shows, so filtering isn't silently missing clients with no
+    // computed health at all.
+    function centreRowHealthCategories(r) {
+      const entries = centreHealthByClientId.get(r.clientId);
+      if (!entries || !entries.length) return ['not_tracked'];
+      return [...new Set(entries.map(e => e.health))];
+    }
+    const CENTRE_HEALTH_FILTER_LABELS = {
+      ...Object.fromEntries(CENTRE_HEALTH_ORDER.map(cat => [cat, CENTRE_HEALTH_META[cat].label])),
+      not_tracked: 'Not tracked'
+    };
+    // Kept short at a glance — one suburb is by far the common case (86%
+    // of active real clients have exactly one location), and a client
+    // like Nino Early Learning Adventures spanning 11 suburbs would
+    // otherwise print a comma-separated wall of text in this cell.
+    function clientSuburbsCell(r) {
+      const suburbs = clientSuburbs(r);
+      if (!suburbs.length) return '<span style="color:var(--gray-400)">—</span>';
+      const rest = suburbs.slice(1);
+      return escHtml(suburbs[0]) + (rest.length ? ` <span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap" title="${escHtml(rest.join(', '))}">(+${rest.length} more)</span>` : '');
     }
 
     // services/centreNurtureService.js computes this live from centre_visits
@@ -11596,9 +11626,6 @@
         sub: 'All client centres from the RawTalent app.',
         dateField: 'createdDate', dateFieldLabel: 'created date',
         searchFields: ['name', 'nickName', 'email', 'emailAddress'],
-        extraFilters: [
-          { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
-        ],
         // Health comes from services/centreHealthService.js via
         // GET /api/centres (the same live-computed data My Centres uses) —
         // fetched once per session (ensureCentreHealthByClientId) and
@@ -11623,8 +11650,11 @@
           // needs day to day. Still fully switchable back to Active +
           // Inactive via the same dropdown.
           defaultActiveOnly: true,
+          // Spreadsheet-style full grid lines + zebra striping for this
+          // one table (see .data-table-excel in style.css) — a dense
+          // reference directory, not one of the app's usual light tables.
+          excelStyle: true,
           extraFilters: [
-            { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient },
             // Distinct from "Migration delete" (RT's own historical marker
             // on real, formerly-real clients, left alone here) — this only
             // catches actual placeholder/test records (name containing
@@ -11634,16 +11664,22 @@
             // are never something day-to-day work needs to see.
             { id: 'hideTest', label: 'Hide Test Centres', type: 'checkbox', default: true, test: r => !isTestCentreName(r.name) }
           ],
+          selectFilters: [
+            { id: 'health', label: 'Health', multi: true, optionsFn: r => centreRowHealthCategories(r), labelMap: CENTRE_HEALTH_FILTER_LABELS }
+          ],
           columns: [
             { header: 'Name', render: r => escHtml(r.name || '—') },
             { header: 'Centre Contact', render: r => centreContactCell(r) },
-            { header: 'Suburb(s)', render: r => escHtml(clientSuburbs(r).join(', ') || '—') },
             { header: 'Contact No', render: r => centreContactNoCell(r) },
             { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
             { header: 'Locations', render: r => String((r.locations || []).length) },
             { header: 'Health', render: r => clientHealthCell(r) },
             { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
-            { header: 'Active', render: r => r.isActive ? '✅' : '—' }
+            { header: 'Active', render: r => r.isActive ? '✅' : '—' },
+            // Kept last on purpose — can run long for a multi-location
+            // client (Nino Early Learning has 11 different suburbs), and
+            // is the least often needed at a glance next to Health/Active.
+            { header: 'Suburb(s)', render: r => clientSuburbsCell(r) }
           ],
           detailTitle: r => r.name || 'Client Details',
           renderDetail: clientDetailHtml
@@ -12167,7 +12203,7 @@
             `}
             <div class="admin-table-card">
               <div style="overflow-x:auto">
-                <table class="data-table data-table-compact">
+                <table class="data-table data-table-compact${cfg.listView.excelStyle ? ' data-table-excel' : ''}">
                   <thead><tr>${cfg.listView.columns.map(c => `<th>${escHtml(c.header)}</th>`).join('')}</tr></thead>
                   <tbody id="report_${type}_list_table">
                     <tr><td colspan="${cfg.listView.columns.length}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>

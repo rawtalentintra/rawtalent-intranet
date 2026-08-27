@@ -1743,6 +1743,20 @@ body:has(> .navbar) { padding-top: 64px; }
 }
 .data-table tr:hover td { background: rgba(61,111,255,.03); }
 
+/* Opt-in, additive to .data-table rather than changing its shared base
+   (dozens of unrelated tables use plain .data-table/.data-table-compact)
+   — full grid lines + zebra striping, for a spreadsheet-like read on a
+   dense reference table (Centre List) rather than the app's usual
+   row-separator-only look. Placed after every other .data-table rule
+   above (same specificity throughout this file) so its border/hover
+   styling actually wins the cascade instead of being partially
+   overridden by e.g. .data-table td's own border-bottom. */
+.data-table-excel { border: 1px solid var(--gray-200); }
+.data-table-excel th, .data-table-excel td { border: 1px solid var(--gray-200); }
+.data-table-excel tr:last-child td { border-bottom: 1px solid var(--gray-200); }
+.data-table-excel tbody tr:nth-child(even) td { background: var(--offwhite); }
+.data-table-excel tr:hover td { background: rgba(61,111,255,.06); }
+
 /* Toast — cleaner */
 .toast {
   background: var(--navy);
