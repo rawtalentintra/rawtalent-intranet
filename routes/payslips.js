@@ -43,6 +43,23 @@ router.get('/eligible', requireFinalApprover, async (req, res) => {
   }
 });
 
+// One PDF covering every payslip generated for the given pay period —
+// see services/payslipService.js's buildTeamInvoiceData/generateTeamInvoicePdf.
+// "view" (inline) vs "download" (attachment, with the real filename
+// convention) share the same builder so they can never drift apart.
+router.get('/admin/team-invoice', requireFinalApprover, async (req, res) => {
+  try {
+    if (!req.query.payPeriodStart) return res.status(400).json({ error: 'payPeriodStart is required' });
+    const { buffer, filename } = await payslip.generateTeamInvoicePdf(req.query.payPeriodStart);
+    const disposition = req.query.download ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename.replace(/"/g, '')}"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/suggested-invoice-number', requireFinalApprover, async (req, res) => {
   try {
     res.json({ invoiceNumber: await payslip.suggestedInvoiceNumber() });

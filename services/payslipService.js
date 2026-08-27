@@ -283,9 +283,95 @@ async function previewStoredPdf(id) {
   }, p);
 }
 
+// ── Team Invoice — one PDF per pay run covering every employee paid in
+// it, modeled on a real external invoice Joy provided (#0049). That
+// sample's Employee/Designation/Address/Bank Details block is Sophia's
+// (Operations Manager) — RawTalent's actual pay run is one lump AUD→PHP
+// transfer into her Wise account, which she then distributes internally,
+// so the invoice is addressed to her specifically, not to whoever
+// happens to click Generate. Hardcoded here rather than guessed per
+// request; flagged plainly since it's the one assumption in this feature
+// that isn't derived from stored data — change this constant if that's
+// ever not the actual banking arrangement.
+const TEAM_INVOICE_RECIPIENT_EMAIL = 'sophia@rawtalent.com.au';
+
+// Which of the two sections a position falls under — data-derived rather
+// than a hardcoded name list, so a new hire's position slots in
+// correctly without this needing an update. Matches every position on
+// the real sample invoice exactly: Operations Manager/Team Manager (and
+// Founder, not present on that sample but the same kind of role) read as
+// "Managements"; everything else (Talent Consultant, Sr Consultant,
+// Workforce Partner, Email Marketer, ...) reads as "Consultants".
+function teamInvoiceSectionFor(position) {
+  return /manager|founder/i.test(position || '') ? 'Managements' : 'Consultants';
+}
+
+// Aggregates every payslip already generated for a pay period into the
+// shape teamInvoicePdfService.buildTeamInvoicePdf expects. Deliberately
+// includes drafts as well as published payslips — the invoice is
+// prepared alongside the pay run's payslips, not after every one of them
+// is individually published, and Joy asked to "view and generate the
+// full invoice for this pay run" as its own step.
+async function buildTeamInvoiceData(payPeriodStart) {
+  const db = getDb();
+  const res = await db.execute({ sql: 'SELECT * FROM payslips WHERE pay_period_start = ? ORDER BY user_name ASC', args: [payPeriodStart] });
+  const rows = res.rows.map(normalizePayslip);
+  if (!rows.length) throw new Error('No payslips have been generated for this pay period yet');
+
+  const metaByEmail = {};
+  await Promise.all([...new Set(rows.map(r => r.user_email))].map(async email => {
+    metaByEmail[email] = await getEmployeeMeta(email);
+  }));
+
+  const sectionOrder = ['Managements', 'Consultants'];
+  const sectionsByLabel = { Managements: [], Consultants: [] };
+  let totalAud = 0;
+  for (const row of rows) {
+    const meta = metaByEmail[row.user_email] || {};
+    const position = meta.position || '';
+    const totalHours = (row.line_items || []).reduce((sum, li) => sum + Number(li.hours || 0), 0);
+    const firstName = (meta.legalNameOrName || row.user_name || row.user_email).trim().split(/\s+/)[0];
+    sectionsByLabel[teamInvoiceSectionFor(position)].push({ position, firstName, totalHours, amount: Number(row.total_earnings_aud) });
+    totalAud += Number(row.total_earnings_aud);
+  }
+
+  return {
+    invoiceNumber: rows[0].invoice_number,
+    referenceNo: `RawTalent${String(rows[0].invoice_number).padStart(4, '0')}`,
+    payPeriodStart: rows[0].pay_period_start,
+    payPeriodEnd: rows[0].pay_period_end,
+    datePaid: rows[0].date_paid,
+    sections: sectionOrder.map(label => ({ label, rows: sectionsByLabel[label] })),
+    totalAud: round2(totalAud)
+  };
+}
+
+// "Team Invoice _ August 3 - 14, 2026 (#0049) - Team Invoice.pdf" — the
+// exact filename convention on the real invoice Joy provided. Reuses
+// fmtRangeLabel's same-month/month-crossing logic so a period spanning
+// e.g. July 29 - August 11 files correctly too.
+function teamInvoiceFilename(invoiceNumber, payPeriodStart, payPeriodEnd) {
+  const rangeLabel = fmtRangeLabel(payPeriodStart, payPeriodEnd);
+  return `Team Invoice _ ${rangeLabel} (#${String(invoiceNumber).padStart(4, '0')}) - Team Invoice.pdf`;
+}
+
+async function generateTeamInvoicePdf(payPeriodStart) {
+  const { buildTeamInvoicePdf } = require('./teamInvoicePdfService');
+  const [invoice, profile, meta] = await Promise.all([
+    buildTeamInvoiceData(payPeriodStart),
+    getProfile(TEAM_INVOICE_RECIPIENT_EMAIL),
+    getEmployeeMeta(TEAM_INVOICE_RECIPIENT_EMAIL)
+  ]);
+  const p = profile || {};
+  const recipient = { userName: meta.legalNameOrName, designation: meta.position, address: meta.address, ...p };
+  const buffer = await buildTeamInvoicePdf(invoice, recipient);
+  const filename = teamInvoiceFilename(invoice.invoiceNumber, invoice.payPeriodStart, invoice.payPeriodEnd);
+  return { buffer, filename };
+}
+
 module.exports = {
   getProfile, listProfiles, upsertProfile, getEmployeeMeta, suggestedInvoiceNumber,
   listEligibleForPeriod, buildLineItemsFromTimesheets, previewPdf, generate,
   publish, unpublish, listMine, listAllForAdmin, authorizeDownload, deleteDraft,
-  getById, downloadBuffer, previewStoredPdf
+  getById, downloadBuffer, previewStoredPdf, generateTeamInvoicePdf
 };

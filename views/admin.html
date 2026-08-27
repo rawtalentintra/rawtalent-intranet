@@ -615,6 +615,13 @@
               <button class="btn-secondary" onclick="changePayrollPeriod(-1)">← Prev</button>
               <div id="payrollPeriodLabel" style="font-weight:700;color:var(--navy);font-size:14px"></div>
               <button class="btn-secondary" onclick="changePayrollPeriod(1)">Next →</button>
+              <!-- One invoice for the whole pay run, covering everyone
+                   already generated below — not a per-person document,
+                   see services/payslipService.js's buildTeamInvoiceData. -->
+              <div style="margin-left:auto;display:flex;gap:8px">
+                <button class="btn-secondary" onclick="viewPayrollTeamInvoice()">📄 View Team Invoice</button>
+                <button class="btn-add" onclick="downloadPayrollTeamInvoice()">⬇️ Download Team Invoice</button>
+              </div>
             </div>
           </div>
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
@@ -622,8 +629,22 @@
             <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Set once here, applied automatically to every payslip you generate below for this pay period — still editable per person in the generate form if one needs to differ. Invoice Number is the same number on every payslip in this run (RawTalent issues one invoice per pay run, not per person) — it's used as-is, not incremented as you generate each person's payslip.</div>
             <div style="display:flex;gap:20px;flex-wrap:wrap">
               <div class="form-group-modal" style="margin:0">
+                <label class="form-label-modal">Total PHP Received</label>
+                <input type="number" step="0.01" min="0" id="payrollBatchPhpReceivedInput" class="form-control" style="max-width:150px" placeholder="e.g. 420000" oninput="onPayrollBatchTransferInput()">
+              </div>
+              <div class="form-group-modal" style="margin:0">
+                <label class="form-label-modal">Total AUD Requested</label>
+                <input type="number" step="0.01" min="0" id="payrollBatchAudRequestedInput" class="form-control" style="max-width:150px" placeholder="e.g. 12500" oninput="onPayrollBatchTransferInput()">
+              </div>
+              <div class="form-group-modal" style="margin:0">
+                <!-- Read-only — derived from the two real transfer totals
+                     above (PHP Received ÷ AUD Requested), not typed
+                     directly. This is the actual rate that transfer
+                     cleared at, which is what should drive every PHP
+                     payslip this run, not a quoted/rounded rate typed
+                     from memory. -->
                 <label class="form-label-modal">Exchange Rate <span class="optional">(1 AUD = ? PHP)</span></label>
-                <input type="number" step="0.0001" min="0" id="payrollBatchExchangeRateInput" class="form-control" style="max-width:140px" placeholder="e.g. 35.50" onchange="setPayrollBatchExchangeRate(this.value)">
+                <input type="text" id="payrollBatchExchangeRateInput" class="form-control" style="max-width:140px;background:var(--gray-100);color:var(--text-muted)" readonly placeholder="Computed">
               </div>
               <div class="form-group-modal" style="margin:0">
                 <label class="form-label-modal">Date Paid</label>
@@ -6460,6 +6481,15 @@
     // incrementing after each generate. invoice_number's DB uniqueness
     // constraint was dropped for exactly this reason (see db/schema.sql).
     let payrollBatchExchangeRate = null;
+    // The two real totals from the actual bank transfer (Wise, etc.) —
+    // payrollBatchExchangeRate is always derived from these (PHP ÷ AUD),
+    // never typed directly, so it reflects the rate that transfer really
+    // cleared at rather than a rounded/quoted figure. Persist across
+    // period navigation same as the derived rate itself (see
+    // changePayrollPeriod) — one real transfer's rate is "today's rate"
+    // regardless of which pay period is on screen.
+    let payrollBatchPhpReceived = null;
+    let payrollBatchAudRequested = null;
     let payrollBatchDatePaid = null;
     let payrollBatchInvoiceNumber = null;
     // Final-approval-stage timesheet approvals + company-wide totals —
@@ -6778,6 +6808,17 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // Opens/downloads the whole pay run's Team Invoice — server streams
+    // it straight from the payslips already generated for this period
+    // (see GET /api/payslips/admin/team-invoice), so there's nothing to
+    // build client-side beyond picking inline vs attachment.
+    function viewPayrollTeamInvoice() {
+      window.open(`/api/payslips/admin/team-invoice?payPeriodStart=${payrollPeriodStart}`, '_blank');
+    }
+    function downloadPayrollTeamInvoice() {
+      window.open(`/api/payslips/admin/team-invoice?payPeriodStart=${payrollPeriodStart}&download=1`, '_blank');
+    }
+
     function changePayrollPeriod(deltaPeriods) {
       payrollPeriodStart = addDaysAdmin(payrollPeriodStart, deltaPeriods * 14);
       // Date Paid and Invoice Number are both specific to one pay run —
@@ -6804,11 +6845,29 @@
         try { payrollBatchInvoiceNumber = (await fetch('/api/payslips/suggested-invoice-number').then(r => r.json())).invoiceNumber; }
         catch { /* left null — openPayrollGenerateModal falls back to its own per-person fetch */ }
       }
+      document.getElementById('payrollBatchPhpReceivedInput').value = payrollBatchPhpReceived ?? '';
+      document.getElementById('payrollBatchAudRequestedInput').value = payrollBatchAudRequested ?? '';
       document.getElementById('payrollBatchExchangeRateInput').value = payrollBatchExchangeRate ?? '';
       document.getElementById('payrollBatchDatePaidInput').value = payrollBatchDatePaid ?? '';
       document.getElementById('payrollBatchInvoiceNumberInput').value = payrollBatchInvoiceNumber ?? '';
     }
-    function setPayrollBatchExchangeRate(value) { payrollBatchExchangeRate = value === '' ? null : Number(value); }
+    // Recomputes the Exchange Rate field live as either transfer total is
+    // typed — 1 AUD = (Total PHP Received / Total AUD Requested) PHP.
+    // Left blank (not zero) until both totals are in, so a half-entered
+    // pair never silently applies a wrong/zero rate to a real payslip.
+    function onPayrollBatchTransferInput() {
+      const php = Number(document.getElementById('payrollBatchPhpReceivedInput').value) || 0;
+      const aud = Number(document.getElementById('payrollBatchAudRequestedInput').value) || 0;
+      payrollBatchPhpReceived = document.getElementById('payrollBatchPhpReceivedInput').value === '' ? null : php;
+      payrollBatchAudRequested = document.getElementById('payrollBatchAudRequestedInput').value === '' ? null : aud;
+      if (php > 0 && aud > 0) {
+        payrollBatchExchangeRate = Math.round((php / aud) * 10000) / 10000;
+        document.getElementById('payrollBatchExchangeRateInput').value = payrollBatchExchangeRate;
+      } else {
+        payrollBatchExchangeRate = null;
+        document.getElementById('payrollBatchExchangeRateInput').value = '';
+      }
+    }
     function setPayrollBatchDatePaid(value) { payrollBatchDatePaid = value || null; }
     function setPayrollBatchInvoiceNumber(value) { payrollBatchInvoiceNumber = value === '' ? null : Number(value); }
 

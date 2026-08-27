@@ -211,7 +211,30 @@ async function decide(weekId, approverEmail, decision, note) {
   const week = res.rows[0];
   if (!week) throw new Error('Timesheet week not found');
 
-  if (week.status === 'pending_l1') {
+  // A final approver (Sophia/Joy) can act on a week that's still sitting
+  // at pending_l1, without waiting for the team's own L1 manager
+  // (Lorie/Adzi) to approve first — requested explicitly by Joy, since
+  // she's already the authority both stages ultimately answer to. An
+  // approve here does both stages in one action (records l1_decided_*
+  // AND jumps straight to 'approved', not just 'pending_final') rather
+  // than leaving a half-finished L1 record behind for no one to see; a
+  // reject behaves exactly like a normal L1 reject. This is additive —
+  // the L1 manager can still approve/reject normally themselves; this
+  // just means they no longer block a final approver who doesn't want
+  // to wait on them.
+  if (week.status === 'pending_l1' && isFinalApprover(approverEmail)) {
+    if (decision === 'reject') {
+      await db.execute({
+        sql: "UPDATE timesheet_weeks SET status = 'draft', l1_decided_by = ?, l1_decided_at = now(), rejection_note = ?, updated_at = now() WHERE id = ?",
+        args: [approverEmail, note, weekId]
+      });
+    } else {
+      await db.execute({
+        sql: "UPDATE timesheet_weeks SET status = 'approved', l1_decided_by = ?, l1_decided_at = now(), final_decided_by = ?, final_decided_at = now(), updated_at = now() WHERE id = ?",
+        args: [approverEmail, approverEmail, weekId]
+      });
+    }
+  } else if (week.status === 'pending_l1') {
     if (week.l1_approver_email?.toLowerCase() !== approverEmail.toLowerCase()) {
       throw new Error('You are not the approver for this timesheet');
     }
@@ -254,6 +277,7 @@ async function listPendingFor(approverEmail) {
     sql: "SELECT * FROM timesheet_weeks WHERE status = 'pending_l1' AND LOWER(l1_approver_email) = LOWER(?) ORDER BY week_start_date ASC",
     args: [approverEmail]
   });
+  let l1Rows = l1Res.rows;
   let finalRows = [];
   if (isFinalApprover(approverEmail)) {
     const finalRes = await db.execute({
@@ -261,6 +285,17 @@ async function listPendingFor(approverEmail) {
       args: [approverEmail]
     });
     finalRows = finalRes.rows;
+    // A final approver can also act on anything still sitting at
+    // pending_l1 without waiting on the team's own L1 manager (see
+    // decide()) — so their queue needs to actually show those rows too,
+    // not just the ones where they happen to be l1_approver_email
+    // (never true today, but this stays correct if that ever changes).
+    const allL1Res = await db.execute({
+      sql: "SELECT * FROM timesheet_weeks WHERE status = 'pending_l1' ORDER BY week_start_date ASC",
+      args: []
+    });
+    const seen = new Set(l1Rows.map(r => r.id));
+    l1Rows = [...l1Rows, ...allL1Res.rows.filter(r => !seen.has(r.id))];
   } else {
     const finalRes = await db.execute({
       sql: "SELECT * FROM timesheet_weeks WHERE status = 'pending_final' AND LOWER(final_approver_email) = LOWER(?) ORDER BY week_start_date ASC",
@@ -268,7 +303,7 @@ async function listPendingFor(approverEmail) {
     });
     finalRows = finalRes.rows;
   }
-  const weeks = normalizeWeeks([...l1Res.rows, ...finalRows]);
+  const weeks = normalizeWeeks([...l1Rows, ...finalRows]);
   for (const week of weeks) {
     const entriesRes = await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE week_id = ? ORDER BY entry_date ASC', args: [week.id] });
     week.entries = normalizeEntries(entriesRes.rows);

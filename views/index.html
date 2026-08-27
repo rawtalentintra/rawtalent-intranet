@@ -4848,7 +4848,7 @@
             </div>
             <div style="font-weight:700;color:var(--navy);font-size:14px">${Number(w.total_hours).toFixed(2)} hrs</div>
           </div>
-          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">Awaiting your (manager) approval</div>
+          <div style="font-size:11.5px;color:#b45309;font-weight:700;margin-bottom:10px">${w.status === 'pending_l1' && hoursPolicy.isFinalApprover && !hoursPolicy.isL1Approver ? 'Still awaiting their team manager\'s (L1) approval — approving here does both steps at once' : 'Awaiting your (manager) approval'}</div>
           <div style="overflow-x:auto;margin-bottom:12px">
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               ${(w.entries || []).map(e => `
