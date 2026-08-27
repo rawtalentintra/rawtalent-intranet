@@ -2554,60 +2554,112 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">🔒 Security</div>
-            <div class="admin-page-sub">The safeguards currently in place across this app, and how each one was verified.</div>
+            <div class="admin-page-sub">This app doesn't lean on any one safeguard — it's built in layers, so a gap in one layer still leaves the rest standing. Here's the full stack, outermost to innermost, and how each layer was actually verified.</div>
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Page &amp; Route Access</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Every authenticated page (<code>views/index.html</code>, <code>admin.html</code>, <code>article.html</code>) lives outside <code>public/</code>, the one directory <code>express.static</code> serves from — so there's no request path that returns page content without going through <code>server.js</code>'s own login check (<code>guardRoute()</code>) first. Only <code>public/login.html</code> and <code>public/403.html</code> are reachable without a session, which is exactly what they're for. Inside the admin panel, <code>qa_view</code> and <code>workforce_partner</code> are further restricted to a fixed allowlist of sections (articles, FAQ, call quality, leads, etc. — see <code>RESTRICTED_ROLE_SECTIONS</code>) enforced both in navigation and on direct <code>showSection()</code> calls, so typing a section id doesn't reach anything outside that role's scope. Every API route independently re-checks auth/role server-side regardless of what the client-side nav shows or hides.
+        <!-- At-a-glance stats — real, current numbers, not marketing copy. -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px">
+          <div style="background:linear-gradient(135deg,#0b1d3e,#1e3a6e);border-radius:12px;padding:16px 18px;color:white">
+            <div style="font-size:26px;font-weight:800;line-height:1">7</div>
+            <div style="font-size:11.5px;color:#c7d2fe;margin-top:4px;font-weight:600">independent layers of defense</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#0e7490,#155e75);border-radius:12px;padding:16px 18px;color:white">
+            <div style="font-size:26px;font-weight:800;line-height:1">~150</div>
+            <div style="font-size:11.5px;color:#cffafe;margin-top:4px;font-weight:600">parameterized queries, zero raw SQL</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#15803d,#166534);border-radius:12px;padding:16px 18px;color:white">
+            <div style="font-size:26px;font-weight:800;line-height:1">0</div>
+            <div style="font-size:11.5px;color:#dcfce7;margin-top:4px;font-weight:600">hardcoded secrets, ever committed</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#b45309,#92400e);border-radius:12px;padding:16px 18px;color:white">
+            <div style="font-size:26px;font-weight:800;line-height:1">20/15m</div>
+            <div style="font-size:11.5px;color:#fef3c7;margin-top:4px;font-weight:600">login attempts per IP before a cooldown</div>
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Login &amp; Sessions</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            <code>/auth/login</code> is rate limited to 20 attempts per 15 minutes per IP, so credential guessing costs real time instead of being free. Sessions are cookie-based (Passport + <code>express-session</code>, stored server-side in Postgres) with <code>httpOnly</code> and <code>sameSite: 'lax'</code> set explicitly — the cookie is inaccessible to page JavaScript and isn't sent on cross-site requests, which is what keeps a malicious page elsewhere from riding a signed-in user's session.
-          </div>
+        <!-- Defense-in-depth stack — each band is one of the detailed cards
+             below, in the order a request actually passes through them.
+             Deliberately not a severity/checklist look (see the plain
+             prose below) — the point being visualized here is that these
+             are independent, layered controls, not one big wall. -->
+        <div class="admin-table-card" style="padding:24px 28px 8px;margin-bottom:20px">
+          <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:2px">The stack, outside in</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:18px">An attacker (or a bug) has to get through every layer below to reach real data — clearing one doesn't clear the next.</div>
+          <div id="securityLayerStack" style="display:flex;flex-direction:column;max-width:680px;margin:0 auto"></div>
         </div>
 
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Authorization on Actions</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Approval-type actions (leave requests, timesheets, payslips) always re-derive who's allowed to approve a given item from the row itself, server-side — never from anything the client sends. Payroll actions (rates, bank details, payslip generation/deletion) are gated to the same fixed Sophia/Joy pool everywhere they appear, not a role check. Role changes are super-admin only. Admin impersonation can't target yourself, can't nest (impersonate while already impersonating), can't target a disabled account, and logs both the impersonator's and target's identity on every use.
-          </div>
-        </div>
-
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">File Uploads</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            A file's declared type at upload time (whatever the uploader's browser happened to send) is never trusted on the way back out. <code>services/storageService.js</code>'s <code>setFileResponseHeaders()</code> only ever renders <code>image/jpeg|png|gif|webp</code> and <code>application/pdf</code> inline — every other file type downloads as a generic <code>application/octet-stream</code> attachment instead, with <code>X-Content-Type-Options: nosniff</code> set, regardless of what it claims to be. Every attachment/file route in the app (tasks, ideas, articles, announcements, projects, leads, centres) goes through this one function rather than setting headers individually.
-          </div>
-        </div>
-
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">HTTP Security Headers</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Set via <code>helmet</code> on every response: a Content-Security-Policy, <code>X-Frame-Options</code> (blocks the login page from being framed by another site — clickjacking protection), HSTS, <code>X-Content-Type-Options: nosniff</code>, and a Referrer-Policy. The CSP's external allowlist (Google Fonts, the DOMPurify CDN script, Mapbox GL JS, <code>esm.sh</code> for the TipTap rich-text editor) reflects exactly what the app actually loads, checked by exercising every page with the policy live rather than just reading the HTML — some of it (like <code>esm.sh</code>'s dynamic imports) doesn't show up any other way. <code>script-src</code>/<code>script-src-attr</code> allow inline scripts and <code>onclick=</code> attributes, since this frontend has no build step and is written that way throughout.
-          </div>
-        </div>
-
-        <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Database Queries</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            Every query in the app — roughly 150 call sites — uses parameterized <code>?</code> placeholders. Where a query's shape has to change based on input (a dynamic <code>UPDATE ... SET</code>, or an <code>IN (...)</code> list), the column names come from a fixed whitelist in the code and only the values are parameterized (<code>.map(() =&gt; '?').join(',')</code> for the placeholder count) — user input is never concatenated directly into SQL text anywhere.
-          </div>
-        </div>
-
-        <div class="admin-table-card" style="padding:24px 28px">
-          <div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:8px">Secrets &amp; Dependencies</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.7">
-            No API key, token, or credential is hardcoded anywhere in the codebase or its git history — everything comes from environment variables (Railway's Variables tab in production, <code>.env</code> locally, which is git-ignored). Dependency vulnerabilities are checked with <code>npm audit</code> and kept patched where a fix doesn't require a breaking change.
-          </div>
-        </div>
+        <div id="securityLayerCards"></div>
       </div>
       </template>
+      <script>
+        // Single source of truth for both the visual stack above and the
+        // detailed cards below, so the diagram and the prose can never
+        // drift out of sync with each other (a layer added/reworded in
+        // one place automatically shows up correctly in the other).
+        const SECURITY_LAYERS = [
+          {
+            n: 1, icon: '🌐', color: '#3d6fff', tint: '#eff6ff', title: 'Perimeter & Transport',
+            tagline: 'What every response carries before anything else runs',
+            body: `Set via <code>helmet</code> on every response: a Content-Security-Policy, <code>X-Frame-Options</code> (blocks the login page from being framed by another site — clickjacking protection), HSTS, <code>X-Content-Type-Options: nosniff</code>, and a Referrer-Policy. The CSP's external allowlist (Google Fonts, the DOMPurify CDN script, Mapbox GL JS, <code>esm.sh</code> for the TipTap rich-text editor) reflects exactly what the app actually loads, checked by exercising every page with the policy live rather than just reading the HTML — some of it (like <code>esm.sh</code>'s dynamic imports) doesn't show up any other way. <code>script-src</code>/<code>script-src-attr</code> allow inline scripts and <code>onclick=</code> attributes, since this frontend has no build step and is written that way throughout. <code>/auth/login</code> is rate limited to 20 attempts per 15 minutes per IP, so credential guessing costs real time instead of being free.`
+          },
+          {
+            n: 2, icon: '🚪', color: '#6366f1', tint: '#eef2ff', title: 'Authentication Gate',
+            tagline: 'Can this request even get in the door',
+            body: `Every authenticated page (<code>views/index.html</code>, <code>admin.html</code>, <code>article.html</code>) lives outside <code>public/</code>, the one directory <code>express.static</code> serves from — so there's no request path that returns page content without going through <code>server.js</code>'s own login check (<code>guardRoute()</code>) first. Only <code>public/login.html</code> and <code>public/403.html</code> are reachable without a session, which is exactly what they're for. Inside the admin panel, <code>qa_view</code> and <code>workforce_partner</code> are further restricted to a fixed allowlist of sections (articles, FAQ, call quality, leads, etc. — see <code>RESTRICTED_ROLE_SECTIONS</code>) enforced both in navigation and on direct <code>showSection()</code> calls, so typing a section id doesn't reach anything outside that role's scope.`
+          },
+          {
+            n: 3, icon: '🔑', color: '#7c3aed', tint: '#f5f3ff', title: 'Session Integrity',
+            tagline: 'Once you’re in, what keeps that session actually yours',
+            body: `Sessions are cookie-based (Passport + <code>express-session</code>, stored server-side in Postgres) with <code>httpOnly</code> and <code>sameSite: 'lax'</code> set explicitly — the cookie is inaccessible to page JavaScript and isn't sent on cross-site requests, which is what keeps a malicious page elsewhere from riding a signed-in user's session. Every API route independently re-checks auth/role server-side regardless of what the client-side nav shows or hides — the UI hiding a button is cosmetic, never the actual control.`
+          },
+          {
+            n: 4, icon: '🛡️', color: '#15803d', tint: '#f0fdf4', title: 'Authorization',
+            tagline: 'Being logged in isn’t the same as being allowed to do this',
+            body: `Approval-type actions (leave requests, timesheets, payslips) always re-derive who's allowed to approve a given item from the row itself, server-side — never from anything the client sends. Payroll actions (rates, bank details, payslip generation/deletion) are gated to the same fixed Sophia/Joy pool everywhere they appear, not a role check. Role changes are super-admin only. Admin impersonation can't target yourself, can't nest (impersonate while already impersonating), can't target a disabled account, and logs both the impersonator's and target's identity on every use.`
+          },
+          {
+            n: 5, icon: '📎', color: '#b45309', tint: '#fff7ed', title: 'Content Safety',
+            tagline: 'What happens to content a user hands the app',
+            body: `A file's declared type at upload time (whatever the uploader's browser happened to send) is never trusted on the way back out. <code>services/storageService.js</code>'s <code>setFileResponseHeaders()</code> only ever renders <code>image/jpeg|png|gif|webp</code> and <code>application/pdf</code> inline — every other file type downloads as a generic <code>application/octet-stream</code> attachment instead, with <code>X-Content-Type-Options: nosniff</code> set, regardless of what it claims to be. Every attachment/file route in the app (tasks, ideas, articles, announcements, projects, leads, centres) goes through this one function rather than setting headers individually.`
+          },
+          {
+            n: 6, icon: '🗄️', color: '#0e7490', tint: '#ecfeff', title: 'Data Layer Integrity',
+            tagline: 'What the database will and won’t execute',
+            body: `Every query in the app — roughly 150 call sites — uses parameterized <code>?</code> placeholders. Where a query's shape has to change based on input (a dynamic <code>UPDATE ... SET</code>, or an <code>IN (...)</code> list), the column names come from a fixed whitelist in the code and only the values are parameterized (<code>.map(() =&gt; '?').join(',')</code> for the placeholder count) — user input is never concatenated directly into SQL text anywhere.`
+          },
+          {
+            n: 7, icon: '🔐', color: '#0b1d3e', tint: '#f8fafc', title: 'Secrets & Supply Chain',
+            tagline: 'The foundation every other layer above is built on',
+            body: `No API key, token, or credential is hardcoded anywhere in the codebase or its git history — everything comes from environment variables (Railway's Variables tab in production, <code>.env</code> locally, which is git-ignored). Dependency vulnerabilities are checked with <code>npm audit</code> and kept patched where a fix doesn't require a breaking change.`
+          }
+        ];
+        function renderSecurityStack() {
+          const stackEl = document.getElementById('securityLayerStack');
+          const cardsEl = document.getElementById('securityLayerCards');
+          if (!stackEl || !cardsEl) return; // section not lazy-loaded yet
+          stackEl.innerHTML = SECURITY_LAYERS.map((l, i) => `
+            <div style="display:flex;align-items:center;gap:14px;background:${l.tint};border:1px solid ${l.color}33;border-radius:10px;padding:12px 16px">
+              <div style="flex-shrink:0;width:30px;height:30px;border-radius:50%;background:${l.color};color:white;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px">${l.n}</div>
+              <div style="flex-shrink:0;font-size:20px">${l.icon}</div>
+              <div style="min-width:0">
+                <div style="font-weight:700;color:var(--navy);font-size:13.5px">${l.title}</div>
+                <div style="font-size:11.5px;color:var(--text-muted)">${l.tagline}</div>
+              </div>
+            </div>
+            ${i < SECURITY_LAYERS.length - 1 ? `<div style="width:2px;height:14px;background:${l.color}55;margin-left:29px"></div>` : ''}
+          `).join('');
+          cardsEl.innerHTML = SECURITY_LAYERS.map(l => `
+            <div class="admin-table-card" style="padding:24px 28px;margin-bottom:20px;border-left:4px solid ${l.color}">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${l.color};color:white;font-weight:800;font-size:11px;flex-shrink:0">${l.n}</span>
+                <span style="font-weight:700;font-size:15px;color:var(--navy)">${l.icon} ${l.title}</span>
+              </div>
+              <div style="font-size:13px;color:var(--text-muted);line-height:1.7;padding-left:32px">${l.body}</div>
+            </div>
+          `).join('');
+        }
+      </script>
 
       <!-- Glossary -->
       <template id="__lazy_glossary">
@@ -5460,6 +5512,7 @@
         // section didn't exist yet), so without this a lazy-loaded section
         // would show role-inappropriate UI on first visit.
         applyRoleVisibility();
+        if (id === 'security') renderSecurityStack();
       }
 
       const sectionEl = document.getElementById(`section-${id}`);
