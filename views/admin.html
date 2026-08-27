@@ -6808,15 +6808,26 @@
       } catch { toast('Network error', 'error'); }
     }
 
-    // Opens/downloads the whole pay run's Team Invoice — server streams
-    // it straight from the payslips already generated for this period
-    // (see GET /api/payslips/admin/team-invoice), so there's nothing to
-    // build client-side beyond picking inline vs attachment.
+    // Opens/downloads the whole pay run's Team Invoice — works as soon
+    // as everyone's Ready (both weeks approved + profile set up), not
+    // only once payslips have actually been generated (see GET
+    // /api/payslips/admin/team-invoice). Passes the Batch Defaults'
+    // Invoice Number/Date Paid through so the invoice matches whatever's
+    // about to be used on every payslip in this run, rather than the
+    // server guessing its own.
+    function payrollTeamInvoiceParams() {
+      const params = new URLSearchParams({ payPeriodStart: payrollPeriodStart });
+      if (payrollBatchInvoiceNumber != null) params.set('invoiceNumber', payrollBatchInvoiceNumber);
+      if (payrollBatchDatePaid) params.set('datePaid', payrollBatchDatePaid);
+      return params;
+    }
     function viewPayrollTeamInvoice() {
-      window.open(`/api/payslips/admin/team-invoice?payPeriodStart=${payrollPeriodStart}`, '_blank');
+      window.open(`/api/payslips/admin/team-invoice?${payrollTeamInvoiceParams()}`, '_blank');
     }
     function downloadPayrollTeamInvoice() {
-      window.open(`/api/payslips/admin/team-invoice?payPeriodStart=${payrollPeriodStart}&download=1`, '_blank');
+      const params = payrollTeamInvoiceParams();
+      params.set('download', '1');
+      window.open(`/api/payslips/admin/team-invoice?${params}`, '_blank');
     }
 
     function changePayrollPeriod(deltaPeriods) {
@@ -6840,7 +6851,9 @@
     // switching sub-tabs and back doesn't stomp on a value Sophia/Joy
     // already typed over for this run.
     async function initPayrollBatchDefaults() {
-      if (payrollBatchDatePaid == null) payrollBatchDatePaid = addDaysAdmin(payrollPeriodStart, 13);
+      // Friday of the second week, not the Saturday the period itself
+      // ends on — pay day and period-end are different dates.
+      if (payrollBatchDatePaid == null) payrollBatchDatePaid = addDaysAdmin(payrollPeriodStart, 12);
       if (payrollBatchInvoiceNumber == null) {
         try { payrollBatchInvoiceNumber = (await fetch('/api/payslips/suggested-invoice-number').then(r => r.json())).invoiceNumber; }
         catch { /* left null — openPayrollGenerateModal falls back to its own per-person fetch */ }
@@ -6976,7 +6989,7 @@
         document.getElementById('pgPayPeriodStart').value = payrollPeriodStart;
         document.getElementById('pgEmployeeName').textContent = profileRow?.legal_name || profileRow?.name || userEmail;
         document.getElementById('pgInvoiceNumber').value = payrollBatchInvoiceNumber ?? '';
-        document.getElementById('pgDatePaid').value = payrollBatchDatePaid || addDaysAdmin(payrollPeriodStart, 13);
+        document.getElementById('pgDatePaid').value = payrollBatchDatePaid || addDaysAdmin(payrollPeriodStart, 12);
         document.getElementById('pgWorkedDays').value = prefill.workedDays;
         document.getElementById('pgPhpFields').style.display = pgPaysInPhp ? '' : 'none';
         document.getElementById('pgExchangeRate').value = pgPaysInPhp && payrollBatchExchangeRate != null ? payrollBatchExchangeRate : '';

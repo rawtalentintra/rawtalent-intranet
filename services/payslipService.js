@@ -78,12 +78,19 @@ async function getEmployeeMeta(userEmail) {
   return { legalNameOrName: row.legal_name || row.name || userEmail, position: row.position || '', address: row.address || '' };
 }
 
-// Real external numbering (from before this app existed) is already in
-// the 40s — this is a suggestion, not a hard sequence. See db/schema.sql's
-// comment on payslips.invoice_number for why it's a plain UNIQUE integer.
+// Real external numbering (from before this app existed) was already at
+// 0049 the day payslip generation moved in-app — no historical payslip
+// ever got backfilled into this table, so MAX(invoice_number) on an
+// empty/early table would otherwise suggest starting back at 1 instead
+// of continuing the real sequence at 0050. This floor only matters until
+// the DB's own history overtakes it — the first real payslip generated
+// at 50 makes MAX() return 50, and every suggestion after that is
+// MAX()+1 same as always, no floor needed. Confirmed with Joy 2026-08-27:
+// this pay run is 0050, next is 0051, etc.
+const LAST_EXTERNAL_INVOICE_NUMBER = 49;
 async function suggestedInvoiceNumber() {
   const res = await getDb().execute('SELECT COALESCE(MAX(invoice_number),0) AS max FROM payslips');
-  return Number(res.rows[0].max) + 1;
+  return Math.max(Number(res.rows[0].max), LAST_EXTERNAL_INVOICE_NUMBER) + 1;
 }
 
 // "Payroll approved" = both timesheet_weeks rows for this pay period are
@@ -306,41 +313,63 @@ function teamInvoiceSectionFor(position) {
   return /manager|founder/i.test(position || '') ? 'Managements' : 'Consultants';
 }
 
-// Aggregates every payslip already generated for a pay period into the
-// shape teamInvoicePdfService.buildTeamInvoicePdf expects. Deliberately
-// includes drafts as well as published payslips — the invoice is
-// prepared alongside the pay run's payslips, not after every one of them
-// is individually published, and Joy asked to "view and generate the
-// full invoice for this pay run" as its own step.
-async function buildTeamInvoiceData(payPeriodStart) {
+// Built from every person who's "Ready" for this pay period (both
+// timesheet weeks approved + a payroll profile set up — the exact same
+// `eligible` flag listEligibleForPeriod/the Payslips table already use),
+// not from persisted payslip rows — confirmed with Joy 2026-08-27: the
+// invoice should be viewable as soon as everyone's status is Ready, not
+// gated behind actually clicking Generate Payslip for each person first.
+// Where a payslip already exists for someone (draft or published), its
+// own stored line_items/total are used instead of recomputing from
+// timesheets live — those numbers may have been hand-adjusted (a manual
+// line item, a corrected rate) before generating, and the invoice should
+// reflect that adjustment rather than silently overriding it with a
+// fresh timesheet-only calculation. Someone not yet Ready (still pending
+// approval, or no profile) is simply left off, same as they'd be absent
+// from a payslip run today.
+//
+// invoiceNumber/datePaid come from the Batch Defaults panel (the caller
+// already has these in state) since there may be no persisted payslip
+// row yet to read them from; both fall back to sensible computed
+// defaults if omitted.
+async function buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid } = {}) {
   const db = getDb();
-  const res = await db.execute({ sql: 'SELECT * FROM payslips WHERE pay_period_start = ? ORDER BY user_name ASC', args: [payPeriodStart] });
-  const rows = res.rows.map(normalizePayslip);
-  if (!rows.length) throw new Error('No payslips have been generated for this pay period yet');
+  const payPeriodEnd = timesheet.payPeriodEndOf(payPeriodStart);
+  const roster = await listEligibleForPeriod(payPeriodStart);
+  const ready = roster.filter(p => p.eligible);
+  if (!ready.length) throw new Error('No one is Ready for this pay period yet — approve both timesheet weeks and set up a payroll profile first');
 
-  const metaByEmail = {};
-  await Promise.all([...new Set(rows.map(r => r.user_email))].map(async email => {
-    metaByEmail[email] = await getEmployeeMeta(email);
-  }));
+  const existingRes = await db.execute({ sql: 'SELECT * FROM payslips WHERE pay_period_start = ?', args: [payPeriodStart] });
+  const existingByEmail = {};
+  existingRes.rows.map(normalizePayslip).forEach(r => { existingByEmail[r.user_email.toLowerCase()] = r; });
 
   const sectionOrder = ['Managements', 'Consultants'];
   const sectionsByLabel = { Managements: [], Consultants: [] };
   let totalAud = 0;
-  for (const row of rows) {
-    const meta = metaByEmail[row.user_email] || {};
-    const position = meta.position || '';
-    const totalHours = (row.line_items || []).reduce((sum, li) => sum + Number(li.hours || 0), 0);
-    const firstName = (meta.legalNameOrName || row.user_name || row.user_email).trim().split(/\s+/)[0];
-    sectionsByLabel[teamInvoiceSectionFor(position)].push({ position, firstName, totalHours, amount: Number(row.total_earnings_aud) });
-    totalAud += Number(row.total_earnings_aud);
+  let resolvedInvoiceNumber = invoiceNumber;
+  for (const person of ready) {
+    const existing = existingByEmail[person.userEmail.toLowerCase()];
+    let totalHours, amount;
+    if (existing) {
+      totalHours = (existing.line_items || []).reduce((sum, li) => sum + Number(li.hours || 0), 0);
+      amount = Number(existing.total_earnings_aud);
+      if (resolvedInvoiceNumber == null) resolvedInvoiceNumber = existing.invoice_number;
+    } else {
+      const prefill = await buildLineItemsFromTimesheets(person.userEmail, payPeriodStart);
+      totalHours = prefill.lineItems.reduce((sum, li) => sum + Number(li.hours || 0), 0);
+      amount = round2(prefill.lineItems.reduce((sum, li) => sum + Number(li.amount || 0), 0));
+    }
+    const firstName = (person.userName || person.userEmail).trim().split(/\s+/)[0];
+    sectionsByLabel[teamInvoiceSectionFor(person.position)].push({ position: person.position || '', firstName, totalHours, amount });
+    totalAud += amount;
   }
+  if (resolvedInvoiceNumber == null) resolvedInvoiceNumber = await suggestedInvoiceNumber();
 
   return {
-    invoiceNumber: rows[0].invoice_number,
-    referenceNo: `RawTalent${String(rows[0].invoice_number).padStart(4, '0')}`,
-    payPeriodStart: rows[0].pay_period_start,
-    payPeriodEnd: rows[0].pay_period_end,
-    datePaid: rows[0].date_paid,
+    invoiceNumber: resolvedInvoiceNumber,
+    referenceNo: `RawTalent${String(resolvedInvoiceNumber).padStart(4, '0')}`,
+    payPeriodStart, payPeriodEnd,
+    datePaid: datePaid || addDays(payPeriodStart, 12),
     sections: sectionOrder.map(label => ({ label, rows: sectionsByLabel[label] })),
     totalAud: round2(totalAud)
   };
@@ -355,10 +384,10 @@ function teamInvoiceFilename(invoiceNumber, payPeriodStart, payPeriodEnd) {
   return `Team Invoice _ ${rangeLabel} (#${String(invoiceNumber).padStart(4, '0')}) - Team Invoice.pdf`;
 }
 
-async function generateTeamInvoicePdf(payPeriodStart) {
+async function generateTeamInvoicePdf(payPeriodStart, { invoiceNumber, datePaid } = {}) {
   const { buildTeamInvoicePdf } = require('./teamInvoicePdfService');
   const [invoice, profile, meta] = await Promise.all([
-    buildTeamInvoiceData(payPeriodStart),
+    buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid }),
     getProfile(TEAM_INVOICE_RECIPIENT_EMAIL),
     getEmployeeMeta(TEAM_INVOICE_RECIPIENT_EMAIL)
   ]);

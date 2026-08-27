@@ -43,14 +43,23 @@ router.get('/eligible', requireFinalApprover, async (req, res) => {
   }
 });
 
-// One PDF covering every payslip generated for the given pay period —
-// see services/payslipService.js's buildTeamInvoiceData/generateTeamInvoicePdf.
-// "view" (inline) vs "download" (attachment, with the real filename
-// convention) share the same builder so they can never drift apart.
+// One PDF covering every person Ready for the given pay period — see
+// services/payslipService.js's buildTeamInvoiceData/generateTeamInvoicePdf.
+// Works even before anyone's payslip has actually been generated
+// (Ready = both timesheet weeks approved + a payroll profile set up,
+// same flag /eligible already returns), using each Ready person's
+// already-generated payslip if one exists, live timesheet totals
+// otherwise. invoiceNumber/datePaid pass through from the Batch
+// Defaults panel so the invoice reflects the same numbers about to be
+// used on every payslip in this run. "view" (inline) vs "download"
+// (attachment, with the real filename convention) share the same
+// builder so they can never drift apart.
 router.get('/admin/team-invoice', requireFinalApprover, async (req, res) => {
   try {
     if (!req.query.payPeriodStart) return res.status(400).json({ error: 'payPeriodStart is required' });
-    const { buffer, filename } = await payslip.generateTeamInvoicePdf(req.query.payPeriodStart);
+    const invoiceNumber = req.query.invoiceNumber ? Number(req.query.invoiceNumber) : undefined;
+    const datePaid = req.query.datePaid || undefined;
+    const { buffer, filename } = await payslip.generateTeamInvoicePdf(req.query.payPeriodStart, { invoiceNumber, datePaid });
     const disposition = req.query.download ? 'attachment' : 'inline';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${disposition}; filename="${filename.replace(/"/g, '')}"`);
