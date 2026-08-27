@@ -8551,6 +8551,77 @@
       return html;
     }
 
+    // One-line definitions matching computeCentreHealth's actual branch
+    // logic in services/centreHealthService.js — kept here as prose so the
+    // Centres → Centre List legend (and anywhere else this gets reused)
+    // never drifts from what the service really checks.
+    const CENTRE_HEALTH_DEFINITIONS = {
+      healthy: 'Booking activity has been steady over the last 30 days, nothing overdue.',
+      growing: 'Bookings over the last 30 days are up 20%+ versus the prior 30.',
+      opportunity: 'Steady bookings, but no relationship visit logged in 60+ days — likely under-engaged.',
+      new_activating: 'Added to RT in the last 60 days, with fewer than 5 bookings so far.',
+      needs_attention: 'A follow-up is overdue, no visit logged in 45+ days, or bookings stopped after prior activity.',
+      declining: 'Bookings dropped 50%+ versus the prior 30 days, or none at all in the last 90.',
+      dormant: 'No booking in 12+ months, or marked inactive in RT.'
+    };
+    function centreHealthLegendHtml() {
+      return `
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">
+          <div style="font-weight:700;color:var(--navy);margin-bottom:6px">What "Health" means</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px 20px">
+            ${CENTRE_HEALTH_ORDER.map(cat => `
+              <div style="display:flex;align-items:baseline;gap:6px;max-width:300px">
+                ${centreHealthBadge(cat)}
+                <span>${escHtml(CENTRE_HEALTH_DEFINITIONS[cat])}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div style="margin-top:8px">Computed live from each centre's real booking/visit history in RT, same as <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\\'my-centres\\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> — not editable here. A client with no tracked centre yet (too new, no bookings, or every location inactive) shows "Not tracked" rather than a category.</div>
+        </div>
+      `;
+    }
+
+    // Only actual placeholder/test records — "test", "dummy", "delete",
+    // etc. as whole words in the name. Deliberately does NOT match on
+    // nickName, since ~917 of the ~1,100 real RT clients carry a
+    // "Migration delete" nickname (RT's own historical data-migration
+    // marker, confirmed against real client names like "Guardian
+    // Childcare & Education") — that's stale/inactive real business data,
+    // not test data, and already handled by the Active Only default.
+    function isTestCentreName(name) {
+      return /\btest|dummy|\bdemo\b|\bsample\b|xxx|zzz|\bdelete\b|do ?not ?use|placeholder/i.test(name || '');
+    }
+
+    // Backs the Centre List's Health column — a client can have several
+    // RT locations, each tracked (or not) as its own centre in My Centres,
+    // so this shows whichever one is most actionable (CENTRE_HEALTH_ORDER)
+    // rather than an arbitrary first match, with a location count alongside
+    // once there's more than one.
+    let centreHealthByClientId = new Map();
+    let centreHealthByClientIdPromise = null;
+    function ensureCentreHealthByClientId() {
+      if (!centreHealthByClientIdPromise) {
+        centreHealthByClientIdPromise = fetch('/api/centres').then(r => r.json()).then(data => {
+          const map = new Map();
+          (Array.isArray(data) ? data : []).forEach(c => {
+            if (c.rtClientId == null) return;
+            if (!map.has(c.rtClientId)) map.set(c.rtClientId, []);
+            map.get(c.rtClientId).push(c);
+          });
+          centreHealthByClientId = map;
+          return map;
+        }).catch(() => new Map());
+      }
+      return centreHealthByClientIdPromise;
+    }
+    function clientHealthCell(r) {
+      const entries = centreHealthByClientId.get(r.clientId);
+      if (!entries || !entries.length) return '<span style="color:var(--gray-400)">Not tracked</span>';
+      const worst = entries.slice().sort((a, b) => CENTRE_HEALTH_ORDER.indexOf(a.health) - CENTRE_HEALTH_ORDER.indexOf(b.health))[0];
+      const badge = centreHealthBadge(worst.health, worst.healthReasons, worst.isStrategic, worst.isEscalated);
+      return entries.length > 1 ? `${badge} <span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap">(${entries.length} locations)</span>` : badge;
+    }
+
     // services/centreNurtureService.js computes this live from centre_visits
     // + the health category — see that file for the cadence config and the
     // "never contacted" launch-date-anchor reasoning. Reuses the WFP
@@ -11499,6 +11570,12 @@
         extraFilters: [
           { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
         ],
+        // Health comes from services/centreHealthService.js via
+        // GET /api/centres (the same live-computed data My Centres uses) —
+        // fetched once per session (ensureCentreHealthByClientId) and
+        // matched onto each row here by clientId, not a separate field RT
+        // itself returns.
+        needsCentreHealth: true,
         // Sub-view: a searchable directory (not an analytical slice like the
         // Dashboard tab above) — its own independent search/suburb/active
         // filters, click a row to see every field the RT API returns for
@@ -11510,8 +11587,23 @@
           idField: 'clientId',
           suburbFn: clientSuburbs,
           searchFields: ['name', 'nickName', 'email', 'emailAddress', 'contactNo'],
+          // Defaults to Active Only on first load — the raw RT sync is
+          // ~1,100 clients going back years, most long closed/migrated out
+          // ("Migration delete" nickname, RT's own historical marker, not a
+          // test flag), which drowned out the ~170 centres anyone actually
+          // needs day to day. Still fully switchable back to Active +
+          // Inactive via the same dropdown.
+          defaultActiveOnly: true,
           extraFilters: [
-            { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient }
+            { id: 'trial', label: 'Trial only', type: 'checkbox', test: r => r.isTrialClient },
+            // Distinct from "Migration delete" (RT's own historical marker
+            // on real, formerly-real clients, left alone here) — this only
+            // catches actual placeholder/test records (name containing
+            // "test", "dummy", "delete", etc.), like the internal test
+            // centres staff create for themselves ("Sophia Test ELC",
+            // "Test", "TestingPrince"...). Checked by default since these
+            // are never something day-to-day work needs to see.
+            { id: 'hideTest', label: 'Hide Test Centres', type: 'checkbox', default: true, test: r => !isTestCentreName(r.name) }
           ],
           columns: [
             { header: 'Name', render: r => escHtml(r.name || '—') },
@@ -11520,6 +11612,7 @@
             { header: 'Contact No', render: r => escHtml(r.contactNo || '—') },
             { header: 'Email', render: r => escHtml(r.email || r.emailAddress || '—') },
             { header: 'Locations', render: r => String((r.locations || []).length) },
+            { header: 'Health', render: r => clientHealthCell(r) },
             { header: 'Trial', render: r => r.isTrialClient ? 'Yes' : 'No' },
             { header: 'Active', render: r => r.isActive ? '✅' : '—' }
           ],
@@ -12012,8 +12105,8 @@
                 </select>
                 `}
                 <select id="report_${type}_list_active" class="form-control" style="width:150px" onchange="applyListViewFilters('${type}')">
-                  <option value="">Active + Inactive</option>
-                  <option value="true">Active Only</option>
+                  <option value="" ${!cfg.listView.defaultActiveOnly ? 'selected' : ''}>Active + Inactive</option>
+                  <option value="true" ${cfg.listView.defaultActiveOnly ? 'selected' : ''}>Active Only</option>
                   <option value="false">Inactive Only</option>
                 </select>
                 ${(cfg.listView.selectFilters || []).map(f => f.multi ? `
@@ -12030,7 +12123,7 @@
                 `).join('')}
                 ${(cfg.listView.extraFilters || []).map(f => `
                   <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);white-space:nowrap">
-                    <input type="checkbox" id="report_${type}_list_${f.id}" onchange="applyListViewFilters('${type}')"> ${escHtml(f.label)}
+                    <input type="checkbox" id="report_${type}_list_${f.id}" ${f.default ? 'checked' : ''} onchange="applyListViewFilters('${type}')"> ${escHtml(f.label)}
                   </label>
                 `).join('')}
                 <span id="report_${type}_list_count" style="font-size:12.5px;color:var(--text-muted);white-space:nowrap"></span>
@@ -12040,6 +12133,7 @@
                 </div>
               </div>
               ${cfg.note ? `<div style="font-size:11.5px;color:var(--text-muted);white-space:pre-line;margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">${escHtml(cfg.note)}</div>` : ''}
+              ${cfg.needsCentreHealth ? centreHealthLegendHtml() : ''}
             </div>
             `}
             <div class="admin-table-card">
@@ -12115,7 +12209,8 @@
       try {
         const [rows] = await Promise.all([
           fetch(`/api/reports/${type}?${params}`).then(r => r.json()),
-          cfg.needsLookups ? ensureReportLookups() : Promise.resolve()
+          cfg.needsLookups ? ensureReportLookups() : Promise.resolve(),
+          cfg.needsCentreHealth ? ensureCentreHealthByClientId() : Promise.resolve()
         ]);
         if (!Array.isArray(rows)) throw new Error(rows.error || 'Unexpected response');
         if (cfg.needsEngagement) {
