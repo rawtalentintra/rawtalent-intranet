@@ -1731,15 +1731,15 @@
         return;
       }
       body.innerHTML = notifHistoryItems.map((item, i) => `
-        <div style="display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--gray-100)">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--gray-100);background:${item.isRead ? 'transparent' : '#eff6ff'}">
           ${item.isRead
-            ? '<span title="Read" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gray-200)"></span>'
+            ? '<span title="Read" style="flex-shrink:0;display:inline-block;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--gray-300);background:white"></span>'
             : item.dismissible
-              ? `<span title="Click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
-              : '<span title="Still outstanding — click the title" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>'
+              ? `<span title="Unread — click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.15)" onclick="markNotifHistoryItemRead(${i})"></span>`
+              : '<span title="Still outstanding — click the title" style="flex-shrink:0;display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.15)"></span>'
           }
-          <span style="flex:1;min-width:0;cursor:pointer;font-size:12.5px;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNotifHistoryItem(${i})" title="${escHtml(item.title)}">${escHtml(item.title)}</span>
-          <span style="flex-shrink:0;font-size:11px;color:var(--text-muted)">${item.date ? fmtDate(item.date) : '—'}</span>
+          <span style="flex:1;min-width:0;cursor:pointer;font-size:12.5px;font-weight:${item.isRead ? '400' : '700'};color:${item.isRead ? 'var(--text-muted)' : 'var(--navy)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNotifHistoryItem(${i})" title="${escHtml(item.title)}">${escHtml(item.title)}</span>
+          <span style="flex-shrink:0;font-size:11px;font-weight:${item.isRead ? '400' : '600'};color:${item.isRead ? 'var(--text-muted)' : 'var(--navy)'}">${item.date ? fmtDate(item.date) : '—'}</span>
         </div>
       `).join('');
     }
