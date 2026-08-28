@@ -2340,7 +2340,7 @@
           <div class="task-card-class">✍️ Created by ${escHtml(t.created_by_name || t.created_by)}</div>
           ${taskLinkedBadgesHtml(t)}
           <div class="task-card-bottom">
-            <span class="task-card-assignee">👤 ${escHtml(assigneeLabelFor(t))}</span>
+            <span class="task-card-assignee">👤 Assigned to ${escHtml(assigneeLabelFor(t))}</span>
             ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
           </div>
         </div>

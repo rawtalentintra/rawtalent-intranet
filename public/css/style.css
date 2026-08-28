@@ -1828,6 +1828,12 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-card-title { font-size: 13.5px; font-weight: 700; color: var(--navy); line-height: 1.35; margin-bottom: 6px; }
 .task-card-class { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
 .task-card-bottom { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); gap: 6px; flex-wrap: wrap; }
+/* A card's "Created by" line and its assignee used to be the same muted
+   11px gray, so the actual owner (assignee) got lost next to provenance
+   metadata (creator) — reported live, 2026-08-28. This pill is
+   deliberately the one warm/colored element low on the card (besides the
+   due-date state colors) so the eye lands on it first. */
+.task-card-assignee { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--navy); background: #fff7ed; border: 1px solid #fed7aa; padding: 3px 10px; border-radius: 50px; font-size: 11px; }
 .task-card-due { font-weight: 700; }
 .task-card-due.soon { color: #d97706; }
 .task-card-due.overdue { color: #dc2626; }
