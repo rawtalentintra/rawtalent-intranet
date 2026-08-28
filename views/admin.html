@@ -4455,7 +4455,7 @@
     }
 
     // ── Notifications (birthday / work-anniversary reminders + greetings) ──
-    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], unreadCount: 0 };
+    let notifData = { upcomingEvents: [], receivedGreetings: [], announcements: [], trainingAssignments: [], leaveApprovals: [], leaveDecisions: [], feedbackDecisions: [], taskAlerts: [], taskMentions: [], hoursAlerts: [], unreadCount: 0 };
 
     async function loadNotifications() {
       try {
@@ -4500,6 +4500,53 @@
             <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="toggleNotifPanel();showSection('leave-requests', document.querySelector('[onclick*=\\'leave-requests\\']'))">
               <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">🏖️ ${escHtml(l.user_name || l.user_email)} — ${fmtDate(l.start_date)} to ${fmtDate(l.end_date)}</div>
               <div style="font-size:12px;color:var(--text-muted)">${escHtml(l.reason)}</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      // Tasks/hours/mentions: admin.html has no Tasks board or Log Hours
+      // page of its own, so these can't click through to an in-page view
+      // the way index.html's do — they navigate back to HeartBeat instead
+      // (?tab=... deep-links index.html already supports). Previously
+      // omitted entirely on the theory "nothing to be consistent with" —
+      // wrong: the unreadCount badge (routes/notifications.js) counts
+      // these regardless of which page is asking, so omitting them here
+      // just made the badge lie (e.g. badge says 3, panel shows nothing)
+      // whenever they're the only unread items. Keep in sync with
+      // index.html's versions of these three blocks.
+      if (notifData.taskAlerts?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Tasks due soon or overdue</div>
+          ${notifData.taskAlerts.map(t => {
+            const overdue = isTaskOverdue(t);
+            return `
+            <div style="background:${overdue ? 'linear-gradient(135deg,#fef2f2,#fee2e2)' : 'linear-gradient(135deg,#fff7ed,#fef3e8)'};border:1px solid ${overdue ? '#fecaca' : '#fed7aa'};border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="location.href='/?tab=tasks&task=${t.id}'">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${overdue ? '🔴' : '🟠'} ${escHtml(t.title)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml(t.department_name || '')} · ${overdue ? 'Overdue' : 'Due'} ${fmtDate(t.due_date)}</div>
+            </div>`;
+          }).join('')}
+        `);
+      }
+      if (notifData.hoursAlerts?.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Timesheet reminder</div>
+          ${notifData.hoursAlerts.map(h => `
+            <div style="background:linear-gradient(135deg,#fff7ed,#fef3e8);border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin:0 6px 8px;cursor:pointer" onclick="location.href='/?tab=hours'">
+              <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">⏰ Finalize this week's hours</div>
+              <div style="font-size:12px;color:var(--text-muted)">Week of ${fmtDate(h.week_start)} — submit by Thursday EOD</div>
+            </div>
+          `).join('')}
+        `);
+      }
+      const mentionsUnread = unreadOnly(notifData.taskMentions);
+      if (mentionsUnread.length > 0) {
+        sections.push(`
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;padding:8px 8px 4px">Task mentions</div>
+          ${mentionsUnread.map(m => `
+            <div style="position:relative;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 30px 12px 14px;margin:0 6px 8px;cursor:pointer" onclick="openTaskMention('${m.kind}','${m.mention_id}','${m.task_id}')">
+              ${notifReadToggleHtml('taskmention', `${m.kind}:${m.mention_id}`, false)}
+              <div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:4px">🏷️ ${escHtml(m.author_name)} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${escHtml(m.task_title)}"</div>
+              <div style="font-size:11px;color:var(--text-muted)">${escHtml(m.body).slice(0,80)}${m.body.length > 80 ? '…' : ''}</div>
             </div>
           `).join('')}
         `);
@@ -4699,6 +4746,21 @@
       return `<button onclick="toggleNotifRead(event,'${type}','${idOrSuffix}',${isRead})" title="${isRead ? 'Mark unread' : 'Mark read'}" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:2px;color:${isRead ? 'var(--gray-400)' : 'var(--orange)'}">${isRead ? '○' : '●'}</button>`;
     }
 
+    // Same as index.html's version — kept in sync.
+    function isTaskOverdue(t) {
+      if (!t.due_date || t.status === 'done') return false;
+      return new Date(t.due_date + 'T00:00:00') < new Date(new Date().toDateString());
+    }
+
+    // admin.html has no Tasks board to switch modes into — mark the
+    // mention read, then hand off to HeartBeat's own deep-link (?task=)
+    // to actually open it.
+    function openTaskMention(kind, mentionId, taskId) {
+      const m = notifData.taskMentions.find(x => x.kind === kind && x.mention_id === mentionId);
+      if (m && !m.is_read) dismissNotification(`taskmention:${kind}:${mentionId}`);
+      location.href = `/?tab=tasks&task=${taskId}`;
+    }
+
     function openLeaveDecision(id) {
       const l = notifData.leaveDecisions.find(x => x.id === id);
       if (!l) return;
@@ -4797,14 +4859,30 @@
         // (leaveApprovals/trainingAssignments/upcomingEvents) but missing
         // from history until now — no real dismiss/read state, so these
         // always show as "unread" with no click-to-toggle, same as
-        // announcements. taskAlerts/hoursAlerts/taskMentions are
-        // deliberately NOT added here — this file's dropdown never shows
-        // those either (no Tasks board/Log Hours page in the admin
-        // panel), so there's nothing to be consistent with by adding them.
+        // announcements. taskAlerts/hoursAlerts now included too (added
+        // 2026-08-28 — the unreadCount badge always counted them, so
+        // omitting them here made the badge lie whenever they were the
+        // only unread items); their history rows navigate back to
+        // HeartBeat, same as the bell dropdown versions above.
         (notifData.leaveApprovals || []).forEach(l => items.push({
           type: 'leaveapproval', id: l.id,
           title: `${l.user_name || l.user_email} requested leave ${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`,
           date: l.created_at, isRead: false, dismissible: false
+        }));
+        (notifData.taskAlerts || []).forEach(t => items.push({
+          type: 'taskalert', id: t.id,
+          title: `${isTaskOverdue(t) ? '🔴' : '🟠'} ${t.title}${t.due_date ? ` — due ${fmtDate(t.due_date)}` : ''}`,
+          date: t.due_date, isRead: false, dismissible: false
+        }));
+        (notifData.hoursAlerts || []).forEach(h => items.push({
+          type: 'hoursalert', id: h.week_start,
+          title: `⏰ Finalize hours for week of ${fmtDate(h.week_start)}`,
+          date: h.week_start, isRead: false, dismissible: false
+        }));
+        (notifData.taskMentions || []).forEach(m => items.push({
+          type: 'taskmention', id: `${m.kind}:${m.mention_id}`, kind: m.kind, mentionId: m.mention_id, taskId: m.task_id,
+          title: `🏷️ ${m.author_name} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${m.task_title}"`,
+          date: m.created_at, isRead: m.is_read, dismissible: true
         }));
         (notifData.trainingAssignments || []).forEach(a => items.push({
           type: 'training', id: a.course_id,
@@ -4859,6 +4937,9 @@
       else if (item.type === 'leaveapproval') { showSection('leave-requests', document.querySelector('[onclick*=\'leave-requests\']')); }
       else if (item.type === 'training') { goToAssignedTraining(item.id); }
       else if (item.type === 'upcomingevent') { previewGreeting(item.teamMemberId, item.eventType, item.name); }
+      else if (item.type === 'taskalert') { location.href = `/?tab=tasks&task=${item.id}`; }
+      else if (item.type === 'hoursalert') { location.href = '/?tab=hours'; }
+      else if (item.type === 'taskmention') { openTaskMention(item.kind, item.mentionId, item.taskId); }
     }
     // Marks read without opening/navigating — announcements are excluded
     // (no dot rendered for them when unread, see renderNotifHistory) since
@@ -4871,6 +4952,7 @@
       if (item.type === 'leave') await dismissNotification(`leave:${item.id}`);
       else if (item.type === 'feedback') await dismissNotification(`feedback:${item.id}`);
       else if (item.type === 'greeting') await fetch(`/api/notifications/${item.id}/read`, { method: 'POST' });
+      else if (item.type === 'taskmention') await dismissNotification(`taskmention:${item.kind}:${item.mentionId}`);
       await refreshNotifHistory();
     }
 
