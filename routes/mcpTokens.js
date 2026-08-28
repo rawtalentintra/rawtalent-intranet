@@ -1,13 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const { requireAuth } = require('../middleware/authMiddleware');
+const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const mcpTokens = require('../services/mcpTokenService');
 
 // Regular session auth (cookie) — this is the Settings UI managing
 // tokens for whoever's actually logged in right now, not the MCP
 // protocol endpoint itself (see routes/mcp.js, which uses the token as
 // its own bearer-auth instead of a session).
-router.use(requireAuth);
+// super_admin only for now (Joy 2026-08-28) — this is a brand new,
+// still-experimental feature; requireAuth alone would let any logged-in
+// role generate their own token today. Widen this (or make it a
+// per-person grant, matching requireTrainingBuilder's pattern) if MCP
+// access is ever meant to reach past just her.
+router.use(requireSuperAdmin);
 
 router.get('/', async (req, res) => {
   try {

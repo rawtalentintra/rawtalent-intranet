@@ -3323,7 +3323,11 @@
           <label class="form-label-modal">Confirm New Password</label>
           <input type="password" id="adminConfirmPwd" class="form-control" placeholder="Repeat new password" autocomplete="new-password">
         </div>
-        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--gray-100)">
+        <!-- super_admin only for now, per Joy 2026-08-28 — see
+             routes/mcpTokens.js and routes/mcp.js's own requireSuperAdmin
+             gates, which are the real enforcement; this is just matching
+             the UI to what would 403 anyway. -->
+        <div class="super-admin-only" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--gray-100)">
           <span style="cursor:pointer;color:var(--orange);font-size:12.5px;font-weight:600" onclick="closePasswordModal();openMcpTokensModal()">🔌 Manage API Access (MCP) →</span>
         </div>
       </div>

@@ -119,6 +119,14 @@ async function requireMcpToken(req, res, next) {
     res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Invalid or missing access token' }, id: null });
     return;
   }
+  // super_admin only for now (Joy 2026-08-28, same restriction as
+  // routes/mcpTokens.js — token generation is already gated there, but
+  // this is the actual data-access endpoint, so it gets its own
+  // independent check rather than trusting that gate alone).
+  if (user.role !== 'super_admin') {
+    res.status(403).json({ jsonrpc: '2.0', error: { code: -32001, message: 'MCP access is not enabled for this account' }, id: null });
+    return;
+  }
   req.mcpUser = user;
   next();
 }
