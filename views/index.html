@@ -5081,7 +5081,10 @@
             <div style="font-weight:700;color:var(--navy);font-size:13.5px">${fmtDate(p.pay_period_start)} – ${fmtDate(p.pay_period_end)}</div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Invoice #${p.invoice_number} · Paid ${fmtDate(p.date_paid)} · $${Number(p.total_earnings_aud).toFixed(2)} AUD</div>
           </div>
-          <a class="btn-secondary" style="text-decoration:none" href="/api/payslips/${p.id}/download" download="Payslip-${p.pay_period_start}.pdf">⬇️ Download PDF</a>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary" onclick="window.open('/api/payslips/${p.id}/download?inline=1','_blank')">👁 Preview</button>
+            <a class="btn-secondary" style="text-decoration:none" href="/api/payslips/${p.id}/download" download="Payslip-${p.pay_period_start}.pdf">⬇️ Download PDF</a>
+          </div>
         </div>
       `).join('');
     }

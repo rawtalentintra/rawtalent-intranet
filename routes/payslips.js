@@ -178,13 +178,18 @@ router.get('/mine', async (req, res) => {
   }
 });
 
+// ?inline=1 backs the employee-facing "Preview" button — same
+// authorization, same stored bytes, just Content-Disposition: inline so
+// the browser's own PDF viewer renders it in a new tab (which already
+// has its own download control) instead of forcing a save dialog.
 router.get('/:id/download', async (req, res) => {
   try {
     const row = await payslip.authorizeDownload(req.params.id, req.user.email);
     const buffer = await payslip.downloadBuffer(row.storage_path);
+    const disposition = req.query.inline ? 'inline' : 'attachment';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Content-Disposition', `attachment; filename="Payslip-${row.pay_period_start}.pdf"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="Payslip-${row.pay_period_start}.pdf"`);
     res.send(buffer);
   } catch (err) {
     res.status(err.message.includes('access') ? 403 : 404).json({ error: err.message });
