@@ -263,7 +263,19 @@ router.post('/', requireMcpToken, async (req, res) => {
       await server.connect(transport);
       entry = { transport, email: req.mcpUser.email };
     } else {
-      res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'No valid session — send an initialize request first' }, id: null });
+      // 404, not 400 — this is the SDK's own documented convention
+      // ("Requests with invalid session IDs are rejected with 404 Not
+      // Found", streamableHttp.js's header comment) and per the MCP
+      // Streamable HTTP spec, 404 is specifically the signal a client is
+      // expected to treat as "this session is gone, silently start a new
+      // one" rather than a hard failure. `sessions` is in-memory, so it's
+      // wiped on every deploy — every session alive at that moment hits
+      // this exact branch on its next call. Getting the status code right
+      // is the difference between "reconnects itself" and "every deploy
+      // breaks the connector until you manually disconnect/reconnect in
+      // Claude" — confirmed live 2026-08-29 as the latter, with a plain
+      // 400 here.
+      res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found — the server may have restarted. Send a new initialize request.' }, id: null });
       return;
     }
     await entry.transport.handleRequest(req, res, req.body);
@@ -275,8 +287,14 @@ router.post('/', requireMcpToken, async (req, res) => {
 async function handleSessionRequest(req, res) {
   const sessionId = req.headers['mcp-session-id'];
   const entry = sessionId ? sessions[sessionId] : null;
-  if (!entry || entry.email.toLowerCase() !== req.mcpUser.email.toLowerCase()) {
-    res.status(400).send('Invalid or mismatched session');
+  // 404 specifically for "doesn't exist" (see the matching comment in the
+  // POST handler above — same reasoning, same in-memory-sessions-die-on-
+  // deploy cause) vs. 401 for "exists, but for a different token's user" —
+  // a real security-relevant rejection, not something a client should
+  // silently paper over by reinitializing.
+  if (!entry) { res.status(404).send('Session not found — the server may have restarted. Send a new initialize request.'); return; }
+  if (entry.email.toLowerCase() !== req.mcpUser.email.toLowerCase()) {
+    res.status(401).send('Token does not match this session');
     return;
   }
   await entry.transport.handleRequest(req, res);
