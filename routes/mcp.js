@@ -22,6 +22,12 @@ const { z } = require('zod');
 const { getDb } = require('../db/database');
 const mcpTokens = require('../services/mcpTokenService');
 const aiService = require('../services/aiService');
+const rtApi = require('../services/rtApiReportService');
+// Reuses routes/centres.js's own cached client+booking fetch (its
+// module.exports.getCentresAndBookings) rather than re-deriving a third
+// copy of "pull every RT client" — same 5-minute in-memory cache, so a
+// second search_centres call moments later doesn't re-hit RT's API.
+const { getCentresAndBookings } = require('./centres');
 
 // sessionId -> { transport, email } — an MCP "session" spans several
 // JSON-RPC calls (initialize, then repeated tool calls) over what the
@@ -105,6 +111,104 @@ function buildServerForUser(email) {
     });
     if (!res.rows.length) return { content: [{ type: 'text', text: `No team member matching "${nameOrEmail}".` }] };
     const text = res.rows.map(m => `• ${m.legal_name || m.name} — ${m.position || 'no position on file'}${m.team ? ` (${m.team})` : ''}${m.email ? `, ${m.email}` : ''}${m.phone ? `, ${m.phone}` : ''}`).join('\n');
+    return { content: [{ type: 'text', text }] };
+  });
+
+  // ── Educator/candidate + centre database (2026-08-29) ──────────────
+  // Added after Joy pointed out the original 5 tools never reached RT's
+  // real educator/candidate or client data at all — everything above is
+  // HeartBeat's own tables (KB, tasks, leave, team directory), not RT's.
+  // search_educators/get_educator read the same rt_candidates_cache sync
+  // table Tasks' own auto-link feature uses (services/
+  // taskPersonMatchService.js) — a local Postgres cache of RT's real
+  // candidate database, refreshed nightly, not a live RT call. Centres
+  // are the opposite: RT has no local cache table for clients (routes/
+  // centres.js's own comment explains why — ~360 active centres is cheap
+  // enough to just re-fetch live, unlike candidates' ~25k rows), so
+  // search_centres reuses that route's exported getCentresAndBookings()
+  // and its existing 5-minute in-memory cache.
+  server.registerTool('search_educators', {
+    title: 'Search Educators / Candidates',
+    description: 'Search RawTalent\'s real educator/candidate database (RT) by name, phone, or email. Returns each match\'s contact info, active status, any expiring compliance documents, and a link to their full RT profile.',
+    inputSchema: { query: z.string().describe('A name, phone number, or email to search for'), limit: z.number().int().min(1).max(20).optional() }
+  }, async ({ query, limit }) => {
+    const digits = query.replace(/\D/g, '');
+    const db = getDb();
+    // Phone is the strong signal (near-unique once normalised) — same
+    // 9-trailing-digit comparison taskPersonMatchService.js uses, so
+    // "0417225760", "+61417225760" and "417225760" all match each other.
+    const res = digits.length >= 8
+      ? await db.execute({
+          sql: `SELECT user_id, first_name, last_name, contact_no, email, suburb, is_active, expiring_docs_count
+                FROM rt_candidates_cache
+                WHERE RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) = RIGHT(?, 9)
+                LIMIT ?`,
+          args: [digits, limit || 10]
+        })
+      : await db.execute({
+          sql: `SELECT user_id, first_name, last_name, contact_no, email, suburb, is_active, expiring_docs_count,
+                       similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) AS sim
+                FROM rt_candidates_cache
+                WHERE similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) > 0.25 OR email ILIKE ?
+                ORDER BY sim DESC NULLS LAST LIMIT ?`,
+          args: [query, query, `%${query}%`, limit || 10]
+        });
+    if (!res.rows.length) return { content: [{ type: 'text', text: `No educators matched "${query}".` }] };
+    const text = res.rows.map(r => {
+      const name = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';
+      const flags = [r.is_active ? 'active' : 'inactive', r.expiring_docs_count ? `⚠️ ${r.expiring_docs_count} expiring doc(s)` : null].filter(Boolean).join(', ');
+      return `• ${name} (id ${r.user_id}) — ${r.contact_no || 'no phone'}${r.email ? `, ${r.email}` : ''}${r.suburb ? `, ${r.suburb}` : ''} — ${flags}\n  Profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${r.user_id}`;
+    }).join('\n\n');
+    return { content: [{ type: 'text', text }] };
+  });
+
+  server.registerTool('get_educator', {
+    title: 'Get Educator Details',
+    description: 'Full profile for one educator/candidate by their RT user id (get the id from search_educators first) — contact info, addresses, qualifications, and compliance documents on file, including expiry dates.',
+    inputSchema: { userId: z.union([z.string(), z.number()]).describe('The RT candidate user id') }
+  }, async ({ userId }) => {
+    const res = await getDb().execute({ sql: `SELECT * FROM rt_candidates_cache WHERE user_id = ?`, args: [userId] });
+    const row = res.rows[0];
+    if (!row) return { content: [{ type: 'text', text: `No educator found with id ${userId}.` }] };
+    const raw = row.raw || {};
+    const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';
+    const lines = [
+      `${name} (id ${row.user_id})`,
+      `Phone: ${row.contact_no || '—'} · Email: ${row.email || '—'}`,
+      `Status: ${row.is_active ? 'Active' : 'Inactive'}${row.is_deleted ? ' (deleted)' : ''}${row.suburb ? ` · Suburb: ${row.suburb}` : ''}`,
+      row.expiring_docs_count ? `⚠️ ${row.expiring_docs_count} expiring compliance document(s)` : null
+    ];
+    if (Array.isArray(raw.addresses) && raw.addresses.length) {
+      lines.push('', 'Addresses:', ...raw.addresses.map(a => `  • ${[a.addressLine1, a.addressLine2, a.suburb, a.state, a.postCode].filter(Boolean).join(', ')}`));
+    }
+    if (Array.isArray(raw.qualifications) && raw.qualifications.length) {
+      lines.push('', 'Qualifications:', ...raw.qualifications.map(q => `  • ${q.qualificationName || 'Unnamed qualification'}${q.qualified ? ' (qualified)' : ''}`));
+    }
+    if (Array.isArray(raw.attachedRequirements) && raw.attachedRequirements.length) {
+      // RT uses two sentinel dates, not just missing/null: '0001-01-01'
+      // (unset) and '9999-12-31' (this document type never expires) —
+      // confirmed against real data (Passport/Payslip/etc. all carry the
+      // 9999 sentinel). Both read as noise, not a real date, to a human.
+      lines.push('', 'Compliance documents:', ...raw.attachedRequirements.map(r => {
+        const hasRealExpiry = r.expiryDate && !r.expiryDate.startsWith('0001') && !r.expiryDate.startsWith('9999');
+        const expiry = hasRealExpiry ? ` — expires ${new Date(r.expiryDate).toLocaleDateString('en-AU')}` : '';
+        return `  • ${r.requirementName || 'Document'}${expiry}${r.isMandatory ? ' (mandatory)' : ''}`;
+      }));
+    }
+    lines.push('', `Profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${row.user_id}`);
+    return { content: [{ type: 'text', text: lines.filter(l => l !== null).join('\n') }] };
+  });
+
+  server.registerTool('search_centres', {
+    title: 'Search Centres / Clients',
+    description: 'Search RawTalent\'s active RT client centres by name or suburb. Returns each match\'s location and contact number.',
+    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(20).optional() }
+  }, async ({ query, limit }) => {
+    const { centres } = await getCentresAndBookings();
+    const q = query.toLowerCase();
+    const matches = centres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)).slice(0, limit || 10);
+    if (!matches.length) return { content: [{ type: 'text', text: `No centres matched "${query}".` }] };
+    const text = matches.map(c => `• ${c.name}${c.suburb ? ` — ${c.suburb}${c.state ? `, ${c.state}` : ''}` : ''}${c.contactNo ? ` · ${c.contactNo}` : ''}`).join('\n');
     return { content: [{ type: 'text', text }] };
   });
 
