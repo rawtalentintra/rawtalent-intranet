@@ -1663,27 +1663,58 @@
         allAnnouncements.forEach(a => items.push({
           type: 'announcement', id: a.id,
           title: a.title || (a.message.length > 80 ? a.message.slice(0, 80) + '…' : a.message),
-          date: a.send_at, isRead: a.is_acked
+          date: a.send_at, isRead: a.is_acked, dismissible: false
         }));
         (notifData.leaveDecisions || []).forEach(l => items.push({
           type: 'leave', id: l.id,
           title: `${l.status === 'approved' ? 'Approved' : 'Rejected'}: leave ${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`,
-          date: l.updated_at, isRead: l.is_read
+          date: l.updated_at, isRead: l.is_read, dismissible: true
         }));
         (notifData.feedbackDecisions || []).forEach(f => items.push({
-          type: 'feedback', id: f.id, title: `Feedback on "${f.article_title}" actioned`, date: f.updated_at, isRead: f.is_read
+          type: 'feedback', id: f.id, title: `Feedback on "${f.article_title}" actioned`, date: f.updated_at, isRead: f.is_read, dismissible: true
         }));
         (notifData.receivedGreetings || []).forEach(g => items.push({
           type: 'greeting', id: g.id,
           title: `${g.sent_by_name || 'A teammate'} sent you a ${g.greeting_type === 'birthday' ? 'Birthday' : 'Work Anniversary'} greeting`,
-          date: g.created_at, isRead: g.is_read
+          date: g.created_at, isRead: g.is_read, dismissible: true
         }));
         (notifData.taskMentions || []).forEach(m => items.push({
           type: 'taskmention', id: `${m.kind}:${m.mention_id}`, kind: m.kind, mentionId: m.mention_id, taskId: m.task_id,
           title: `${m.author_name} mentioned you ${m.kind === 'task' ? 'in the description of' : 'on'} "${m.task_title}"`,
-          date: m.created_at, isRead: m.is_read
+          date: m.created_at, isRead: m.is_read, dismissible: true
         }));
-        items.sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Standing to-dos — no real dismiss/read state (they clear on their
+        // own once the underlying thing is actually done: task marked done,
+        // hours submitted, leave decided, training completed), so these
+        // always show as "unread" here with no click-to-toggle, same as
+        // announcements above. Added 2026-08-28 — Joy wants the "All
+        // Notifications" history to cover everything the bell ever shows,
+        // not just the categories with a real binary read state.
+        (notifData.leaveApprovals || []).forEach(l => items.push({
+          type: 'leaveapproval', id: l.id,
+          title: `${l.user_name || l.user_email} requested leave ${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`,
+          date: l.created_at, isRead: false, dismissible: false
+        }));
+        (notifData.taskAlerts || []).forEach(t => items.push({
+          type: 'taskalert', id: t.id,
+          title: `${isTaskOverdue(t) ? '🔴' : '🟠'} ${t.title}${t.due_date ? ` — due ${fmtDate(t.due_date)}` : ''}`,
+          date: t.due_date, isRead: false, dismissible: false
+        }));
+        (notifData.hoursAlerts || []).forEach(h => items.push({
+          type: 'hoursalert', id: h.week_start,
+          title: `⏰ Finalize hours for week of ${fmtDate(h.week_start)}`,
+          date: h.week_start, isRead: false, dismissible: false
+        }));
+        (notifData.trainingAssignments || []).forEach(a => items.push({
+          type: 'training', id: a.course_id,
+          title: `📚 ${a.course_title}${a.due_date ? ` — due ${fmtDate(a.due_date)}` : ''}`,
+          date: a.due_date || null, isRead: false, dismissible: false
+        }));
+        (notifData.upcomingEvents || []).forEach(ev => items.push({
+          type: 'upcomingevent', id: `${ev.teamMemberId}:${ev.type}`, teamMemberId: ev.teamMemberId, eventType: ev.type, name: ev.name,
+          title: ev.headline, date: ev.date, isRead: ev.alreadySent, dismissible: false
+        }));
+        items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
         notifHistoryItems = items;
         renderNotifHistory();
       } catch {
@@ -1703,12 +1734,12 @@
         <div style="display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--gray-100)">
           ${item.isRead
             ? '<span title="Read" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gray-200)"></span>'
-            : item.type === 'announcement'
-              ? '<span title="Unread — click the title to review and acknowledge it" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>'
-              : `<span title="Click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
+            : item.dismissible
+              ? `<span title="Click to mark read" style="cursor:pointer;flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626" onclick="markNotifHistoryItemRead(${i})"></span>`
+              : '<span title="Still outstanding — click the title" style="flex-shrink:0;display:inline-block;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>'
           }
           <span style="flex:1;min-width:0;cursor:pointer;font-size:12.5px;font-weight:${item.isRead ? '500' : '700'};color:${item.isRead ? 'var(--text)' : 'var(--navy)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNotifHistoryItem(${i})" title="${escHtml(item.title)}">${escHtml(item.title)}</span>
-          <span style="flex-shrink:0;font-size:11px;color:var(--text-muted)">${fmtDate(item.date)}</span>
+          <span style="flex-shrink:0;font-size:11px;color:var(--text-muted)">${item.date ? fmtDate(item.date) : '—'}</span>
         </div>
       `).join('');
     }
@@ -1721,6 +1752,11 @@
       else if (item.type === 'feedback') openFeedbackDecision(item.id);
       else if (item.type === 'greeting') openGreetingCelebration(item.id);
       else if (item.type === 'taskmention') openTaskMention(item.kind, item.mentionId, item.taskId);
+      else if (item.type === 'leaveapproval') { setMode('leave'); }
+      else if (item.type === 'taskalert') { setMode('tasks'); setTimeout(() => openTaskDetail(item.id), 300); }
+      else if (item.type === 'hoursalert') { setMode('hours'); }
+      else if (item.type === 'training') { goToAssignedTraining(item.id); }
+      else if (item.type === 'upcomingevent') { previewGreeting(item.teamMemberId, item.eventType, item.name); }
     }
     // Marks read without opening/navigating — announcements are excluded
     // (no dot rendered for them when unread, see renderNotifHistory)
