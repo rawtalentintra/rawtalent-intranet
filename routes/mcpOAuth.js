@@ -20,7 +20,17 @@ const router = express.Router();
 const mcpOAuth = require('../services/mcpOAuthService');
 const mcpTokens = require('../services/mcpTokenService');
 
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+// Deliberately NOT process.env.APP_URL (unlike config/passport.js's Google
+// callback URL) — that var turned out to be unset/wrong in Railway's
+// production environment, which silently advertised
+// registration_endpoint etc. as http://localhost:3000 and broke Claude's
+// "Couldn't register" flow (2026-08-28, reported live). Deriving the
+// origin from the actual incoming request instead makes this correct
+// regardless of that env var's state — trust proxy is already set in
+// server.js, so req.protocol correctly reads 'https' behind Railway.
+function baseUrl(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
 
 function escHtml(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -84,11 +94,12 @@ function redirectWithError(res, redirectUri, state, error, description) {
 // RFC 8414 — points Claude at /authorize, /token, /register and tells it
 // PKCE S256 + no client_secret ("none") is how this server works.
 router.get('/.well-known/oauth-authorization-server', (req, res) => {
+  const origin = baseUrl(req);
   res.json({
-    issuer: APP_URL,
-    authorization_endpoint: `${APP_URL}/authorize`,
-    token_endpoint: `${APP_URL}/token`,
-    registration_endpoint: `${APP_URL}/register`,
+    issuer: origin,
+    authorization_endpoint: `${origin}/authorize`,
+    token_endpoint: `${origin}/token`,
+    registration_endpoint: `${origin}/register`,
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code'],
     code_challenge_methods_supported: ['S256'],
@@ -100,9 +111,9 @@ router.get('/.well-known/oauth-authorization-server', (req, res) => {
 // RFC 9728 — tells Claude which authorization server protects /mcp.
 // Registered at both the generic path and a resource-scoped one since
 // clients vary on which they probe first.
-const protectedResourceMeta = () => ({ resource: `${APP_URL}/mcp`, authorization_servers: [APP_URL] });
-router.get('/.well-known/oauth-protected-resource', (req, res) => res.json(protectedResourceMeta()));
-router.get('/.well-known/oauth-protected-resource/mcp', (req, res) => res.json(protectedResourceMeta()));
+const protectedResourceMeta = (req) => { const origin = baseUrl(req); return { resource: `${origin}/mcp`, authorization_servers: [origin] }; };
+router.get('/.well-known/oauth-protected-resource', (req, res) => res.json(protectedResourceMeta(req)));
+router.get('/.well-known/oauth-protected-resource/mcp', (req, res) => res.json(protectedResourceMeta(req)));
 
 // RFC 7591 Dynamic Client Registration — open/unauthenticated, same as
 // every real-world implementation of this endpoint (Claude has no

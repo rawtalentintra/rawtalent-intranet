@@ -111,8 +111,6 @@ function buildServerForUser(email) {
   return server;
 }
 
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
-
 async function requireMcpToken(req, res, next) {
   const auth = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
@@ -121,7 +119,10 @@ async function requireMcpToken(req, res, next) {
     // Points an OAuth-aware client (Claude's Custom Connector flow) at
     // the discovery document for routes/mcpOAuth.js instead of leaving
     // it to guess — see that file's header comment for the full flow.
-    res.set('WWW-Authenticate', `Bearer resource_metadata="${APP_URL}/.well-known/oauth-protected-resource/mcp"`);
+    // Derived from the actual request, not process.env.APP_URL — that
+    // var turned out unset/wrong in Railway production and silently
+    // pointed Claude at http://localhost:3000 (2026-08-28, live report).
+    res.set('WWW-Authenticate', `Bearer resource_metadata="${req.protocol}://${req.get('host')}/.well-known/oauth-protected-resource/mcp"`);
     res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Invalid or missing access token' }, id: null });
     return;
   }
