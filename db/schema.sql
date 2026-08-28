@@ -1637,3 +1637,27 @@ CREATE TABLE IF NOT EXISTS task_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_attachments_note ON task_attachments(note_id);
+
+-- Personal access tokens for the MCP server (routes/mcp.js) — lets a
+-- user connect HeartBeat as a Custom Connector in Claude. Deliberately
+-- separate from the session-cookie/Passport login the rest of the app
+-- uses; an MCP client is a server-to-server caller, not a browser.
+-- token_hash is SHA-256 (not bcrypt) — the token itself is a random
+-- 256-bit value, not a human-chosen password, so it doesn't need slow
+-- hashing to resist brute force; a fast hash is standard practice for
+-- high-entropy API tokens and matters here since every tool call
+-- re-verifies the token. token_prefix (first 8 chars of the raw token)
+-- is stored in the clear purely so a user can tell their own tokens
+-- apart in a list without the real value ever being shown again after
+-- creation.
+CREATE TABLE IF NOT EXISTS mcp_tokens (
+  id TEXT PRIMARY KEY,
+  user_email CITEXT NOT NULL,
+  label TEXT,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user_email ON mcp_tokens(user_email);

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.108.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.110.2",
     "bcryptjs": "^2.4.3",
     "cheerio": "^1.2.0",
@@ -28,7 +29,8 @@
     "pdfkit": "^0.20.1",
     "pg": "^8.22.0",
     "tesseract.js": "^7.0.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"

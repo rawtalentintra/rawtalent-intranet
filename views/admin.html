@@ -3323,10 +3323,45 @@
           <label class="form-label-modal">Confirm New Password</label>
           <input type="password" id="adminConfirmPwd" class="form-control" placeholder="Repeat new password" autocomplete="new-password">
         </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--gray-100)">
+          <span style="cursor:pointer;color:var(--orange);font-size:12.5px;font-weight:600" onclick="closePasswordModal();openMcpTokensModal()">🔌 Manage API Access (MCP) →</span>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closePasswordModal()">Cancel</button>
         <button class="btn-add" onclick="changePassword()">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP personal access tokens — lets this user connect HeartBeat as
+       a Custom Connector in Claude (see routes/mcp.js). The raw token
+       is shown exactly once, right after generating it, in
+       #mcpNewTokenBox — same "reveal once, never again" convention as
+       every other secret in this app. -->
+  <div class="modal-overlay" id="mcpTokensModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeMcpTokensModal()">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div class="modal-title">API Access (MCP)</div>
+        <button class="modal-close" onclick="closeMcpTokensModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">Connect HeartBeat to Claude as a Custom Connector using a personal access token. In Claude: Settings → Connectors → Add custom connector, URL <code id="mcpConnectorUrl"></code>, and paste a token generated below.</div>
+        <div id="mcpNewTokenBox" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:12px 14px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#15803d;margin-bottom:6px">Copy this now — it won't be shown again:</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <code id="mcpNewTokenValue" style="flex:1;min-width:0;font-size:11.5px;word-break:break-all;background:white;border:1px solid var(--gray-200);border-radius:6px;padding:6px 8px"></code>
+            <button class="btn-secondary" style="font-size:11px;padding:5px 10px;flex-shrink:0" onclick="copyMcpToken()">Copy</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <input type="text" id="mcpTokenLabelInput" class="form-control" placeholder="Label (optional) — e.g. &quot;My Laptop&quot;" style="flex:1">
+          <button class="btn-add" style="flex-shrink:0" onclick="generateMcpToken()">+ Generate Token</button>
+        </div>
+        <div id="mcpTokensList"><div class="loading-spinner" style="padding:20px"><div class="spinner"></div></div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeMcpTokensModal()">Close</button>
       </div>
     </div>
   </div>
@@ -16001,6 +16036,67 @@
       document.getElementById('passwordModal').classList.add('open');
     }
     function closePasswordModal() { document.getElementById('passwordModal').classList.remove('open'); }
+
+    // ── MCP personal access tokens ───────────────────────────────────
+    function openMcpTokensModal() {
+      document.getElementById('mcpConnectorUrl').textContent = `${location.origin}/mcp`;
+      document.getElementById('mcpNewTokenBox').style.display = 'none';
+      document.getElementById('mcpTokenLabelInput').value = '';
+      document.getElementById('mcpTokensModal').classList.add('open');
+      loadMcpTokens();
+    }
+    function closeMcpTokensModal() { document.getElementById('mcpTokensModal').classList.remove('open'); }
+
+    async function loadMcpTokens() {
+      const list = document.getElementById('mcpTokensList');
+      list.innerHTML = '<div class="loading-spinner" style="padding:20px"><div class="spinner"></div></div>';
+      try {
+        const tokens = await fetch('/api/mcp-tokens').then(r => r.json());
+        if (!tokens.length) {
+          list.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:12.5px;padding:16px 0">No tokens yet.</div>';
+          return;
+        }
+        list.innerHTML = tokens.map(t => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--gray-100)">
+            <div style="min-width:0">
+              <div style="font-size:12.5px;font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.label || 'Unlabeled token')} <code style="font-size:10.5px;color:var(--text-muted);font-weight:400">${escHtml(t.token_prefix)}…</code></div>
+              <div style="font-size:11px;color:var(--text-muted)">${t.revoked_at ? 'Revoked' : t.last_used_at ? `Last used ${fmtDate(t.last_used_at)}` : 'Never used'} · created ${fmtDate(t.created_at)}</div>
+            </div>
+            ${t.revoked_at ? '' : `<button class="btn-secondary" style="font-size:11px;padding:4px 10px;flex-shrink:0;color:#dc2626" onclick="revokeMcpToken('${t.id}')">Revoke</button>`}
+          </div>
+        `).join('');
+      } catch {
+        list.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:12.5px;padding:16px 0">Failed to load tokens.</div>';
+      }
+    }
+
+    async function generateMcpToken() {
+      try {
+        const label = document.getElementById('mcpTokenLabelInput').value.trim();
+        const res = await fetch('/api/mcp-tokens', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to generate token', 'error'); return; }
+        document.getElementById('mcpNewTokenValue').textContent = data.token;
+        document.getElementById('mcpNewTokenBox').style.display = 'block';
+        document.getElementById('mcpTokenLabelInput').value = '';
+        loadMcpTokens();
+      } catch { toast('Network error', 'error'); }
+    }
+    function copyMcpToken() {
+      const value = document.getElementById('mcpNewTokenValue').textContent;
+      navigator.clipboard.writeText(value).then(() => toast('Token copied', 'success')).catch(() => toast('Copy failed — select the text manually', 'error'));
+    }
+    async function revokeMcpToken(id) {
+      if (!confirm('Revoke this token? Anything still using it will stop working immediately.')) return;
+      try {
+        const res = await fetch(`/api/mcp-tokens/${id}`, { method: 'DELETE' });
+        if (!res.ok) { const d = await res.json(); toast(d.error || 'Failed to revoke', 'error'); return; }
+        toast('Token revoked', 'success');
+        loadMcpTokens();
+      } catch { toast('Network error', 'error'); }
+    }
 
     async function changePassword() {
       const currentPassword = document.getElementById('adminCurrentPwd').value;

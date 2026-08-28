@@ -147,6 +147,12 @@ app.use('/api/route-planner', require('./routes/routePlanner'));
 app.use('/api/document-checker', require('./routes/documentChecker'));
 app.use('/api/outreach-lists', require('./routes/outreachLists'));
 app.use('/api/tasks', require('./routes/tasks'));
+// MCP Custom Connector — /mcp uses its own bearer-token auth (see
+// routes/mcp.js), not the session cookie every other route above relies
+// on; /api/mcp-tokens is the ordinary session-authenticated Settings UI
+// for generating/revoking those tokens.
+app.use('/mcp', require('./routes/mcp'));
+app.use('/api/mcp-tokens', require('./routes/mcpTokens'));
 
 // 'qa_view' gets into the admin panel shell — the panel itself then hides
 // everything except the small set of sections that role is scoped to
