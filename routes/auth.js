@@ -22,8 +22,23 @@ router.post('/login', (req, res, next) => {
   })(req, res, next);
 });
 
+// Same-origin-relative-path check as public/login.html's own returnTo
+// guard — this one matters more, since it's what stops someone crafting
+// a /auth/google?returnTo=https://evil.example link from turning Google
+// sign-in into an open redirect.
+function safeReturnTo(value) {
+  return (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) ? value : null;
+}
+
 if (process.env.GOOGLE_CLIENT_ID) {
-  router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+  // returnTo (set by GET /authorize in routes/mcpOAuth.js when it sends
+  // an unauthenticated visitor to sign in first) rides through Google's
+  // OAuth round-trip as the `state` param — the one field Google hands
+  // back to the callback unchanged.
+  router.get('/google', (req, res, next) => {
+    const returnTo = safeReturnTo(req.query.returnTo);
+    passport.authenticate('google', { scope: ['profile', 'email'], state: returnTo || undefined })(req, res, next);
+  });
   router.get('/google/callback',
     passport.authenticate('google', { failureRedirect: '/login.html?error=1' }),
     async (req, res) => {
@@ -32,7 +47,7 @@ if (process.env.GOOGLE_CLIENT_ID) {
       } catch (err) {
         console.error('Google login last_login update error:', err.message);
       }
-      res.redirect('/');
+      res.redirect(safeReturnTo(req.query.state) || '/');
     }
   );
 }

@@ -1661,3 +1661,23 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
   revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user_email ON mcp_tokens(user_email);
+
+-- Claude's "Add Custom Connector" flow doesn't just take a URL + a
+-- manually-pasted token — it does real OAuth 2.1 against the server's
+-- origin (discovery, Dynamic Client Registration, an /authorize consent
+-- screen, then a /token exchange), per the MCP Authorization spec.
+-- Discovered 2026-08-28: the original bearer-token-only design 404'd
+-- when Claude's client hit GET /authorize, which didn't exist. Clients
+-- register themselves once (RFC 7591) and are public/PKCE-only (no
+-- client_secret — an MCP client like Claude can't keep one secret), so
+-- redirect_uris is the only thing worth persisting per client; there's
+-- nothing sensitive in this table. Authorization codes are single-use
+-- and live ~2 minutes, so they stay an in-memory map in routes/mcp.js
+-- rather than a table — a code dying on a mid-flight redeploy just means
+-- retrying the "Connect" click once, not a real outage.
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+  client_id TEXT PRIMARY KEY,
+  client_name TEXT,
+  redirect_uris JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);

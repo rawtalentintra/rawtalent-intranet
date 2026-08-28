@@ -1,0 +1,248 @@
+// OAuth 2.1 endpoints backing the MCP Custom Connector flow — mounted at
+// the app root (not under /mcp) because OAuth discovery is origin-scoped
+// (/.well-known/...) and /authorize, /token, /register are conventionally
+// root-level too. See db/schema.sql's mcp_oauth_clients comment for why
+// this exists: Claude's "Add Custom Connector" doesn't take a
+// manually-pasted bearer token, it drives a real authorization-code+PKCE
+// dance against the server's origin.
+//
+// This deliberately reuses HeartBeat's own session-cookie login for the
+// human part of the flow (GET /authorize renders a consent screen behind
+// the same Passport session everything else uses) rather than inventing
+// a separate identity system — "authorize Claude" is just Joy, already
+// logged into HeartBeat, clicking one more button. The payload it hands
+// back is a normal mcp_tokens personal access token (services/
+// mcpTokenService.js), so an OAuth-issued token shows up in, and can be
+// revoked from, the same "Manage API Access" list as a manually-generated
+// one — no parallel token system.
+const express = require('express');
+const router = express.Router();
+const mcpOAuth = require('../services/mcpOAuthService');
+const mcpTokens = require('../services/mcpTokenService');
+
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+
+function escHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderMessagePage(title, message, { showHomeLink = true } = {}) {
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escHtml(title)} — RawTalent HeartBeat</title>
+<link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css"></head>
+<body><div class="error-page">
+<div class="error-title">${escHtml(title)}</div>
+<p class="error-sub">${escHtml(message)}</p>
+${showHomeLink ? '<br><a href="/" style="color:var(--orange);font-weight:600">← Return to HeartBeat</a>' : ''}
+</div></body></html>`;
+}
+
+function renderConsentPage({ clientName, userEmail, params }) {
+  const hidden = Object.entries(params).map(([k, v]) => `<input type="hidden" name="${escHtml(k)}" value="${escHtml(v)}">`).join('\n');
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect to Claude — RawTalent HeartBeat</title>
+<link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css"></head>
+<body>
+<div class="login-page">
+  <div class="login-bg"></div>
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/images/logo-dark-bg.png" alt="RawTalent" height="36" style="display:block;margin:0 auto 8px">
+      <div class="login-logo-sub">HeartBeat</div>
+    </div>
+    <div style="text-align:center;color:white;font-size:15px;font-weight:700;margin-bottom:8px">Connect ${escHtml(clientName || 'this app')} to HeartBeat?</div>
+    <div style="text-align:center;color:rgba(255,255,255,.6);font-size:12.5px;line-height:1.5;margin-bottom:22px">
+      Signed in as <strong style="color:rgba(255,255,255,.85)">${escHtml(userEmail)}</strong>.<br>
+      It'll be able to search the knowledge base, ask HeartBeat AI, and read your own tasks/leave requests on your behalf.
+    </div>
+    <form method="POST" action="/authorize" style="display:flex;flex-direction:column;gap:10px">
+      ${hidden}
+      <button type="submit" name="decision" value="allow" class="btn-primary">Allow</button>
+      <button type="submit" name="decision" value="deny" class="btn-google" style="justify-content:center">Cancel</button>
+    </form>
+  </div>
+</div>
+</body></html>`;
+}
+
+function redirectWithError(res, redirectUri, state, error, description) {
+  const url = new URL(redirectUri);
+  url.searchParams.set('error', error);
+  if (description) url.searchParams.set('error_description', description);
+  if (state) url.searchParams.set('state', state);
+  res.redirect(url.toString());
+}
+
+// RFC 8414 — points Claude at /authorize, /token, /register and tells it
+// PKCE S256 + no client_secret ("none") is how this server works.
+router.get('/.well-known/oauth-authorization-server', (req, res) => {
+  res.json({
+    issuer: APP_URL,
+    authorization_endpoint: `${APP_URL}/authorize`,
+    token_endpoint: `${APP_URL}/token`,
+    registration_endpoint: `${APP_URL}/register`,
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code'],
+    code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['none'],
+    scopes_supported: ['mcp']
+  });
+});
+
+// RFC 9728 — tells Claude which authorization server protects /mcp.
+// Registered at both the generic path and a resource-scoped one since
+// clients vary on which they probe first.
+const protectedResourceMeta = () => ({ resource: `${APP_URL}/mcp`, authorization_servers: [APP_URL] });
+router.get('/.well-known/oauth-protected-resource', (req, res) => res.json(protectedResourceMeta()));
+router.get('/.well-known/oauth-protected-resource/mcp', (req, res) => res.json(protectedResourceMeta()));
+
+// RFC 7591 Dynamic Client Registration — open/unauthenticated, same as
+// every real-world implementation of this endpoint (Claude has no
+// credential to present yet at this point in the flow). Safe to leave
+// open: registering a client record grants nothing by itself — /authorize
+// still requires a real HeartBeat super_admin session before it'll ever
+// hand out a code.
+router.post('/register', async (req, res) => {
+  try {
+    const { client_name, redirect_uris } = req.body || {};
+    const client = await mcpOAuth.registerClient({ clientName: client_name, redirectUris: redirect_uris });
+    res.status(201).json({
+      client_id: client.client_id,
+      client_name: client.client_name,
+      redirect_uris: client.redirect_uris,
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code'],
+      response_types: ['code']
+    });
+  } catch (err) {
+    res.status(400).json({ error: 'invalid_client_metadata', error_description: err.message });
+  }
+});
+
+async function validateAuthorizeRequest(req, res) {
+  const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method } = req.query;
+  if (!client_id || !redirect_uri) {
+    res.status(400).send(renderMessagePage('Invalid Request', 'This connection request is missing required information — try reconnecting from Claude.'));
+    return null;
+  }
+  const client = await mcpOAuth.getClient(client_id);
+  if (!client) {
+    res.status(400).send(renderMessagePage('Unknown Connector', "This connector isn't registered with HeartBeat — try removing and re-adding it in Claude."));
+    return null;
+  }
+  // Exact match only — this is the check that stops a code minted here
+  // from ever being deliverable anywhere but the address Claude itself
+  // registered.
+  if (!client.redirect_uris.includes(redirect_uri)) {
+    res.status(400).send(renderMessagePage('Redirect Mismatch', "This request's redirect address doesn't match what was registered — try reconnecting from Claude."));
+    return null;
+  }
+  if (response_type !== 'code') {
+    redirectWithError(res, redirect_uri, req.query.state, 'unsupported_response_type', 'Only "code" is supported.');
+    return null;
+  }
+  if (!code_challenge || (code_challenge_method && code_challenge_method !== 'S256')) {
+    redirectWithError(res, redirect_uri, req.query.state, 'invalid_request', 'PKCE (S256) is required.');
+    return null;
+  }
+  return client;
+}
+
+router.get('/authorize', async (req, res) => {
+  const client = await validateAuthorizeRequest(req, res);
+  if (!client) return; // response already sent
+
+  if (!req.isAuthenticated()) {
+    res.redirect(`/login.html?returnTo=${encodeURIComponent(req.originalUrl)}`);
+    return;
+  }
+  // Same restriction as routes/mcp.js's own data-access gate (Joy
+  // 2026-08-28) — enforced here too so someone else logged into HeartBeat
+  // can't even reach the consent screen, not just fail later at /mcp.
+  if (req.user.role !== 'super_admin') {
+    res.status(403).send(renderMessagePage('Access Restricted', 'MCP access is limited to the HeartBeat super admin account. Sign in as that account to connect this.'));
+    return;
+  }
+
+  res.send(renderConsentPage({
+    clientName: client.client_name,
+    userEmail: req.user.email,
+    params: {
+      client_id: req.query.client_id,
+      redirect_uri: req.query.redirect_uri,
+      state: req.query.state || '',
+      code_challenge: req.query.code_challenge,
+      code_challenge_method: req.query.code_challenge_method || 'S256',
+      scope: req.query.scope || ''
+    }
+  }));
+});
+
+router.post('/authorize', async (req, res) => {
+  const { decision, client_id, redirect_uri, state, code_challenge, code_challenge_method, scope } = req.body || {};
+  if (!req.isAuthenticated() || req.user.role !== 'super_admin') {
+    res.status(403).send(renderMessagePage('Access Restricted', 'MCP access is limited to the HeartBeat super admin account.'));
+    return;
+  }
+  const client = client_id ? await mcpOAuth.getClient(client_id) : null;
+  if (!client || !redirect_uri || !client.redirect_uris.includes(redirect_uri)) {
+    res.status(400).send(renderMessagePage('Invalid Request', 'This connection request is no longer valid — try reconnecting from Claude.'));
+    return;
+  }
+  if (decision !== 'allow') {
+    redirectWithError(res, redirect_uri, state, 'access_denied', 'The user denied the request.');
+    return;
+  }
+  const code = mcpOAuth.issueCode({
+    clientId: client_id, redirectUri: redirect_uri, codeChallenge: code_challenge,
+    codeChallengeMethod: code_challenge_method || 'S256', email: req.user.email, scope
+  });
+  const url = new URL(redirect_uri);
+  url.searchParams.set('code', code);
+  if (state) url.searchParams.set('state', state);
+  res.redirect(url.toString());
+});
+
+router.post('/token', async (req, res) => {
+  const { grant_type, code, redirect_uri, client_id, code_verifier } = req.body || {};
+  if (grant_type !== 'authorization_code') {
+    res.status(400).json({ error: 'unsupported_grant_type' });
+    return;
+  }
+  if (!code || !code_verifier || !client_id || !redirect_uri) {
+    res.status(400).json({ error: 'invalid_request', error_description: 'Missing code, code_verifier, client_id, or redirect_uri.' });
+    return;
+  }
+  const entry = mcpOAuth.consumeCode(code); // single-use — a retry with the same code always fails from here on
+  if (!entry) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'Code is invalid, expired, or already used.' });
+    return;
+  }
+  if (entry.clientId !== client_id || entry.redirectUri !== redirect_uri) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'client_id or redirect_uri does not match the original request.' });
+    return;
+  }
+  if (!mcpOAuth.verifyPkce(code_verifier, entry.codeChallenge)) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed.' });
+    return;
+  }
+  try {
+    // A normal mcp_tokens PAT — same verifyToken() path every other MCP
+    // call already goes through, so it shows up in (and can be revoked
+    // from) the ordinary "Manage API Access" list, no parallel system.
+    const accessToken = await mcpTokens.generateToken(entry.email, 'Claude (OAuth connector)');
+    res.json({ access_token: accessToken, token_type: 'bearer', scope: entry.scope || 'mcp' });
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', error_description: err.message });
+  }
+});
+
+module.exports = router;

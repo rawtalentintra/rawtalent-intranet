@@ -153,6 +153,11 @@ app.use('/api/tasks', require('./routes/tasks'));
 // for generating/revoking those tokens.
 app.use('/mcp', require('./routes/mcp'));
 app.use('/api/mcp-tokens', require('./routes/mcpTokens'));
+// OAuth discovery/authorize/token/register for the Custom Connector flow
+// above — root-mounted, not under /mcp, since /.well-known/... is
+// origin-scoped and /authorize|/token|/register are conventionally
+// root-level too. See routes/mcpOAuth.js's header comment.
+app.use('/', require('./routes/mcpOAuth'));
 
 // 'qa_view' gets into the admin panel shell — the panel itself then hides
 // everything except the small set of sections that role is scoped to
