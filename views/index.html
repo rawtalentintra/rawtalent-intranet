@@ -2335,6 +2335,8 @@
       const pr = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META.normal;
       const overdue = isTaskOverdue(t);
       const dueSoon = isTaskDueSoon(t);
+      const assigneeLabel = assigneeLabelFor(t);
+      const unassigned = assigneeLabel === 'Unassigned';
       return `
         <div class="task-card" draggable="true" ondragstart="handleTaskDragStart(event,'${t.id}')" ondragend="handleTaskDragEnd()" onclick="openTaskDetail('${t.id}')">
           <div class="task-card-top">
@@ -2346,7 +2348,7 @@
           <div class="task-card-class">✍️ Created by ${escHtml(t.created_by_name || t.created_by)}</div>
           ${taskLinkedBadgesHtml(t)}
           <div class="task-card-bottom">
-            <span class="task-card-assignee">👤 Assigned to ${escHtml(assigneeLabelFor(t))}</span>
+            <span class="task-card-assignee ${unassigned ? 'task-card-assignee--unassigned' : ''}">👤 ${unassigned ? 'Unassigned' : `Assigned to ${escHtml(assigneeLabel)}`}</span>
             ${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : ''}
           </div>
         </div>

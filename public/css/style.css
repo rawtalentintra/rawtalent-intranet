@@ -1834,6 +1834,9 @@ body:has(> .navbar) { padding-top: 64px; }
    deliberately the one warm/colored element low on the card (besides the
    due-date state colors) so the eye lands on it first. */
 .task-card-assignee { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--navy); background: #fff7ed; border: 1px solid #fed7aa; padding: 3px 10px; border-radius: 50px; font-size: 11px; }
+/* No one owns this yet — that's worth flagging red, not the same warm
+   "someone's on it" orange every other pill uses. */
+.task-card-assignee--unassigned { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
 .task-card-due { font-weight: 700; }
 .task-card-due.soon { color: #d97706; }
 .task-card-due.overdue { color: #dc2626; }
