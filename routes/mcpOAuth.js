@@ -52,7 +52,11 @@ ${showHomeLink ? '<br><a href="/" style="color:var(--orange);font-weight:600">�
 }
 
 function renderConsentPage({ clientName, userEmail, params }) {
-  const hidden = Object.entries(params).map(([k, v]) => `<input type="hidden" name="${escHtml(k)}" value="${escHtml(v)}">`).join('\n');
+  // Params ride along as a JSON blob for the JS-driven submit below, not
+  // hidden <input> fields — see the <script> at the bottom for why plain
+  // <form method="POST"> wasn't reliable here. < escaping stops the
+  // JSON from being able to close the <script> tag early.
+  const paramsJson = JSON.stringify(params).replace(/</g, '\\u003c');
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Connect to Claude — RawTalent HeartBeat</title>
@@ -73,22 +77,78 @@ function renderConsentPage({ clientName, userEmail, params }) {
       Signed in as <strong style="color:rgba(255,255,255,.85)">${escHtml(userEmail)}</strong>.<br>
       It'll be able to search the knowledge base, ask HeartBeat AI, and read your own tasks/leave requests on your behalf.
     </div>
-    <form method="POST" action="/authorize" style="display:flex;flex-direction:column;gap:10px">
-      ${hidden}
-      <button type="submit" name="decision" value="allow" class="btn-primary">Allow</button>
-      <button type="submit" name="decision" value="deny" class="btn-google" style="justify-content:center">Cancel</button>
-    </form>
+    <div id="consentError" style="display:none;background:rgba(220,38,38,.15);border:1px solid rgba(220,38,38,.4);color:#fecaca;font-size:12px;line-height:1.5;padding:10px 12px;border-radius:8px;margin-bottom:14px"></div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button type="button" id="allowBtn" class="btn-primary">Allow</button>
+      <button type="button" id="denyBtn" class="btn-google" style="justify-content:center">Cancel</button>
+    </div>
+    <noscript><div style="text-align:center;color:#fecaca;font-size:12px;margin-top:14px">This page needs JavaScript enabled to connect. Try opening this link in a regular browser tab.</div></noscript>
   </div>
 </div>
+<script>
+  const CONSENT_PARAMS = ${paramsJson};
+  // A plain <form method="POST"> here used to leave "Allow" doing
+  // nothing at all, with zero visible error — reported live 2026-08-28.
+  // Most likely cause: Claude shows this page inside a restricted embed
+  // (e.g. a sandboxed iframe) that blocks form-submission navigation.
+  // fetch() isn't restricted by that same sandbox flag, so this posts
+  // via fetch and then explicitly navigates window.top (falling back to
+  // window.location if that's blocked too) — and either way, any failure
+  // now shows a real message instead of silently doing nothing.
+  async function decide(decision) {
+    const allowBtn = document.getElementById('allowBtn');
+    const denyBtn = document.getElementById('denyBtn');
+    const errEl = document.getElementById('consentError');
+    errEl.style.display = 'none';
+    allowBtn.disabled = denyBtn.disabled = true;
+    const clickedBtn = decision === 'allow' ? allowBtn : denyBtn;
+    const originalText = clickedBtn.textContent;
+    clickedBtn.textContent = decision === 'allow' ? 'Connecting…' : 'Cancelling…';
+    try {
+      const res = await fetch('/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(Object.assign({ decision }, CONSENT_PARAMS))
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.redirectTo) {
+        throw new Error((data && data.error_description) || ('Server returned ' + res.status));
+      }
+      try { window.top.location.href = data.redirectTo; }
+      catch (navErr) { window.location.href = data.redirectTo; }
+    } catch (e) {
+      errEl.textContent = "Couldn't complete this: " + e.message + '. Try again, or use the "Report issues" link in Claude\\'s Add Custom Connector dialog if it keeps happening.';
+      errEl.style.display = 'block';
+      clickedBtn.textContent = originalText;
+      allowBtn.disabled = denyBtn.disabled = false;
+    }
+  }
+  document.getElementById('allowBtn').addEventListener('click', () => decide('allow'));
+  document.getElementById('denyBtn').addEventListener('click', () => decide('deny'));
+</script>
 </body></html>`;
 }
 
-function redirectWithError(res, redirectUri, state, error, description) {
+function errorRedirectUrl(redirectUri, state, error, description) {
   const url = new URL(redirectUri);
   url.searchParams.set('error', error);
   if (description) url.searchParams.set('error_description', description);
   if (state) url.searchParams.set('state', state);
-  res.redirect(url.toString());
+  return url.toString();
+}
+
+// The consent page's JS (see renderConsentPage) posts with
+// Accept: application/json and does the actual top-level navigation
+// itself — a plain 302 here wouldn't reach the browser's address bar at
+// all from a fetch() call, it'd just be fetch() transparently following
+// it as a second background request. Anything else (a form POST, or a
+// future caller with no JS) still gets a normal redirect.
+function respondWithRedirect(req, res, url) {
+  if (wantsJson(req)) { res.json({ redirectTo: url }); return; }
+  res.redirect(url);
+}
+function wantsJson(req) {
+  return req.is('application/json') || (req.headers.accept || '').includes('application/json');
 }
 
 // RFC 8414 — points Claude at /authorize, /token, /register and tells it
@@ -157,11 +217,11 @@ async function validateAuthorizeRequest(req, res) {
     return null;
   }
   if (response_type !== 'code') {
-    redirectWithError(res, redirect_uri, req.query.state, 'unsupported_response_type', 'Only "code" is supported.');
+    res.redirect(errorRedirectUrl(redirect_uri, req.query.state, 'unsupported_response_type', 'Only "code" is supported.'));
     return null;
   }
   if (!code_challenge || (code_challenge_method && code_challenge_method !== 'S256')) {
-    redirectWithError(res, redirect_uri, req.query.state, 'invalid_request', 'PKCE (S256) is required.');
+    res.redirect(errorRedirectUrl(redirect_uri, req.query.state, 'invalid_request', 'PKCE (S256) is required.'));
     return null;
   }
   return client;
@@ -200,16 +260,20 @@ router.get('/authorize', async (req, res) => {
 router.post('/authorize', async (req, res) => {
   const { decision, client_id, redirect_uri, state, code_challenge, code_challenge_method, scope } = req.body || {};
   if (!req.isAuthenticated() || req.user.role !== 'super_admin') {
-    res.status(403).send(renderMessagePage('Access Restricted', 'MCP access is limited to the HeartBeat super admin account.'));
+    const message = 'MCP access is limited to the HeartBeat super admin account.';
+    if (wantsJson(req)) { res.status(403).json({ error_description: message }); return; }
+    res.status(403).send(renderMessagePage('Access Restricted', message));
     return;
   }
   const client = client_id ? await mcpOAuth.getClient(client_id) : null;
   if (!client || !redirect_uri || !client.redirect_uris.includes(redirect_uri)) {
-    res.status(400).send(renderMessagePage('Invalid Request', 'This connection request is no longer valid — try reconnecting from Claude.'));
+    const message = 'This connection request is no longer valid — try reconnecting from Claude.';
+    if (wantsJson(req)) { res.status(400).json({ error_description: message }); return; }
+    res.status(400).send(renderMessagePage('Invalid Request', message));
     return;
   }
   if (decision !== 'allow') {
-    redirectWithError(res, redirect_uri, state, 'access_denied', 'The user denied the request.');
+    respondWithRedirect(req, res, errorRedirectUrl(redirect_uri, state, 'access_denied', 'The user denied the request.'));
     return;
   }
   const code = mcpOAuth.issueCode({
@@ -219,7 +283,7 @@ router.post('/authorize', async (req, res) => {
   const url = new URL(redirect_uri);
   url.searchParams.set('code', code);
   if (state) url.searchParams.set('state', state);
-  res.redirect(url.toString());
+  respondWithRedirect(req, res, url.toString());
 });
 
 router.post('/token', async (req, res) => {
