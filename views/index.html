@@ -2183,6 +2183,7 @@
     let editingTaskId = null;
     let taskFilterDept = 'all';
     let taskFilterClass = 'all'; // 'all' | '__none__' | a task_classifications.id
+    let taskFilterAssignee = 'all'; // 'all' | '__unassigned__' | a lowercased email
     let taskShowDone = false;
     let taskMineOnly = true; // default view for everyone is "Assigned to me"
     let taskSearchQuery = '';
@@ -2277,8 +2278,13 @@
     // populateTaskClassSelect), so a previously-picked one is almost
     // never valid for the newly-selected department and would otherwise
     // silently filter the board down to nothing.
-    function setTaskDeptFilter(id) { taskFilterDept = id; taskFilterClass = 'all'; renderTasksView(); }
-    function setTaskClassFilter(id) { taskFilterClass = id; renderTasksView(); }
+    // Both reset taskFilterAssignee too — it's scoped by dept+class (see
+    // taskAssigneeFilterSelectHtml), so narrowing either one can drop the
+    // currently-picked owner out of the option list entirely, which would
+    // otherwise leave the board silently filtered to zero results with no
+    // visible reason why.
+    function setTaskDeptFilter(id) { taskFilterDept = id; taskFilterClass = 'all'; taskFilterAssignee = 'all'; renderTasksView(); }
+    function setTaskClassFilter(id) { taskFilterClass = id; taskFilterAssignee = 'all'; renderTasksView(); }
     function toggleTaskLegend() { taskLegendOpen = !taskLegendOpen; renderTasksView(); }
     function setTaskViewMode(mode) { taskViewMode = mode; renderTasksView(); }
 
@@ -2497,6 +2503,9 @@
         if (taskFilterClass === '__none__' && t.classification_id) return false;
         if (taskFilterClass !== 'all' && taskFilterClass !== '__none__' && t.classification_id !== taskFilterClass) return false;
         if (taskMineOnly && !(Array.isArray(t.assigned_to_emails) && t.assigned_to_emails.includes((currentUserEmail || '').toLowerCase()))) return false;
+        const assignedEmails = Array.isArray(t.assigned_to_emails) ? t.assigned_to_emails : [];
+        if (taskFilterAssignee === '__unassigned__' && assignedEmails.length) return false;
+        if (taskFilterAssignee !== 'all' && taskFilterAssignee !== '__unassigned__' && !assignedEmails.includes(taskFilterAssignee)) return false;
         if (taskSearchQuery && !t.title.toLowerCase().includes(taskSearchQuery.toLowerCase())) return false;
         return true;
       });
@@ -2509,6 +2518,7 @@
       `;
 
       const classFilterHtml = taskClassFilterSelectHtml(visibleAll);
+      const assigneeFilterHtml = taskAssigneeFilterSelectHtml(visibleAll);
       const viewHtml = taskViewMode === 'list' ? renderTaskListHtml(filtered) : renderTaskBoardHtml(filtered);
 
       list.innerHTML = `
@@ -2516,7 +2526,8 @@
           <button class="btn-add" onclick="openTaskModal()">+ New Task</button>
           <input type="text" class="form-control" id="taskSearchInput" placeholder="Search tasks…" style="max-width:220px" value="${escHtml(taskSearchQuery)}" oninput="taskSearchQuery=this.value;renderTasksView()">
           ${classFilterHtml}
-          <label class="task-toggle"><input type="checkbox" ${taskMineOnly ? 'checked' : ''} onchange="taskMineOnly=this.checked;renderTasksView()"> Assigned to me</label>
+          ${assigneeFilterHtml}
+          <label class="task-toggle"><input type="checkbox" ${taskMineOnly ? 'checked' : ''} onchange="taskMineOnly=this.checked; if(taskMineOnly){taskFilterAssignee='all'} renderTasksView()"> Assigned to me</label>
           <label class="task-toggle"><input type="checkbox" ${taskShowDone ? 'checked' : ''} onchange="taskShowDone=this.checked;renderTasksView()"> Show done</label>
           <div class="task-view-toggle" style="margin-left:auto">
             <button class="${taskViewMode === 'board' ? 'active' : ''}" onclick="setTaskViewMode('board')">🗂 Board</button>
@@ -2572,6 +2583,46 @@
           ${optionsHtml}
         </select>
       `;
+    }
+
+    // "who owns what" — lets you pick anyone (not just yourself) and see
+    // just their tasks, e.g. checking what a teammate is working on.
+    // Scoped by the currently-picked department + classification, same
+    // convention as taskClassFilterSelectHtml above (so its counts move
+    // with those two filters but not with search/mineOnly/itself); hidden
+    // entirely once those narrow things down to nothing. Picking a
+    // specific owner here and checking "Assigned to me" are two ways of
+    // scoping by the same axis (person), so they're kept mutually
+    // exclusive rather than AND'd — each one clears the other, in
+    // renderTasksView()'s toolbar and setTaskAssigneeFilter() below.
+    function taskAssigneeFilterSelectHtml(visibleAll) {
+      const scoped = visibleAll.filter(t =>
+        (taskFilterDept === 'all' || t.department_id === taskFilterDept) &&
+        (taskFilterClass === 'all' || (taskFilterClass === '__none__' ? !t.classification_id : t.classification_id === taskFilterClass))
+      );
+      const counts = new Map();
+      let unassignedCount = 0;
+      scoped.forEach(t => {
+        const emails = Array.isArray(t.assigned_to_emails) ? t.assigned_to_emails : [];
+        if (!emails.length) { unassignedCount++; return; }
+        emails.forEach(e => counts.set(e, (counts.get(e) || 0) + 1));
+      });
+      if (!counts.size && !unassignedCount) return '';
+      const options = [...counts.entries()]
+        .map(([email, count]) => ({ email, count, label: taskUserLabel(email) }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+      return `
+        <select class="form-control" id="taskAssigneeFilterSelect" style="max-width:200px" onchange="setTaskAssigneeFilter(this.value)">
+          <option value="all" ${taskFilterAssignee === 'all' ? 'selected' : ''}>All Owners</option>
+          ${options.map(o => `<option value="${escHtml(o.email)}" ${taskFilterAssignee === o.email ? 'selected' : ''}>${escHtml(o.label)} (${o.count})</option>`).join('')}
+          ${unassignedCount ? `<option value="__unassigned__" ${taskFilterAssignee === '__unassigned__' ? 'selected' : ''}>— Unassigned (${unassignedCount}) —</option>` : ''}
+        </select>
+      `;
+    }
+    function setTaskAssigneeFilter(value) {
+      taskFilterAssignee = value;
+      if (value !== 'all') taskMineOnly = false;
+      renderTasksView();
     }
 
     function populateTaskSelects() {
