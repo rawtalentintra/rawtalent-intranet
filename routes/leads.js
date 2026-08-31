@@ -12,6 +12,8 @@ const { MEANINGFUL_BOOKING_STATUSES } = require('../services/centreHealthService
 const { visitsByCentreKey, getCentresAndBookings } = require('./centres');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 const { partnerForSuburbState } = require('../services/melbourneTerritoryService');
+const mapboxService = require('../services/mapboxService');
+const leadRegionService = require('../services/leadRegionService');
 
 router.use(requireAuth);
 
@@ -62,6 +64,25 @@ function sanitizeStreetAddress(raw) {
   return s || null;
 }
 
+// Best-effort geocode + metro/regional classification for one address —
+// used both at lead-creation time and by the backfill endpoint below.
+// Never throws: a bad/unresolvable address (or Mapbox not configured,
+// e.g. locally) just leaves the lead unclassified (is_regional stays
+// NULL) rather than blocking creation — same tolerance every other
+// geocoding call site in this app already uses.
+async function geocodeAndClassify(streetAddress, suburb, state) {
+  if (!streetAddress || !suburb || !state || !mapboxService.isConfigured()) {
+    return { lat: null, lng: null, isRegional: null };
+  }
+  try {
+    const coord = await mapboxService.geocodeAddress(`${streetAddress}, ${suburb} ${state}, Australia`);
+    if (!coord) return { lat: null, lng: null, isRegional: null };
+    return { lat: coord.lat, lng: coord.lng, isRegional: leadRegionService.isRegional(state, coord.lat, coord.lng) };
+  } catch {
+    return { lat: null, lng: null, isRegional: null };
+  }
+}
+
 // Anyone signed in can submit — consultant identity is always the caller,
 // never a field the client can set, so a lead can't be logged under
 // someone else's name by mistake or on purpose.
@@ -83,18 +104,22 @@ router.post('/', async (req, res) => {
     // Leads table's "Add Centre" button explicitly says otherwise — that's
     // the only caller that should ever send 'centre'.
     const resolvedEntryType = entryType === 'centre' ? 'centre' : 'lead';
+    const cleanStreetAddress = sanitizeStreetAddress(streetAddress);
+    const { lat, lng, isRegional } = await geocodeAndClassify(cleanStreetAddress, suburb, state);
     await getDb().execute({
       sql: `INSERT INTO leads (
               id, centre_name, street_address, suburb, state, centre_phone,
               educator_name, agency_name, number_of_shifts, agency_usage, position,
               contact_first_name, contact_last_name, contact_email,
-              submitted_by_email, submitted_by_name, assigned_workforce_partner, entry_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              submitted_by_email, submitted_by_name, assigned_workforce_partner, entry_type,
+              latitude, longitude, is_regional, archived_at, archived_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        id, centreName.trim(), sanitizeStreetAddress(streetAddress), suburb?.trim() || null, state || null, centrePhone?.trim() || null,
+        id, centreName.trim(), cleanStreetAddress, suburb?.trim() || null, state || null, centrePhone?.trim() || null,
         educatorName?.trim() || null, agencyName?.trim() || null, numberOfShifts?.trim() || null, agencyUsage || null, position || null,
         contactFirstName?.trim() || null, contactLastName?.trim() || null, contactEmail?.trim() || null,
-        req.user.email, req.user.name || req.user.email, assignedWorkforcePartner, resolvedEntryType
+        req.user.email, req.user.name || req.user.email, assignedWorkforcePartner, resolvedEntryType,
+        lat, lng, isRegional, isRegional ? new Date().toISOString() : null, isRegional ? 'regional' : null
       ]
     });
     res.json({ success: true, id });
@@ -121,6 +146,65 @@ router.get('/', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One-time (and safety-net) classification pass for leads that predate
+// this feature, or whose address failed to geocode at creation time
+// (Mapbox down, address unresolvable, etc.) — only ever touches rows
+// that have never been classified (is_regional IS NULL), so a lead a
+// human has since manually unarchived (still is_regional=true,
+// archived_at cleared) is never silently re-archived by a later run of
+// this. Admin-only since it makes real writes and costs real Mapbox
+// geocoding calls, not something to expose to every leads-view role.
+router.post('/backfill-regions', requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const rows = (await db.execute({
+      sql: `SELECT id, street_address, suburb, state, latitude, longitude FROM leads WHERE is_regional IS NULL`,
+      args: []
+    })).rows;
+    let classified = 0, archived = 0, skipped = 0;
+    for (const row of rows) {
+      // Reuse coordinates Smart Routing already geocoded for this lead
+      // (most real leads have these — see leads.latitude/longitude's own
+      // comment) instead of spending a fresh Mapbox call on every row.
+      let lat = row.latitude, lng = row.longitude;
+      if (lat == null || lng == null) {
+        const geo = await geocodeAndClassify(row.street_address, row.suburb, row.state);
+        lat = geo.lat; lng = geo.lng;
+      }
+      const isRegional = leadRegionService.isRegional(row.state, lat, lng);
+      if (isRegional === null) { skipped++; continue; }
+      classified++;
+      if (isRegional) archived++;
+      await db.execute({
+        sql: `UPDATE leads SET latitude = ?, longitude = ?, is_regional = ?,
+                archived_at = ?, archived_reason = ? WHERE id = ?`,
+        args: [lat, lng, isRegional, isRegional ? new Date().toISOString() : null, isRegional ? 'regional' : null, row.id]
+      });
+    }
+    res.json({ totalChecked: rows.length, classified, archived, skipped });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual restore — "recoverable when we start going out to regional
+// areas" (Liam, 2026-08-24). Deliberately doesn't reset is_regional back
+// to false/null: it's still, factually, outside the metro radius; this
+// only clears the archive so it shows in the main view again, same
+// distinction as a closed lead being reopened.
+router.post('/:id/unarchive', leadsViewAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: `UPDATE leads SET archived_at = NULL, archived_reason = NULL WHERE id = ?`,
+      args: [req.params.id]
+    });
+    if (!result.rowsAffected) return res.status(404).json({ error: 'Lead not found' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

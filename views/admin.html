@@ -1023,6 +1023,19 @@
           <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
         </div>
 
+        <!-- Regional (outside the Melbourne/Adelaide/Brisbane metro
+             radius) leads are archived, not deleted (Liam, 2026-08-24) —
+             hidden from the main view by default so the day-to-day board
+             stays focused on the metro pipeline, with this as the
+             "review the archived pool" tab for when RawTalent starts
+             going out to regional areas. -->
+        <div class="leads-closed-tabs" id="leadsRegionalTabs" style="margin-top:8px">
+          <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsRegionalFilter('active')">🏙️ Metro Leads</button>
+          <button type="button" class="leads-closed-tab" data-value="regional" onclick="setLeadsRegionalFilter('regional')">🗺️ Regional (Archived)</button>
+          <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsRegionalFilter('all')">All</button>
+          <button type="button" id="leadsBackfillBtn" style="display:none;margin-left:auto;background:none;border:1px solid var(--gray-200);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;color:var(--text-muted);cursor:pointer" onclick="runLeadsRegionalBackfill()" title="Geocodes+classifies any lead that's never been checked yet — safe to run any time, only touches unclassified leads">🗺️ Run Regional Classification</button>
+        </div>
+
         <div class="admin-table-card">
           <div class="leads-filter-bar">
             <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
@@ -7312,6 +7325,14 @@
     let allLeads = [];
     let leadsStateFilterDefaulted = false;
     let leadsClosedFilter = 'active';
+    // 'active' (default) hides regional/archived leads from the main
+    // table entirely; 'regional' shows ONLY them (the review pool for
+    // when RawTalent expands into regional areas — Liam, 2026-08-24);
+    // 'all' applies no regional filter. Same 3-state shape as
+    // leadsClosedFilter, deliberately — not "show everything, archived
+    // included" by default, since regional leads aren't part of the
+    // day-to-day working pipeline at all.
+    let leadsRegionalFilter = 'active';
 
     function setLeadsClosedFilter(value) {
       leadsClosedFilter = value;
@@ -7319,6 +7340,26 @@
         btn.classList.toggle('active', btn.dataset.value === value);
       });
       filterLeadsTable();
+    }
+    function setLeadsRegionalFilter(value) {
+      leadsRegionalFilter = value;
+      document.querySelectorAll('#leadsRegionalTabs .leads-closed-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === value);
+      });
+      filterLeadsTable();
+    }
+    async function runLeadsRegionalBackfill() {
+      const btn = document.getElementById('leadsBackfillBtn');
+      btn.disabled = true;
+      btn.textContent = 'Classifying…';
+      try {
+        const res = await fetch('/api/leads/backfill-regions', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to classify leads', 'error'); return; }
+        toast(`Checked ${data.totalChecked} · archived ${data.archived} as regional · ${data.skipped} skipped (no address/coordinates yet)`, 'success');
+        loadLeadsTable();
+      } catch { toast('Network error', 'error'); }
+      finally { btn.disabled = false; btn.textContent = '🗺️ Run Regional Classification'; }
     }
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const LEAD_AGENCY_USAGE_BADGE_CLASS = { target_temp: 'agency-badge-target', high_agency_user: 'agency-badge-high' };
@@ -7609,6 +7650,14 @@
 
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
+      // Backfill button: makes real writes + costs real Mapbox geocoding
+      // calls (see POST /api/leads/backfill-regions), so admin/super_admin
+      // only — matches that route's own requireAdmin gate. No existing
+      // .admin-only CSS class to reuse (only .super-admin-only exists), so
+      // toggled directly here rather than inventing a new global class for
+      // one button.
+      document.getElementById('leadsBackfillBtn').style.display =
+        (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? 'inline-block' : 'none';
       // Only flash the spinner on the very first load — allLeads is often
       // already populated by the time this runs (WFP Dashboard/Route
       // Planner load it too), so re-navigating to Leads was blanking an
@@ -7815,6 +7864,13 @@
         btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
       });
 
+      // Regional/archived leads are excluded before the stats bar too
+      // (unlike the closed filter below) — they aren't part of the
+      // working pipeline at all, so they shouldn't inflate "how many
+      // leads reached this stage" any more than they show in the table.
+      if (leadsRegionalFilter === 'active') filtered = filtered.filter(l => !l.archived_at);
+      else if (leadsRegionalFilter === 'regional') filtered = filtered.filter(l => !!l.archived_at);
+
       // Called/Visited/Signed in the stats bar are achievement counts —
       // "how many leads reached this stage", not "how many are still open"
       // — so they're computed before the closed filter, off every OTHER
@@ -7931,6 +7987,7 @@
             ${escHtml(l.centre_name)}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
             ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
+            ${l.archived_at && l.archived_reason === 'regional' ? `<span title="Outside the metro radius — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#9a3412;background:#ffedd5;padding:1px 6px;border-radius:20px;vertical-align:middle">🗺️ REGIONAL</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
             ${l.auto_signed && !l.auto_signed_reviewed_at ? `<span title="HeartBeat automatically marked this Profile Created from RT data — open it to review and fill in Lead Called/Centre Visited/recording/notes" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#047857;background:#d1fae5;padding:1px 6px;border-radius:20px;vertical-align:middle">🤖 NEEDS REVIEW</span>` : ''}
           </td>
           <td>${renderLeadExistingCentreCell(l)}</td>
@@ -7955,6 +8012,21 @@
     function changeLeadsPage(delta) {
       leadsPage += delta;
       renderLeadsTablePage();
+    }
+
+    // Recoverable, per Liam's 2026-08-24 directive ("at some stage we
+    // might start going out to regional areas") — restores it to the main
+    // Leads view without touching is_regional (still factually outside
+    // the metro radius; see routes/leads.js's POST /:id/unarchive comment).
+    async function unarchiveLead(event, id) {
+      event.stopPropagation();
+      try {
+        const res = await fetch(`/api/leads/${id}/unarchive`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to unarchive', 'error'); return; }
+        toast('Lead restored to the main view', 'success');
+        loadLeadsTable();
+      } catch { toast('Network error', 'error'); }
     }
 
     // ── Lead status popover — single-field editor ───────────────────

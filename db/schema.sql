@@ -1064,6 +1064,23 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 
+-- Metro-vs-regional classification (Liam 2026-08-24: "for the leads, we
+-- want to remove the ones that are regional... at some stage we might
+-- start going out to regional areas" — archive, don't delete, so they're
+-- recoverable then). See services/leadRegionService.js for the actual
+-- classification logic. is_regional is nullable rather than a plain
+-- boolean — NULL specifically means "not yet classified" (no coordinates
+-- yet, or created before this feature existed), distinct from `false`
+-- (checked, confirmed metro) so a backfill pass knows exactly which rows
+-- still need geocoding+classifying without re-touching ones already
+-- decided — including a lead a human manually unarchived, which keeps
+-- is_regional=true (still "yes, technically regional") with archived_at
+-- cleared, so it won't silently get re-archived by the next backfill run.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_regional BOOLEAN;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS archived_reason TEXT; -- 'regional' today; room for other reasons later without a schema change
+CREATE INDEX IF NOT EXISTS idx_leads_archived_at ON leads(archived_at);
+
 -- Links a signed centre (entry_type='centre') to its real RT record, for My
 -- Centres/Centre 360 (health, booking performance, educator relationships —
 -- see services/centreHealthService.js). RT has no field connecting a
