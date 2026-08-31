@@ -13089,15 +13089,23 @@
     }
 
     // attachedRequirements[] is where WWCC/PCC-type compliance documents
-    // live, each with its own expiryDate. isExpiry is the RT app's own
-    // "already expired" flag; falls back to comparing expiryDate against
-    // "30 days from now" so a document expiring imminently also counts as
-    // needing attention, not just one that's already lapsed.
+    // live, each with its own expiryDate. isExpiry is NOT "already
+    // expired" — verified against real data (2026-08-30): most
+    // isExpiry=true requirements have a perfectly normal future
+    // expiryDate; it just means "this requirement type tracks an expiry
+    // date at all". Real expiryDate vs. today (with RT's two sentinel
+    // dates excluded — '0001-01-01' unset, '9999-12-31' never-expires) is
+    // the only real signal; "30 days from now" catches one expiring
+    // imminently, not just one already lapsed. Same fix applied to
+    // isDocExpiring below, routes/micropods.js's fully_compliant, and
+    // services/rtCandidatesSyncService.js's stored expiring_docs_count —
+    // all four were the same copy-pasted mistake.
     function candidateExpiringDocsCount(candidate) {
       const soon = Date.now() + 30 * 86400000;
       return (candidate.attachedRequirements || []).filter(req => {
-        if (req.isExpiry) return true;
         if (!req.expiryDate) return false;
+        const dateStr = String(req.expiryDate).slice(0, 10);
+        if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;
         const t = new Date(req.expiryDate).getTime();
         return !isNaN(t) && t < soon;
       }).length;
@@ -13691,13 +13699,15 @@
       finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Sync Now'; } }
     }
 
-    // isDocExpiring mirrors candidateExpiringDocsCount's own rule (already
-    // expired per the RT app's isExpiry flag, or expiring within 30 days) so
-    // the same document is flagged consistently between the list column and
-    // this detail view.
+    // isDocExpiring mirrors candidateExpiringDocsCount's own rule (real
+    // expiryDate already past, or expiring within 30 days — see that
+    // function's comment for why isExpiry alone isn't used) so the same
+    // document is flagged consistently between the list column and this
+    // detail view.
     function isDocExpiring(req) {
-      if (req.isExpiry) return true;
       if (!req.expiryDate) return false;
+      const dateStr = String(req.expiryDate).slice(0, 10);
+      if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;
       const t = new Date(req.expiryDate).getTime();
       return !isNaN(t) && t < Date.now() + 30 * 86400000;
     }

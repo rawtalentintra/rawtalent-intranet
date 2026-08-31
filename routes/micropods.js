@@ -58,6 +58,19 @@ async function getCandidatePoints() {
   // wholesale-missing required document types — there's no canonical
   // "which docs are required for whom" list anywhere in this codebase,
   // that's a harder, separate problem this doesn't try to solve.
+  //
+  // isExpiry alone used to be treated as "expired" here — wrong, verified
+  // against real production data (2026-08-30): it means "this requirement
+  // TYPE tracks an expiry date at all", not a live expired flag (most
+  // isExpiry=true rows have a perfectly normal future date). That bug
+  // pushed a huge share of candidates into "onboarding_supply" who should
+  // have landed in "available_engaged" — confirmed live: fixing this took
+  // SA's Onboarding Supply count from 159 down to 80 and surfaced 78 real
+  // Available & Engaged educators that had been invisible. Real
+  // expiryDate vs. today, excluding RT's two sentinel dates
+  // ('0001-01-01' unset, '9999-12-31' never-expires), is the only real
+  // signal — same fix applied in services/rtCandidatesSyncService.js and
+  // twice in admin.html, all four were the same copy-pasted mistake.
   const rows = (await getDb().execute({
     sql: `SELECT
             user_id, first_name, last_name, email, contact_no, suburb,
@@ -74,9 +87,10 @@ async function getCandidatePoints() {
               SELECT 1 FROM jsonb_array_elements(coalesce(raw->'attachedRequirements','[]'::jsonb)) r
               WHERE (r->>'isMandatory')::boolean IS TRUE
                 AND (
-                     (r->>'isExpiry')::boolean IS TRUE
-                  OR (r->>'expiryDate' IS NOT NULL AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD'))
-                  OR (r->>'isReviewed')::boolean IS NOT TRUE
+                     (r->>'isReviewed')::boolean IS NOT TRUE
+                  OR (r->>'expiryDate' IS NOT NULL
+                      AND left(r->>'expiryDate',10) NOT IN ('0001-01-01','9999-12-31')
+                      AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD'))
                 )
             ) AS fully_compliant
           FROM rt_candidates_cache

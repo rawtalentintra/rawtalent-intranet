@@ -23,11 +23,30 @@ function isSyncRunning(state) {
 // (candidateExpiringDocsCount in admin.html) — kept in sync deliberately so
 // the cached count always means the same thing as what a reviewer sees when
 // they actually open the candidate.
+//
+// isExpiry is NOT "already expired" — verified against real production data
+// (2026-08-30): 18,392 of 25,818 isExpiry=true requirements have a real,
+// non-expired expiryDate (most just a normal future date), vs. 7,426 that
+// are genuinely expired. It means "this requirement TYPE tracks an expiry
+// date at all" (as opposed to a one-time document with no expiry concept),
+// not a live expired/expiring flag — a previous version of this function
+// (and 3 other copies of the same logic, in routes/micropods.js and twice
+// in admin.html) treated isExpiry=true alone as "expiring", which massively
+// over-counted compliance issues company-wide and, in routes/micropods.js,
+// pushed a huge share of Micropods' educator segmentation into "Onboarding
+// Supply" that should have landed in "Available & Engaged" (confirmed live:
+// fixing just this took Onboarding Supply in SA from 159 down to 80, and
+// surfaced 78 real Available & Engaged educators that had been invisible).
+// Real expiryDate, compared to the actual date, is the only signal that
+// means anything here — excluding RT's two sentinel dates, which aren't
+// real dates at all: '0001-01-01' (unset) and '9999-12-31' (this instance
+// never expires).
 function expiringDocsCount(candidate) {
   const soon = Date.now() + 30 * 24 * 60 * 60 * 1000;
   return (candidate.attachedRequirements || []).filter(req => {
-    if (req.isExpiry) return true;
     if (!req.expiryDate) return false;
+    const dateStr = String(req.expiryDate).slice(0, 10);
+    if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;
     const t = new Date(req.expiryDate).getTime();
     return !isNaN(t) && t < soon;
   }).length;
