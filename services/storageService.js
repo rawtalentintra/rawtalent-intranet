@@ -10,17 +10,25 @@ function getStorageClient() {
   return client;
 }
 
+// STORAGE_BUCKET_PREFIX (2026-08-30) — a test/staging deployment shares
+// this same Supabase project (and so the same Storage buckets) with
+// production; the DB-level isolation (a separate `staging` Postgres
+// schema, see db/schema.sql's comment) says nothing about Storage. Unset
+// in production (bucket names unchanged); set to e.g. 'staging-' for a
+// staging environment so its uploads land in their own, separately-named
+// buckets instead of writing into live team photos/payslips/task files.
+const BUCKET_PREFIX = process.env.STORAGE_BUCKET_PREFIX || '';
 const BUCKETS = {
-  teamPhotos: 'team-photos',
-  articleFiles: 'article-files',
-  callRecordings: 'call-recordings',
-  announcementFiles: 'announcement-files',
-  projectFiles: 'project-files',
-  ideaFiles: 'idea-files',
-  leadRecordings: 'lead-recordings',
-  centreRecordings: 'centre-recordings',
-  payslips: 'payslips',
-  taskFiles: 'task-files'
+  teamPhotos: BUCKET_PREFIX + 'team-photos',
+  articleFiles: BUCKET_PREFIX + 'article-files',
+  callRecordings: BUCKET_PREFIX + 'call-recordings',
+  announcementFiles: BUCKET_PREFIX + 'announcement-files',
+  projectFiles: BUCKET_PREFIX + 'project-files',
+  ideaFiles: BUCKET_PREFIX + 'idea-files',
+  leadRecordings: BUCKET_PREFIX + 'lead-recordings',
+  centreRecordings: BUCKET_PREFIX + 'centre-recordings',
+  payslips: BUCKET_PREFIX + 'payslips',
+  taskFiles: BUCKET_PREFIX + 'task-files'
 };
 
 // Every other bucket above was provisioned manually in Supabase ahead of
