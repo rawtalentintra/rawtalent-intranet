@@ -9780,16 +9780,28 @@
         : `<tr><th>Area</th><th>Candidates</th>${SEGMENT_ORDER.map(key => `<th>${SEGMENT_META[key].label}</th>`).join('')}</tr>`;
     }
 
+    // The "N candidates outside any pod" count used to be a bare number
+    // with nothing to click into — real in a smaller/sparser market (e.g.
+    // SA's Currently Working: 53 real people, 0 of them within clustering
+    // distance of each other anywhere in the state, confirmed live
+    // 2026-08-30), not something a lower minPodSize could fix. This makes
+    // it a link into the same candidate-list/export/outreach view a real
+    // pod gets, via GET /api/micropods/unclustered.
+    function unclusteredSummaryHtml(count) {
+      if (!count) return '0 candidates outside any pod';
+      return `<span style="cursor:pointer;color:var(--orange);font-weight:700;text-decoration:underline" onclick="openUnclusteredMicropod()">${count} candidates outside any pod →</span>`;
+    }
+
     function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
       const colspan = territoryMode ? 4 : 8;
       if (!data || !data.pods.length) {
-        document.getElementById('micropodsSummary').textContent = data ? `0 pods · ${data.unclusteredCount} candidates outside any pod` : '';
-        tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it.</td></tr>`;
+        document.getElementById('micropodsSummary').innerHTML = data ? `0 pods · ${unclusteredSummaryHtml(data.unclusteredCount)}` : '';
+        tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it, or see the candidates outside any pod above.</td></tr>`;
         return;
       }
       if (!territoryMode) {
-        document.getElementById('micropodsSummary').textContent = `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
+        document.getElementById('micropodsSummary').innerHTML = `${data.pods.length} pods · ${unclusteredSummaryHtml(data.unclusteredCount)}`;
         tbody.innerHTML = data.pods.map(p => `
           <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
             <td>${escHtml(p.name)}</td>
@@ -9800,9 +9812,9 @@
       }
       const quadrantFilter = document.getElementById('micropodsTerritoryFilter').value;
       const pods = quadrantFilter ? data.pods.filter(p => p.quadrant === quadrantFilter) : data.pods;
-      document.getElementById('micropodsSummary').textContent = quadrantFilter
-        ? `${pods.length} of ${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`
-        : `${data.pods.length} pods · ${data.unclusteredCount} candidates outside any pod`;
+      document.getElementById('micropodsSummary').innerHTML = quadrantFilter
+        ? `${pods.length} of ${data.pods.length} pods · ${unclusteredSummaryHtml(data.unclusteredCount)}`
+        : `${data.pods.length} pods · ${unclusteredSummaryHtml(data.unclusteredCount)}`;
       if (!pods.length) {
         tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods match this strategy right now.</td></tr>`;
         return;
@@ -9935,6 +9947,146 @@
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this pod.</div>';
       }
+    }
+
+    // "Outside any pod" detail — same screen/table/pager/export/outreach
+    // machinery a real pod's detail view gets (micropodDetailCandidates
+    // etc. are generic, keyed by whatever candidate list is currently
+    // loaded, not pod-specific), just sourced from GET /api/micropods/
+    // unclustered instead of /:podId, and a scatter-pin map instead of a
+    // density heatmap — these people are, by definition, too spread out
+    // to have a meaningful density center to zoom in on.
+    async function openUnclusteredMicropod() {
+      document.getElementById('micropodsListScreen').style.display = 'none';
+      document.getElementById('micropodDetailScreen').style.display = 'block';
+      window.scrollTo({ top: 0 });
+      const bodyEl = document.getElementById('micropodDetailBody');
+      bodyEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const minSize = document.getElementById('micropodsMinSize').value || 15;
+        const segmentFilter = [...micropodsSegmentSelection].join(',');
+        const { state, partner } = micropodsApiStateParams();
+        const data = await fetch(`/api/micropods/unclustered?state=${encodeURIComponent(state)}&partner=${encodeURIComponent(partner)}&minPodSize=${encodeURIComponent(minSize)}&segment=${encodeURIComponent(segmentFilter)}`).then(r => r.json());
+        if (data.error) throw new Error(data.error);
+        micropodDetailCandidates = data.candidates;
+        micropodDetailPage = 1;
+        micropodDetailSegmentSelection = new Set();
+        micropodSelectedUserIds = new Set();
+        micropodDetailPodContext = { id: '__unclustered__', segment: segmentFilter || null };
+        bodyEl.innerHTML = renderUnclusteredDetail(data);
+        renderMicropodCandidatesPage();
+        renderUnclusteredMap(data.candidates);
+      } catch {
+        bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load these candidates.</div>';
+      }
+    }
+
+    function renderUnclusteredDetail(data) {
+      const qualCounts = data.qualificationCounts || {};
+      const qualLine = Object.keys(qualCounts).length
+        ? Object.entries(qualCounts).sort((a, b) => b[1] - a[1]).map(([name, n]) => `${escHtml(name)} (${n})`).join(' · ')
+        : '—';
+      return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:700;color:var(--navy);font-size:18px">Outside Any Pod</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">Too geographically spread out to form a pod at the current settings — not missing, just scattered. Try a lower minimum pod size, or work this list directly below.</div>
+          <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px"><span style="font-weight:600;color:var(--navy)">${data.candidateCount} candidates</span></div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Qualification mix (from RT's reporting API — known limitation: only one qualification per candidate is returned, and it's sometimes wrong): ${qualLine}</div>
+        </div>
+        <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
+          <div id="micropodDetailMap" style="height:320px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px"></div>
+        </div>
+        <div class="admin-table-card">
+          <div class="report-multiselect" style="position:relative;display:flex;justify-content:flex-end;padding:12px 20px 0">
+            <button type="button" id="micropodDetailSegmentFilter_btn" class="form-control" style="max-width:220px;text-align:left;cursor:pointer;background:white" onclick="toggleMicropodDetailSegmentFilterPanel()">All segments</button>
+            <div id="micropodDetailSegmentFilter_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);z-index:1000;min-width:200px;padding:6px 0"></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table data-table-compact">
+              <thead><tr>${currentUserCanUseOutreach() ? '<th><input type="checkbox" id="micropodSelectAllCheckbox" onchange="toggleAllMicropodSelection(this)"></th>' : ''}<th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Qualification</th><th>Segment</th><th>Shifts 28d</th><th>Days Since Last Shift</th><th>Compliant</th></tr></thead>
+              <tbody id="micropodCandidatesBody"></tbody>
+            </table>
+          </div>
+          <div id="micropodCandidatesPager" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-100)"></div>
+          ${currentUserCanUseOutreach() ? `
+          <div id="micropodSelectionBar" style="display:none;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-100);background:var(--gray-50)">
+            <div id="micropodSelectionCount" style="font-size:12.5px;font-weight:600;color:var(--navy)"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-secondary" style="padding:6px 14px;font-size:12px" onclick="exportMicropodSelectionCsv()">Export CSV</button>
+              <button class="btn-add" style="padding:6px 14px;font-size:12px" onclick="openOutreachSaveListModal()">Save as outreach list</button>
+            </div>
+          </div>` : ''}
+        </div>`;
+    }
+
+    // One small dot per candidate, bounds-fit to all of them — a heatmap
+    // (renderMicropodHeatmap) assumes a real density center to zoom into,
+    // which these points by definition don't have; a scatter map is what
+    // actually answers "where are they, roughly" for a spread-out set.
+    async function renderUnclusteredMap(candidates) {
+      const mapEl = document.getElementById('micropodDetailMap');
+      if (!mapEl) return; // user already navigated away
+      if (!mapboxTokenCache) {
+        try { mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json()); } catch { mapboxTokenCache = { configured: false }; }
+      }
+      if (!mapboxTokenCache.configured || !mapboxTokenCache.token) {
+        mapEl.innerHTML = 'Map view needs Mapbox configured — the list below still works without it.';
+        return;
+      }
+      const points = candidates.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+      if (!points.length) {
+        mapEl.innerHTML = 'No mapped locations for these candidates.';
+        return;
+      }
+      try {
+        await ensureMapboxGlLoaded();
+      } catch {
+        mapEl.textContent = 'Could not load the map.';
+        return;
+      }
+      mapEl.innerHTML = '';
+      mapboxgl.accessToken = mapboxTokenCache.token;
+      if (micropodsHeatmapInstance) { micropodsHeatmapInstance.remove(); micropodsHeatmapInstance = null; }
+
+      // Same just-shown-container timing fix as renderMicropodsMap/
+      // renderMicropodHeatmap — see the comment on the first of those.
+      await new Promise(requestAnimationFrame);
+      if (mapEl !== document.getElementById('micropodDetailMap')) return;
+
+      micropodsHeatmapInstance = new mapboxgl.Map({
+        container: 'micropodDetailMap',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [points[0].lng, points[0].lat],
+        zoom: 8
+      });
+      micropodsHeatmapInstance.resize();
+
+      micropodsHeatmapInstance.on('load', () => {
+        const bounds = new mapboxgl.LngLatBounds();
+        points.forEach(c => {
+          const el = document.createElement('div');
+          el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:var(--orange);border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer';
+
+          // Built as DOM nodes (textContent, not innerHTML) — name/suburb
+          // are RT-sourced data, not markup we should ever parse as such.
+          const popupEl = document.createElement('div');
+          popupEl.style.cssText = 'font-size:12.5px;line-height:1.4';
+          const title = document.createElement('div');
+          title.style.cssText = 'font-weight:700;color:var(--navy)';
+          title.textContent = c.name;
+          popupEl.appendChild(title);
+          const sub = document.createElement('div');
+          sub.style.cssText = 'color:var(--text-muted);margin-top:2px';
+          sub.textContent = c.suburb || '';
+          popupEl.appendChild(sub);
+
+          new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat])
+            .setPopup(new mapboxgl.Popup({ offset: 10 }).setDOMContent(popupEl))
+            .addTo(micropodsHeatmapInstance);
+          bounds.extend([c.lng, c.lat]);
+        });
+        if (points.length > 1) micropodsHeatmapInstance.fitBounds(bounds, { padding: 50, maxZoom: 11 });
+      });
     }
 
     function renderMicropodDetail(pod) {

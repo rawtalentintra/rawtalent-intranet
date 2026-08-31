@@ -274,7 +274,7 @@ async function getPodsForParams(req) {
   const coreMinPerCell = segmentFilter.length && fullStatePoints.length
     ? Math.max(3, Math.round(20 * (statePoints.length / fullStatePoints.length)))
     : undefined;
-  const { pods, unclusteredCount } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
+  const { pods, unclusteredCount, unclusteredMemberIds } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
 
   // Deterministic centroid-based id — stays stable across recomputation/
   // cache expiry so a stale client-side pod list can never point at the
@@ -288,7 +288,7 @@ async function getPodsForParams(req) {
     return { ...pod, id: `${state || 'ALL'}${partner ? '_' + partner.toUpperCase() : ''}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`, ...computePodAggregates(memberPoints) };
   });
 
-  const result = { pods: podsWithId, unclusteredCount, totalActive, totalGeocoded, statePointCount: statePoints.length };
+  const result = { pods: podsWithId, unclusteredCount, unclusteredMemberIds, totalActive, totalGeocoded, statePointCount: statePoints.length };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
   return { state: state || '', partner: partner || '', gridKm, minPodSize, segments: segmentFilter, ...result };
 }
@@ -411,6 +411,61 @@ async function getAddressLines(userIds) {
 
 // One pod's actual candidates — only reachable once that specific pod has
 // been selected (map bubble or list row), never fetched upfront.
+// Shared by /:podId and /unclustered below — both need "here are the real
+// people behind this set of userIds", just for a different set (a pod's
+// members vs. everyone too spread out to form one).
+async function buildCandidateList(memberPoints) {
+  const addressLines = await getAddressLines(memberPoints.map(p => p.userId));
+  // lat/lng included here (not in the list-view pod summary) purely to
+  // drive the per-pod heatmap/pin-list once actually opened — still never
+  // exposed before that point.
+  return memberPoints
+    .map(({ userId, name, email, contactNo, suburb, lat, lng, segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift }) => ({
+      userId, name, email, contactNo, suburb, lat, lng,
+      segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift,
+      address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// "from RT's reporting API — known limitation": qualifications[] is
+// separately documented (RT API Data Reference, admin.html) as only ever
+// returning one entry per candidate, sometimes the wrong one — this
+// breakdown is directionally useful, not authoritative.
+function qualificationCountsFor(candidates) {
+  const counts = {};
+  for (const c of candidates) {
+    const key = c.qualification || 'Unknown';
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
+// Candidates too geographically spread out to seed a pod at the current
+// density threshold — a real, expected outcome in a smaller/sparser
+// market (confirmed live: SA's "Currently Working" segment, 2026-08-30 —
+// 53 real people, 0 of them within coreMinPerCell of each other anywhere
+// in the state, even at the segment-filtered auto-scaled-down threshold).
+// Before this, the list view's "N candidates outside any pod" was just a
+// bare number with nothing to click into — this is the fallback view for
+// exactly that case: no cluster to center a heatmap on, so a plain list
+// (same shape/fields as a pod's own candidate list) instead. Registered
+// as a literal path ahead of '/:podId', same reason as /territory-strategy
+// and /advertising-opportunities above.
+router.get('/unclustered', async (req, res) => {
+  try {
+    const result = await getPodsForParams(req);
+    if (result.error) return res.status(400).json({ error: result.error });
+    const { points } = await getCandidatePoints();
+    const memberSet = new Set(result.unclusteredMemberIds);
+    const members = points.filter(p => memberSet.has(p.userId));
+    const candidates = await buildCandidateList(members);
+    res.json({ candidateCount: candidates.length, qualificationCounts: qualificationCountsFor(candidates), candidates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:podId', async (req, res) => {
   try {
     const result = await getPodsForParams(req);
@@ -421,33 +476,12 @@ router.get('/:podId', async (req, res) => {
     const { points } = await getCandidatePoints();
     const memberSet = new Set(pod.memberIds);
     const members = points.filter(p => memberSet.has(p.userId));
-    const addressLines = await getAddressLines(members.map(p => p.userId));
-
-    // lat/lng included here (not in the list-view pod summary) purely to
-    // drive the per-pod heatmap once a pod is actually open — still never
-    // exposed before that point.
-    const candidates = members
-      .map(({ userId, name, email, contactNo, suburb, lat, lng, segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift }) => ({
-        userId, name, email, contactNo, suburb, lat, lng,
-        segment, fullyCompliant, hasCurrentAvailability, qualification, shifts28d, daysSinceLastShift,
-        address: [addressLines[userId], suburb, addressLines[userId + ':postCode']].filter(Boolean).join(', ') || null
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    // "from RT's reporting API — known limitation": qualifications[] is
-    // separately documented (RT API Data Reference, admin.html) as only
-    // ever returning one entry per candidate, sometimes the wrong one —
-    // this breakdown is directionally useful, not authoritative.
-    const qualificationCounts = {};
-    for (const c of candidates) {
-      const key = c.qualification || 'Unknown';
-      qualificationCounts[key] = (qualificationCounts[key] || 0) + 1;
-    }
+    const candidates = await buildCandidateList(members);
 
     res.json({
       id: pod.id, name: pod.name, centroid: pod.centroid, candidateCount: pod.candidateCount,
       ...computePodAggregates(members),
-      qualificationCounts,
+      qualificationCounts: qualificationCountsFor(candidates),
       candidates
     });
   } catch (err) {

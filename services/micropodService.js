@@ -148,6 +148,7 @@ function buildMicropods(points, { gridKm = 2, minPodSize = 15, coreMinPerCell = 
   const claimedBorder = new Set(); // prevents a border cell being absorbed into two components
   const pods = [];
   let pointsInPods = 0;
+  const clusteredUserIds = new Set();
 
   for (const key of coreKeys) {
     if (visitedCore.has(key)) continue;
@@ -193,11 +194,17 @@ function buildMicropods(points, { gridKm = 2, minPodSize = 15, coreMinPerCell = 
         memberIds: componentPoints.map((p) => p.userId)
       });
       pointsInPods += componentPoints.length;
+      componentPoints.forEach((p) => clusteredUserIds.add(p.userId));
     }
   }
 
   pods.sort((a, b) => b.candidateCount - a.candidateCount);
-  return { pods, unclusteredCount: points.length - pointsInPods };
+  // Who's left over — too geographically spread out to seed a pod at this
+  // density threshold (a real, expected outcome in a smaller/sparser
+  // market like SA, not a bug; see routes/micropods.js's GET /unclustered
+  // for how these are actually surfaced instead of just a bare count).
+  const unclusteredMemberIds = points.filter((p) => !clusteredUserIds.has(p.userId)).map((p) => p.userId);
+  return { pods, unclusteredCount: unclusteredMemberIds.length, unclusteredMemberIds };
 }
 
 module.exports = { normalizeStateToShort, buildMicropods };
