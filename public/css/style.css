@@ -1659,11 +1659,15 @@ body:has(> .navbar) { padding-top: 64px; }
   #salesFunnelRow, #salesPartnerRow, #salesSecondaryRow { flex-direction: column; }
 
   /* Priority Today rows — a status chip + centre name + two meta spans,
-     none of which shrink, previously ran off the right edge of the
-     screen instead of wrapping. Only adds wrapping; everything else
-     about .attn-row-top (see its own definition above) is unchanged. */
-  #section-sales-dashboard .attn-row-top { flex-wrap: wrap; row-gap: 4px; }
+     none of which shrink. flex-wrap alone (an earlier pass at this) just
+     let a wrapped multi-line centre name collide with whichever meta
+     span landed on its last line — still unreadable, just no longer
+     clipped. Stacking every child onto its own full-width line instead
+     reads as a clean little list: chip, then name, then suburb/state,
+     then rep — nothing beside anything else to collide with. */
+  #section-sales-dashboard .attn-row-top { flex-direction: column; align-items: flex-start; gap: 3px; }
   #section-sales-dashboard .attn-centre { white-space: normal; overflow: visible; text-overflow: clip; }
+  #section-sales-dashboard .attn-meta { font-size: 11.5px; }
 
   #section-sales-dashboard .partner-stat-grid { grid-template-columns: repeat(2, 1fr); }
 
