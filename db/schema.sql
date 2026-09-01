@@ -1363,6 +1363,33 @@ CREATE TABLE IF NOT EXISTS calendar_watch_state (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Per-partner Google Calendar OAuth (services/googleCalendarClient.js's
+-- CALENDAR_AUTH_MODE=oauth path — the "not implemented yet" note that used
+-- to sit here). Built as a deliberate workaround (2026-09-01, Joy: "really
+-- going to be very complicated" to do the Workspace Admin domain-wide-
+-- delegation dance) — each partner does one ordinary "Sign in with
+-- Google"-style consent click instead, reusing the SAME OAuth client
+-- already registered for HeartBeat's own Google login
+-- (GOOGLE_CLIENT_ID/SECRET) — no new Google Cloud app registration, no
+-- Workspace Admin console step, at all.
+-- refresh_token is stored in plain text — same trust boundary as every
+-- other secret already living in this Postgres instance (there's no
+-- encryption-at-rest precedent anywhere else in this schema either), but
+-- flag this specifically to Raj's upcoming security review: it's a new
+-- class of stored credential (ongoing access to a real person's calendar),
+-- not just app data.
+CREATE TABLE IF NOT EXISTS calendar_oauth_connections (
+  partner_label TEXT PRIMARY KEY, -- matches WORKFORCE_PARTNER_OPTIONS / users.wfp_label
+  google_email CITEXT NOT NULL,   -- whichever Google account this partner actually connected
+  refresh_token TEXT NOT NULL,
+  access_token TEXT,               -- short-lived; refreshed automatically and re-persisted on use
+  token_expiry TIMESTAMPTZ,
+  connected_by_email CITEXT,
+  connected_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_oauth_google_email ON calendar_oauth_connections(google_email);
+
 -- Inbound calendar events that couldn't be confidently matched to a
 -- lead (below the fuzzy-match threshold, or two leads scored almost
 -- identically) land here instead of guessing — resolved manually via

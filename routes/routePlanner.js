@@ -157,7 +157,7 @@ router.post('/sync-calendar', async (req, res) => {
     if (!Array.isArray(blocks) || !blocks.length) return res.status(400).json({ error: 'No itinerary blocks to sync' });
     const firstVisit = blocks.find(b => b.type === 'visit');
     if (!firstVisit) return res.status(400).json({ error: 'Itinerary has no centre visits to sync' });
-    let partnerEmail = emailForPartner(firstVisit.stop.assigned_workforce_partner);
+    let partnerEmail = await emailForPartner(firstVisit.stop.assigned_workforce_partner);
     // A centre stop has no assigned_workforce_partner at all (My Centres
     // isn't split by territory yet — see routes/centres.js's comment), and
     // some leads don't either. Fall back to the logged-in partner's own
@@ -166,10 +166,10 @@ router.post('/sync-calendar', async (req, res) => {
     // guessing when there's still no match (e.g. an admin building a
     // centre-only route with no partner context).
     if (!partnerEmail && req.user.role === 'workforce_partner' && req.user.wfp_label) {
-      partnerEmail = emailForPartner(req.user.wfp_label);
+      partnerEmail = await emailForPartner(req.user.wfp_label);
     }
     if (!partnerEmail) {
-      return res.status(422).json({ error: `No calendar mapped for ${firstVisit.stop.assigned_workforce_partner || req.user.wfp_label || 'this route'} — check CALENDAR_PARTNER_MAP` });
+      return res.status(422).json({ error: `No calendar connected for ${firstVisit.stop.assigned_workforce_partner || req.user.wfp_label || 'this route'} — connect it from Calendar Sync in Admin` });
     }
     const created = await syncRouteToCalendar(partnerEmail, blocks, { email: req.user.email, name: req.user.name || req.user.email });
     res.json({ success: true, created, partnerEmail });

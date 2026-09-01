@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const calendarSync = require('../services/leadCalendarSyncService');
+const googleCalendarClient = require('../services/googleCalendarClient');
 
 // Google's push notification callback. No session cookie arrives here —
 // Google is the caller — so this route is deliberately outside requireAuth.
@@ -21,12 +22,87 @@ router.post('/webhook', async (req, res) => {
     console.error(`Calendar webhook sync error (${ownerEmail}):`, err.message));
 });
 
+// Per-partner Google Calendar OAuth connect flow (CALENDAR_AUTH_MODE=oauth
+// — see googleCalendarClient.js). These three routes need to be reachable
+// by the PARTNER THEMSELVES under their own HeartBeat session — an admin
+// can't complete Google's consent screen on someone else's behalf without
+// that person's Google password, which defeats the point of OAuth — so
+// they sit ahead of the router.use(requireAdmin) gate below, with their
+// own check instead: an admin can trigger/manage any label (useful when
+// walking a partner through it in person), a non-admin only their own
+// wfp_label.
+function canManageCalendarConnection(user, partnerLabel) {
+  if (['admin', 'super_admin'].includes(user.role)) return true;
+  return !!user.wfp_label && user.wfp_label === partnerLabel;
+}
+
+// Starts the consent flow — redirects the partner's own browser to
+// Google. `state` carries the partner label through the round trip since
+// Google's callback only tells us which Google account authorized, not
+// which of our partner labels this is for.
+router.get('/connect/:partnerLabel', requireAuth, (req, res) => {
+  const partnerLabel = decodeURIComponent(req.params.partnerLabel || '').trim();
+  if (!partnerLabel) return res.status(400).send('Missing partner label.');
+  if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).send('You can only connect your own calendar.');
+  try {
+    res.redirect(googleCalendarClient.buildConsentUrl(partnerLabel));
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+// Google redirects the partner's own browser back here after they
+// approve (or decline). No requireAdmin here either — this is Google
+// calling back into the SAME browser tab that started the flow, still
+// carrying that person's ordinary session cookie (sameSite:lax allows a
+// normal top-level redirect like this one through).
+router.get('/oauth-callback', requireAuth, async (req, res) => {
+  const { code, state, error } = req.query;
+  const partnerLabel = decodeURIComponent(state || '');
+  if (error) return res.send(`<p>Google Calendar connection was not completed: ${escapeHtmlLite(error)}. You can close this tab and try again.</p>`);
+  if (!code || !partnerLabel) return res.status(400).send('Missing code or state from Google — try connecting again.');
+  if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).send('You can only connect your own calendar.');
+  try {
+    const googleEmail = await googleCalendarClient.saveTokensForPartner(partnerLabel, code, req.user.email);
+    res.send(`<p>✅ Connected ${escapeHtmlLite(partnerLabel)}'s calendar (${escapeHtmlLite(googleEmail)}). You can close this tab.</p>`);
+  } catch (err) {
+    res.status(500).send(`<p>Could not finish connecting: ${escapeHtmlLite(err.message)}</p>`);
+  }
+});
+
+// Minimal, dependency-free escaping for the plain-text confirmation pages
+// above — this route has no HTML template of its own to render into.
+function escapeHtmlLite(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+router.delete('/connect/:partnerLabel', requireAuth, async (req, res) => {
+  const partnerLabel = decodeURIComponent(req.params.partnerLabel || '').trim();
+  if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).json({ error: 'You can only disconnect your own calendar.' });
+  try {
+    await googleCalendarClient.disconnectPartner(partnerLabel);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin-only list of who's currently connected, for the Calendar Sync
+// panel's status display.
+router.get('/connections', requireAdmin, async (req, res) => {
+  try {
+    res.json(await googleCalendarClient.listOAuthConnections());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.use(requireAdmin);
 
 // Manual fallback for before push-notification channels are registered
 // (e.g. domain-wide delegation not authorized yet) or to force a catch-up.
 router.post('/sync-now', async (req, res) => {
-  const partners = Object.keys(calendarSync.getPartnerCalendarMap());
+  const partners = Object.keys(await calendarSync.getPartnerCalendarMap());
   const results = {};
   for (const email of partners) {
     try {
@@ -40,7 +116,7 @@ router.post('/sync-now', async (req, res) => {
 });
 
 router.post('/watch/register', async (req, res) => {
-  const partners = Object.keys(calendarSync.getPartnerCalendarMap());
+  const partners = Object.keys(await calendarSync.getPartnerCalendarMap());
   const results = {};
   for (const email of partners) {
     try {

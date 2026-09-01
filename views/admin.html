@@ -1358,6 +1358,10 @@
             </div>
             <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
 
+            <div style="font-size:13px;font-weight:700;margin-top:20px;margin-bottom:4px">Partner Connections</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner connects their own Google Calendar with one click — no Workspace admin setup needed. They can also connect from their own login; this list is just visibility + a way to reconnect on their behalf.</div>
+            <div id="calPartnerConnections"><div class="loading-spinner"><div class="spinner"></div></div></div>
+
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
               <div style="font-size:13px;font-weight:700">Needs Review</div>
               <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="loadCalendarSyncSection()">🔄 Refresh</button>
@@ -10803,6 +10807,53 @@
     function openCalendarSyncModal() {
       document.getElementById('calendarSyncModal').classList.add('open');
       loadCalendarSyncSection();
+      loadPartnerConnections();
+    }
+
+    // Per-partner OAuth connect/disconnect (services/googleCalendarClient.js
+    // CALENDAR_AUTH_MODE=oauth) — the workaround for not wanting to do the
+    // Google Workspace Admin domain-wide-delegation dance. WORKFORCE_PARTNER_OPTIONS
+    // is the same fixed list used everywhere else a partner gets picked from.
+    async function loadPartnerConnections() {
+      const el = document.getElementById('calPartnerConnections');
+      try {
+        const connections = await fetch('/api/calendar-sync/connections').then(r => r.json());
+        const byLabel = {};
+        for (const c of connections) byLabel[c.partner_label] = c;
+        el.innerHTML = WORKFORCE_PARTNER_OPTIONS.map(label => {
+          const c = byLabel[label];
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100)">
+              <div>
+                <div style="font-size:13px;font-weight:600">${escHtml(label)}</div>
+                <div style="font-size:11.5px;color:${c ? '#1a8a4a' : 'var(--text-muted)'}">${c ? `✓ Connected — ${escHtml(c.google_email)}` : 'Not connected'}</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="connectPartnerCalendar('${escHtml(label).replace(/'/g, "\\'")}')">${c ? 'Reconnect' : 'Connect'}</button>
+                ${c ? `<button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;color:#c0392b" onclick="disconnectPartnerCalendar('${escHtml(label).replace(/'/g, "\\'")}')">Disconnect</button>` : ''}
+              </div>
+            </div>`;
+        }).join('');
+      } catch {
+        el.innerHTML = '<div style="font-size:12px;color:#c0392b">Could not load connection status.</div>';
+      }
+    }
+    function connectPartnerCalendar(label) {
+      // A full Google consent redirect doesn't belong inside this modal's
+      // iframe-less page — opens in a new tab so the admin panel (and this
+      // modal) stays exactly as it was; the new tab shows a plain
+      // confirmation page when it's done (routes/calendarSync.js).
+      window.open(`/api/calendar-sync/connect/${encodeURIComponent(label)}`, '_blank');
+      toast('Complete the Google sign-in in the new tab, then come back and refresh.', 'success');
+    }
+    async function disconnectPartnerCalendar(label) {
+      if (!confirm(`Disconnect ${label}'s Google Calendar? Their scheduled call/visit reminders will stop syncing until reconnected.`)) return;
+      try {
+        const res = await fetch(`/api/calendar-sync/connect/${encodeURIComponent(label)}`, { method: 'DELETE' });
+        if (!res.ok) { toast('Failed to disconnect', 'error'); return; }
+        toast('Disconnected');
+        loadPartnerConnections();
+      } catch { toast('Network error', 'error'); }
     }
     function closeCalendarSyncModal() {
       document.getElementById('calendarSyncModal').classList.remove('open');

@@ -286,9 +286,10 @@ async function start() {
   // Reverted; the manual button (routes/calls.js) is unaffected.
   // Renews Google Calendar push-notification channels before their ~30-day
   // expiry, and registers new ones for any partner missing a channel (e.g.
-  // right after CALENDAR_PARTNER_MAP is first configured). No-ops entirely
-  // until domain-wide delegation is authorized, so it's always safe to run.
-  if (calendarSync.getPartnerCalendarMap && Object.keys(calendarSync.getPartnerCalendarMap()).length) {
+  // right after a partner first connects). No-ops entirely until at least
+  // one partner is connected (delegation configured, or an oauth
+  // connection exists), so it's always safe to run.
+  if (Object.keys(await calendarSync.getPartnerCalendarMap()).length) {
     calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
     setInterval(() => {
       calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));

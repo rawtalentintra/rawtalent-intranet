@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
-const { getCalendarClientFor, isConfigured: calendarConfigured } = require('./googleCalendarClient');
+const { getCalendarClientFor, isConfigured: calendarConfigured, authMode } = require('./googleCalendarClient');
 
 // ─── Partner ↔ calendar mapping ─────────────────────────────────────
 // CALENDAR_PARTNER_MAP is a JSON object in .env: { "email": "partner name" },
@@ -8,23 +8,36 @@ const { getCalendarClientFor, isConfigured: calendarConfigured } = require('./go
 // strings used elsewhere in the app (see WORKFORCE_PARTNER_OPTIONS in
 // public/admin.html). Keeping the mapping in env rather than hardcoded here
 // means adding/removing a partner's calendar never needs a code change.
-function getPartnerCalendarMap() {
-  if (!process.env.CALENDAR_PARTNER_MAP) return {};
-  try {
-    return JSON.parse(process.env.CALENDAR_PARTNER_MAP);
-  } catch {
-    console.warn('Calendar sync: CALENDAR_PARTNER_MAP is not valid JSON');
-    return {};
-  }
+//
+// In oauth mode (CALENDAR_AUTH_MODE=oauth — see googleCalendarClient.js),
+// this is instead built from calendar_oauth_connections, populated as each
+// partner personally connects via routes/calendarSync.js's /connect flow —
+// no env var to hand-maintain at all. Async now (the oauth path needs a
+// DB query); every caller already awaits it.
+async function getPartnerCalendarMap() {
+  const envMap = (() => {
+    if (!process.env.CALENDAR_PARTNER_MAP) return {};
+    try {
+      return JSON.parse(process.env.CALENDAR_PARTNER_MAP);
+    } catch {
+      console.warn('Calendar sync: CALENDAR_PARTNER_MAP is not valid JSON');
+      return {};
+    }
+  })();
+  if (authMode() !== 'oauth') return envMap;
+  const rows = (await getDb().execute('SELECT google_email, partner_label FROM calendar_oauth_connections')).rows;
+  const dbMap = {};
+  for (const r of rows) dbMap[r.google_email] = r.partner_label;
+  return { ...envMap, ...dbMap };
 }
 
-function emailForPartner(partnerName) {
-  const map = getPartnerCalendarMap();
+async function emailForPartner(partnerName) {
+  const map = await getPartnerCalendarMap();
   return Object.keys(map).find(email => map[email] === partnerName) || null;
 }
 
-function partnerForEmail(ownerEmail) {
-  const map = getPartnerCalendarMap();
+async function partnerForEmail(ownerEmail) {
+  const map = await getPartnerCalendarMap();
   return map[ownerEmail] || null;
 }
 
@@ -113,13 +126,13 @@ const CALENDAR_MATCH_AMBIGUOUS_GAP = 0.05;
 async function syncLeadEventOutbound(lead, eventType) {
   try {
     if (!calendarConfigured()) return;
-    const ownerEmail = emailForPartner(lead.assigned_workforce_partner);
+    const ownerEmail = await emailForPartner(lead.assigned_workforce_partner);
     if (!ownerEmail) return; // no calendar mapped for this partner yet
 
     const scheduledAt = eventType === 'call' ? lead.lead_called_at : lead.centre_visited_at;
     if (!scheduledAt) return;
 
-    const calendar = getCalendarClientFor(ownerEmail);
+    const calendar = await getCalendarClientFor(ownerEmail);
     if (!calendar) return;
 
     const start = new Date(scheduledAt);
@@ -193,7 +206,7 @@ async function processInboundEvent(event, ownerEmail) {
 
   const title = event.summary || '';
   const { eventType, strippedTitle } = classifyAndStripTitle(title);
-  const ownerPartnerName = partnerForEmail(ownerEmail);
+  const ownerPartnerName = await partnerForEmail(ownerEmail);
 
   const reject = async (reason, candidate) => {
     await db.execute({
@@ -239,7 +252,7 @@ async function processInboundEvent(event, ownerEmail) {
 // rather than walking the partner's entire calendar history.
 async function listAndApplyChanges(ownerEmail) {
   if (!calendarConfigured()) return;
-  const calendar = getCalendarClientFor(ownerEmail);
+  const calendar = await getCalendarClientFor(ownerEmail);
   if (!calendar) return;
 
   const db = getDb();
@@ -284,7 +297,7 @@ async function listAndApplyChanges(ownerEmail) {
 // must be re-registered before then, or the webhook silently stops firing.
 async function registerOrRenewWatch(ownerEmail) {
   if (!calendarConfigured() || !process.env.APP_URL) return;
-  const calendar = getCalendarClientFor(ownerEmail);
+  const calendar = await getCalendarClientFor(ownerEmail);
   if (!calendar) return;
 
   const db = getDb();
@@ -310,7 +323,7 @@ async function registerOrRenewWatch(ownerEmail) {
 
 async function renewWatchesNearingExpiry() {
   if (!calendarConfigured()) return;
-  const partners = Object.keys(getPartnerCalendarMap());
+  const partners = Object.keys(await getPartnerCalendarMap());
   const db = getDb();
   for (const ownerEmail of partners) {
     try {
@@ -337,7 +350,7 @@ async function renewWatchesNearingExpiry() {
 // centre_visits write in the app (e.g. Centre 360's Log Visit).
 async function syncRouteToCalendar(ownerEmail, blocks, actor) {
   if (!calendarConfigured()) throw new Error('Google Calendar is not configured');
-  const calendar = getCalendarClientFor(ownerEmail);
+  const calendar = await getCalendarClientFor(ownerEmail);
   if (!calendar) throw new Error(`Could not build a calendar client for ${ownerEmail}`);
 
   const db = getDb();
