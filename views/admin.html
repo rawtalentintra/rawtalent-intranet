@@ -1738,13 +1738,31 @@
           <div class="modal-body" id="leadDetailBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer" style="justify-content:space-between">
             <div style="display:flex;gap:8px">
-              <button class="action-btn delete" id="leadDetailDeleteBtn" style="display:none" onclick="deleteLeadConfirm()">Delete Lead</button>
               <button class="btn-secondary" id="leadDetailCloseOutBtn" style="display:none" onclick="toggleLeadClosed()">Close Lead</button>
             </div>
             <div style="display:flex;gap:8px;margin-left:auto">
               <button class="btn-secondary" onclick="closeLeadDetailModal()">Close</button>
               <button class="btn-add" id="leadDetailSaveBtn" onclick="saveLeadAssignment()">Save</button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nurture Cadence popup (My Centres' Centre 360 screen) — same
+           .modal-overlay/.modal shell as leadDetailModal just above, per
+           Joy's "should be a popup that looks like this popup from Leads
+           section." Content is filled in by openNurtureCadenceModal(),
+           reusing renderNurtureActionRow() (the same row markup the
+           table used before this became a popup). -->
+      <div class="modal-overlay" id="nurtureCadenceModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNurtureCadenceModal()">
+        <div class="modal" style="max-width:520px">
+          <div class="modal-header">
+            <div class="modal-title">🌱 Nurture Cadence</div>
+            <button class="modal-close" onclick="closeNurtureCadenceModal()">×</button>
+          </div>
+          <div class="modal-body" id="nurtureCadenceBody" style="max-height:70vh;overflow-y:auto"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeNurtureCadenceModal()">Close</button>
           </div>
         </div>
       </div>
@@ -9256,9 +9274,29 @@
       if (caret) caret.textContent = opening ? '▾' : '▸';
     }
 
+    // Nurture Cadence popup (Centre 360's own card triggers this instead
+    // of expanding inline) — currentCentreNurture/currentCentreKey are
+    // both set by renderCentre360/openCentre360 for whichever centre is
+    // currently open, same pattern leadDetailModal's own currentLeadDetailId
+    // already uses.
+    function openNurtureCadenceModal() {
+      document.getElementById('nurtureCadenceBody').innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="data-table data-table-compact">
+            <thead><tr><th>Action Needed</th><th>Last Contact</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
+            <tbody>${renderNurtureActionRow(currentCentreNurture, currentCentreKey)}</tbody>
+          </table>
+        </div>`;
+      document.getElementById('nurtureCadenceModal').classList.add('open');
+    }
+    function closeNurtureCadenceModal() {
+      document.getElementById('nurtureCadenceModal').classList.remove('open');
+    }
+
     let myCentresData = [];
     let currentCentreKey = null;
     let currentCentreName = '';
+    let currentCentreNurture = null; // set in renderCentre360, read by openNurtureCadenceModal
     // clientBookingId -> raw booking object, from Centre 360's own
     // /activity fetch — lets a booking row in Relationship History open
     // the shared booking-detail popup without a second fetch.
@@ -9471,6 +9509,7 @@
           fetch(`/api/centres/${enc}/activity`).then(r => r.json())
         ]);
         currentCentreName = centre.name || '';
+        currentCentreNurture = centre.nurture || null;
         // Seeds the same clientNameById/locationNameById/candidateNameById
         // caches bookingDetailHtml() reads, from data this screen already
         // has permission to fetch — NOT ensureReportLookups(), which hits
@@ -9583,25 +9622,20 @@
           </div>
         </div>
 
-        <!-- Same click-to-reveal pattern as Educator Relationships/
-             Relationship History below (toggleCentre360Collapse) — Joy,
-             2026-09-02: "remove the table, just tap [Nurture Cadence]
-             so the info shows when it's tapped." Was a table shown
-             inline/always-open before; now closed by default like the
-             other two collapsible cards. -->
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('nurture')">
+        <!-- Opens as its own popup (openNurtureCadenceModal) — Joy,
+             2026-09-02: "should be a popup that looks like this popup
+             from Leads section" (the Lead Detail modal). Was an
+             always-open inline table, briefly a click-to-reveal card
+             (same pattern as Educator Relationships/Relationship
+             History below) before this — a real popup matches what was
+             actually asked for instead. -->
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px;cursor:pointer" onclick="openNurtureCadenceModal()">
+          <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <div class="sd-card-title" style="color:#059669">🌱 Nurture Cadence</div>
               <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
             </div>
-            <span id="centre360-nurture-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
-          </div>
-          <div id="centre360-nurture-body" style="display:none;overflow-x:auto;margin-top:10px">
-            <table class="data-table data-table-compact">
-              <thead><tr><th>Action Needed</th><th>Last Contact</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
-              <tbody>${renderNurtureActionRow(c.nurture, c.centreKey)}</tbody>
-            </table>
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0">tap to view</span>
           </div>
         </div>
 
@@ -14330,7 +14364,6 @@
       currentLeadDetailId = id;
       document.getElementById('leadDetailTitle').innerHTML = escHtml(lead.centre_name) +
         (lead.entry_type === 'centre' ? ' <span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : '');
-      document.getElementById('leadDetailDeleteBtn').style.display = currentUserRole === 'super_admin' ? '' : 'none';
       // Same access level as editing the status fields — the people
       // actually managing a lead day to day should be able to close it,
       // not just admin/super_admin.

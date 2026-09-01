@@ -1808,6 +1808,10 @@ body:has(> .navbar) { padding-top: 64px; }
   }
   .admin-sidebar.wfp-restricted-view .admin-nav-icon { font-size: 19px; width: 24px; }
   .admin-sidebar.wfp-restricted-view .admin-nav-label { font-size: 12.5px; padding: 4px 14px; }
+  /* Joy, 2026-09-02: "remove the Settings and Sign Out options here" —
+     desktop's /admin sidebar (not .wfp-restricted-view) keeps both
+     unchanged; this is the mobile /partners+/wfp sidebar only. */
+  .admin-sidebar.wfp-restricted-view #adminSidebarAccount { display: none; }
 }
 
 /* My Centres description — two versions in the HTML, one shown at a time.
@@ -1857,10 +1861,14 @@ body:has(> .navbar) { padding-top: 64px; }
      doesn't (e.g. a future longer category name), not the normal case. */
   .centre-health-box-label { font-size: 7px; white-space: normal; line-height: 1.15; overflow-wrap: break-word; word-break: break-word; letter-spacing: 0; }
 
-  /* Filter bar — identical treatment to the Leads page's own. */
+  /* Filter bar — identical treatment to the Leads page's own. State
+     dropped too — Joy: "we already have Liam Justine and Gwen and All
+     filters up there" (the coloured state-filter buttons directly above
+     this bar cover the same ground on a phone). */
   #section-my-centres .leads-filter-bar { flex-direction: column; }
   #section-my-centres .leads-filter-bar select,
   #section-my-centres .leads-filter-bar input { max-width: none; width: 100%; flex: none; }
+  #centresFilterState { display: none; }
 
   /* Table — every column but Centre dropped, same call as Leads: the
      row's own onclick (openCentre360) already opens all of it on tap. */
