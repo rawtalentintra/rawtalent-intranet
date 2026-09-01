@@ -721,7 +721,7 @@
         <span id="navName" style="font-size:13px;color:rgba(255,255,255,.5);display:none"></span>
       </div>
       <button class="nav-btn ghost" onclick="logout()">Sign Out</button>
-      <button class="nav-btn admin-btn" id="adminNavBtn" onclick="location.href='/admin'" style="display:none">⚙ Admin</button>
+      <button class="nav-btn admin-btn" id="adminNavBtn" onclick="location.href='/admin'" style="display:none">⚙️ Admin</button>
     </div>
   </nav>
 
@@ -1252,7 +1252,7 @@
         if (me.role === 'admin' || me.role === 'super_admin' || me.role === 'qa_view' || me.role === 'workforce_partner') {
           const btn = document.getElementById('adminNavBtn');
           btn.style.display = 'inline-flex';
-          btn.textContent = me.role === 'super_admin' ? '⚙ Super Admin' : '⚙ Admin';
+          btn.textContent = me.role === 'super_admin' ? '⚙️ Super Admin' : '⚙️ Admin';
 
           const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
           document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on User View.`;
