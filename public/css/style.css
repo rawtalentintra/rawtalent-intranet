@@ -1721,13 +1721,25 @@ body:has(> .navbar) { padding-top: 64px; }
      beat that rule outright (equal-specificity ties go to whichever rule
      is later in the cascade, which isn't reliably this one). */
   #section-leads .leads-filter-bar input#leadsFilterCentre { flex: none; height: auto; }
+  /* WF Partner/State/Submitted by/Called/Visited/Profile/Sort — Joy,
+     2026-09-02: dropped from the mobile filter bar entirely. WF Partner
+     and State are redundant with the coloured Liam/Justine/Gwen buttons
+     already above the bar; the rest just weren't worth the space on a
+     phone. Search/Period/Suburb/Agency Usage stay. Desktop keeps all 10 —
+     this only hides them below 900px. */
+  #leadsFilterPartner, #leadsFilterState, #leadsFilterSubmittedBy,
+  #leadsFilterLeadCalled, #leadsFilterCentreVisited, #leadsFilterProfileCreated,
+  #leadsSortBy { display: none; }
 
   /* Table — every column but Centre dropped. Nothing is actually lost:
      the row's own onclick (openLeadDetail) already opens every one of
      these on tap, same as it does on desktop; Centre is just the one
-     column worth scanning a phone-width list by. */
+     column worth scanning a phone-width list by. Text bumped up a size
+     from .data-table-compact's desktop-tuned 12.5px/10px — plenty of
+     room now that it's the only column, and easier to read one-handed. */
   #leadsTable th:not(:nth-child(2)), #leadsTable td:not(:nth-child(2)) { display: none; }
-  #leadsTable td:nth-child(2) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; }
+  #leadsTable td:nth-child(2) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; font-size: 14.5px; }
+  #leadsTable th:nth-child(2) { font-size: 11.5px; }
 
   /* Lead Source Performance / Leads Received — one whole-width row each,
      same fix as the WFP Dashboard's identical row. */
@@ -1735,6 +1747,31 @@ body:has(> .navbar) { padding-top: 64px; }
 
   /* Leads by Rep — same call as the WFP Dashboard's identical table. */
   #leadsRepByCard { display: none; }
+}
+
+/* Admin panel, all sections, mobile — Joy, 2026-09-02: ".admin-content"
+   wraps every single section (Leads, WFP Dashboard, My Centres, Micropods,
+   Smart Routing, and everything else in the sidebar) and carries a flat
+   32px of padding on every side, written for the desktop panel. On a
+   375px phone that alone eats 64px — title, filter bar, Open/Closed tabs,
+   Lead Source Performance, the table, all of it — before any content
+   even starts. Cut to a slimmer, still-breathing 14px (this file's usual
+   mobile gutter, e.g. the WFP PWA) so every section gets its full width
+   back, not just Leads. Purely a padding number — nothing inside needed
+   its own width:100% changed, each section's content already fills
+   .admin-content's box. */
+@media (max-width: 900px) {
+  .admin-content { padding: 14px; }
+
+  /* State-filter buttons (All States/Liam/Justine/Gwen) — same markup on
+     five sections (WFP Dashboard, Leads, My Centres, Micropods, Smart
+     Routing; see each button's own <span class="wfp-state-icon">). Joy:
+     drop the icons and tighten the padding so all four fit more
+     comfortably across a phone width — one rule here covers every
+     section at once since they all share this class. Icon markup and
+     desktop sizing are both untouched above 900px. */
+  .wfp-state-icon { display: none; }
+  .wfp-state-filter-btn { padding: 8px 12px !important; font-size: 12px !important; }
 }
 
 @media (max-width: 600px) {
