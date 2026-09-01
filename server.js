@@ -188,6 +188,24 @@ app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 
+// /allapp (Joy, 2026-09-01) — a plain additional alias for the exact same
+// full admin panel /admin already serves (same file, same guard) — /admin
+// itself keeps working unchanged, nothing existing breaks. Exists purely
+// so "the complete app, everything" has its own memorable URL to
+// contrast with /partners below (the new narrow Workforce-Partners-only
+// view of this same file).
+app.get('/allapp', (req, res) => guardRoute(req, res, 'admin.html', true));
+app.get('/allapp/*', (req, res) => guardRoute(req, res, 'admin.html', true));
+
+// /partners — the SAME admin.html file as /admin (not a separate view to
+// build/maintain), restricted client-side to just the Workforce Partners
+// nav group (WFP Dashboard, Leads, My Centres, Micropods, Smart Routing —
+// see admin.html's IS_PARTNERS_VIEW/PARTNERS_VIEW_SECTIONS). The
+// distinction is which route the request came in on, not a different
+// file or a different auth rule — same guard as /admin/allapp.
+app.get('/partners', (req, res) => guardRoute(req, res, 'admin.html', true));
+app.get('/partners/*', (req, res) => guardRoute(req, res, 'admin.html', true));
+
 // Workforce Partner PWA (Aug 26 meeting) — same session cookie as
 // everywhere else in this app (no separate login/token scheme), gated by
 // the requirePwaAccess grant (admin/super_admin always pass, matching

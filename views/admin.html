@@ -4225,6 +4225,20 @@
     // Ops/Onboarding's feature, not Workforce Partners') and is now visible.
     const EDUCATOR_OUTREACH_ENABLED = true;
 
+    // Isolated Workforce Partners view (Joy, 2026-09-01) — this same
+    // admin.html file, served at /partners instead of /admin, restricted to
+    // exactly the Workforce Partners nav group (WFP Dashboard, Leads, My
+    // Centres, Micropods, Smart Routing) regardless of the caller's actual
+    // role — an admin/super_admin visiting /partners gets this same narrow
+    // view too, not the full sidebar. Piggybacks entirely on the existing
+    // RESTRICTED_ROLE_SECTIONS/getEffectiveAllowedSections machinery below
+    // (already enforced in nav visibility, showSection() direct-navigation
+    // blocking, and the initial-section pick on load) rather than a
+    // second, parallel restriction system — a URL-driven override takes
+    // priority over whatever the role-based one would otherwise allow.
+    const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners');
+    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'leads', 'my-centres', 'micropods', 'route-planner'];
+
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
     let currentUserEmail = '';
@@ -4316,7 +4330,7 @@
       // Articles active), so it's safe to call it unconditionally here.
       let savedSection = null;
       try { savedSection = localStorage.getItem('adminActiveSection'); } catch {}
-      const allowedSections = RESTRICTED_ROLE_SECTIONS[currentUserRole];
+      const allowedSections = IS_PARTNERS_VIEW ? PARTNERS_VIEW_SECTIONS : RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (allowedSections) {
         const target = (savedSection && allowedSections.includes(savedSection)) ? savedSection : allowedSections[0];
         showSection(target, document.querySelector(`[onclick*="showSection('${target}'"]`));
@@ -4407,6 +4421,7 @@
     // qa_view user seeing the nav item but bouncing on click, or vice
     // versa, would both be bugs.
     function getEffectiveAllowedSections() {
+      if (IS_PARTNERS_VIEW) return PARTNERS_VIEW_SECTIONS;
       const base = RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (!base) return null;
       return (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;

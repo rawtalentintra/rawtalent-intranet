@@ -79,7 +79,38 @@
       padding-right: 0;
       border-right: none;
     }
-    .sidebar-nav.collapsed .sidebar-nav-items { display: none; }
+    .sidebar-nav.collapsed .sidebar-nav-items,
+    .sidebar-nav.collapsed .sidebar-footer { display: none; }
+    /* Pushed to the bottom of the sidebar's own flex column (.sidebar-nav
+       is already flex-direction:column — see above) via margin-top:auto,
+       rather than absolute positioning, so it never overlaps the nav
+       items list even on a short viewport with many tabs. */
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 14px;
+      border-top: 1px solid #c7d2fe;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .sidebar-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px;
+    }
+    .sidebar-signout-btn {
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid #c7d2fe;
+      background: white;
+      color: var(--navy);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .sidebar-signout-btn:hover { background: var(--gray-100); }
     .app-main {
       flex: 1;
       min-width: 0;
@@ -130,6 +161,10 @@
       }
       .sidebar-nav.mobile-open { transform: translateX(0); }
       .sidebar-collapse-toggle { display: none; }
+      /* Joy, 2026-09-01: the Quick Links row (external tool shortcuts) is
+         desktop-only clutter on a small screen — full removal, not just
+         wrapping, on mobile. */
+      .quick-links-bar { display: none; }
     }
     .mode-tab {
       padding: 9px 16px;
@@ -716,12 +751,7 @@
           <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
         </button>
       </div>
-      <div class="nav-user">
-        <div class="nav-avatar" id="navAvatar">?</div>
-        <span id="navName" style="font-size:13px;color:rgba(255,255,255,.5);display:none"></span>
-      </div>
-      <button class="nav-btn ghost" onclick="logout()">Sign Out</button>
-      <button class="nav-btn admin-btn" id="adminNavBtn" onclick="location.href='/admin'" style="display:none">⚙️ Admin</button>
+      <button class="nav-btn admin-btn" id="adminNavBtn" onclick="goToAdminPanel()" style="display:none">⚙️ Admin</button>
     </div>
   </nav>
 
@@ -811,6 +841,17 @@
       <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
       <button class="mode-tab" id="tabHours" onclick="setMode('hours')">🕒 Log My Hours</button>
       <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
+      </div>
+      <!-- Relocated out of the top navbar (2026-09-01, Joy: simplify the
+           header down to hamburger/logo/bell/admin-button only) — same
+           #navAvatar/#navName ids and logout() call as before, just moved,
+           so the existing populate-on-load JS needs no changes at all. -->
+      <div class="sidebar-footer" id="sidebarFooter">
+        <div class="sidebar-user">
+          <div class="nav-avatar" id="navAvatar">?</div>
+          <span id="navName" style="font-size:13px;color:var(--navy);opacity:.75;display:none"></span>
+        </div>
+        <button class="sidebar-signout-btn" id="sidebarSignOutBtn" onclick="logout()">Sign Out</button>
       </div>
     </aside>
     <script>
@@ -1252,7 +1293,11 @@
         if (me.role === 'admin' || me.role === 'super_admin' || me.role === 'qa_view' || me.role === 'workforce_partner') {
           const btn = document.getElementById('adminNavBtn');
           btn.style.display = 'inline-flex';
-          btn.textContent = me.role === 'super_admin' ? '⚙️ Super Admin' : '⚙️ Admin';
+          // workforce_partner lands on /partners (the new distraction-free
+          // WFP-only view — see admin.html's IS_PARTNERS_VIEW), not the
+          // full /admin sidebar with a dozen unrelated sections — everyone
+          // else's destination is unchanged.
+          btn.textContent = me.role === 'super_admin' ? '⚙️ Super Admin' : me.role === 'workforce_partner' ? '🧭 Partners' : '⚙️ Admin';
 
           const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
           document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on User View.`;
@@ -4453,6 +4498,13 @@
     async function logout() {
       await fetch('/auth/logout', { method: 'POST' });
       location.href = '/login.html';
+    }
+    // workforce_partner goes to the new distraction-free /partners view
+    // (admin.html restricted to just WFP Dashboard/Leads/My Centres/
+    // Micropods/Smart Routing); everyone else keeps going to the full
+    // /admin sidebar exactly as before.
+    function goToAdminPanel() {
+      location.href = currentUserRole === 'workforce_partner' ? '/partners' : '/admin';
     }
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
