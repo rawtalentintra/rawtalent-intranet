@@ -758,7 +758,7 @@
 
         <div style="display:flex;gap:16px;margin-bottom:20px" id="salesPartnerRow"></div>
 
-        <div style="display:flex;gap:16px;margin-bottom:20px">
+        <div style="display:flex;gap:16px;margin-bottom:20px" id="salesSecondaryRow">
           <div class="admin-table-card" style="padding:20px 24px;flex:1">
             <div class="sd-card-title">Lead Source Performance</div>
             <div class="sd-card-sub">Which lead type is converting better — worth knowing where to focus sourcing effort</div>
@@ -771,7 +771,12 @@
           </div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+        <!-- id on the card itself (not just the inner salesRepBreakdown div)
+             so the mobile stylesheet can hide the whole card — Joy, 2026-09-02:
+             this table is real data-density built for a wide desktop screen,
+             not something a Workforce Partner needs on their phone. Desktop
+             is untouched — see the #salesRepByCard rule's media query. -->
+        <div class="admin-table-card" id="salesRepByCard" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Leads by Rep — this period vs last</div>
           <div class="sd-card-sub">Same date range as the KPIs above (change it there) — sorted alphabetically by rep.</div>
           <div id="salesRepBreakdown" style="margin-top:14px;overflow-x:auto"></div>

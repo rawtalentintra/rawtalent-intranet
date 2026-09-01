@@ -1638,6 +1638,41 @@ body:has(> .navbar) { padding-top: 64px; }
     display: block; position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 290;
   }
 }
+
+/* WFP Dashboard mobile layout — Joy, 2026-09-02: #section-sales-dashboard's
+   markup (views/admin.html) was built for the wide desktop admin panel and
+   the same static HTML is now also reachable at /partners on a phone.
+   Scoped to max-width:900px (this file's existing mobile breakpoint) AND to
+   #section-sales-dashboard specifically, so /admin and /allapp at a real
+   desktop width stay pixel-identical to before this — nothing here touches
+   the desktop layout. */
+@media (max-width: 900px) {
+  /* The KPI row's hardcoded 3-column grid is an inline style (added for a
+     real 1280px desktop squeeze bug — see its own HTML comment), so
+     overriding it here needs !important: an external stylesheet rule
+     otherwise never beats an inline style regardless of selector. */
+  #salesKpiRow { grid-template-columns: 1fr !important; }
+
+  /* These wrapper rows only set display:flex/gap inline — flex-direction
+     was never part of that inline style, so no !important is needed to
+     add it here; three side-by-side cards per row become one column. */
+  #salesFunnelRow, #salesPartnerRow, #salesSecondaryRow { flex-direction: column; }
+
+  /* Priority Today rows — a status chip + centre name + two meta spans,
+     none of which shrink, previously ran off the right edge of the
+     screen instead of wrapping. Only adds wrapping; everything else
+     about .attn-row-top (see its own definition above) is unchanged. */
+  #section-sales-dashboard .attn-row-top { flex-wrap: wrap; row-gap: 4px; }
+  #section-sales-dashboard .attn-centre { white-space: normal; overflow: visible; text-overflow: clip; }
+
+  #section-sales-dashboard .partner-stat-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Leads by Rep — a dense, horizontally-scrolling data table built for a
+     wide screen. Joy confirmed (2026-09-02) this isn't something a
+     Workforce Partner needs on their phone, so it's hidden outright on
+     mobile instead of squeezed/scrolled — untouched on desktop. */
+  #salesRepByCard { display: none; }
+}
 @media (max-width: 600px) {
   .navbar { padding: 0 16px; }
   .nav-tag { display: none; }
