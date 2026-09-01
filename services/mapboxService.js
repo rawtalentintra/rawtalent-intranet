@@ -8,14 +8,26 @@ function isConfigured() {
 
 // Restricted to au (Australia) so a partial/ambiguous address doesn't
 // silently resolve to a same-named street on the other side of the world.
+//
+// types=address,poi stops Mapbox from ever falling back to a coarse
+// suburb/postcode/region-centroid match when it can't confidently place
+// the exact address — previously nothing here rejected that, and it's
+// the likely cause of a real reported bug (2026-09-01): a centre's pin
+// on the Smart Routing map landing in the wrong part of Melbourne
+// entirely. relevance is a second, belt-and-suspenders check for the
+// rarer case where even an address/poi match is a weak one — both
+// failure modes are treated the same as "couldn't geocode this one",
+// which every caller here already handles gracefully (drops that one
+// stop/centre rather than showing a wrong location, or failing outright).
 async function geocodeAddress(addressText) {
   if (!isConfigured()) throw new Error('Mapbox is not configured (MAPBOX_ACCESS_TOKEN missing)');
   const query = encodeURIComponent(addressText);
-  const res = await fetch(`${GEOCODE_URL}/${query}.json?country=au&limit=1&access_token=${process.env.MAPBOX_ACCESS_TOKEN}`);
+  const res = await fetch(`${GEOCODE_URL}/${query}.json?country=au&types=address,poi&limit=1&access_token=${process.env.MAPBOX_ACCESS_TOKEN}`);
   if (!res.ok) throw new Error(`Mapbox geocoding failed (${res.status})`);
   const data = await res.json();
   const feature = data.features?.[0];
   if (!feature) return null;
+  if (typeof feature.relevance === 'number' && feature.relevance < 0.5) return null;
   const [lng, lat] = feature.center;
   return { lat, lng };
 }

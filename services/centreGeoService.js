@@ -1,10 +1,23 @@
 // Geocodes RT centre addresses for Territory Strategy's demand-vs-supply
-// matching. RT client/location records carry no lat/lng of their own
-// (unlike rt_candidates_cache's addresses, which RT pre-geocodes — see
-// routes/micropods.js), so this fills the same gap routePlanner.js already
-// fills for leads: geocode via Mapbox once, cache permanently (a street
-// address essentially never moves), top up lazily for whatever centre
-// hasn't been seen yet.
+// matching (and Smart Routing's map). RT DOES pre-geocode most locations
+// (ClientLocationResponse.latitude/longitude — confirmed against live
+// data 2026-09-01, same as rt_candidates_cache's addresses already used
+// via routes/micropods.js) and centreKeyService.flattenCentres() now
+// carries that through, so this prefers RT's own coordinate outright —
+// it's a real, centre-specific value RT already resolved, not a second
+// independent guess from re-parsing the address text. Mapbox (geocode
+// once, cache permanently in centre_geocodes — a street address
+// essentially never moves) is only a fallback for the rare
+// location RT hasn't geocoded on its side.
+//
+// This matters beyond just saving a Mapbox call: re-geocoding via a
+// constructed "street, suburb state, Australia" string can mismatch on an
+// ambiguous/abbreviated address and silently place a centre's pin
+// somewhere else in Melbourne — reported 2026-09-01 as a Frankston centre
+// plotting near South Melbourne on the Smart Routing map. Preferring RT's
+// value also self-heals any such bad entry already sitting in
+// centre_geocodes from before this, since it's simply never consulted for
+// a centre RT can geocode itself.
 const { getDb } = require('../db/database');
 const mapboxService = require('./mapboxService');
 
@@ -38,10 +51,21 @@ async function saveGeocode(centreKey, coord) {
 // centres with no usable address, or whose address Mapbox can't resolve,
 // are simply absent from the result rather than failing the whole call.
 async function getGeocodesForCentres(centres) {
-  if (!mapboxService.isConfigured()) return {};
-  const byKey = await getCachedGeocodes(centres.map(c => c.centreKey));
+  const byKey = {};
 
-  const missing = centres.filter(c => !byKey[c.centreKey] && c.streetAddress && c.suburb && c.state);
+  // RT's own coordinate wins outright wherever it has one — never even
+  // consults the Mapbox cache/API for these, see the comment above.
+  const needsGeocoding = [];
+  for (const c of centres) {
+    if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) byKey[c.centreKey] = { lat: c.latitude, lng: c.longitude };
+    else needsGeocoding.push(c);
+  }
+  if (!needsGeocoding.length || !mapboxService.isConfigured()) return byKey;
+
+  const cached = await getCachedGeocodes(needsGeocoding.map(c => c.centreKey));
+  Object.assign(byKey, cached);
+
+  const missing = needsGeocoding.filter(c => !byKey[c.centreKey] && c.streetAddress && c.suburb && c.state);
   for (let i = 0; i < missing.length; i += GEOCODE_CONCURRENCY) {
     const batch = missing.slice(i, i + GEOCODE_CONCURRENCY);
     await Promise.all(batch.map(async (c) => {

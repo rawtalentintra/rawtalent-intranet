@@ -45,6 +45,8 @@ function flattenCentres(clients) {
         streetAddress: null,
         suburb: null,
         state: null,
+        latitude: null,
+        longitude: null,
         contactName: null,
         contactNo: client.contactNo || null,
         email: client.email || client.emailAddress || null,
@@ -67,6 +69,13 @@ function flattenCentres(clients) {
         streetAddress: [loc.addressLine1, loc.addressLine2].filter(Boolean).join(' '),
         suburb: loc.suburb || null,
         state: loc.state || null,
+        // RT pre-geocodes every location (confirmed against a real record,
+        // 2026-09-01) — carried through so centreGeoService can use RT's
+        // own coordinate directly instead of re-deriving one from the
+        // address text via Mapbox, which is what produced a mis-plotted
+        // pin on the Smart Routing map (see centreGeoService.js).
+        latitude: Number.isFinite(loc.latitude) ? loc.latitude : null,
+        longitude: Number.isFinite(loc.longitude) ? loc.longitude : null,
         contactName: loc.contactName || null,
         contactNo: loc.contactNo || client.landLineNo || client.contactNo || null,
         email: client.email || client.emailAddress || null,
