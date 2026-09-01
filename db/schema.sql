@@ -58,6 +58,14 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS restricted_task_department_id TEXT;
 UPDATE users SET restricted_task_department_id = 'app_dev'
   WHERE LOWER(email) = 'prince@rawtalent.com.au' AND restricted_task_department_id IS NULL;
 
+-- Same per-person grant pattern again, for the Workforce Partner PWA
+-- (Aug 26 meeting) — Liam needs access despite being admin/super_admin,
+-- not every workforce_partner-role login automatically (Joy: "whoever I
+-- give it to"), so this is a grant independent of role, same as
+-- can_build_training above. admin/super_admin always pass regardless
+-- (see requirePwaAccess in middleware/authMiddleware.js).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_wfp_pwa BOOLEAN DEFAULT false;
+
 CREATE TABLE IF NOT EXISTS articles (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -1263,6 +1271,30 @@ CREATE TABLE IF NOT EXISTS centre_partner_assignments (
   assigned_by_name TEXT,
   assigned_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Workforce Partner PWA (Aug 26 meeting) — "attach educators where our
+-- market intelligence shows an existing relationship with that centre."
+-- RT has no such concept at all (bookings are the only educator<->centre
+-- link RT exposes), so this is pure HeartBeat metadata, same posture as
+-- centre_visits. relationship_type is deliberately just 'favourite' /
+-- 'known_to_centre' — per Liam's email, "known to centre" must NEVER be
+-- presented as "previously worked here through Raw Talent" (that's a real
+-- distinct claim this table doesn't make), so the label is enforced in the
+-- UI copy, not just here. note carries the actual market-intelligence
+-- source as free text (who said what, e.g. a centre manager mentioning an
+-- educator covered there via another agency).
+CREATE TABLE IF NOT EXISTS centre_educator_relationships (
+  id TEXT PRIMARY KEY,
+  centre_key TEXT NOT NULL,
+  candidate_user_id TEXT NOT NULL, -- rt_candidates_cache.user_id
+  relationship_type TEXT NOT NULL, -- 'favourite' | 'known_to_centre'
+  note TEXT,
+  created_by CITEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cer_centre ON centre_educator_relationships(centre_key);
+CREATE INDEX IF NOT EXISTS idx_cer_candidate ON centre_educator_relationships(candidate_user_id);
 
 -- Territory Strategy (Micropods demand overlay) — RT client/location
 -- records have no lat/lng of their own (unlike rt_candidates_cache's

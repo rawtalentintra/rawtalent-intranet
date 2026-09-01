@@ -28,6 +28,7 @@ const rtApi = require('../services/rtApiReportService');
 // copy of "pull every RT client" — same 5-minute in-memory cache, so a
 // second search_centres call moments later doesn't re-hit RT's API.
 const { getCentresAndBookings } = require('./centres');
+const educatorSearchService = require('../services/educatorSearchService');
 
 // sessionId -> { transport, email } — an MCP "session" spans several
 // JSON-RPC calls (initialize, then repeated tool calls) over what the
@@ -132,29 +133,9 @@ function buildServerForUser(email) {
     description: 'Search RawTalent\'s real educator/candidate database (RT) by name, phone, or email. Returns each match\'s contact info, active status, any expiring compliance documents, and a link to their full RT profile.',
     inputSchema: { query: z.string().describe('A name, phone number, or email to search for'), limit: z.number().int().min(1).max(20).optional() }
   }, async ({ query, limit }) => {
-    const digits = query.replace(/\D/g, '');
-    const db = getDb();
-    // Phone is the strong signal (near-unique once normalised) — same
-    // 9-trailing-digit comparison taskPersonMatchService.js uses, so
-    // "0417225760", "+61417225760" and "417225760" all match each other.
-    const res = digits.length >= 8
-      ? await db.execute({
-          sql: `SELECT user_id, first_name, last_name, contact_no, email, suburb, is_active, expiring_docs_count
-                FROM rt_candidates_cache
-                WHERE RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) = RIGHT(?, 9)
-                LIMIT ?`,
-          args: [digits, limit || 10]
-        })
-      : await db.execute({
-          sql: `SELECT user_id, first_name, last_name, contact_no, email, suburb, is_active, expiring_docs_count,
-                       similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) AS sim
-                FROM rt_candidates_cache
-                WHERE similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) > 0.25 OR email ILIKE ?
-                ORDER BY sim DESC NULLS LAST LIMIT ?`,
-          args: [query, query, `%${query}%`, limit || 10]
-        });
-    if (!res.rows.length) return { content: [{ type: 'text', text: `No educators matched "${query}".` }] };
-    const text = res.rows.map(r => {
+    const rows = await educatorSearchService.searchEducators(query, limit || 10);
+    if (!rows.length) return { content: [{ type: 'text', text: `No educators matched "${query}".` }] };
+    const text = rows.map(r => {
       const name = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';
       const flags = [r.is_active ? 'active' : 'inactive', r.expiring_docs_count ? `⚠️ ${r.expiring_docs_count} expiring doc(s)` : null].filter(Boolean).join(', ');
       return `• ${name} (id ${r.user_id}) — ${r.contact_no || 'no phone'}${r.email ? `, ${r.email}` : ''}${r.suburb ? `, ${r.suburb}` : ''} — ${flags}\n  Profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${r.user_id}`;
@@ -167,8 +148,7 @@ function buildServerForUser(email) {
     description: 'Full profile for one educator/candidate by their RT user id (get the id from search_educators first) — contact info, addresses, qualifications, and compliance documents on file, including expiry dates.',
     inputSchema: { userId: z.union([z.string(), z.number()]).describe('The RT candidate user id') }
   }, async ({ userId }) => {
-    const res = await getDb().execute({ sql: `SELECT * FROM rt_candidates_cache WHERE user_id = ?`, args: [userId] });
-    const row = res.rows[0];
+    const row = await educatorSearchService.getEducatorProfile(userId);
     if (!row) return { content: [{ type: 'text', text: `No educator found with id ${userId}.` }] };
     const raw = row.raw || {};
     const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';

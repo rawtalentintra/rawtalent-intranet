@@ -1,0 +1,15 @@
+{
+  "name": "RawTalent Workforce Partner",
+  "short_name": "RT Partner",
+  "description": "Centres, bookings, and educators for Workforce Partners on the go.",
+  "start_url": "/wfp",
+  "scope": "/wfp",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1d3e",
+  "theme_color": "#0b1d3e",
+  "icons": [
+    { "src": "/wfp/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/wfp/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

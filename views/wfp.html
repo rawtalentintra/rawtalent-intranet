@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>RawTalent Workforce Partner</title>
+
+  <link rel="manifest" href="/wfp/manifest.json">
+  <meta name="theme-color" content="#0b1d3e">
+  <!-- iOS Safari doesn't honor the manifest for install metadata — these
+       three tags are still required for "Add to Home Screen" there. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RT Partner">
+  <link rel="apple-touch-icon" href="/wfp/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/wfp/icon-192.png">
+
+  <style>
+    :root {
+      --navy: #0b1d3e;
+      --navy-light: #132248;
+      --blue: #3d6fff;
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --text: #16213e;
+      --text-muted: #6b7590;
+      --border: #e2e6f0;
+      --green: #15803d;
+      --green-bg: #f0fdf4;
+      --amber: #b45309;
+      --amber-bg: #fff7ed;
+      --red: #b91c1c;
+      --red-bg: #fef2f2;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+    a { color: inherit; }
+
+    /* Fixed header/bottom-nav — CLAUDE.md GPU-compositor guidance: contain
+       paint on any large fixed element, explicit background, no
+       backdrop-filter/will-change/translateZ anywhere in this file. */
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: var(--navy); color: white;
+      padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+      contain: paint; transform-style: flat;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .back-btn {
+      background: none; border: none; color: white; font-size: 20px;
+      padding: 4px 8px 4px 0; cursor: pointer; line-height: 1;
+    }
+    header h1 { font-size: 17px; font-weight: 700; margin: 0; flex: 1; }
+    header .wfp-tag { font-size: 12px; color: #a8b6e8; }
+
+    main { padding: 14px 14px 24px; max-width: 560px; margin: 0 auto; }
+
+    nav.bottom-nav {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      background: var(--card); border-top: 1px solid var(--border);
+      display: flex; padding-bottom: env(safe-area-inset-bottom);
+      contain: paint; transform-style: flat;
+    }
+    nav.bottom-nav button {
+      flex: 1; background: none; border: none; padding: 9px 4px 8px;
+      font-size: 11px; color: var(--text-muted); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+    }
+    nav.bottom-nav button.active { color: var(--blue); font-weight: 700; }
+    nav.bottom-nav button .icon { font-size: 20px; }
+
+    .search-box {
+      width: 100%; padding: 11px 14px; border: 1px solid var(--border);
+      border-radius: 10px; font-size: 15px; background: var(--card); margin-bottom: 12px;
+    }
+    .toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13.5px; color: var(--text-muted); }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 13px 15px; margin-bottom: 10px; cursor: pointer;
+    }
+    .card .name { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
+    .card .sub { font-size: 13px; color: var(--text-muted); }
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px;
+      border-radius: 20px; margin-top: 6px;
+    }
+    .badge.good { background: var(--green-bg); color: var(--green); }
+    .badge.warn { background: var(--amber-bg); color: var(--amber); }
+    .badge.bad { background: var(--red-bg); color: var(--red); }
+    .badge.neutral { background: #eef1f8; color: var(--text-muted); }
+
+    .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 14px; }
+    .spinner-wrap { display: flex; justify-content: center; padding: 30px 0; }
+    .spinner {
+      width: 26px; height: 26px; border: 3px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .section-title { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 18px 0 8px; }
+    .stat-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .stat { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 8px; text-align: center; }
+    .stat .num { font-size: 19px; font-weight: 800; color: var(--navy); }
+    .stat .label { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+
+    .action-row { display: flex; gap: 8px; margin: 14px 0; }
+    .btn {
+      flex: 1; padding: 11px 10px; border-radius: 10px; border: none; font-size: 13.5px;
+      font-weight: 700; cursor: pointer; text-align: center;
+    }
+    .btn-primary { background: var(--blue); color: white; }
+    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn:disabled { opacity: 0.55; }
+
+    .educator-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .educator-row:last-child { border-bottom: none; }
+    .educator-row .name { font-weight: 600; font-size: 14px; }
+    .educator-row .meta { font-size: 12px; color: var(--text-muted); }
+    .tag-chip { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-right: 4px; margin-top: 3px; }
+    .tag-chip.favourite { background: #fef3c7; color: #92400e; }
+    .tag-chip.known { background: #e0e7ff; color: #3730a3; }
+    .icon-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 6px; }
+
+    label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin: 12px 0 5px; }
+    input[type=text], input[type=date], input[type=tel], select, textarea {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
+      font-size: 15px; background: var(--card); font-family: inherit;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+
+    .toast {
+      position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom));
+      transform: translateX(-50%); background: var(--navy); color: white; padding: 10px 18px;
+      border-radius: 20px; font-size: 13.5px; z-index: 100; opacity: 0; pointer-events: none;
+      transition: opacity 0.2s; contain: paint; transform-style: flat;
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { background: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <button class="back-btn" id="backBtn" style="display:none" onclick="goBack()">←</button>
+    <div style="flex:1">
+      <h1 id="headerTitle">My Centres</h1>
+      <div class="wfp-tag" id="wfpTag"></div>
+    </div>
+  </header>
+
+  <main id="mainContent"><div class="spinner-wrap"><div class="spinner"></div></div></main>
+
+  <nav class="bottom-nav">
+    <button id="navCentres" class="active" onclick="setView('centres')"><span class="icon">🏢</span>Centres</button>
+    <button id="navEducators" onclick="setView('educators')"><span class="icon">🔍</span>Educators</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────────────────
+    let currentUser = null;
+    let viewStack = ['centres'];
+    let allCentres = [];
+    let showMineOnly = true;
+    let currentCentreKey = null;
+    let currentSnapshot = null;
+    let currentEducatorUserId = null;
+    let activityTypes = { callTypes: [], visitTypes: [] };
+
+    function toast(msg, kind) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast show' + (kind === 'error' ? ' error' : '');
+      setTimeout(() => { el.className = 'toast'; }, 2400);
+    }
+    function escHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function api(path, opts) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+
+    // ── Navigation ─────────────────────────────────────────────────────
+    function setView(view, push = true) {
+      if (push) viewStack.push(view);
+      document.getElementById('backBtn').style.display = viewStack.length > 1 ? 'block' : 'none';
+      document.getElementById('navCentres').classList.toggle('active', view === 'centres' || view === 'centre-detail' || view === 'log-visit');
+      document.getElementById('navEducators').classList.toggle('active', view === 'educators' || view === 'educator-profile');
+      render(view);
+    }
+    function goBack() {
+      if (viewStack.length > 1) viewStack.pop();
+      setView(viewStack[viewStack.length - 1], false);
+    }
+
+    function render(view) {
+      const main = document.getElementById('mainContent');
+      main.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      if (view === 'centres') return renderCentresList();
+      if (view === 'centre-detail') return renderCentreDetail();
+      if (view === 'educators') return renderEducatorSearch();
+      if (view === 'educator-profile') return renderEducatorProfile();
+      if (view === 'log-visit') return renderLogVisit();
+    }
+
+    // ── My Centres ─────────────────────────────────────────────────────
+    async function loadCentres() {
+      try {
+        const q = showMineOnly && currentUser.wfpLabel ? '?mine=true' : '';
+        allCentres = await api('/api/centres' + q);
+      } catch { toast('Could not load centres', 'error'); allCentres = []; }
+    }
+    async function renderCentresList() {
+      document.getElementById('headerTitle').textContent = 'My Centres';
+      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      await loadCentres();
+      paintCentresList();
+    }
+    function paintCentresList() {
+      const main = document.getElementById('mainContent');
+      const searchVal = document.getElementById('centreSearchInput')?.value || '';
+      const HEALTH_BADGE = {
+        healthy: 'good', growing: 'good', opportunity: 'neutral',
+        needs_attention: 'warn', new_activating: 'warn',
+        declining: 'bad', dormant: 'bad'
+      };
+      const filtered = allCentres.filter(c => !searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
+      main.innerHTML = `
+        <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="paintCentresList()">
+        ${currentUser.wfpLabel ? `<label class="toggle-row"><input type="checkbox" id="mineToggle" ${showMineOnly ? 'checked' : ''} onchange="onMineToggle()"> Show only my centres</label>` : ''}
+        ${filtered.length ? filtered.map(c => `
+          <div class="card" onclick="openCentre('${c.centreKey}')">
+            <div class="name">${escHtml(c.name)}</div>
+            <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
+            <span class="badge ${HEALTH_BADGE[c.health] || 'neutral'}">${escHtml((c.health || '').replace(/_/g, ' '))}</span>
+          </div>
+        `).join('') : `<div class="empty-state">No centres found.</div>`}
+      `;
+    }
+    async function onMineToggle() {
+      showMineOnly = document.getElementById('mineToggle').checked;
+      document.getElementById('mainContent').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      await loadCentres();
+      paintCentresList();
+    }
+
+    // ── Centre Detail / Snapshot ───────────────────────────────────────
+    function openCentre(centreKey) {
+      currentCentreKey = centreKey;
+      setView('centre-detail');
+    }
+    async function renderCentreDetail() {
+      document.getElementById('headerTitle').textContent = 'Centre';
+      document.getElementById('wfpTag').textContent = '';
+      try {
+        currentSnapshot = await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/snapshot`);
+      } catch { toast('Could not load this centre', 'error'); currentSnapshot = null; }
+      paintCentreDetail();
+    }
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; }
+    }
+    function paintCentreDetail() {
+      const main = document.getElementById('mainContent');
+      const s = currentSnapshot;
+      if (!s) { main.innerHTML = `<div class="empty-state">This centre could not be loaded.</div>`; return; }
+      document.getElementById('headerTitle').textContent = s.name;
+      main.innerHTML = `
+        <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
+        ${s.contactName || s.contactNo ? `<div class="sub">${escHtml(s.contactName || '')}${s.contactName && s.contactNo ? ' · ' : ''}${s.contactNo ? `<a href="tel:${escHtml(s.contactNo)}">${escHtml(s.contactNo)}</a>` : ''}</div>` : ''}
+
+        <div class="section-title">Snapshot</div>
+        <div class="stat-row">
+          <div class="stat"><div class="num">${s.fillRate != null ? s.fillRate + '%' : '—'}</div><div class="label">Fill rate</div></div>
+          <div class="stat"><div class="num">${s.todayBookingsCount}</div><div class="label">Today</div></div>
+          <div class="stat"><div class="num">${s.upcomingBookingsCount}</div><div class="label">Upcoming</div></div>
+        </div>
+        <div class="sub" style="margin-bottom:10px">Last booking: ${fmtDate(s.lastBookingDate)}</div>
+
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="setView('log-visit')">📝 Log Visit/Call</button>
+          <button class="btn btn-secondary" onclick="requestCentreBooking()">📅 Request Booking</button>
+        </div>
+
+        <div class="section-title">Educators</div>
+        ${s.educators.length ? s.educators.map(e => `
+          <div class="educator-row">
+            <div>
+              <div class="name">${escHtml(e.name)}</div>
+              <div class="meta">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'} here</div>
+              ${e.relationships.map(r => `<span class="tag-chip ${r.type === 'favourite' ? 'favourite' : 'known'}">${r.type === 'favourite' ? '⭐ Favourite' : '🔗 Known to Centre'}</span>`).join('')}
+            </div>
+            <button class="icon-btn" onclick="tagEducator('${e.userId}', '${escHtml(e.name).replace(/'/g, "\\'")}')" title="Tag relationship">🏷️</button>
+          </div>
+        `).join('') : `<div class="sub">No educators with shifts here yet.</div>`}
+      `;
+    }
+    async function tagEducator(userId, name) {
+      const choice = prompt(`Tag ${name} as:\n1 = ⭐ Favourite\n2 = 🔗 Known to Centre (market intelligence)\n\nType 1 or 2:`);
+      if (choice !== '1' && choice !== '2') return;
+      const relationshipType = choice === '1' ? 'favourite' : 'known_to_centre';
+      const note = choice === '2' ? (prompt('Note — how do we know this? (e.g. "Centre manager mentioned she covered here via another agency")') || '') : null;
+      try {
+        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/educator-relationships`, {
+          method: 'POST', body: JSON.stringify({ candidateUserId: userId, relationshipType, note })
+        });
+        toast('Saved');
+        renderCentreDetail();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function requestCentreBooking() {
+      const note = prompt('What do you need booked? (optional note)') || '';
+      try {
+        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/request-booking`, { method: 'POST', body: JSON.stringify({ note }) });
+        toast('Request sent to the team');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    // ── Log Visit/Call ─────────────────────────────────────────────────
+    async function renderLogVisit() {
+      document.getElementById('headerTitle').textContent = 'Log Visit/Call';
+      if (!activityTypes.callTypes.length) {
+        try { activityTypes = await api('/api/centres/activity-types'); } catch {}
+      }
+      paintLogVisit();
+    }
+    function paintLogVisit() {
+      const main = document.getElementById('mainContent');
+      const today = new Date().toISOString().slice(0, 10);
+      main.innerHTML = `
+        <label>Date</label>
+        <input type="date" id="lvDate" value="${today}">
+        <label>Channel</label>
+        <select id="lvChannel" onchange="paintLvActivityOptions()">
+          <option value="visit">Visit</option>
+          <option value="call">Call</option>
+        </select>
+        <label>Activity Type</label>
+        <select id="lvActivityType"></select>
+        <label>Status</label>
+        <select id="lvStatus" onchange="document.getElementById('lvOutcomeWrap').style.display = this.value === 'completed' ? 'block' : 'none'">
+          <option value="completed">Called / Visited</option>
+          <option value="planned">Planned</option>
+          <option value="rescheduled">Rescheduled</option>
+        </select>
+        <div id="lvOutcomeWrap">
+          <label>Outcome</label>
+          <select id="lvOutcome">
+            <option value="positive">Positive</option>
+            <option value="neutral">Neutral</option>
+            <option value="concern">Concern</option>
+            <option value="issue_raised">Issue Raised</option>
+          </select>
+        </div>
+        <label>Who did you speak with?</label>
+        <input type="text" id="lvContactName" placeholder="Contact name">
+        <label>Notes</label>
+        <textarea id="lvNotes" placeholder="What happened…"></textarea>
+        <label>Next step (optional — leave blank if nothing further is needed)</label>
+        <input type="text" id="lvNextStep" placeholder="e.g. Send pricing sheet">
+        <label>Next step due date</label>
+        <input type="date" id="lvNextStepDue">
+        <div class="action-row">
+          <button class="btn btn-primary" id="lvSaveBtn" onclick="saveVisit()">Save</button>
+        </div>
+      `;
+      paintLvActivityOptions();
+    }
+    function paintLvActivityOptions() {
+      const channel = document.getElementById('lvChannel').value;
+      const options = channel === 'call' ? activityTypes.callTypes : activityTypes.visitTypes;
+      document.getElementById('lvActivityType').innerHTML = (options || []).map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
+    }
+    async function saveVisit() {
+      const btn = document.getElementById('lvSaveBtn');
+      if (btn.disabled) return;
+      btn.disabled = true; const originalLabel = btn.textContent; btn.textContent = 'Saving…';
+      try {
+        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/visits`, {
+          method: 'POST',
+          body: JSON.stringify({
+            visitDate: document.getElementById('lvDate').value,
+            channel: document.getElementById('lvChannel').value,
+            activityType: document.getElementById('lvActivityType').value,
+            status: document.getElementById('lvStatus').value,
+            outcome: document.getElementById('lvStatus').value === 'completed' ? document.getElementById('lvOutcome').value : null,
+            contactName: document.getElementById('lvContactName').value || null,
+            notes: document.getElementById('lvNotes').value || null,
+            nextStep: document.getElementById('lvNextStep').value || null,
+            nextStepDueDate: document.getElementById('lvNextStepDue').value || null
+          })
+        });
+        toast('Visit logged');
+        goBack();
+      } catch (e) { toast(e.message, 'error'); }
+      finally { btn.disabled = false; btn.textContent = originalLabel; }
+    }
+
+    // ── Educator Search ─────────────────────────────────────────────────
+    let educatorSearchTimer = null;
+    function renderEducatorSearch() {
+      document.getElementById('headerTitle').textContent = 'Educators';
+      document.getElementById('wfpTag').textContent = '';
+      const main = document.getElementById('mainContent');
+      main.innerHTML = `
+        <input type="text" class="search-box" id="educatorSearchInput" placeholder="Search by name or phone…" oninput="onEducatorSearchInput()" autofocus>
+        <div id="educatorResults"></div>
+      `;
+    }
+    function onEducatorSearchInput() {
+      clearTimeout(educatorSearchTimer);
+      const q = document.getElementById('educatorSearchInput').value.trim();
+      if (q.length < 2) { document.getElementById('educatorResults').innerHTML = ''; return; }
+      educatorSearchTimer = setTimeout(async () => {
+        try {
+          const results = await api(`/api/educators/search?q=${encodeURIComponent(q)}`);
+          document.getElementById('educatorResults').innerHTML = results.length ? results.map(r => `
+            <div class="card" onclick="openEducator(${r.userId})">
+              <div class="name">${escHtml(r.name)}</div>
+              <div class="sub">${escHtml(r.contactNo || 'no phone')}${r.suburb ? ' · ' + escHtml(r.suburb) : ''}</div>
+              <span class="badge ${r.isActive ? 'good' : 'neutral'}">${r.isActive ? 'Active' : 'Inactive'}</span>
+              ${r.expiringDocsCount ? `<span class="badge warn">⚠️ ${r.expiringDocsCount} expiring doc(s)</span>` : ''}
+            </div>
+          `).join('') : `<div class="empty-state">No matches.</div>`;
+        } catch { toast('Search failed', 'error'); }
+      }, 350);
+    }
+    function openEducator(userId) {
+      currentEducatorUserId = userId;
+      setView('educator-profile');
+    }
+    async function renderEducatorProfile() {
+      document.getElementById('headerTitle').textContent = 'Educator';
+      try {
+        const p = await api(`/api/educators/${currentEducatorUserId}`);
+        paintEducatorProfile(p);
+      } catch { toast('Could not load this educator', 'error'); }
+    }
+    function paintEducatorProfile(p) {
+      document.getElementById('headerTitle').textContent = p.name;
+      const main = document.getElementById('mainContent');
+      main.innerHTML = `
+        <div class="sub">${p.contactNo ? `<a href="tel:${escHtml(p.contactNo)}">${escHtml(p.contactNo)}</a>` : 'No phone'}${p.email ? ' · ' + escHtml(p.email) : ''}</div>
+        <span class="badge ${p.isActive ? 'good' : 'neutral'}">${p.isActive ? 'Active' : 'Inactive'}</span>
+
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="requestEducatorBooking(${p.userId}, '${escHtml(p.name).replace(/'/g, "\\'")}')">📅 Request / Rebook</button>
+          <a class="btn btn-secondary" style="text-decoration:none" href="${escHtml(p.profileUrl)}" target="_blank" rel="noopener">Full RT Profile ↗</a>
+        </div>
+
+        ${p.qualifications.length ? `<div class="section-title">Qualifications</div>${p.qualifications.map(q => `<div class="sub">• ${escHtml(q.qualificationName || 'Qualification')}${q.qualified ? ' (qualified)' : ''}</div>`).join('')}` : ''}
+
+        ${p.complianceDocuments.length ? `<div class="section-title">Compliance Documents</div>${p.complianceDocuments.map(d => `<div class="sub">• ${escHtml(d.name)}${d.expiryDate ? ' — expires ' + fmtDate(d.expiryDate) : ''}${d.mandatory ? ' (mandatory)' : ''}</div>`).join('')}` : ''}
+      `;
+    }
+    async function requestEducatorBooking(userId, name) {
+      const note = prompt(`Request/rebook ${name} — any note for the team?`) || '';
+      try {
+        await api(`/api/educators/${userId}/request-booking`, {
+          method: 'POST',
+          body: JSON.stringify({ note, centreKey: currentCentreKey, centreName: currentSnapshot?.name || null })
+        });
+        toast('Request sent to the team');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    // ── Boot ─────────────────────────────────────────────────────────
+    (async function init() {
+      try {
+        currentUser = await api('/auth/me');
+      } catch {
+        location.href = '/login.html';
+        return;
+      }
+      showMineOnly = !!currentUser.wfpLabel;
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
+      }
+      render('centres');
+    })();
+  </script>
+</body>
+</html>

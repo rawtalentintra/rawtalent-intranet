@@ -3,7 +3,7 @@ const router = express.Router();
 const path = require('path');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const { requireAuth, requireRole } = require('../middleware/authMiddleware');
+const { requireAuth, requireRole, requirePwaAccess } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const rtApi = require('../services/rtApiReportService');
 const { flattenCentres, parseCentreKey } = require('../services/centreKeyService');
@@ -13,11 +13,12 @@ const { detectTimestampFromText } = require('../services/transcriptDateService')
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
-const { MELBOURNE_SUBURB_PARTNER } = require('../services/melbourneTerritoryService');
+const { MELBOURNE_SUBURB_PARTNER, partnerForSuburbState } = require('../services/melbourneTerritoryService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
 const { computeSystemMilestones } = require('../services/centreMilestoneService');
 const { CALL_ACTIVITY_TYPES, VISIT_ACTIVITY_TYPES, DECISIONS_REQUIRED } = require('../services/centreActivityTypeService');
+const { createTask } = require('./tasks');
 
 // Any format — a site-visit recording could be a phone-app voice memo, a
 // Zoom/Teams export, a plain-text transcript, whatever the Workforce
@@ -43,8 +44,12 @@ function isRealAssignment(assignedUserId) {
 // wfp_label column comment in db/schema.sql for the intended future hook).
 // Narrower than routes/reports.js's requireAdmin (that route exposes the
 // full Candidates/Timesheets surface, which workforce_partner shouldn't
-// get) but open to workforce_partner for the centre-scoped data here.
-router.use(requireAuth, requireRole('admin', 'super_admin', 'workforce_partner'));
+// get). requirePwaAccess (not the plain role check this used to be) so
+// this also covers a plain-role person granted can_use_wfp_pwa for the
+// Workforce Partner PWA — that shell's own page-load gate (server.js)
+// checks the exact same condition, so a person who can open the app can
+// actually call its APIs too.
+router.use(requireAuth, requirePwaAccess);
 
 const BOOKING_WINDOW_DAYS = 100; // covers the 90-day health window with a few days' slack
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -251,14 +256,27 @@ async function getCentreStopsByKeys(centreKeys) {
 // dataset list endpoints in this app (Leads, Reports): compute everything
 // once server-side, let the frontend filter/sort/search client-side
 // rather than adding query-param plumbing for a ~360-row list.
+// `?mine=true` (Workforce Partner PWA) — the only backend-enforced
+// territory scoping this route has ever had; the existing state-filter
+// buttons in My Centres are purely cosmetic client-side filters over the
+// same unfiltered list every caller already receives (confirmed — see the
+// PWA plan). Scopes to a real centre_partner_assignments row matching the
+// caller's own wfp_label, falling back to the same suburb-default
+// (partnerForSuburbState) the frontend already uses cosmetically for a
+// centre with no explicit assignment. A caller with no wfp_label at all
+// (Liam and every admin/super_admin today) has nothing to scope by, so
+// `mine=true` is a no-op for them rather than returning an empty list.
 router.get('/', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();
     const hidden = await getHiddenCentreKeys();
-    const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
+    let visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates(visible);
+    if (req.query.mine === 'true' && req.user.wfp_label) {
+      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state)) === req.user.wfp_label);
+    }
     const withHealth = visible.map(c => ({
       ...healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
       assignedWorkforcePartner: assignments[c.centreKey] || null
@@ -417,41 +435,196 @@ router.get('/:centreKey/bookings', async (req, res) => {
   }
 });
 
+// Shared by GET /:centreKey/educators below and the snapshot endpoint —
+// "recent" educators, ranked by how often they've actually worked this
+// centre, resolved to names via a live candidate lookup (mirrors the
+// report dashboard's existing candidateName-by-id pattern). `limit` caps
+// how many get their name resolved (the snapshot only wants a handful).
+async function topEducatorsForCentre(parsed, bookings, limit = null) {
+  const forCentre = bookings.filter(b =>
+    (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id) &&
+    isRealAssignment(b.assignedUserId) && MEANINGFUL_BOOKING_STATUSES.has(b.statusId)
+  );
+  const countByEducator = {};
+  for (const b of forCentre) countByEducator[b.assignedUserId] = (countByEducator[b.assignedUserId] || 0) + 1;
+  let educatorIds = Object.keys(countByEducator).sort((a, b) => countByEducator[b] - countByEducator[a]);
+  if (limit) educatorIds = educatorIds.slice(0, limit);
+  if (!educatorIds.length) return [];
+
+  // Only worth resolving names for the educators who actually appear
+  // here (a handful per centre), not every candidate in RT.
+  const names = {};
+  await Promise.all(educatorIds.map(async id => {
+    try {
+      const candidate = await rtApi.fetchById('candidates', id);
+      names[id] = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || `Educator #${id}`;
+    } catch {
+      names[id] = `Educator #${id}`;
+    }
+  }));
+
+  return educatorIds
+    .map(id => ({ userId: Number(id), name: names[id], bookingCount: countByEducator[id] }))
+    .sort((a, b) => b.bookingCount - a.bookingCount);
+}
+
 // Educator relationships tab — who's actually worked this centre, ranked
-// by how often, resolved to names via a live candidate lookup (mirrors
-// the report dashboard's existing candidateName-by-id pattern).
+// by how often.
 router.get('/:centreKey/educators', async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
   try {
     const { bookings } = await getCentresAndBookings();
-    const forCentre = bookings.filter(b =>
-      (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id) &&
-      isRealAssignment(b.assignedUserId) && MEANINGFUL_BOOKING_STATUSES.has(b.statusId)
-    );
-    const countByEducator = {};
-    for (const b of forCentre) countByEducator[b.assignedUserId] = (countByEducator[b.assignedUserId] || 0) + 1;
-    const educatorIds = Object.keys(countByEducator);
-    if (!educatorIds.length) return res.json([]);
-
-    // Only worth resolving names for the educators who actually appear
-    // here (a handful per centre), not every candidate in RT.
-    const names = {};
-    await Promise.all(educatorIds.map(async id => {
-      try {
-        const candidate = await rtApi.fetchById('candidates', id);
-        names[id] = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || `Educator #${id}`;
-      } catch {
-        names[id] = `Educator #${id}`;
-      }
-    }));
-
-    const result = educatorIds
-      .map(id => ({ userId: Number(id), name: names[id], bookingCount: countByEducator[id] }))
-      .sort((a, b) => b.bookingCount - a.bookingCount);
-    res.json(result);
+    res.json(await topEducatorsForCentre(parsed, bookings));
   } catch (err) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+// One-round-trip mobile "pre-meeting snapshot" (Workforce Partner PWA,
+// Aug 26 meeting) — bundles what today takes 3 separate calls
+// (GET /:centreKey, /:centreKey/bookings, /:centreKey/educators) into one,
+// plus two fields that exist internally but were never returned as plain
+// values before: a raw last-booking date, and today's/upcoming booking
+// counts split out (rather than the caller counting the full booking
+// list itself, wasteful on a slow mobile connection). "Live booking"
+// (Liam's doc) is treated as "booking dated today" — RT has no concept of
+// a currently-in-progress/checked-in shift to draw on instead; flag if
+// something more real-time was actually meant.
+router.get('/:centreKey/snapshot', async (req, res) => {
+  const parsed = parseCentreKey(req.params.centreKey);
+  if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
+  try {
+    if ((await getHiddenCentreKeys()).has(req.params.centreKey)) return res.status(404).json({ error: 'Centre not found' });
+    const client = await rtApi.fetchById('clients', parsed.type === 'loc'
+      ? (await findClientIdForLocation(parsed.id))
+      : parsed.id
+    );
+    if (!client) return res.status(404).json({ error: 'Centre not found' });
+    const [centre] = flattenCentres([client]).filter(c => c.centreKey === req.params.centreKey);
+    if (!centre) return res.status(404).json({ error: 'Centre not found' });
+
+    const { bookings } = await getCentresAndBookings();
+    const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
+    const assignments = await getCentrePartnerAssignments();
+    const lastBookingByCentreKey = await getLastBookingDates([centre]);
+    const withHealth = healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null);
+
+    const forCentre = bookings.filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id));
+    const filled = forCentre.filter(b => isRealAssignment(b.assignedUserId)).length;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayCount = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) === todayStr).length;
+    const upcomingCount = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) > todayStr).length;
+
+    const educators = await topEducatorsForCentre(parsed, bookings, 5);
+    const relationships = (await getDb().execute({
+      sql: 'SELECT candidate_user_id, relationship_type, note FROM centre_educator_relationships WHERE centre_key = ?',
+      args: [centre.centreKey]
+    })).rows;
+    const relByUserId = {};
+    for (const r of relationships) (relByUserId[r.candidate_user_id] ||= []).push({ type: r.relationship_type, note: r.note });
+    const educatorsWithTags = educators.map(e => ({ ...e, relationships: relByUserId[e.userId] || [] }));
+
+    res.json({
+      centreKey: centre.centreKey,
+      name: centre.name,
+      streetAddress: centre.streetAddress,
+      suburb: centre.suburb,
+      state: centre.state,
+      contactName: centre.contactName,
+      contactNo: centre.contactNo,
+      email: centre.email,
+      assignedWorkforcePartner: assignments[centre.centreKey] || null,
+      health: withHealth.health,
+      healthReasons: withHealth.healthReasons,
+      nurture: withHealth.nurture,
+      lastBookingDate: lastBookingByCentreKey[centre.centreKey] || null,
+      fillRate: forCentre.length ? Math.round((filled / forCentre.length) * 100) : null,
+      todayBookingsCount: todayCount,
+      upcomingBookingsCount: upcomingCount,
+      educators: educatorsWithTags
+    });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Favourite / "known to centre" educator tagging — see
+// centre_educator_relationships' schema comment for why the label must
+// never read as "previously worked here through Raw Talent" (that's a
+// distinct, unverified claim this doesn't make). Any signed-in user with
+// PWA/centres access can add one; matches centre_visits' own ownership
+// model (creator recorded, admin/super_admin can remove any).
+router.get('/:centreKey/educator-relationships', async (req, res) => {
+  try {
+    const rows = (await getDb().execute({
+      sql: 'SELECT * FROM centre_educator_relationships WHERE centre_key = ? ORDER BY created_at DESC',
+      args: [req.params.centreKey]
+    })).rows;
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router.post('/:centreKey/educator-relationships', async (req, res) => {
+  const { candidateUserId, relationshipType, note } = req.body;
+  if (!candidateUserId) return res.status(400).json({ error: 'candidateUserId is required' });
+  if (!['favourite', 'known_to_centre'].includes(relationshipType)) return res.status(400).json({ error: 'relationshipType must be favourite or known_to_centre' });
+  try {
+    const id = uuidv4();
+    await getDb().execute({
+      sql: `INSERT INTO centre_educator_relationships (id, centre_key, candidate_user_id, relationship_type, note, created_by, created_by_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, req.params.centreKey, String(candidateUserId), relationshipType, note || null, req.user.email, req.user.name || req.user.email]
+    });
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router.delete('/:centreKey/educator-relationships/:id', async (req, res) => {
+  try {
+    const existing = await getDb().execute({ sql: 'SELECT created_by FROM centre_educator_relationships WHERE id = ? AND centre_key = ?', args: [req.params.id, req.params.centreKey] });
+    const row = existing.rows[0];
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.created_by.toLowerCase() !== req.user.email.toLowerCase() && !['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only the person who added this or an admin can remove it' });
+    }
+    await getDb().execute({ sql: 'DELETE FROM centre_educator_relationships WHERE id = ?', args: [req.params.id] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Task-bridge for "request/rebook an educator" (Workforce Partner PWA) —
+// RT has no booking-write API for this to call yet (confirmed — see the
+// PWA plan), so this raises a real HeartBeat Task in the Bookings
+// department instead of either faking a write RT can't accept or doing
+// nothing. Retire this in favour of a real RT write once Raj/Yuvraj's API
+// exists.
+router.post('/:centreKey/request-booking', async (req, res) => {
+  const { note, candidateUserId, candidateName } = req.body;
+  const parsed = parseCentreKey(req.params.centreKey);
+  if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
+  try {
+    const { centres } = await getCentresAndBookings();
+    const centre = centres.find(c => c.centreKey === req.params.centreKey);
+    if (!centre) return res.status(404).json({ error: 'Centre not found' });
+    const title = candidateName ? `Book ${candidateName} at ${centre.name}` : `New booking request — ${centre.name}`;
+    const description = [
+      `Requested from the Workforce Partner app by ${req.user.name || req.user.email}.`,
+      `Centre: ${centre.name}${centre.suburb ? ` (${centre.suburb})` : ''}`,
+      note ? `Note: ${note}` : null
+    ].filter(Boolean).join('\n');
+    const id = await createTask({
+      departmentId: 'bookings', title, description,
+      linkedCandidates: candidateUserId ? [{ userId: candidateUserId, name: candidateName || null, phone: null }] : [],
+      createdByEmail: req.user.email, createdByName: req.user.name
+    });
+    res.json({ success: true, taskId: id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -140,6 +140,7 @@ app.use('/api/payslips', require('./routes/payslips'));
 app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/centres', require('./routes/centres'));
+app.use('/api/educators', require('./routes/educators'));
 app.use('/api/micropods', require('./routes/micropods'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/calendar-sync', require('./routes/calendarSync'));
@@ -186,6 +187,26 @@ app.get('/', (req, res) => guardRoute(req, res, 'index.html'));
 app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));
+
+// Workforce Partner PWA (Aug 26 meeting) — same session cookie as
+// everywhere else in this app (no separate login/token scheme), gated by
+// the requirePwaAccess grant (admin/super_admin always pass, matching
+// that middleware's own rule). Static assets under public/wfp/ (manifest,
+// service worker, icons) are already reachable via the express.static
+// mount above — nothing in them is sensitive — only the app shell itself
+// needs the auth check, same reasoning as guardRoute above for why it
+// lives in views/ rather than public/.
+function wfpGuard(req, res) {
+  if (!req.isAuthenticated()) return res.redirect('/login.html');
+  // Must match requirePwaAccess (middleware/authMiddleware.js) exactly —
+  // that's the same check routes/centres.js and routes/educators.js use
+  // to gate the APIs this shell actually calls.
+  const hasAccess = ['admin', 'super_admin', 'workforce_partner'].includes(req.user.role) || req.user.can_use_wfp_pwa;
+  if (!hasAccess) return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
+  res.sendFile(path.join(__dirname, 'views', 'wfp.html'));
+}
+app.get('/wfp', wfpGuard);
+app.get('/wfp/*', wfpGuard);
 
 // Short "Copy Link" URLs for Tasks — resolves a code minted by
 // routes/tasks.js's POST /:id/short-link and redirects to the real

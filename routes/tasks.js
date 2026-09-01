@@ -218,6 +218,34 @@ function normalizeLinkedCandidates(list) {
   return out;
 }
 
+// Shared with the Workforce Partner PWA's request-booking/request-educator
+// bridge (routes/educators.js, routes/centres.js — RT has no booking-write
+// API for those to call yet, so they raise a real Task here instead of
+// faking a write RT can't accept). Kept as one insert path rather than
+// two, so a future change to the tasks schema doesn't have to be made twice.
+async function createTask({ departmentId, classificationId, title, description, status, priority, assignedToEmails, dueDate, linkedCandidates, linkedClientName, linkedClientPhone, createdByEmail, createdByName }) {
+  const db = getDb();
+  const id = uuidv4();
+  const finalStatus = status || 'to_do';
+  const mentioned = await resolveDescriptionMentions(db, description, createdByEmail);
+  await db.execute({
+    sql: `INSERT INTO tasks
+          (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, completed_at, mentioned_emails,
+           linked_candidates, linked_client_name, linked_client_phone)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [
+      id, departmentId, classificationId || null, title.trim(), description || null,
+      finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assignedToEmails)), dueDate || null,
+      createdByEmail, createdByName || createdByEmail,
+      finalStatus === 'done' ? new Date().toISOString() : null,
+      JSON.stringify(mentioned),
+      JSON.stringify(normalizeLinkedCandidates(linkedCandidates)),
+      linkedClientName || null, linkedClientPhone || null
+    ]
+  });
+  return id;
+}
+
 router.post('/', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
@@ -234,24 +262,11 @@ router.post('/', async (req, res) => {
   // canAccessDepartment's comment above).
   if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
-    const db = getDb();
-    const id = uuidv4();
-    const finalStatus = status || 'to_do';
-    const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
-    await db.execute({
-      sql: `INSERT INTO tasks
-            (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, completed_at, mentioned_emails,
-             linked_candidates, linked_client_name, linked_client_phone)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      args: [
-        id, department_id, classification_id || null, title.trim(), description || null,
-        finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null,
-        req.user.email, req.user.name || req.user.email,
-        finalStatus === 'done' ? new Date().toISOString() : null,
-        JSON.stringify(mentioned),
-        JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
-        linked_client_name || null, linked_client_phone || null
-      ]
+    const id = await createTask({
+      departmentId: department_id, classificationId: classification_id, title, description, status, priority,
+      assignedToEmails: assigned_to_emails, dueDate: due_date, linkedCandidates: linked_candidates,
+      linkedClientName: linked_client_name, linkedClientPhone: linked_client_phone,
+      createdByEmail: req.user.email, createdByName: req.user.name
     });
     res.json({ success: true, id });
   } catch (err) {
@@ -553,3 +568,4 @@ router.delete('/attachments/:attachmentId', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.createTask = createTask;

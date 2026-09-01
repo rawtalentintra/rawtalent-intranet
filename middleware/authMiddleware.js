@@ -61,4 +61,21 @@ function requireOutreachListBuilder(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder };
+// Workforce Partner PWA (Aug 26 meeting) — a real workforce_partner-role
+// login gets this automatically (same as admin/super_admin), and anyone
+// else (Liam himself is admin, not workforce_partner) gets it via the
+// per-person can_use_wfp_pwa flag instead — Joy: "Liam and the Workforce
+// Partners or whoever I give it to". Used both for the /wfp page shell
+// (server.js) and as the underlying API gate on routes/centres.js and
+// routes/educators.js, so a person who can open the app shell can
+// actually call its APIs too — those two checks must never drift apart.
+function requirePwaAccess(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  const allowedRole = ['admin', 'super_admin', 'workforce_partner'].includes(req.user.role);
+  if (!allowedRole && !req.user.can_use_wfp_pwa) {
+    return res.status(403).json({ error: 'You do not have access to this' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder, requirePwaAccess };
