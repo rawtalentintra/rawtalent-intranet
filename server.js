@@ -187,6 +187,23 @@ app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 
+// Short "Copy Link" URLs for Tasks — resolves a code minted by
+// routes/tasks.js's POST /:id/short-link and redirects to the real
+// ?tab=tasks&task=<uuid> deep link. Same auth requirement as every other
+// page here; an unknown code (its task was deleted, or it was just made
+// up) 404s in plain text rather than redirecting into a broken task view.
+app.get('/t/:code', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/login.html');
+  try {
+    const result = await getDb().execute({ sql: 'SELECT task_id FROM task_short_links WHERE code = ?', args: [req.params.code] });
+    const row = result.rows[0];
+    if (!row) return res.status(404).send('This link is invalid or has expired.');
+    res.redirect(`/?tab=tasks&task=${row.task_id}`);
+  } catch (err) {
+    res.status(500).send('Something went wrong loading this link.');
+  }
+});
+
 const RT_CANDIDATES_SYNC_TZ = 'Australia/Melbourne';
 async function maybeRunNightlyCandidatesSync() {
   const state = await rtCandidatesSync.getSyncState();

@@ -1667,6 +1667,26 @@ CREATE TABLE IF NOT EXISTS task_attachments (
 CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_attachments_note ON task_attachments(note_id);
 
+-- Short "Copy Link" codes for Tasks (routes/tasks.js POST /:id/short-link,
+-- server.js GET /t/:code) — a bare task UUID pasted into Slack/chat is
+-- long and visually noisy; one random code is generated per task (reused
+-- on every later Copy Link click for that same task, not regenerated) and
+-- resolves back to the real ?tab=tasks&task=<uuid> deep link.
+CREATE TABLE IF NOT EXISTS task_short_links (
+  code TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+-- UNIQUE, not just an index — two Copy Link clicks racing (two tabs,
+-- roughly the same instant) must not be able to both pass the "does this
+-- task already have a code" check and each insert their own, leaving one
+-- task with two different live short links. The route below relies on
+-- this actually being enforced at the DB level, not just checked first.
+-- (Named distinctly from an earlier non-unique idx_task_short_links_task
+-- this session briefly created locally — CREATE INDEX IF NOT EXISTS
+-- would silently keep that plain one forever rather than upgrade it.)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_short_links_task_unique ON task_short_links(task_id);
+
 -- Personal access tokens for the MCP server (routes/mcp.js) — lets a
 -- user connect HeartBeat as a Custom Connector in Claude. Deliberately
 -- separate from the session-cookie/Passport login the rest of the app

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
@@ -323,9 +324,55 @@ router.delete('/:id', async (req, res) => {
       }
     }
     await db.execute({ sql: 'DELETE FROM task_notes WHERE task_id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM task_short_links WHERE task_id = ?', args: [req.params.id] });
     const result = await db.execute({ sql: 'DELETE FROM tasks WHERE id = ?', args: [req.params.id] });
     if (!result.rowsAffected) return res.status(404).json({ error: 'Task not found' });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// "Copy Link" short codes — a bare task UUID pasted into Slack/chat looks
+// noisy; one random code is generated per task and reused on every later
+// Copy Link click for that same task (not regenerated each time), so the
+// short link a person shared earlier keeps working. Collisions on the
+// random code itself are vanishingly rare at this table's size but are
+// retried defensively rather than assumed impossible.
+const SHORT_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function generateShortCode(length = 7) {
+  const bytes = crypto.randomBytes(length);
+  let code = '';
+  for (let i = 0; i < length; i++) code += SHORT_CODE_ALPHABET[bytes[i] % SHORT_CODE_ALPHABET.length];
+  return code;
+}
+router.post('/:id/short-link', async (req, res) => {
+  try {
+    const db = getDb();
+    const task = await db.execute({ sql: 'SELECT id FROM tasks WHERE id = ?', args: [req.params.id] });
+    if (!task.rows[0]) return res.status(404).json({ error: 'Task not found' });
+
+    const existing = await db.execute({ sql: 'SELECT code FROM task_short_links WHERE task_id = ?', args: [req.params.id] });
+    if (existing.rows[0]) return res.json({ code: existing.rows[0].code });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = generateShortCode();
+      try {
+        await db.execute({ sql: 'INSERT INTO task_short_links (code, task_id) VALUES (?, ?)', args: [code, req.params.id] });
+        return res.json({ code });
+      } catch (err) {
+        if (!/duplicate key|unique/i.test(err.message)) throw err;
+        // Either this random code collided (vanishingly rare), or a
+        // second Copy Link click racing this same one (two tabs, near-
+        // simultaneous) already inserted this task's row first — the
+        // task_id unique index (schema.sql) is what actually prevents two
+        // live codes for one task. Either way, whatever's there now is
+        // the answer to return.
+        const race = await db.execute({ sql: 'SELECT code FROM task_short_links WHERE task_id = ?', args: [req.params.id] });
+        if (race.rows[0]) return res.json({ code: race.rows[0].code });
+      }
+    }
+    res.status(500).json({ error: 'Could not generate a unique short link, please try again' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

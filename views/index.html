@@ -1187,7 +1187,7 @@
               <input type="file" id="taskNoteFileInput" style="display:none" onchange="handleAttachmentFilesSelected(this.files,'note');this.value=''">
               <span style="font-size:11px;color:var(--gray-400)">or paste an image</span>
             </div>
-            <button class="btn-add" style="font-size:12px;padding:6px 14px" onclick="submitTaskNote()">Add Note</button>
+            <button class="btn-add" id="taskNoteSubmitBtn" style="font-size:12px;padding:6px 14px" onclick="submitTaskNote()">Add Note</button>
           </div>
           <div id="taskNoteAttachmentsEdit" style="margin-top:8px"></div>
         </div>
@@ -2897,9 +2897,18 @@
       else renderTaskNotes();
     });
 
-    function copyTaskLink() {
+    // Prefers the short /t/<code> form (server.js + routes/tasks.js's
+    // POST /:id/short-link) so a pasted link isn't a raw UUID — falls back
+    // to the full deep link if that request fails for any reason, so Copy
+    // Link never silently does nothing.
+    async function copyTaskLink() {
       if (!editingTaskId) return;
-      const url = `${location.origin}${location.pathname}?tab=tasks&task=${editingTaskId}`;
+      let url = `${location.origin}${location.pathname}?tab=tasks&task=${editingTaskId}`;
+      try {
+        const res = await fetch(`/api/tasks/${editingTaskId}/short-link`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.code) url = `${location.origin}/t/${data.code}`;
+      } catch { /* network error — the long link above still works */ }
       navigator.clipboard.writeText(url).then(
         () => toast('Link copied', 'success'),
         () => toast('Failed to copy link', 'error')
@@ -3380,7 +3389,7 @@
               <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
               <textarea id="taskNoteEditInput_${n.id}" class="form-control" style="min-height:60px;resize:vertical;margin-top:6px;font-size:13px">${escHtml(n.body)}</textarea>
               <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
-                <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--orange)" onclick="saveTaskNoteEdit('${n.id}')">Save</span>
+                <span id="taskNoteEditSaveBtn_${n.id}" style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--orange)" onclick="saveTaskNoteEdit('${n.id}')">Save</span>
                 <span style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-muted)" onclick="cancelTaskNoteEdit()">Cancel</span>
                 <span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted)" onclick="document.getElementById('taskNoteEditFileInput_${n.id}').click()">📎 Attach</span>
                 <input type="file" id="taskNoteEditFileInput_${n.id}" style="display:none" onchange="handleAttachmentFilesSelected(this.files,'noteEdit');this.value=''">
@@ -3416,10 +3425,20 @@
       pendingNoteEditAttachments = [];
       renderTaskNotes();
     }
+    // Same double-submit risk as submitTask()/submitTaskNote() below — a
+    // slow PUT (or an impatient extra click) firing twice wouldn't create
+    // a duplicate row here (PUT is by note id, not an insert), but it
+    // would fire the mention-extraction/notification side effect twice
+    // for no benefit, so it's guarded the same way for consistency.
+    let taskNoteEditSaveInFlight = false;
     async function saveTaskNoteEdit(id) {
+      if (taskNoteEditSaveInFlight) return;
       const ta = document.getElementById(`taskNoteEditInput_${id}`);
       const body = ta.value.trim();
       if (!body) { toast('Note text is required', 'error'); return; }
+      taskNoteEditSaveInFlight = true;
+      const saveBtn = document.getElementById(`taskNoteEditSaveBtn_${id}`);
+      if (saveBtn) { saveBtn.textContent = 'Saving…'; saveBtn.style.pointerEvents = 'none'; saveBtn.style.opacity = '0.6'; }
       try {
         const res = await fetch(`/api/tasks/${editingTaskId}/notes/${id}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body })
@@ -3435,6 +3454,13 @@
         editingNoteId = null;
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
+      finally {
+        taskNoteEditSaveInFlight = false;
+        // Only still in the DOM if the save failed (success re-renders the
+        // whole notes list via renderTaskNotes(), which drops this node).
+        const stillThere = document.getElementById(`taskNoteEditSaveBtn_${id}`);
+        if (stillThere) { stillThere.textContent = 'Save'; stillThere.style.pointerEvents = ''; stillThere.style.opacity = ''; }
+      }
     }
     async function deleteTaskNoteConfirm(id) {
       if (!confirm('Delete this note? This cannot be undone.')) return;
@@ -3447,11 +3473,20 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // Same real risk submitTask() already had to be fixed for: POST
+    // /:id/notes is a plain INSERT with no dedup, so a slow request (or an
+    // impatient extra click on Add Note) firing twice creates a genuine
+    // duplicate note row, not a display glitch. Guarded the identical way.
     async function submitTaskNote() {
       if (!editingTaskId) return;
+      const addBtn = document.getElementById('taskNoteSubmitBtn');
+      if (addBtn.disabled) return;
       const input = document.getElementById('taskNoteInput');
       const body = input.value.trim();
       if (!body) return;
+      const originalLabel = addBtn.textContent;
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding…';
       try {
         const res = await fetch(`/api/tasks/${editingTaskId}/notes`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body })
@@ -3471,6 +3506,7 @@
         }
         renderTaskNotes();
       } catch { toast('Network error', 'error'); }
+      finally { addBtn.disabled = false; addBtn.textContent = originalLabel; }
     }
 
     // Simple, reliable @mention autocomplete — a dropdown fixed under the
