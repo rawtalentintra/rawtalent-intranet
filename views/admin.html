@@ -31,7 +31,7 @@
         <meta name="theme-color" content="#0b1d3e">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="RT Partner">
+        <meta name="apple-mobile-web-app-title" content="RT HeartBeat">
         <link rel="apple-touch-icon" sizes="192x192" href="/wfp/icon-192.png">
         <link rel="icon" type="image/png" sizes="192x192" href="/wfp/icon-192.png">
       `);
@@ -9314,9 +9314,9 @@
         const n = counts[key] || 0;
         const active = activeFilter === key;
         return `
-          <div class="centre-health-box" onclick="toggleCentresHealthFilter('${key}')" style="cursor:pointer;padding:8px 14px;border-radius:10px;background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'};min-width:92px">
-            <div class="centre-health-box-num" style="font-size:19px;font-weight:700;color:${meta.color}">${n}</div>
-            <div class="centre-health-box-label" style="font-size:10.5px;color:${meta.color};font-weight:700;white-space:nowrap">${meta.label.replace(/^\S+\s/, '')}</div>
+          <div class="centre-health-box" onclick="toggleCentresHealthFilter('${key}')" style="background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'}">
+            <div class="centre-health-box-num" style="color:${meta.color}">${n}</div>
+            <div class="centre-health-box-label" style="color:${meta.color}">${meta.label.replace(/^\S+\s/, '')}</div>
           </div>`;
       }).join('');
     }
@@ -9562,10 +9562,10 @@
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div class="sd-card-title" style="color:var(--orange)">🗂️ Overview</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px;overflow-wrap:break-word">
             <div><span style="color:var(--text-muted)">Contact:</span> ${escHtml(c.contactName || '—')}</div>
             <div><span style="color:var(--text-muted)">Phone:</span> ${escHtml(c.contactNo || '—')}</div>
-            <div><span style="color:var(--text-muted)">Email:</span> ${escHtml(c.email || '—')}</div>
+            <div style="overflow-wrap:break-word;word-break:break-word"><span style="color:var(--text-muted)">Email:</span> ${escHtml(c.email || '—')}</div>
             <div><span style="color:var(--text-muted)">Client since:</span> ${c.createdDate ? fmtDate(c.createdDate) : '—'}</div>
           </div>
           <div style="margin-top:8px;font-size:12.5px;display:flex;align-items:center;gap:8px">
@@ -9581,16 +9581,23 @@
               </select>
             ` : `<span style="font-weight:600;color:var(--navy)">${escHtml(effectivePartner || 'Unassigned')}</span>`}
           </div>
-          ${c.healthReasons && c.healthReasons.length ? `
-            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--text)">
-              ${c.healthReasons.map(r => `<div>• ${escHtml(r)}</div>`).join('')}
-            </div>` : ''}
         </div>
 
+        <!-- Same click-to-reveal pattern as Educator Relationships/
+             Relationship History below (toggleCentre360Collapse) — Joy,
+             2026-09-02: "remove the table, just tap [Nurture Cadence]
+             so the info shows when it's tapped." Was a table shown
+             inline/always-open before; now closed by default like the
+             other two collapsible cards. -->
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title" style="color:#059669">🌱 Nurture Cadence</div>
-          <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
-          <div style="overflow-x:auto;margin-top:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('nurture')">
+            <div>
+              <div class="sd-card-title" style="color:#059669">🌱 Nurture Cadence</div>
+              <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
+            </div>
+            <span id="centre360-nurture-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
+          </div>
+          <div id="centre360-nurture-body" style="display:none;overflow-x:auto;margin-top:10px">
             <table class="data-table data-table-compact">
               <thead><tr><th>Action Needed</th><th>Last Contact</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
               <tbody>${renderNurtureActionRow(c.nurture, c.centreKey)}</tbody>

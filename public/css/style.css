@@ -1625,6 +1625,15 @@ body:has(> .navbar) { padding-top: 64px; }
   overflow: hidden;
 }
 
+/* My Centres' Portfolio Health boxes (renderCentresHealthSummary) — sizing
+   moved here from that function's own inline styles so the mobile
+   override below (mobile-friendly-my-centres pass) can actually win
+   without a pile of !important on every property; only the genuinely
+   per-item values (background/border/text color) stay inline. */
+.centre-health-box { cursor: pointer; padding: 8px 14px; border-radius: 10px; min-width: 92px; }
+.centre-health-box-num { font-size: 19px; font-weight: 700; }
+.centre-health-box-label { font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+
 /* ─── Responsive ──────────────────────────────────────────────── */
 .mobile-sidebar-toggle { display: none; }
 .mobile-sidebar-overlay { display: none; }
@@ -1831,13 +1840,22 @@ body:has(> .navbar) { padding-top: 64px; }
      #myCentresHealthSummary's own inline flex/gap and each box's inline
      min-width:92px (inline styles otherwise always win regardless of
      selector). */
-  #myCentresHealthSummary { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .centre-health-box { min-width: 0 !important; padding: 8px 4px; border-radius: 8px; text-align: center; }
-  .centre-health-box-num { font-size: 15px; }
-  /* "New/Activating" has no space for the browser to find a natural wrap
-     point at — overflow-wrap alone leaves it bleeding out of its cell;
-     break-word here is what actually lets it split mid-word. */
-  .centre-health-box-label { font-size: 8.5px; white-space: normal !important; line-height: 1.15; overflow-wrap: break-word; word-break: break-word; }
+  /* #myCentresHealthSummary's own display:flex is still inline in the
+     static HTML (unlike the boxes below, this container was never part
+     of the JS template) — !important is genuinely still needed here. */
+  #myCentresHealthSummary { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .centre-health-box { min-width: 0; padding: 7px 3px; border-radius: 8px; text-align: center; }
+  .centre-health-box-num { font-size: 14px; }
+  /* Joy, 2026-09-02: "Opportunity" was still wrapping mid-word
+     ("Opportuni-ty") — turned out font-size wasn't actually applying at
+     all (the JS template's own inline font-size:10.5px was winning over
+     this rule every time; fixed by moving that sizing into the base
+     .centre-health-box-label rule above instead of leaving it inline).
+     Sized down further on top of that fix so every label (including
+     "Opportunity"/"New/Activating") fits on one line at this column
+     width; break-word stays as a safety net for anything that still
+     doesn't (e.g. a future longer category name), not the normal case. */
+  .centre-health-box-label { font-size: 7px; white-space: normal; line-height: 1.15; overflow-wrap: break-word; word-break: break-word; letter-spacing: 0; }
 
   /* Filter bar — identical treatment to the Leads page's own. */
   #section-my-centres .leads-filter-bar { flex-direction: column; }
@@ -1849,6 +1867,14 @@ body:has(> .navbar) { padding-top: 64px; }
   #myCentresTable th:not(:nth-child(1)), #myCentresTable td:not(:nth-child(1)) { display: none; }
   #myCentresTable td:nth-child(1) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; font-size: 14.5px; }
   #myCentresTable th:nth-child(1) { font-size: 11.5px; }
+
+  /* Centre 360 (a tapped centre's detail screen, still inside
+     #section-my-centres) — Joy: "maximize the whole width of the screen
+     again." Its cards use a wider 20px 24px padding than My Centres'
+     list-screen cards (16px 20px) — this is what was still eating extra
+     width here specifically, on top of the .admin-content fix that
+     already applies to every section. */
+  #centre360Body .admin-table-card { padding: 14px 16px; }
 }
 
 @media (max-width: 600px) {
