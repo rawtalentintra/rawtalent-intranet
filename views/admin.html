@@ -7877,6 +7877,14 @@
         btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
       });
 
+      // Metro count for the stats bar — captured BEFORE the regional tab
+      // filter below, off every other real filter (state/partner/period/
+      // search/etc.), so it stays a stable "how many of these are metro"
+      // reference no matter which of the Metro/Regional/All tabs is
+      // currently selected, instead of just echoing the table's own
+      // count back on the Metro tab and reading as 0 on the other two.
+      const metroCount = filtered.filter(l => !l.archived_at).length;
+
       // Regional/archived leads are excluded before the stats bar too
       // (unlike the closed filter below) — they aren't part of the
       // working pipeline at all, so they shouldn't inflate "how many
@@ -7892,7 +7900,7 @@
       // count, which undercounted real wins. The table itself still
       // applies the closed filter, since that one genuinely is about
       // which rows to show, not what happened historically.
-      renderLeadsStatsBar(filtered);
+      renderLeadsStatsBar(filtered, metroCount);
       if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
       else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
       leadsPage = 1; // any filter change starts back at page 1 — a stale page number from a much larger previous result set would otherwise show "no results" instead of the new filtered set
@@ -7919,7 +7927,7 @@
     // Totals react to whatever's currently filtered, not the full dataset —
     // e.g. filter down to SA + Target Temp and these numbers describe just
     // that slice, since that's the question the filter was set up to ask.
-    function renderLeadsStatsBar(filtered) {
+    function renderLeadsStatsBar(filtered, metroCount) {
       const bar = document.getElementById('leadsStatsBar');
       if (!allLeads.length) { bar.innerHTML = ''; return; }
       const called = filtered.filter(l => l.lead_called_status === 'done').length;
@@ -7928,6 +7936,7 @@
       const totalLabel = filtered.length === allLeads.length ? 'Leads' : `Leads (of ${allLeads.length})`;
       bar.innerHTML = `
         <div class="leads-stat"><span class="leads-stat-num">${filtered.length}</span><span class="leads-stat-label">${totalLabel}</span></div>
+        <div class="leads-stat" title="Not outside the Melbourne/Adelaide/Brisbane metro radius — see the Metro/Regional tabs below"><span class="leads-stat-num" style="color:#0d9488">${metroCount}</span><span class="leads-stat-label">Metro</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#15803d">${called}</span><span class="leads-stat-label">Called</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#2563eb">${visited}</span><span class="leads-stat-label">Visited</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>`;
