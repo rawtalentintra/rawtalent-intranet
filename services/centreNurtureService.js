@@ -139,6 +139,49 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date(), 
     };
   }
 
+  // Smart Routing auto-deprioritization (Aug 24 meeting, Liam/Justine/Joy):
+  // "if there's a follow-up, they can stay in the mix" — a completed
+  // call/visit that left a next_step open must NOT reset the centre onto
+  // the ordinary weeks/months-long recurring cadence below, or a real
+  // outstanding action would silently vanish from Smart Routing's due
+  // pool right when it's most likely to be forgotten. Only the LATEST
+  // completed visit counts (same "superseded by a newer visit" rule
+  // latestOverdueNextStep/latestVisitIsEscalated already use in
+  // centreHealthService.js) — once a later visit closes things out
+  // without leaving its own next_step, the centre falls through to the
+  // normal cadence below exactly as before.
+  //
+  // No next_step_due_date on that follow-up (a rep can leave it blank)
+  // is treated as due now rather than parked indefinitely — the whole
+  // point of this branch is "known outstanding work", not "eventually".
+  const sortedCompleted = (visits || [])
+    .filter(v => v.status === 'completed')
+    .sort((a, b) => new Date(b.visit_date) - new Date(a.visit_date));
+  const openFollowUp = sortedCompleted[0]?.next_step?.trim() ? sortedCompleted[0] : null;
+  if (openFollowUp) {
+    const dueDate = openFollowUp.next_step_due_date ? new Date(openFollowUp.next_step_due_date) : now;
+    const overdue = now >= dueDate;
+    return {
+      status: overdue ? 'follow_up_overdue' : 'follow_up_pending',
+      lastContactDate: lastContact.toISOString(),
+      dueDate: dueDate.toISOString(),
+      daysUntilDue: overdue ? null : Math.ceil((dueDate - now) / DAY_MS),
+      daysOverdue: overdue ? Math.floor((now - dueDate) / DAY_MS) : null,
+      cadenceDays: null,
+      cadenceLabel: 'follow-up owed'
+    };
+  }
+
+  // No open follow-up — this is the actual "drops out of the pool for a
+  // while" deprioritization Liam described. Uses the existing per-category
+  // cadence (7-90 days depending on health/strategic status, see
+  // NURTURE_CADENCE_DAYS above) rather than a flat 3 months for every
+  // centre — his "once every three months" was describing the general
+  // shape of the rule, not overriding the tighter Declining/Needs
+  // Attention cadences already confirmed live two days earlier (Decision
+  // Area 3, 2026-08-22); a Declining centre sitting quiet for 3 months
+  // because nothing needed following up would defeat the point of that
+  // cadence. Flag this if a flat 90 days for everyone was actually wanted.
   const dueDate = new Date(lastContact.getTime() + cadence.recurringDays * DAY_MS);
   const overdue = now >= dueDate;
   return {

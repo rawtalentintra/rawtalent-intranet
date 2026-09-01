@@ -9083,6 +9083,13 @@
       first_contact_overdue: { label: 'First Contact Overdue', cls: 'attn-overdue' },
       on_track: { label: 'On Track', cls: 'attn-supply-good' },
       recurring_overdue: { label: 'Follow-up Overdue', cls: 'attn-overdue' },
+      // A completed call/visit left its own next_step open — distinct from
+      // recurring_overdue (the ordinary cadence lapsing with nothing
+      // outstanding): this centre has known work still owed, so it stays
+      // in Smart Routing's due pool instead of going quiet for weeks/months
+      // (Aug 24 meeting, Liam/Justine/Joy — see centreNurtureService.js).
+      follow_up_pending: { label: 'Follow-up Pending', cls: 'attn-waiting' },
+      follow_up_overdue: { label: 'Follow-up Overdue', cls: 'attn-overdue' },
       // Dormant centres (Decision Area 3, 2026-08-22) deliberately have no
       // fixed cadence — see centreNurtureService.js's reactivation-workflow
       // branch. 'escalated' is the issue/allegation exception that
@@ -11415,7 +11422,7 @@
       if (item.type === 'lead' && item.agency_usage === 'high_agency_user') return 2;
       if (item.type === 'lead' && item.agency_usage === 'target_temp') return 4;
       if (item.type === 'centre' && item.isStrategic && (item.health === 'declining' || item.health === 'dormant')) return 5;
-      if (item.type === 'centre' && (item.nurture?.status === 'recurring_overdue' || item.nurture?.status === 'first_contact_overdue' || item.health === 'new_activating')) return 6;
+      if (item.type === 'centre' && (item.nurture?.status === 'recurring_overdue' || item.nurture?.status === 'first_contact_overdue' || item.nurture?.status === 'follow_up_pending' || item.nurture?.status === 'follow_up_overdue' || item.health === 'new_activating')) return 6;
       if (item.type === 'lead' && (
         (item.lead_called_status === 'scheduled' && item.lead_called_at && new Date(item.lead_called_at).getTime() < Date.now()) ||
         (item.centre_visited_status === 'scheduled' && item.centre_visited_at && new Date(item.centre_visited_at).getTime() < Date.now())
@@ -11429,7 +11436,12 @@
       if (tier === 2) return 'High agency usage — convert to direct bookings';
       if (tier === 4) return 'Target temp lead';
       if (tier === 5) return item.healthReasons?.[0] || 'Declining/dormant, high value';
-      if (tier === 6) return item.type === 'centre' ? (item.healthReasons?.[0] || 'Overdue for contact') : 'Call/visit overdue';
+      if (tier === 6) {
+        if (item.type !== 'centre') return 'Call/visit overdue';
+        if (item.nurture?.status === 'follow_up_pending') return 'Follow-up owed from last visit — not yet overdue';
+        if (item.nurture?.status === 'follow_up_overdue') return 'Follow-up owed from last visit — overdue';
+        return item.healthReasons?.[0] || 'Overdue for contact';
+      }
       if (tier === 7) return item.healthReasons?.[0] || 'Room to grow';
       return 'Nearby — completes the route efficiently';
     }
