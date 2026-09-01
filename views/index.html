@@ -1205,6 +1205,11 @@
     <div class="modal" style="max-width:720px">
       <div class="modal-header">
         <div class="modal-title" id="attachmentPreviewTitle">Attachment</div>
+        <div id="attachmentPreviewZoomControls" style="display:none;align-items:center;gap:4px">
+          <button type="button" class="btn-secondary" style="padding:2px 9px" onclick="adjustAttachmentZoom(-0.25)" title="Zoom out">－</button>
+          <button type="button" class="btn-secondary" id="attachmentZoomPct" style="padding:2px 9px;min-width:46px" onclick="resetAttachmentZoom()" title="Reset zoom">100%</button>
+          <button type="button" class="btn-secondary" style="padding:2px 9px" onclick="adjustAttachmentZoom(0.25)" title="Zoom in">＋</button>
+        </div>
         <button class="modal-close" onclick="closeAttachmentPreview()">×</button>
       </div>
       <div class="modal-body" style="text-align:center" id="attachmentPreviewBody"></div>
@@ -2798,18 +2803,27 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    let attachmentZoomLevel = 1; // 1 = fit-to-modal (the original, unzoomed size)
+    let attachmentBaseWidth = null; // px width measured at zoom level 1, set once the image loads
     function openAttachmentPreview(id) {
       const a = taskAttachments.find(x => x.id === id);
       if (!a) return;
       document.getElementById('attachmentPreviewTitle').textContent = a.filename;
       const url = `/api/tasks/attachments/${a.id}/download`;
       const body = document.getElementById('attachmentPreviewBody');
+      const zoomControls = document.getElementById('attachmentPreviewZoomControls');
+      attachmentZoomLevel = 1;
+      attachmentBaseWidth = null;
       if (isImageMime(a.mimetype)) {
-        body.innerHTML = `<img src="${url}" style="max-width:100%;max-height:70vh">`;
+        body.innerHTML = `<div id="attachmentZoomWrap" style="max-height:70vh;overflow:auto" onwheel="onAttachmentPreviewWheel(event)"><img id="attachmentPreviewImg" src="${url}" style="max-width:100%;max-height:70vh" onload="attachmentBaseWidth=this.clientWidth" ondblclick="toggleAttachmentZoom()" title="Double-click to zoom, or use the +/- controls above"></div>`;
+        zoomControls.style.display = 'flex';
+        document.getElementById('attachmentZoomPct').textContent = '100%';
       } else if (a.mimetype === 'application/pdf') {
         body.innerHTML = `<iframe src="${url}" style="width:100%;height:70vh;border:none"></iframe>`;
+        zoomControls.style.display = 'none';
       } else {
         body.innerHTML = `<div style="padding:30px 10px;color:var(--text-muted);font-size:13px">No preview available for this file type.<br>Use the Download button below.</div>`;
+        zoomControls.style.display = 'none';
       }
       const dl = document.getElementById('attachmentPreviewDownload');
       dl.href = url;
@@ -2819,6 +2833,41 @@
     function closeAttachmentPreview() {
       document.getElementById('attachmentPreviewModal').classList.remove('open');
       document.getElementById('attachmentPreviewBody').innerHTML = '';
+      attachmentZoomLevel = 1;
+      attachmentBaseWidth = null;
+    }
+    function applyAttachmentZoom() {
+      const img = document.getElementById('attachmentPreviewImg');
+      if (!img) return;
+      if (attachmentZoomLevel <= 1 || !attachmentBaseWidth) {
+        img.style.width = '';
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '70vh';
+      } else {
+        img.style.maxWidth = 'none';
+        img.style.maxHeight = 'none';
+        img.style.width = Math.round(attachmentBaseWidth * attachmentZoomLevel) + 'px';
+      }
+      document.getElementById('attachmentZoomPct').textContent = Math.round(attachmentZoomLevel * 100) + '%';
+    }
+    function adjustAttachmentZoom(delta) {
+      if (!attachmentBaseWidth) return;
+      attachmentZoomLevel = Math.min(4, Math.max(1, +(attachmentZoomLevel + delta).toFixed(2)));
+      applyAttachmentZoom();
+    }
+    function resetAttachmentZoom() {
+      attachmentZoomLevel = 1;
+      applyAttachmentZoom();
+    }
+    function toggleAttachmentZoom() {
+      if (!attachmentBaseWidth) return;
+      attachmentZoomLevel = attachmentZoomLevel > 1 ? 1 : 2;
+      applyAttachmentZoom();
+    }
+    function onAttachmentPreviewWheel(e) {
+      if (!e.ctrlKey && !e.metaKey) return; // plain scroll/trackpad pan still works normally
+      e.preventDefault();
+      adjustAttachmentZoom(e.deltaY < 0 ? 0.25 : -0.25);
     }
 
     // ── Description view/edit toggle ─────────────────────────────

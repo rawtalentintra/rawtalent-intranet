@@ -311,6 +311,17 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
+    // task_attachments has no FK/cascade to tasks, so a plain task delete
+    // would otherwise leave both orphaned rows AND orphaned Storage objects
+    // behind forever — clean those up explicitly first, same as the
+    // single-attachment DELETE route above.
+    const attachments = await db.execute({ sql: 'SELECT storage_path FROM task_attachments WHERE task_id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM task_attachments WHERE task_id = ?', args: [req.params.id] });
+    for (const a of attachments.rows) {
+      if (a.storage_path) {
+        try { await removeFile(BUCKETS.taskFiles, a.storage_path); } catch { /* orphaned storage object, non-fatal */ }
+      }
+    }
     await db.execute({ sql: 'DELETE FROM task_notes WHERE task_id = ?', args: [req.params.id] });
     const result = await db.execute({ sql: 'DELETE FROM tasks WHERE id = ?', args: [req.params.id] });
     if (!result.rowsAffected) return res.status(404).json({ error: 'Task not found' });
