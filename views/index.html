@@ -1195,7 +1195,7 @@
       <div class="modal-footer">
         <button class="btn-secondary" id="taskDeleteBtn" style="display:none;margin-right:auto;border-color:rgba(239,68,68,.3);color:#dc2626" onclick="deleteTaskConfirm()">Delete</button>
         <button class="btn-secondary" onclick="closeTaskModal()">Cancel</button>
-        <button class="btn-add" onclick="submitTask()">Save Task</button>
+        <button class="btn-add" id="taskSaveBtn" onclick="submitTask()">Save Task</button>
       </div>
     </div>
   </div>
@@ -3231,6 +3231,18 @@
     }
 
     async function submitTask() {
+      // No guard against clicking Save twice used to mean exactly that —
+      // a slow response (or just an impatient extra click) fired a second
+      // real POST, creating a genuine duplicate task, not a rendering
+      // glitch. Confirmed live 2026-08-31: 5 distinct real rows titled
+      // "Aug 26 | First Shift Completion", same creator, ~45-70s apart —
+      // consistent with repeated clicks/resubmits during a slow save, not
+      // a display bug. Disabling the button for the duration of the
+      // request (matches this app's existing "Saving…" button-disable
+      // convention elsewhere, e.g. runLeadsRegionalBackfill) closes that
+      // window entirely.
+      const saveBtn = document.getElementById('taskSaveBtn');
+      if (saveBtn.disabled) return;
       const title = document.getElementById('taskTitleInput').value.trim();
       if (!title) { toast('Title is required', 'error'); return; }
       const payload = {
@@ -3246,6 +3258,9 @@
         linked_client_name: taskLinkedClient?.name || null,
         linked_client_phone: taskLinkedClient?.phone || null
       };
+      const originalLabel = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
       try {
         const url = editingTaskId ? `/api/tasks/${editingTaskId}` : '/api/tasks';
         const res = await fetch(url, {
@@ -3263,6 +3278,7 @@
         closeTaskModal();
         loadTasksView();
       } catch { toast('Network error', 'error'); }
+      finally { saveBtn.disabled = false; saveBtn.textContent = originalLabel; }
     }
 
     function deleteTaskConfirm() {
