@@ -1130,7 +1130,7 @@
              same render functions against this section's own already-
              filtered leads set, so both places can never drift out of
              sync with each other. -->
-        <div style="display:flex;gap:16px;margin-bottom:20px;margin-top:20px">
+        <div style="display:flex;gap:16px;margin-bottom:20px;margin-top:20px" id="leadsSecondaryRow">
           <div class="admin-table-card" style="padding:20px 24px;flex:1">
             <div class="sd-card-title">Lead Source Performance</div>
             <div class="sd-card-sub">Which lead type is converting better — worth knowing where to focus sourcing effort</div>
@@ -1142,7 +1142,12 @@
             <div id="leadsMonthlyTrend" style="margin-top:14px"></div>
           </div>
         </div>
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+        <!-- id on the card itself (not just the inner leadsRepBreakdown div)
+             so the mobile stylesheet can hide the whole card — same call as
+             the WFP Dashboard's identical #salesRepByCard, and same reason:
+             a dense desktop data table, not something a Workforce Partner
+             needs on their phone. Desktop is untouched. -->
+        <div class="admin-table-card" id="leadsRepByCard" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Leads by Rep — this period vs last</div>
           <div class="sd-card-sub">Same filters as the table above (Period dropdown sets both) — sorted alphabetically by rep.</div>
           <div id="leadsRepBreakdown" style="margin-top:14px;overflow-x:auto"></div>

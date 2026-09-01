@@ -1677,6 +1677,66 @@ body:has(> .navbar) { padding-top: 64px; }
      mobile instead of squeezed/scrolled — untouched on desktop. */
   #salesRepByCard { display: none; }
 }
+
+/* Leads page mobile layout — Joy, 2026-09-02: #section-leads shares the
+   same desktop-only history as the WFP Dashboard fixed above. Every rule
+   here is scoped to max-width:900px AND to #section-leads (or a leads-*
+   id unique to it) specifically — .admin-header and .leads-filter-bar in
+   particular are reused by other sections (every section header; Smart
+   Routing's own filter bar), so scoping matters here, not just style —
+   without it this would also restyle sections nobody asked to change.
+   /admin and /allapp at a real desktop width are untouched. */
+@media (max-width: 900px) {
+  /* Title+description full width, action buttons stacked below instead
+     of squeezed onto the same row. */
+  #section-leads .admin-header { flex-direction: column; align-items: stretch; }
+  #section-leads .admin-header > div:last-child { flex-direction: column; margin-top: 10px; }
+  #section-leads .admin-header > div:last-child button { width: 100%; }
+
+  /* Stats bar — Metro is redundant once the page defaults to metro-only
+     below (there's nothing else left to compare it against on a phone),
+     and dropping it left an uneven 4-item wrapping row; a 2x2 grid reads
+     cleaner than either. */
+  #leadsStatsBar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 16px; }
+  #leadsStatsBar .leads-stat:nth-child(2) { display: none; }
+
+  /* Metro/Regional/All + Run Regional Classification — Regional leads are
+     archived for now (Liam, see #leadsRegionalTabs' own comment), so this
+     toggle has nothing real to switch between on a phone today. The
+     underlying filter still defaults to metro-only regardless (unchanged
+     — see setLeadsRegionalFilter's default 'active' state); only the
+     control for it is hidden here. */
+  #leadsRegionalTabs { display: none; }
+
+  /* Filter bar — 10 selects/inputs wrapping into a ragged multi-row mess
+     at phone width, each truncated to a 132px desktop-sized max-width.
+     One full-width column instead. */
+  #section-leads .leads-filter-bar { flex-direction: column; }
+  #section-leads .leads-filter-bar select,
+  #section-leads .leads-filter-bar input { max-width: none; width: 100%; flex: none; }
+  /* #leadsFilterCentre's own flex-basis:150px (its own rule, above) meant
+     "150px wide" in the row layout it was written for — once the bar
+     above switches to a column, the same flex-basis instead means "150px
+     TALL", ballooning the search box. Needs a selector specific enough to
+     beat that rule outright (equal-specificity ties go to whichever rule
+     is later in the cascade, which isn't reliably this one). */
+  #section-leads .leads-filter-bar input#leadsFilterCentre { flex: none; height: auto; }
+
+  /* Table — every column but Centre dropped. Nothing is actually lost:
+     the row's own onclick (openLeadDetail) already opens every one of
+     these on tap, same as it does on desktop; Centre is just the one
+     column worth scanning a phone-width list by. */
+  #leadsTable th:not(:nth-child(2)), #leadsTable td:not(:nth-child(2)) { display: none; }
+  #leadsTable td:nth-child(2) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; }
+
+  /* Lead Source Performance / Leads Received — one whole-width row each,
+     same fix as the WFP Dashboard's identical row. */
+  #leadsSecondaryRow { flex-direction: column; }
+
+  /* Leads by Rep — same call as the WFP Dashboard's identical table. */
+  #leadsRepByCard { display: none; }
+}
+
 @media (max-width: 600px) {
   .navbar { padding: 0 16px; }
   .nav-tag { display: none; }
