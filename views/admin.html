@@ -445,8 +445,16 @@
            #navAvatar keeps its id — init()'s existing
            document.getElementById('navAvatar').textContent = ... line
            isn't null-safe, so this element has to exist somewhere. -->
-      <div class="admin-nav-section" id="adminSidebarAccount">
-        <div class="admin-nav-label">Account</div>
+      <!-- Not a real .admin-nav-section — Joy, 2026-09-02: with the label
+           gone (see below), this had nothing left to click to expand it,
+           yet toggleNavSection's own "collapse every OTHER
+           .admin-nav-section" step would still have collapsed it —
+           permanently, since nothing could ever re-open it — the moment
+           any other section's label was clicked. .admin-nav-static-section
+           (own rule right under .admin-nav-section's in style.css) keeps
+           the identical padding/spacing without that class ever being
+           matched by the accordion JS, so this always just stays put. -->
+      <div class="admin-nav-static-section" id="adminSidebarAccount">
         <div class="admin-nav-item" onclick="openPasswordModal()" title="Change your password">
           <div class="nav-avatar" id="navAvatar" style="width:20px;height:20px;font-size:10px">?</div> Settings
         </div>
@@ -4486,6 +4494,13 @@
     }
 
     function applyRoleVisibility() {
+      // Marks the sidebar so mobile CSS can give its (7, not 60+) items
+      // bigger, easier-to-tap rows — see style.css's own comment on
+      // .admin-sidebar.wfp-restricted-view .admin-nav-item. The full
+      // /admin sidebar has far too many items across too many groups for
+      // the same treatment to fit without constant scrolling, so this
+      // only applies for /partners and /wfp.
+      if (IS_PARTNERS_VIEW) document.querySelector('.admin-sidebar')?.classList.add('wfp-restricted-view');
       if (currentUserRole === 'super_admin') {
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
       }

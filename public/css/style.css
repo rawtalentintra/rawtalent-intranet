@@ -814,6 +814,16 @@ body:has(> .navbar) { padding-top: 64px; }
   padding: 0 16px;
   margin-bottom: 9px;
 }
+/* Same box as .admin-nav-section (the sidebar's Account block reuses it —
+   see its own HTML comment) but deliberately a different class: the
+   accordion JS in admin.html (toggleNavSection) queries
+   '.admin-nav-section' by name to collapse every section but the one just
+   clicked, and Account has no label/click target of its own to ever
+   re-open it with. */
+.admin-nav-static-section {
+  padding: 0 16px;
+  margin-bottom: 9px;
+}
 .admin-nav-label {
   font-size: 10px;
   font-weight: 700;
@@ -1772,6 +1782,23 @@ body:has(> .navbar) { padding-top: 64px; }
      desktop sizing are both untouched above 900px. */
   .wfp-state-icon { display: none; }
   .wfp-state-filter-btn { padding: 8px 12px !important; font-size: 12px !important; }
+}
+
+/* /partners and /wfp sidebar, mobile — Joy, 2026-09-02: "since it's mobile
+   view and we only have few options let's make the fonts and spacing
+   bigger, it's too small to tap right now." Applies only when
+   applyRoleVisibility() has marked the sidebar .wfp-restricted-view (see
+   its own JS comment) — the full /admin sidebar has 60+ items across 15
+   groups and can't afford the same row height without turning into
+   constant scrolling, so this never touches it. */
+@media (max-width: 900px) {
+  .admin-sidebar.wfp-restricted-view .admin-nav-item {
+    padding: 13px 14px;
+    font-size: 16px;
+    gap: 12px;
+  }
+  .admin-sidebar.wfp-restricted-view .admin-nav-icon { font-size: 19px; width: 24px; }
+  .admin-sidebar.wfp-restricted-view .admin-nav-label { font-size: 12.5px; padding: 4px 14px; }
 }
 
 @media (max-width: 600px) {
