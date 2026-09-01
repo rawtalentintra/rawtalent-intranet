@@ -12,6 +12,7 @@ const { computeCentreNurture } = require('../services/centreNurtureService');
 const { detectTimestampFromText } = require('../services/transcriptDateService');
 const { extractPlainText } = require('../services/documentTextExtractor');
 const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
+const groqTranscription = require('../services/groqTranscriptionService');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 const { MELBOURNE_SUBURB_PARTNER, partnerForSuburbState } = require('../services/melbourneTerritoryService');
 const { getGeocodesForCentres } = require('../services/centreGeoService');
@@ -799,16 +800,26 @@ router.delete('/:centreKey/visits/:visitId', requireRole('admin', 'super_admin')
 });
 
 // ── Recordings/transcripts ─────────────────────────────────────────
-// Best-effort text extraction, used only to look for a real-world
-// timestamp inside the file (transcriptDateService) — never blocks the
-// upload itself if extraction fails or the format isn't text-based (audio/
-// video just get no detected date, falling back to upload time below).
+// Best-effort text extraction, used both to look for a real-world
+// timestamp inside the file (transcriptDateService) and to feed
+// analyzeVisitFromTranscript below — never blocks the upload itself if
+// extraction fails, the format isn't text-based, or GROQ_API_KEY isn't
+// configured (falls back to no detected date/summary either way).
+// Real audio (a phone-recorded call/visit, or the "Start Recording
+// Notes" mic capture in the Log a Call/Visit modal) goes through Groq
+// Whisper first — same transcription service routes/leads.js's voice-
+// note endpoint already uses — so it lands in the exact same
+// text/analysis pipeline a .txt/.pdf transcript already gets, rather
+// than needing a parallel one.
 async function extractTextForDetection(file) {
   const ext = path.extname(file.originalname).toLowerCase();
   try {
     if (ext === '.txt' || ext === '.vtt' || ext === '.srt') return file.buffer.toString('utf8');
     if (ext === '.pdf' || ext === '.docx') return await extractPlainText(file.buffer, file.originalname);
-  } catch { /* unreadable/corrupt file — treat as no text available */ }
+    if (file.mimetype && file.mimetype.startsWith('audio/') && groqTranscription.isConfigured()) {
+      return await groqTranscription.transcribeAudio(file.buffer.toString('base64'), file.mimetype);
+    }
+  } catch { /* unreadable/corrupt file, or transcription failed — treat as no text available */ }
   return null;
 }
 

@@ -1294,8 +1294,12 @@
             <div id="visitLogUploadWrap" ondragover="handleVisitLogRecordingDragOver(event)" ondragleave="handleVisitLogRecordingDragLeave(event)" ondrop="handleVisitLogRecordingDrop(event)" style="border-radius:var(--radius);border:1.5px dashed transparent;transition:border-color .15s,background-color .15s">
               <div class="lead-group-label" style="margin-top:14px;margin-bottom:0">Upload Recording/Transcript</div>
               <div style="background:white;padding:14px 16px;text-align:center">
-                <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Upload Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadVisitLogRecordingFiles(this.files);this.value=''"></label>
-                <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Attach/drag your call recording or transcript here.</div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                  <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Upload Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadVisitLogRecordingFiles(this.files);this.value=''"></label>
+                  <button type="button" class="btn-secondary" id="visitLogRecordBtn" style="padding:6px 14px;font-size:12.5px" onclick="startVisitLogVoiceRecording()">🎙️ Start Recording Notes</button>
+                </div>
+                <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Attach/drag your call recording or transcript here, or record straight from your phone.</div>
+                <div id="visitLogVoiceRecorderBox" style="margin-top:8px"></div>
                 <div id="visitLogRecordingsList" style="margin-top:8px;text-align:left"></div>
               </div>
             </div>
@@ -1751,9 +1755,10 @@
       <!-- Nurture Cadence popup (My Centres' Centre 360 screen) — same
            .modal-overlay/.modal shell as leadDetailModal just above, per
            Joy's "should be a popup that looks like this popup from Leads
-           section." Content is filled in by openNurtureCadenceModal(),
-           reusing renderNurtureActionRow() (the same row markup the
-           table used before this became a popup). -->
+           section" — and, 2026-09-02, the same .lead-group-label/row()
+           section styling that modal's own CENTRE/CONTACT blocks use, not
+           just the same outer shell. Content is filled in by
+           openNurtureCadenceModal(). -->
       <div class="modal-overlay" id="nurtureCadenceModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNurtureCadenceModal()">
         <div class="modal" style="max-width:520px">
           <div class="modal-header">
@@ -9229,38 +9234,6 @@
       escalated: { label: '🚨 Escalated', cls: 'attn-overdue' }
     };
 
-    // One row, not a fabricated history — a centre is either waiting on
-    // its first contact or already tracking a recurring cadence, never
-    // both, so a second row would just be decorative. This recomputes
-    // live every time Centre 360 re-fetches (already happens after every
-    // Log Visit / recording upload), so "whether it's been done" is
-    // carried by the Status column itself, not a separate checkbox that
-    // could drift out of sync.
-    function renderNurtureActionRow(n, centreKey) {
-      if (!n) return '';
-      const meta = NURTURE_STATUS_META[n.status] || { label: n.status, cls: 'attn-waiting' };
-      const actionLabel = n.lastContactDate ? 'Recurring follow-up (call or visit)' : 'First contact (call or visit)';
-      const lastContact = n.lastContactDate ? fmtDate(n.lastContactDate) : 'Never contacted yet';
-      // Dormant ('reactivation_candidate') has no due date at all; escalated
-      // is always "now" — both need their own copy rather than the usual
-      // "in Xd"/"Yd overdue" note, which assumes a real scheduled date.
-      const deadlineNote = n.status === 'reactivation_candidate' ? 'No fixed cadence — visit only if value/opportunity justifies it'
-        : n.status === 'escalated' ? 'Needs attention now'
-        : n.daysOverdue != null ? `${n.daysOverdue}d overdue` : `in ${n.daysUntilDue}d`;
-      const dueDateText = n.dueDate ? fmtDate(n.dueDate) : '—';
-      return `
-        <tr>
-          <td>${escHtml(actionLabel)}</td>
-          <td>${escHtml(lastContact)}</td>
-          <td>${dueDateText} <span style="color:var(--text-muted);font-size:11px">(${escHtml(deadlineNote)})</span></td>
-          <td><span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span></td>
-          <td style="white-space:nowrap">
-            <button class="btn-add" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">+ Log Call/Visit</button>
-            <button class="btn-secondary" style="padding:4px 12px;font-size:11.5px" onclick="openVisitLogModal('${centreKey}')">📎 Upload Recording/Transcript</button>
-          </td>
-        </tr>`;
-    }
-
     // Generic click-header-to-expand toggle for Centre 360's collapsible
     // cards — same style.display toggle as toggleDocFindings, keyed by
     // name so one function covers both Educator Relationships and
@@ -9279,14 +9252,49 @@
     // both set by renderCentre360/openCentre360 for whichever centre is
     // currently open, same pattern leadDetailModal's own currentLeadDetailId
     // already uses.
+    // Joy, 2026-09-02: "action needed on a blue highlight [like the Lead
+    // popup's CENTRE section]... be able to log call visit, upload
+    // recording, and also able to do a recording." Same .lead-group-label/
+    // row() pattern the Lead Detail modal's own CENTRE/CONTACT sections
+    // use — key-value rows under a blue header bar — instead of the
+    // cramped, horizontally-scrolling table this replaced. The three
+    // capabilities all go through the one already-comprehensive Log a
+    // Call/Visit modal (openVisitLogModal) rather than each getting a
+    // separate half-built flow here: Log Call/Visit and Upload Recording
+    // already both opened that same modal even in the original table
+    // (its last, easy-to-miss column) — the new microphone capability
+    // (see startVisitLogVoiceRecording) was added inside that modal too,
+    // next to the existing Upload Recording/Transcript control.
     function openNurtureCadenceModal() {
-      document.getElementById('nurtureCadenceBody').innerHTML = `
-        <div style="overflow-x:auto">
-          <table class="data-table data-table-compact">
-            <thead><tr><th>Action Needed</th><th>Last Contact</th><th>Deadline</th><th>Status</th><th></th></tr></thead>
-            <tbody>${renderNurtureActionRow(currentCentreNurture, currentCentreKey)}</tbody>
-          </table>
+      const n = currentCentreNurture;
+      const row = (label, value) => `
+        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
+          <span style="color:var(--text-muted)">${escHtml(label)}</span>
+          <span style="font-weight:600;color:var(--navy);text-align:right;max-width:60%">${value || '—'}</span>
         </div>`;
+      let body;
+      if (!n) {
+        body = `<div style="font-size:12.5px;color:var(--text-muted);padding:8px 0">Nothing on file for this centre yet.</div>`;
+      } else {
+        const meta = NURTURE_STATUS_META[n.status] || { label: n.status, cls: 'attn-waiting' };
+        const actionLabel = n.lastContactDate ? 'Recurring follow-up (call or visit)' : 'First contact (call or visit)';
+        const lastContact = n.lastContactDate ? fmtDate(n.lastContactDate) : 'Never contacted yet';
+        const deadlineNote = n.status === 'reactivation_candidate' ? 'No fixed cadence — visit only if value/opportunity justifies it'
+          : n.status === 'escalated' ? 'Needs attention now'
+          : n.daysOverdue != null ? `${n.daysOverdue}d overdue` : `in ${n.daysUntilDue}d`;
+        const dueDateText = n.dueDate ? `${fmtDate(n.dueDate)} <span style="color:var(--text-muted);font-weight:500">(${escHtml(deadlineNote)})</span>` : '—';
+        body = `
+          <div class="lead-group-label" style="margin-top:0">Action Needed</div>
+          ${row('Action', escHtml(actionLabel))}
+          ${row('Last contact', escHtml(lastContact))}
+          ${row('Due', dueDateText)}
+          ${row('Status', `<span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span>`)}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+            <button class="btn-add" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">📝 Log Call/Visit</button>
+            <button class="btn-secondary" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">📎 Upload Recording</button>
+          </div>`;
+      }
+      document.getElementById('nurtureCadenceBody').innerHTML = body;
       document.getElementById('nurtureCadenceModal').classList.add('open');
     }
     function closeNurtureCadenceModal() {
@@ -9806,6 +9814,112 @@
       e.currentTarget.style.borderColor = 'transparent';
       e.currentTarget.style.backgroundColor = '';
       await uploadVisitLogRecordingFiles(e.dataTransfer?.files);
+    }
+
+    // ── "Start Recording Notes" — phone-mic voice note for a Log a
+    // Call/Visit, right next to the existing Upload Recording/Transcript
+    // control (Joy, 2026-09-02: "log call visit, upload recording, and
+    // also able to do a recording"). Deliberately thin: records, then
+    // hands the resulting audio straight to uploadVisitLogRecordingFiles
+    // — the exact same function a manual file upload already goes
+    // through — so transcription/analysis (routes/centres.js's
+    // extractTextForDetection, extended to transcribe audio via Groq)
+    // prefills Status/Date/Outcome/Notes and the file lands in the
+    // recordings list exactly like an uploaded transcript already does.
+    // No separate note-review step needed here the way the Leads voice
+    // note has one — those fields are already open on this very form for
+    // the user to check before hitting Save Visit, so nothing extra to
+    // confirm first.
+    let visitLogVoiceRecorder = null;
+    let visitLogVoiceChunks = [];
+    let visitLogVoiceStream = null;
+    let visitLogVoiceStartMs = null;
+    let visitLogVoiceTimerInterval = null;
+
+    function pickVisitLogVoiceMimeType() {
+      if (!window.MediaRecorder) return '';
+      const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+      return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+    }
+    function visitLogVoiceExtFor(mimeType) {
+      if (mimeType.includes('mp4')) return 'm4a';
+      if (mimeType.includes('webm')) return 'webm';
+      if (mimeType.includes('ogg')) return 'ogg';
+      return 'mp3';
+    }
+
+    async function startVisitLogVoiceRecording() {
+      if (!visitLogCentreKey) return;
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        toast('Voice recording needs a browser with microphone support — try uploading a file instead', 'error');
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        toast('Microphone access was denied — check your browser/phone settings and try again', 'error');
+        return;
+      }
+      visitLogVoiceStream = stream;
+      visitLogVoiceChunks = [];
+      const mimeType = pickVisitLogVoiceMimeType();
+      visitLogVoiceRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      visitLogVoiceRecorder.ondataavailable = e => { if (e.data.size > 0) visitLogVoiceChunks.push(e.data); };
+      visitLogVoiceRecorder.onstop = () => finishVisitLogVoiceRecording(visitLogVoiceRecorder.mimeType || mimeType || 'audio/webm');
+      visitLogVoiceRecorder.start();
+      visitLogVoiceStartMs = Date.now();
+      paintVisitLogVoiceRecorderUI('recording');
+      visitLogVoiceTimerInterval = setInterval(() => {
+        const el = document.getElementById('visitLogVoiceTimer');
+        if (!el) return;
+        const secs = Math.floor((Date.now() - visitLogVoiceStartMs) / 1000);
+        el.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+      }, 500);
+    }
+
+    // Also called from closeVisitLogModal (guarded, no-op if nothing's
+    // recording) so closing the modal mid-recording always releases the
+    // mic instead of leaving it active in the background.
+    function stopVisitLogVoiceRecording() {
+      if (visitLogVoiceRecorder && visitLogVoiceRecorder.state !== 'inactive') visitLogVoiceRecorder.stop();
+      visitLogVoiceStream?.getTracks().forEach(t => t.stop());
+      clearInterval(visitLogVoiceTimerInterval);
+      visitLogVoiceTimerInterval = null;
+    }
+
+    async function finishVisitLogVoiceRecording(mimeType) {
+      paintVisitLogVoiceRecorderUI('processing');
+      const blob = new Blob(visitLogVoiceChunks, { type: mimeType });
+      const filename = `Voice Note - ${new Date().toLocaleString('en-AU')}.${visitLogVoiceExtFor(mimeType)}`;
+      const file = new File([blob], filename, { type: mimeType });
+      try {
+        await uploadVisitLogRecordingFiles([file]);
+      } finally {
+        paintVisitLogVoiceRecorderUI('idle');
+      }
+    }
+
+    function paintVisitLogVoiceRecorderUI(state) {
+      const box = document.getElementById('visitLogVoiceRecorderBox');
+      if (!box) return;
+      if (state === 'recording') {
+        box.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #fecaca;background:#fef2f2;border-radius:var(--radius)">
+            <span style="width:10px;height:10px;border-radius:50%;background:#c0392b;flex-shrink:0;animation:pulse-rec 1s ease-in-out infinite"></span>
+            <span style="font-size:12.5px;font-weight:700;color:#c0392b">Recording… <span id="visitLogVoiceTimer">00:00</span></span>
+            <button type="button" class="btn-secondary" style="margin-left:auto;padding:5px 14px;font-size:12px" onclick="stopVisitLogVoiceRecording()">⏹ Stop</button>
+          </div>
+          <style>@keyframes pulse-rec { 0%,100% { opacity:1 } 50% { opacity:.25 } }</style>`;
+      } else if (state === 'processing') {
+        box.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius)">
+            <div class="spinner" style="width:16px;height:16px;margin:0"></div>
+            <span style="font-size:12.5px;color:var(--text-muted)">Saving your recording and filling in the form…</span>
+          </div>`;
+      } else {
+        box.innerHTML = '';
+      }
     }
 
     function deleteVisitLogRecording(recordingId) {
@@ -10814,6 +10928,7 @@
       visitLogCentreKey = centreKey;
       visitLogEditingId = visitId || null;
       visitLogPendingRecordingIds = [];
+      paintVisitLogVoiceRecorderUI('idle');
       document.getElementById('visitLogModalTitle').textContent = visitId ? 'Edit Call/Visit' : 'Log a Call/Visit';
       ['visitLogBrief', 'visitLogNotes', 'visitLogContactName', 'visitLogAttendees', 'visitLogOpportunityNotes', 'visitLogCommitment'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('visitLogStatus').value = 'planned';
@@ -10876,6 +10991,7 @@
       visitLogCentreKey = null;
       visitLogEditingId = null;
       visitLogPendingRecordingIds = [];
+      stopVisitLogVoiceRecording(); // release the mic if a recording was left running
     }
 
     // Next Step dropdown -> due date auto-population. Still editable
