@@ -283,10 +283,6 @@
     <button onclick="stopImpersonating()" style="margin-left:12px;background:#991b1b;color:white;border:none;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Return to My Account</button>
   </div>
 
-  <div id="viewBanner" style="display:none;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:3px 24px;text-align:center;font-size:11px;color:#9a3412;font-weight:600;line-height:1.3">
-    <span id="viewBannerText"></span>
-  </div>
-
   <div class="mobile-sidebar-overlay" id="mobileSidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
   <div class="admin-layout">
@@ -4346,8 +4342,6 @@
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
         currentUserFirstName = firstName;
-        document.getElementById('viewBannerText').textContent = `Hi ${firstName}! You are currently on Admin View.`;
-        document.getElementById('viewBanner').style.display = 'block';
         if (me.impersonating) {
           document.getElementById('impersonationBannerText').textContent = `${me.impersonatorName || 'A super admin'} is viewing as ${me.name || me.email} (${me.role})`;
           document.getElementById('impersonationBanner').style.display = 'block';
