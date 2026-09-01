@@ -12,6 +12,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script>
+    // /wfp (Joy, 2026-09-02): this same admin.html file, restricted to the
+    // Workforce Partners nav group (see IS_PARTNERS_VIEW below), is now
+    // also the installable PWA — replacing the earlier standalone
+    // views/wfp.html shell with the real WFP Dashboard/Leads/My Centres/
+    // Micropods/Smart Routing screens instead of a thinner, separately-
+    // maintained UI. /admin, /allapp, and /partners all serve this exact
+    // same head otherwise — these install-related tags only apply on
+    // /wfp, so opening the full app never offers to "install" a page
+    // branded RT Partner. manifest.json/sw.js/icons are unchanged from
+    // that earlier build (public/wfp/*) — both already just point at the
+    // "/wfp" URL, not at any particular file behind it.
+    if (location.pathname.startsWith('/wfp')) {
+      document.querySelectorAll('link[rel="apple-touch-icon"]').forEach(el => el.remove());
+      document.head.insertAdjacentHTML('beforeend', `
+        <link rel="manifest" href="/wfp/manifest.json">
+        <meta name="theme-color" content="#0b1d3e">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="RT Partner">
+        <link rel="apple-touch-icon" sizes="192x192" href="/wfp/icon-192.png">
+        <link rel="icon" type="image/png" sizes="192x192" href="/wfp/icon-192.png">
+      `);
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
+    }
+  </script>
   <style>
     /* Rich text editor (TipTap-based, replaces Jodit) */
     .rte-root { border: 1px solid var(--gray-200); border-radius: var(--radius); font-family: 'Inter', sans-serif; overflow: hidden; background: #fff; }
@@ -4257,7 +4283,16 @@
     // blocking, and the initial-section pick on load) rather than a
     // second, parallel restriction system — a URL-driven override takes
     // priority over whatever the role-based one would otherwise allow.
-    const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners');
+    // /wfp is the installable PWA version of this exact same restricted
+    // view (Joy, 2026-09-02) — same content, same section allowlist, just
+    // reached with home-screen-app chrome instead of a browser tab. Kept
+    // as a separate flag (not folded into IS_PARTNERS_VIEW's own check)
+    // because the role gate below needs to tell the two apart: /wfp also
+    // has to admit a plain 'user' account with just the can_use_wfp_pwa
+    // grant, which /partners never has (see wfpGuard vs guardRoute in
+    // server.js — two different server-side gates behind these two URLs).
+    const IS_WFP_PWA = location.pathname.startsWith('/wfp');
+    const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners') || IS_WFP_PWA;
     const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'leads', 'my-centres', 'micropods', 'route-planner'];
 
     // ── Init ──────────────────────────────────────────────────────
@@ -4292,7 +4327,15 @@
       // — see the comment there for why.
       try {
         const me = await fetch('/auth/me').then(r => r.json());
-        if (me.error || !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(me.role)) { location.href = '/'; return; }
+        // Same four roles admitted everywhere in this file (/admin,
+        // /allapp, /partners, /wfp) — on /wfp specifically, ALSO admit a
+        // plain 'user' account Joy granted can_use_wfp_pwa to (mirrors
+        // server.js's wfpGuard exactly, the one route with that extra
+        // allowance; /admin/allapp/partners' server-side guardRoute has
+        // no such grant, so this stays scoped to IS_WFP_PWA only).
+        const roleAllowed = ['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(me.role)
+          || (IS_WFP_PWA && !!me.canUseWfpPwa);
+        if (me.error || !roleAllowed) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;

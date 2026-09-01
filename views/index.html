@@ -4499,12 +4499,13 @@
       await fetch('/auth/logout', { method: 'POST' });
       location.href = '/login.html';
     }
-    // workforce_partner goes to the new distraction-free /partners view
-    // (admin.html restricted to just WFP Dashboard/Leads/My Centres/
-    // Micropods/Smart Routing); everyone else keeps going to the full
-    // /admin sidebar exactly as before.
+    // workforce_partner goes to the distraction-free, installable /wfp
+    // view (admin.html restricted to just WFP Dashboard/Leads/My Centres/
+    // Micropods/Smart Routing — /partners is the exact same content
+    // without the "Add to Home Screen" prompt); everyone else keeps going
+    // to the full /admin sidebar exactly as before.
     function goToAdminPanel() {
-      location.href = currentUserRole === 'workforce_partner' ? '/partners' : '/admin';
+      location.href = currentUserRole === 'workforce_partner' ? '/wfp' : '/admin';
     }
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

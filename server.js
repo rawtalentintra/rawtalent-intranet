@@ -185,13 +185,17 @@ process.on('unhandledRejection', (err) => {
 
 // A workforce_partner-role account has no real use for the full HeartBeat
 // homepage — landing there was the actual bug Joy flagged (2026-09-01):
-// "/" should go straight to their focused Admin view instead. This only
-// touches the workforce_partner role itself, not admin/super_admin (who
-// still get the full homepage at "/" even though they can also visit
-// /partners directly) and not a plain user with can_use_wfp_pwa (who
-// belongs on the phone-first /wfp app, not this desktop view).
+// "/" should go straight to their focused view instead. Points at /wfp,
+// not /partners — same restricted content either way (see wfpGuard's own
+// comment), but /wfp is also the installable PWA, so this is where the
+// "Add to Home Screen" prompt actually shows up. Only touches the
+// workforce_partner role itself — admin/super_admin still get the full
+// homepage at "/" even though they can also visit /wfp or /partners
+// directly, and a plain user with just can_use_wfp_pwa was never sent
+// here via role anyway (they land on "/" as a normal 'user' account,
+// same as before — this redirect is keyed off role, not the grant).
 app.get('/', (req, res) => {
-  if (req.isAuthenticated() && req.user.role === 'workforce_partner') return res.redirect('/partners');
+  if (req.isAuthenticated() && req.user.role === 'workforce_partner') return res.redirect('/wfp');
   guardRoute(req, res, 'index.html');
 });
 app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
@@ -216,22 +220,31 @@ app.get('/allapp/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/partners', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/partners/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 
-// Workforce Partner PWA (Aug 26 meeting) — same session cookie as
-// everywhere else in this app (no separate login/token scheme), gated by
-// the requirePwaAccess grant (admin/super_admin always pass, matching
-// that middleware's own rule). Static assets under public/wfp/ (manifest,
-// service worker, icons) are already reachable via the express.static
-// mount above — nothing in them is sensitive — only the app shell itself
-// needs the auth check, same reasoning as guardRoute above for why it
-// lives in views/ rather than public/.
+// Workforce Partner PWA (Aug 26 meeting; repointed at admin.html 2026-09-02
+// — Joy: "/wfp should be the same as /partners... standalone installable").
+// Same session cookie as everywhere else (no separate login/token scheme).
+// Serves the exact same file as /partners (restricted client-side to the
+// Workforce Partners nav group — see admin.html's IS_PARTNERS_VIEW/
+// PARTNERS_VIEW_SECTIONS) rather than the earlier standalone views/wfp.html
+// shell, which this replaces — that file and its own /api/centres/
+// :key/snapshot, /api/educators/* endpoints are unused now but left in
+// place rather than deleted outright. Access is /partners' own four-role
+// check, PLUS (this route only) a plain 'user' account Joy granted
+// can_use_wfp_pwa to — matches requirePwaAccess (middleware/
+// authMiddleware.js), the same check routes/centres.js/educators.js use to
+// gate the APIs the My Centres section actually calls; Leads/Micropods/
+// Smart Routing's own routes don't extend that same grant yet (pre-
+// existing — qa_view has the identical gap at /partners today), so a
+// can_use_wfp_pwa-only account can open this shell and use My Centres, but
+// would 403 on those three sections until that's extended too. Static
+// assets under public/wfp/ (manifest, service worker, icons) are already
+// reachable via the express.static mount above — nothing in them is
+// sensitive — only the app shell itself needs the auth check.
 function wfpGuard(req, res) {
   if (!req.isAuthenticated()) return res.redirect('/login.html');
-  // Must match requirePwaAccess (middleware/authMiddleware.js) exactly —
-  // that's the same check routes/centres.js and routes/educators.js use
-  // to gate the APIs this shell actually calls.
-  const hasAccess = ['admin', 'super_admin', 'workforce_partner'].includes(req.user.role) || req.user.can_use_wfp_pwa;
+  const hasAccess = ['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role) || req.user.can_use_wfp_pwa;
   if (!hasAccess) return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
-  res.sendFile(path.join(__dirname, 'views', 'wfp.html'));
+  res.sendFile(path.join(__dirname, 'views', 'admin.html'));
 }
 app.get('/wfp', wfpGuard);
 app.get('/wfp/*', wfpGuard);
