@@ -31,6 +31,31 @@ function validateStatusForDepartment(status, departmentId) {
   return null;
 }
 
+// Department-level task visibility (Joy, 2026-08-30) — layered on top of
+// requireAuth above, which still just means "any signed-in user can use
+// Tasks at all". Three tiers, checked in order:
+//   1. A per-user restriction (users.restricted_task_department_id, e.g.
+//      Prince — role='admin', but restricted to ONLY 'app_dev') takes
+//      priority over everything below, including role.
+//   2. admin/super_admin/qa_view (with no restriction set) — everything.
+//   3. Everyone else — everything EXCEPT app_dev/marketing/
+//      workforce_partners, kept out of the general board so those
+//      department-specific work streams don't clutter/confuse people
+//      who aren't part of them.
+// Scope note: this gates the task LIST (GET /) and META (GET /meta)
+// endpoints, plus create/update (so a direct API call can't route around
+// the UI), not every sub-resource (notes/attachments) — a task id is a
+// UUID, not realistically guessable, and this is about decluttering the
+// general board, not a confidentiality boundary.
+const FULL_VISIBILITY_ROLES = new Set(['admin', 'super_admin', 'qa_view']);
+const HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS = new Set(['app_dev', 'marketing', 'workforce_partners']);
+
+function canAccessDepartment(user, departmentId) {
+  if (user.restricted_task_department_id) return user.restricted_task_department_id === departmentId;
+  if (FULL_VISIBILITY_ROLES.has(user.role)) return true;
+  return !HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS.has(departmentId);
+}
+
 // Finds @Name mentions in a note body against the known active-user list and
 // returns the matched emails. Matches on full display name (case-insensitive,
 // longest names first so "Joy Smith" doesn't get eaten by a bare "@Joy"
@@ -70,16 +95,26 @@ async function resolveDescriptionMentions(db, description, excludeEmail) {
   return extractMentions(description || '', usersRes.rows).filter(e => e.toLowerCase() !== excludeEmail.toLowerCase());
 }
 
-// Full dataset, client-side grouping/filtering — same convention as Leads/
-// Reports/My Centres in this codebase, rather than server-side query params.
+// Full dataset (within the caller's visible departments), client-side
+// grouping/filtering — same convention as Leads/Reports/My Centres in
+// this codebase, rather than server-side query params for everything
+// else (status/priority/search/etc.); department visibility is the one
+// thing gated server-side, since that's an access boundary, not just a
+// UI filter.
 router.get('/', async (req, res) => {
   try {
-    const result = await getDb().execute(`
-      SELECT t.*, tc.name AS classification_name
-      FROM tasks t
-      LEFT JOIN task_classifications tc ON tc.id = t.classification_id
-      ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC
-    `);
+    const db = getDb();
+    const allDeptIds = (await db.execute('SELECT id FROM task_departments')).rows.map(d => d.id);
+    const visibleIds = allDeptIds.filter(id => canAccessDepartment(req.user, id));
+    const placeholders = visibleIds.map(() => '?').join(',') || 'NULL'; // NULL -> IN (NULL), matches zero rows rather than erroring on an empty IN()
+    const result = await db.execute({
+      sql: `SELECT t.*, tc.name AS classification_name
+            FROM tasks t
+            LEFT JOIN task_classifications tc ON tc.id = t.classification_id
+            WHERE t.department_id IN (${placeholders})
+            ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC`,
+      args: visibleIds
+    });
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -88,7 +123,10 @@ router.get('/', async (req, res) => {
 
 // Departments, classifications, and the active-user list a task can be
 // assigned to / a note can @mention — one call so the frontend can build
-// every dropdown before the first render.
+// every dropdown before the first render. Departments/classifications
+// scoped to what this caller can access, same as GET / above — a
+// restricted user's department picker and classification dropdown only
+// ever offer what they're actually allowed to file a task under.
 router.get('/meta', async (req, res) => {
   try {
     const db = getDb();
@@ -97,7 +135,10 @@ router.get('/meta', async (req, res) => {
       db.execute('SELECT * FROM task_classifications ORDER BY name ASC'),
       db.execute("SELECT email, name, role FROM users WHERE active = true ORDER BY name ASC NULLS LAST, email ASC")
     ]);
-    res.json({ departments: depts.rows, classifications: classifications.rows, users: users.rows });
+    const visibleDepts = depts.rows.filter(d => canAccessDepartment(req.user, d.id));
+    const visibleDeptIds = new Set(visibleDepts.map(d => d.id));
+    const visibleClassifications = classifications.rows.filter(c => visibleDeptIds.has(c.department_id));
+    res.json({ departments: visibleDepts, classifications: visibleClassifications, users: users.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -187,6 +228,10 @@ router.post('/', async (req, res) => {
   if (priority && !PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
   const deptStatusError = validateStatusForDepartment(status, department_id);
   if (deptStatusError) return res.status(400).json({ error: deptStatusError });
+  // Not just a UI filter — a direct API call shouldn't be able to file a
+  // task under a department this account can't see (see
+  // canAccessDepartment's comment above).
+  if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
     const db = getDb();
     const id = uuidv4();
@@ -224,10 +269,16 @@ router.put('/:id', async (req, res) => {
   if (priority && !PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
   const deptStatusError = validateStatusForDepartment(status, department_id);
   if (deptStatusError) return res.status(400).json({ error: deptStatusError });
+  // Same access boundary as create — checked against both the task's
+  // current department (this account shouldn't be able to touch a task
+  // it can't see, full stop) and the new one (can't move a task INTO a
+  // department it can't see either).
+  if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
     const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT status, completed_at FROM tasks WHERE id = ?', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id FROM tasks WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Task not found' });
+    if (!canAccessDepartment(req.user, existing.rows[0].department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
     const finalStatus = status || existing.rows[0].status;
     // completed_at only gets set the moment status actually transitions
     // into 'done', and clears if it's reopened — not touched on every save.

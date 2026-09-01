@@ -46,6 +46,18 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_create_outreach_lists BOOLEAN DEF
 -- existing leads row; matching on the label string is the smaller change.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS wfp_label TEXT;
 
+-- Per-user task-department restriction (Joy, 2026-08-30) — same "one
+-- specific person, not a role tier" pattern as can_build_training above,
+-- just a restriction instead of a grant. NULL = no restriction (falls
+-- through to routes/tasks.js's role-based department-visibility rule).
+-- Set = this person sees/can act on ONLY this one department's tasks,
+-- full stop — overrides even an admin/super_admin/qa_view role that
+-- would otherwise see everything (Prince is 'admin' but restricted to
+-- 'app_dev' only; see routes/tasks.js's canAccessDepartment()).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS restricted_task_department_id TEXT;
+UPDATE users SET restricted_task_department_id = 'app_dev'
+  WHERE LOWER(email) = 'prince@rawtalent.com.au' AND restricted_task_department_id IS NULL;
+
 CREATE TABLE IF NOT EXISTS articles (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
