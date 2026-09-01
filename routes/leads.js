@@ -14,6 +14,8 @@ const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimet
 const { partnerForSuburbState } = require('../services/melbourneTerritoryService');
 const mapboxService = require('../services/mapboxService');
 const leadRegionService = require('../services/leadRegionService');
+const groqTranscription = require('../services/groqTranscriptionService');
+const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisService');
 
 router.use(requireAuth);
 
@@ -659,6 +661,50 @@ router.post('/:id/recordings', requireRole('admin', 'super_admin', 'workforce_pa
     await db.execute({ sql: 'UPDATE lead_recordings SET storage_path = ? WHERE id = ?', args: [storagePath, recordingId] });
 
     res.json({ success: true, id: recordingId, filename: req.file.originalname, filesize: req.file.size });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// "Start Recording Notes" (Site Visit Recordings, Joy 2026-09-02) — a
+// phone-mic voice note, saved as a real recording the same way the plain
+// upload above does, PLUS a best-effort transcript+summary in the same
+// round trip so the modal can offer "Add Note" immediately instead of
+// someone typing up what they just said out loud. The recording always
+// saves regardless of whether the AI steps succeed — same "never blocks
+// the real artifact" posture as analyzeVisitFromTranscript itself; a
+// missing/failed GROQ_API_KEY (transcription) or ANTHROPIC_API_KEY
+// (summary) just means notesSummary comes back null and the recording is
+// still there to play back and note up by hand.
+router.post('/:id/recordings/voice-note', requireRole('admin', 'super_admin', 'workforce_partner'), leadRecordingUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No recording received' });
+  try {
+    const db = getDb();
+    const lead = await db.execute({ sql: 'SELECT id, centre_name FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+
+    const result = await db.execute({
+      sql: `INSERT INTO lead_recordings (lead_id, filename, mimetype, filesize, uploaded_by_email, uploaded_by_name)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      args: [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.user.email, req.user.name || req.user.email]
+    });
+    const recordingId = result.rows[0].id;
+    const storagePath = `${req.params.id}/${recordingId}.${extForMimetype(req.file.mimetype)}`;
+    await ensureBucket(BUCKETS.leadRecordings);
+    await uploadBuffer(BUCKETS.leadRecordings, storagePath, req.file.buffer, req.file.mimetype);
+    await db.execute({ sql: 'UPDATE lead_recordings SET storage_path = ? WHERE id = ?', args: [storagePath, recordingId] });
+
+    let notesSummary = null;
+    try {
+      if (groqTranscription.isConfigured()) {
+        const transcript = await groqTranscription.transcribeAudio(req.file.buffer.toString('base64'), req.file.mimetype);
+        notesSummary = (await analyzeVisitFromTranscript(transcript, lead.rows[0].centre_name)).notesSummary;
+      }
+    } catch (err) {
+      console.error(`Voice-note transcription/summary failed for lead ${req.params.id} (non-fatal — recording is still saved):`, err.message);
+    }
+
+    res.json({ success: true, id: recordingId, filename: req.file.originalname, filesize: req.file.size, notesSummary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

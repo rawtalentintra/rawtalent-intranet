@@ -14395,6 +14395,7 @@
             <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">🎙️ Upload Recording<input type="file" style="display:none" onchange="uploadLeadRecording(this)"></label>
             <div class="file-dropzone-hint">or drag a file here — any format</div>
           </div>
+          <div id="leadVoiceRecorderBox" style="margin-top:8px"></div>
         ` : ''}
         <div id="leadRecordingsList" style="margin-bottom:10px">
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading recordings…</div>
@@ -14414,6 +14415,7 @@
       document.getElementById('leadDetailModal').classList.add('open');
       loadLeadNotes(id);
       loadLeadRecordings(id);
+      resetLeadVoiceRecorder();
     }
 
     // ── Lead notes thread ────────────────────────────────────────
@@ -14521,6 +14523,193 @@
       document.getElementById('confirmModal').classList.add('open');
     }
 
+    // ── "Start Recording Notes" — phone-mic voice note (Joy, 2026-09-02)
+    // Records with MediaRecorder, uploads to POST /:id/recordings/voice-
+    // note (saves the file exactly like a plain upload, then best-effort
+    // transcribes+summarizes it — see that route's own comment), and walks
+    // through four small states in the same box: idle → recording →
+    // processing → summary. State lives in these module-level vars because
+    // only one recording can be in flight at a time for the one lead
+    // detail modal open at once — no need for anything fancier.
+    let leadVoiceRecorder = null;
+    let leadVoiceChunks = [];
+    let leadVoiceStream = null;
+    let leadVoiceStartMs = null;
+    let leadVoiceTimerInterval = null;
+    let leadVoiceLastRecordingId = null;
+    let leadVoiceLastSummary = null;
+
+    function resetLeadVoiceRecorder() {
+      leadVoiceRecorder = null;
+      leadVoiceChunks = [];
+      leadVoiceStream = null;
+      leadVoiceStartMs = null;
+      clearInterval(leadVoiceTimerInterval);
+      leadVoiceTimerInterval = null;
+      leadVoiceLastRecordingId = null;
+      leadVoiceLastSummary = null;
+      paintLeadVoiceRecorderUI('idle');
+    }
+
+    // iOS Safari's MediaRecorder only ever offers audio/mp4 (AAC) — it has
+    // no webm/opus encoder at all — while Chrome/Android go the other way.
+    // Feature-detecting a short preference list instead of hardcoding one
+    // format is what makes this work on both without a build-time check;
+    // an empty result (no match) falls through to the browser's own
+    // default, which still generally works, just isn't guaranteed to.
+    function pickLeadVoiceMimeType() {
+      if (!window.MediaRecorder) return '';
+      const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+      return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+    }
+
+    function leadVoiceExtFor(mimeType) {
+      if (mimeType.includes('mp4')) return 'm4a';
+      if (mimeType.includes('webm')) return 'webm';
+      if (mimeType.includes('ogg')) return 'ogg';
+      return 'mp3';
+    }
+
+    async function startLeadVoiceRecording() {
+      if (!currentLeadDetailId) return;
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        toast('Voice recording needs a browser with microphone support — try uploading a file instead', 'error');
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        toast('Microphone access was denied — check your browser/phone settings and try again', 'error');
+        return;
+      }
+      leadVoiceStream = stream;
+      leadVoiceChunks = [];
+      const mimeType = pickLeadVoiceMimeType();
+      leadVoiceRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      leadVoiceRecorder.ondataavailable = e => { if (e.data.size > 0) leadVoiceChunks.push(e.data); };
+      leadVoiceRecorder.onstop = () => finishLeadVoiceRecording(leadVoiceRecorder.mimeType || mimeType || 'audio/webm');
+      leadVoiceRecorder.start();
+      leadVoiceStartMs = Date.now();
+      paintLeadVoiceRecorderUI('recording');
+      leadVoiceTimerInterval = setInterval(() => {
+        const el = document.getElementById('leadVoiceTimer');
+        if (!el) return;
+        const secs = Math.floor((Date.now() - leadVoiceStartMs) / 1000);
+        el.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+      }, 500);
+    }
+
+    // Also called from closeLeadDetailModal (guarded, no-op if nothing's
+    // recording) so navigating away mid-recording always releases the mic
+    // instead of leaving it active in the background.
+    function stopLeadVoiceRecording() {
+      if (leadVoiceRecorder && leadVoiceRecorder.state !== 'inactive') leadVoiceRecorder.stop();
+      leadVoiceStream?.getTracks().forEach(t => t.stop());
+      clearInterval(leadVoiceTimerInterval);
+      leadVoiceTimerInterval = null;
+    }
+
+    async function finishLeadVoiceRecording(mimeType) {
+      paintLeadVoiceRecorderUI('processing');
+      const blob = new Blob(leadVoiceChunks, { type: mimeType });
+      const filename = `Voice Note - ${new Date().toLocaleString('en-AU')}.${leadVoiceExtFor(mimeType)}`;
+      const fd = new FormData();
+      fd.append('file', blob, filename);
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/recordings/voice-note`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Could not save recording', 'error'); paintLeadVoiceRecorderUI('idle'); return; }
+        loadLeadRecordings(currentLeadDetailId);
+        leadVoiceLastRecordingId = data.id;
+        if (data.notesSummary) {
+          leadVoiceLastSummary = data.notesSummary;
+          paintLeadVoiceRecorderUI('summary');
+        } else {
+          toast('Recording saved — no summary available this time (add a note by hand, or try again)', 'success');
+          paintLeadVoiceRecorderUI('idle');
+        }
+      } catch {
+        toast('Upload failed — check your connection and try again', 'error');
+        paintLeadVoiceRecorderUI('idle');
+      }
+    }
+
+    // Keeps the recording (already saved above) and turns its summary
+    // straight into a real note, same endpoint the "+ Add Note" textarea
+    // below uses — this box is just a faster way to fill it in.
+    async function acceptLeadVoiceSummaryAsNote(btn) {
+      if (!currentLeadDetailId || !leadVoiceLastSummary) return;
+      if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+      try {
+        const res = await fetch(`/api/leads/${currentLeadDetailId}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: leadVoiceLastSummary })
+        });
+        if (!res.ok) { const data = await res.json(); toast(data.error || 'Failed to add note', 'error'); if (btn) { btn.disabled = false; btn.textContent = '✅ Add Note'; } return; }
+        toast('Note added', 'success');
+        loadLeadNotes(currentLeadDetailId);
+        resetLeadVoiceRecorder();
+      } catch {
+        toast('Failed to add note', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Add Note'; }
+      }
+    }
+
+    // Shared by both "🗑️ Delete" (just discard) and "🔁 Redo" (discard,
+    // then immediately start over) — either way the recording just saved
+    // needs to actually be removed, not just hidden from this box.
+    async function discardLeadVoiceRecording() {
+      if (leadVoiceLastRecordingId) {
+        try { await fetch(`/api/leads/recordings/${leadVoiceLastRecordingId}`, { method: 'DELETE' }); } catch { /* best-effort — box resets either way */ }
+        loadLeadRecordings(currentLeadDetailId);
+      }
+    }
+
+    async function deleteLeadVoiceSummary() {
+      await discardLeadVoiceRecording();
+      resetLeadVoiceRecorder();
+    }
+
+    async function redoLeadVoiceRecording() {
+      await discardLeadVoiceRecording();
+      resetLeadVoiceRecorder();
+      startLeadVoiceRecording();
+    }
+
+    function paintLeadVoiceRecorderUI(state) {
+      const box = document.getElementById('leadVoiceRecorderBox');
+      if (!box) return;
+      if (state === 'recording') {
+        box.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #fecaca;background:#fef2f2;border-radius:var(--radius)">
+            <span style="width:10px;height:10px;border-radius:50%;background:#c0392b;flex-shrink:0;animation:pulse-rec 1s ease-in-out infinite"></span>
+            <span style="font-size:12.5px;font-weight:700;color:#c0392b">Recording… <span id="leadVoiceTimer">00:00</span></span>
+            <button class="btn-secondary" style="margin-left:auto;padding:5px 14px;font-size:12px" onclick="stopLeadVoiceRecording()">⏹ Stop</button>
+          </div>
+          <style>@keyframes pulse-rec { 0%,100% { opacity:1 } 50% { opacity:.25 } }</style>`;
+      } else if (state === 'processing') {
+        box.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius)">
+            <div class="spinner" style="width:16px;height:16px;margin:0"></div>
+            <span style="font-size:12.5px;color:var(--text-muted)">Saving your recording and writing a summary…</span>
+          </div>`;
+      } else if (state === 'summary') {
+        box.innerHTML = `
+          <div style="padding:12px 14px;border:1px solid var(--gray-200);border-radius:var(--radius);background:var(--offwhite)">
+            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:5px">Suggested note, from your recording</div>
+            <div style="font-size:13px;white-space:pre-wrap;margin-bottom:10px">${escHtml(leadVoiceLastSummary)}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-add" style="padding:5px 14px;font-size:12px" onclick="acceptLeadVoiceSummaryAsNote(this)">✅ Add Note</button>
+              <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="redoLeadVoiceRecording()">🔁 Redo</button>
+              <button class="action-btn delete" style="padding:5px 14px;font-size:12px" onclick="deleteLeadVoiceSummary()">🗑️ Delete</button>
+            </div>
+          </div>`;
+      } else {
+        box.innerHTML = `<button class="btn-secondary" style="padding:6px 14px;font-size:12.5px" onclick="startLeadVoiceRecording()">🎙️ Start Recording Notes</button>`;
+      }
+    }
+
     // Two real bugs confirmed live before this fix: (1) success was
     // completely silent — no toast, and the new note lands ABOVE the
     // textarea a person is looking at, so there was no visible sign the
@@ -14559,6 +14748,7 @@
     function closeLeadDetailModal() {
       document.getElementById('leadDetailModal').classList.remove('open');
       currentLeadDetailId = null;
+      stopLeadVoiceRecording(); // release the mic if a recording was left running
     }
 
     // Outright deletion (as opposed to a status change) is kept to the
