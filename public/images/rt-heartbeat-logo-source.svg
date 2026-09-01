@@ -1,0 +1,54 @@
+<svg width="800" height="800" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Glass fill: same navy hue throughout, just lighter at the top-left
+         to darker at bottom-right, like light hitting a glossy surface. -->
+    <linearGradient id="glassFill" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#5089cf"/>
+      <stop offset="40%" stop-color="#1e4d8b"/>
+      <stop offset="100%" stop-color="#0f2c52"/>
+    </linearGradient>
+    <!-- Glossy highlight band across the upper portion of the letters -->
+    <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="26%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="46%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="pulseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1c64f2"/>
+      <stop offset="50%" stop-color="#6fa8fb"/>
+      <stop offset="100%" stop-color="#1c64f2"/>
+    </linearGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0b1d3e" flood-opacity="0.30"/>
+    </filter>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="letterClip">
+      <text x="70" y="580" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="560" letter-spacing="-46">R</text>
+      <text x="418" y="580" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="560" letter-spacing="-10">T</text>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <text x="70" y="580" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="560" letter-spacing="-46" fill="url(#glassFill)">R</text>
+    <text x="418" y="580" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="560" letter-spacing="-10" fill="url(#glassFill)">T</text>
+  </g>
+
+  <!-- Glass shine overlay, clipped to the exact letterforms above -->
+  <g clip-path="url(#letterClip)">
+    <rect x="0" y="0" width="800" height="800" fill="url(#shine)"/>
+    <!-- diagonal glare streak -->
+    <polygon points="0,0 260,0 60,800 -140,800" fill="#ffffff" opacity="0.14"/>
+  </g>
+
+  <!-- Heartbeat pulse line, running through the middle -->
+  <g filter="url(#glow)">
+    <path d="M 30 398 L 300 398 L 345 398 L 405 288 L 465 508 L 515 353 L 565 398 L 770 398"
+          fill="none" stroke="url(#pulseGrad)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
