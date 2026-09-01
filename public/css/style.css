@@ -1801,6 +1801,56 @@ body:has(> .navbar) { padding-top: 64px; }
   .admin-sidebar.wfp-restricted-view .admin-nav-label { font-size: 12.5px; padding: 4px 14px; }
 }
 
+/* My Centres description — two versions in the HTML, one shown at a time.
+   Desktop is the default (no override needed there); mobile swaps which
+   one is visible. */
+.my-centres-sub-mobile { display: none; }
+@media (max-width: 900px) {
+  #section-my-centres .my-centres-sub-mobile { display: inline; }
+  #section-my-centres .my-centres-sub-desktop { display: none; }
+}
+
+/* My Centres page mobile layout — Joy, 2026-09-02: same pass as the Leads
+   page, applied here. Scoped to max-width:900px AND #section-my-centres
+   (.leads-filter-bar is shared with Leads/Smart Routing — see that
+   section's own comment for why unscoped would be wrong) so /admin and
+   /allapp at a real desktop width are untouched. */
+@media (max-width: 900px) {
+  /* Portfolio Health — Joy: "the boxes DO NOT look clean... make those
+     smaller like as small as the Liam Justine Gwen buttons." Shrunk to
+     match; at this size 4 fit per row on a phone width instead of 3,
+     giving the 4-then-3 layout across the 7 categories instead of the
+     previous 3/3/1 wrap. */
+  /* A real 4-column grid, not flex-wrap — "Needs Attention"/
+     "New/Activating" are long enough to push a flex box past whatever
+     min-width was set (min-width is a floor, not a cap; a longer label
+     just grows the box past it), which was landing 2-3 per row instead
+     of 4. A grid forces every cell to the same width regardless of its
+     label's length; the 7th/8th cells simply aren't there, so the 7
+     categories land 4-then-3 on their own. !important beats
+     #myCentresHealthSummary's own inline flex/gap and each box's inline
+     min-width:92px (inline styles otherwise always win regardless of
+     selector). */
+  #myCentresHealthSummary { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .centre-health-box { min-width: 0 !important; padding: 8px 4px; border-radius: 8px; text-align: center; }
+  .centre-health-box-num { font-size: 15px; }
+  /* "New/Activating" has no space for the browser to find a natural wrap
+     point at — overflow-wrap alone leaves it bleeding out of its cell;
+     break-word here is what actually lets it split mid-word. */
+  .centre-health-box-label { font-size: 8.5px; white-space: normal !important; line-height: 1.15; overflow-wrap: break-word; word-break: break-word; }
+
+  /* Filter bar — identical treatment to the Leads page's own. */
+  #section-my-centres .leads-filter-bar { flex-direction: column; }
+  #section-my-centres .leads-filter-bar select,
+  #section-my-centres .leads-filter-bar input { max-width: none; width: 100%; flex: none; }
+
+  /* Table — every column but Centre dropped, same call as Leads: the
+     row's own onclick (openCentre360) already opens all of it on tap. */
+  #myCentresTable th:not(:nth-child(1)), #myCentresTable td:not(:nth-child(1)) { display: none; }
+  #myCentresTable td:nth-child(1) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; font-size: 14.5px; }
+  #myCentresTable th:nth-child(1) { font-size: 11.5px; }
+}
+
 @media (max-width: 600px) {
   .navbar { padding: 0 16px; }
   .nav-tag { display: none; }

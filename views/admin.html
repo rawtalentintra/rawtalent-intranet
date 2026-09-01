@@ -828,7 +828,14 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">🏢 My Centres</div>
-            <div class="admin-page-sub">Your existing, booking centres — once a lead becomes a real client, this is where its account health lives. New business that hasn't signed yet stays on <a href="#" onclick="showSection('sales-dashboard', document.querySelector('[onclick*=\'sales-dashboard\']'));return false" style="color:var(--orange);font-weight:600">the WFP Dashboard</a>. Not yet split by Workforce Partner territory, so everyone sees the full list for now.</div>
+            <div class="admin-page-sub">
+              <!-- Two versions, one shown at a time via mobile CSS (style.css)
+                   — Joy, 2026-09-02: "shorten the description" on mobile only,
+                   desktop keeps the full explanation including the WFP
+                   Dashboard link and the not-yet-territory-split caveat. -->
+              <span class="my-centres-sub-mobile">Your existing centres. Once a lead signs up, this is where its account health lives.</span>
+              <span class="my-centres-sub-desktop">Your existing, booking centres — once a lead becomes a real client, this is where its account health lives. New business that hasn't signed yet stays on <a href="#" onclick="showSection('sales-dashboard', document.querySelector('[onclick*=\'sales-dashboard\']'));return false" style="color:var(--orange);font-weight:600">the WFP Dashboard</a>. Not yet split by Workforce Partner territory, so everyone sees the full list for now.</span>
+            </div>
           </div>
         </div>
 
@@ -9307,9 +9314,9 @@
         const n = counts[key] || 0;
         const active = activeFilter === key;
         return `
-          <div onclick="toggleCentresHealthFilter('${key}')" style="cursor:pointer;padding:8px 14px;border-radius:10px;background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'};min-width:92px">
-            <div style="font-size:19px;font-weight:700;color:${meta.color}">${n}</div>
-            <div style="font-size:10.5px;color:${meta.color};font-weight:700;white-space:nowrap">${meta.label.replace(/^\S+\s/, '')}</div>
+          <div class="centre-health-box" onclick="toggleCentresHealthFilter('${key}')" style="cursor:pointer;padding:8px 14px;border-radius:10px;background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'};min-width:92px">
+            <div class="centre-health-box-num" style="font-size:19px;font-weight:700;color:${meta.color}">${n}</div>
+            <div class="centre-health-box-label" style="font-size:10.5px;color:${meta.color};font-weight:700;white-space:nowrap">${meta.label.replace(/^\S+\s/, '')}</div>
           </div>`;
       }).join('');
     }
