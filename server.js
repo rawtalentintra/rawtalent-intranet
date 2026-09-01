@@ -183,7 +183,17 @@ process.on('unhandledRejection', (err) => {
   console.error('Unhandled promise rejection:', err);
 });
 
-app.get('/', (req, res) => guardRoute(req, res, 'index.html'));
+// A workforce_partner-role account has no real use for the full HeartBeat
+// homepage — landing there was the actual bug Joy flagged (2026-09-01):
+// "/" should go straight to their focused Admin view instead. This only
+// touches the workforce_partner role itself, not admin/super_admin (who
+// still get the full homepage at "/" even though they can also visit
+// /partners directly) and not a plain user with can_use_wfp_pwa (who
+// belongs on the phone-first /wfp app, not this desktop view).
+app.get('/', (req, res) => {
+  if (req.isAuthenticated() && req.user.role === 'workforce_partner') return res.redirect('/partners');
+  guardRoute(req, res, 'index.html');
+});
 app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));

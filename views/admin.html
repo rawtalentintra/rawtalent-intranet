@@ -198,18 +198,12 @@
       <span class="nav-tag">Admin</span>
     </a>
     <div class="nav-actions">
-      <button class="nav-btn ghost" onclick="location.href='/'">← HeartBeat</button>
       <div class="notif-bell-wrap" style="position:relative">
         <button class="nav-btn ghost" onclick="toggleNotifPanel(event)" id="notifBellBtn" style="position:relative;font-size:15px;padding:8px 11px">
           🔔
           <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:white;font-size:9px;font-weight:800;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px;line-height:1"></span>
         </button>
       </div>
-      <div class="nav-user" style="cursor:pointer" onclick="openPasswordModal()" title="Change your password">
-        <div class="nav-avatar" id="navAvatar">J</div>
-      </div>
-      <button class="nav-btn ghost" onclick="openPasswordModal()" style="font-size:12px;padding:6px 12px">⚙️ Settings</button>
-      <button class="nav-btn ghost" onclick="logout()">Sign Out</button>
     </div>
   </nav>
 
@@ -419,6 +413,23 @@
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Private</div>
         <div class="admin-nav-item" onclick="showSection('meetings', this)">
           <span class="admin-nav-icon">🗓️</span> Meetings
+        </div>
+      </div>
+      <!-- Account — was three separate top-navbar buttons ("← HeartBeat",
+           "⚙️ Settings", "Sign Out") plus the avatar; Joy flagged the
+           navbar as cluttered (2026-09-01), so all four moved down here
+           instead of being deleted outright — same "relocate, don't just
+           remove" call as index.html's own sidebar-footer Sign Out.
+           #navAvatar keeps its id — init()'s existing
+           document.getElementById('navAvatar').textContent = ... line
+           isn't null-safe, so this element has to exist somewhere. -->
+      <div class="admin-nav-section" id="adminSidebarAccount">
+        <div class="admin-nav-label">Account</div>
+        <div class="admin-nav-item" onclick="openPasswordModal()" title="Change your password">
+          <div class="nav-avatar" id="navAvatar" style="width:20px;height:20px;font-size:10px">?</div> Settings
+        </div>
+        <div class="admin-nav-item" onclick="logout()">
+          <span class="admin-nav-icon">🚪</span> Sign Out
         </div>
       </div>
       </div>
@@ -4449,10 +4460,24 @@
       if (effectiveAllowed) {
         document.querySelectorAll('.admin-nav-item').forEach(item => {
           const match = item.getAttribute('onclick')?.match(/showSection\('([^']+)'/);
-          item.style.display = (match && effectiveAllowed.includes(match[1])) ? '' : 'none';
+          // Utility items (Settings/Sign Out in #adminSidebarAccount) have
+          // no showSection onclick at all — this filter only governs
+          // section links, so leave those alone rather than hiding them;
+          // every role/view needs a way to sign out.
+          if (!match) return;
+          item.style.display = effectiveAllowed.includes(match[1]) ? '' : 'none';
         });
         document.querySelectorAll('.admin-nav-section').forEach(section => {
-          const anyVisible = [...section.querySelectorAll('.admin-nav-item')].some(i => i.style.display !== 'none');
+          // Only real showSection links decide whether a section collapses
+          // away — a section with a non-link utility item mixed in (New
+          // Article inside Content) still needs to vanish once its actual
+          // links are all hidden, same as before; one made ENTIRELY of
+          // utility items (Account: Settings/Sign Out, no showSection
+          // items at all) was never a "section link" list to begin with,
+          // so it's exempt and always stays visible.
+          const sectionLinks = [...section.querySelectorAll('.admin-nav-item')]
+            .filter(i => i.getAttribute('onclick')?.match(/showSection\('([^']+)'/));
+          const anyVisible = sectionLinks.length === 0 || sectionLinks.some(i => i.style.display !== 'none');
           section.style.display = anyVisible ? '' : 'none';
         });
       }
