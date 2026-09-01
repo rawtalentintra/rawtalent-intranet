@@ -1079,6 +1079,10 @@
               <option value="pending">Pending</option>
               <option value="signed">Profile Created</option>
             </select>
+            <select id="leadsSortBy" onchange="filterLeadsTable()" title="Liam, Aug 24 meeting: 'sort a column from like alphabetical order' by rep">
+              <option value="geography" selected>Sort: Geography</option>
+              <option value="rep">Sort: Rep (A–Z)</option>
+            </select>
           </div>
           <div style="overflow-x:auto">
             <table class="data-table data-table-compact" id="leadsTable">
@@ -1092,12 +1096,13 @@
                   <th>Agency Usage</th>
                   <th title="One combined view of the Called → Visited → Profile Created pipeline — shows whichever step is next.">Stage ⓘ</th>
                   <th>WF Partner</th>
+                  <th>Submitted By</th>
                   <th style="white-space:normal;max-width:56px">Last Called</th>
                   <th style="white-space:normal;max-width:56px">Last Visited</th>
                 </tr>
               </thead>
               <tbody id="leadsTableBody">
-                <tr><td colspan="10"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                <tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -7664,7 +7669,7 @@
       // already-visible table just to refill it with the same data a
       // moment later.
       if (!allLeads.length) {
-        body.innerHTML = '<tr><td colspan="10"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+        body.innerHTML = '<tr><td colspan="11"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
       }
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
@@ -7709,7 +7714,7 @@
         loadLeadsCentreMatches(); // fired, not awaited — leads render immediately, matches fill in the column once ready
         loadLeadsRetentionForBadges(); // same pattern — booking counts for the Lead Converted/Booked badges fill in once ready
       } catch {
-        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Failed to load leads</td></tr>';
       }
     }
 
@@ -7847,15 +7852,23 @@
         filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
       }
 
-      // Geography first, not most-recently-submitted-first — a Workforce
-      // Partner scanning their own territory wants centres grouped by
-      // where they actually are, not buried in reverse-chronological
-      // order. Alphabetical within each level (state, then suburb, then
-      // centre name) so the same centre always lands in the same spot.
-      filtered = filtered.slice().sort((a, b) =>
-        (a.state || '').localeCompare(b.state || '') ||
-        (a.suburb || '').localeCompare(b.suburb || '') ||
-        (a.centre_name || '').localeCompare(b.centre_name || ''));
+      // Default: geography first, not most-recently-submitted-first — a
+      // Workforce Partner scanning their own territory wants centres
+      // grouped by where they actually are, not buried in reverse-
+      // chronological order. Alphabetical within each level (state, then
+      // suburb, then centre name) so the same centre always lands in the
+      // same spot.
+      // "Rep (A–Z)" — Liam, Aug 24 meeting: "sort a column from like
+      // alphabetical order" once he could see leads broken out by who
+      // submitted them. Ties broken by centre name, same reasoning as
+      // the geography sort (a stable, predictable order within the tie).
+      const sortBy = document.getElementById('leadsSortBy').value;
+      filtered = filtered.slice().sort((a, b) => sortBy === 'rep'
+        ? (a.submitted_by_name || a.submitted_by_email || '').localeCompare(b.submitted_by_name || b.submitted_by_email || '') ||
+          (a.centre_name || '').localeCompare(b.centre_name || '')
+        : (a.state || '').localeCompare(b.state || '') ||
+          (a.suburb || '').localeCompare(b.suburb || '') ||
+          (a.centre_name || '').localeCompare(b.centre_name || ''));
 
       // Keeps button styling correct even if the State/Partner dropdowns
       // were changed directly rather than via a button click.
@@ -7971,7 +7984,7 @@
       const body = document.getElementById('leadsTableBody');
       const total = leadsFilteredRows.length;
       if (!total) {
-        body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">${allLeads.length ? 'No leads match these filters' : 'No leads submitted yet'}</td></tr>`;
         document.getElementById('leadsPager').innerHTML = '';
         return;
       }
@@ -7996,6 +8009,7 @@
           <td>${l.agency_usage ? `<span class="agency-badge ${LEAD_AGENCY_USAGE_BADGE_CLASS[l.agency_usage] || ''}" title="${escHtml(LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)}">${escHtml(LEAD_AGENCY_USAGE_SHORT[l.agency_usage] || l.agency_usage)}</span>` : '—'}</td>
           <td>${leadStageBadge(l)}</td>
           <td class="td-truncate" style="max-width:44px" title="${escHtml(l.assigned_workforce_partner || '')}">${escHtml(WORKFORCE_PARTNER_SHORT[l.assigned_workforce_partner] || l.assigned_workforce_partner || '—')}</td>
+          <td class="td-truncate" style="max-width:110px" title="${escHtml(l.submitted_by_name || l.submitted_by_email || '')}">${escHtml(l.submitted_by_name || l.submitted_by_email || '—')}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.lead_called_at)}</td>
           <td style="white-space:nowrap">${fmtDateShort(l.centre_visited_at)}</td>
         </tr>`).join('');
