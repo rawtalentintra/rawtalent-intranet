@@ -126,6 +126,9 @@
     .tag-chip.favourite { background: #fef3c7; color: #92400e; }
     .tag-chip.known { background: #e0e7ff; color: #3730a3; }
     .icon-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 6px; }
+    .badge.inline { margin-top: 0; flex-shrink: 0; }
+    .show-more-btn { background: none; border: none; color: var(--blue); font-size: 13px; font-weight: 700; padding: 8px 0 2px; cursor: pointer; }
+    .note-line { font-size: 12.5px; color: var(--text-muted); padding: 8px 0; }
 
     label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin: 12px 0 5px; }
     input[type=text], input[type=date], input[type=tel], select, textarea {
@@ -257,6 +260,7 @@
     // ── Centre Detail / Snapshot ───────────────────────────────────────
     function openCentre(centreKey) {
       currentCentreKey = centreKey;
+      upcomingExpanded = false;
       setView('centre-detail');
     }
     async function renderCentreDetail() {
@@ -271,27 +275,54 @@
       if (!iso) return '—';
       try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; }
     }
+    let upcomingExpanded = false;
+
+    function bookingRow(b) {
+      const cls = b.statusId === 6 ? 'bad' : (b.filled ? 'good' : 'warn');
+      const timeStr = b.startTime ? fmtTime(b.startTime) : '';
+      return `
+        <div class="educator-row">
+          <div>
+            <div class="name">${fmtDate(b.bookingDate)}${timeStr ? ' · ' + timeStr : ''}</div>
+            <div class="meta">${b.filled ? escHtml(b.assignedEducatorName || 'Filled') : 'No educator assigned yet'}</div>
+          </div>
+          <span class="badge inline ${cls}">${escHtml(b.statusLabel)}</span>
+        </div>
+      `;
+    }
+    function fmtTime(iso) {
+      try { return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }); } catch { return ''; }
+    }
+
     function paintCentreDetail() {
       const main = document.getElementById('mainContent');
       const s = currentSnapshot;
       if (!s) { main.innerHTML = `<div class="empty-state">This centre could not be loaded.</div>`; return; }
       document.getElementById('headerTitle').textContent = s.name;
+      const upcomingShown = upcomingExpanded ? s.upcomingBookings : s.upcomingBookings.slice(0, 3);
       main.innerHTML = `
         <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
         ${s.contactName || s.contactNo ? `<div class="sub">${escHtml(s.contactName || '')}${s.contactName && s.contactNo ? ' · ' : ''}${s.contactNo ? `<a href="tel:${escHtml(s.contactNo)}">${escHtml(s.contactNo)}</a>` : ''}</div>` : ''}
 
-        <div class="section-title">Snapshot</div>
         <div class="stat-row">
           <div class="stat"><div class="num">${s.fillRate != null ? s.fillRate + '%' : '—'}</div><div class="label">Fill rate</div></div>
           <div class="stat"><div class="num">${s.todayBookingsCount}</div><div class="label">Today</div></div>
           <div class="stat"><div class="num">${s.upcomingBookingsCount}</div><div class="label">Upcoming</div></div>
         </div>
-        <div class="sub" style="margin-bottom:10px">Last booking: ${fmtDate(s.lastBookingDate)}</div>
 
         <div class="action-row">
           <button class="btn btn-primary" onclick="setView('log-visit')">📝 Log Visit/Call</button>
           <button class="btn btn-secondary" onclick="requestCentreBooking()">📅 Request Booking</button>
         </div>
+
+        <div class="section-title">Today</div>
+        ${s.todayBookings.length ? s.todayBookings.map(bookingRow).join('') : `<div class="sub">No bookings today. Last booking: ${fmtDate(s.lastBookingDate)}</div>`}
+
+        ${s.upcomingBookings.length ? `
+          <div class="section-title">Upcoming</div>
+          ${upcomingShown.map(bookingRow).join('')}
+          ${s.upcomingBookings.length > 3 ? `<button class="show-more-btn" onclick="toggleUpcoming()">${upcomingExpanded ? 'Show less' : `Show ${s.upcomingBookings.length - 3} more`}</button>` : ''}
+        ` : ''}
 
         <div class="section-title">Educators</div>
         ${s.educators.length ? s.educators.map(e => `
@@ -304,7 +335,14 @@
             <button class="icon-btn" onclick="tagEducator('${e.userId}', '${escHtml(e.name).replace(/'/g, "\\'")}')" title="Tag relationship">🏷️</button>
           </div>
         `).join('') : `<div class="sub">No educators with shifts here yet.</div>`}
+
+        <div class="section-title">Centre Users</div>
+        <div class="note-line">Not available yet — RT doesn't expose centre login users to us. Flagged for the team's API review.</div>
       `;
+    }
+    function toggleUpcoming() {
+      upcomingExpanded = !upcomingExpanded;
+      paintCentreDetail();
     }
     async function tagEducator(userId, name) {
       const choice = prompt(`Tag ${name} as:\n1 = ⭐ Favourite\n2 = 🔗 Known to Centre (market intelligence)\n\nType 1 or 2:`);

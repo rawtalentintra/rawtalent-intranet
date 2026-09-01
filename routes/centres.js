@@ -38,6 +38,48 @@ function isRealAssignment(assignedUserId) {
   return assignedUserId != null && assignedUserId !== 0;
 }
 
+// Same inferred map admin.html's RT API Data Reference documents
+// (BOOKING_STATUS_LABELS there) — duplicated here rather than shared
+// since that copy lives in a big inline <script>, not a requirable
+// module; both describe the same RT statusId values and should be kept
+// in sync if either changes.
+const BOOKING_STATUS_LABELS = { 1: 'Open', 2: 'Requested', 3: 'Assigned', 5: 'Completed', 6: 'Cancelled', 7: 'Unfilled' };
+function bookingStatusLabel(statusId) {
+  return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
+}
+
+// Resolves a compact list of RT bookings (already filtered to a single
+// centre + date range by the caller) into the shape the WFP app's Today/
+// Upcoming booking lists need — status label + assigned educator name,
+// soonest first. Named lookups are deduped across the whole list (a
+// centre with several shifts filled by the same educator only costs one
+// RT candidate call), matching topEducatorsForCentre's own "only resolve
+// the handful actually present" approach just above it.
+async function resolveBookingsForDisplay(bookings) {
+  const ids = [...new Set(bookings.filter(b => isRealAssignment(b.assignedUserId)).map(b => b.assignedUserId))];
+  const names = {};
+  await Promise.all(ids.map(async id => {
+    try {
+      const candidate = await rtApi.fetchById('candidates', id);
+      names[id] = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || `Educator #${id}`;
+    } catch {
+      names[id] = `Educator #${id}`;
+    }
+  }));
+  return bookings
+    .slice()
+    .sort((a, b) => new Date(a.bookingDate) - new Date(b.bookingDate))
+    .map(b => ({
+      bookingDate: b.bookingDate,
+      startTime: b.startTime || null,
+      endTime: b.endTime || null,
+      statusId: b.statusId,
+      statusLabel: bookingStatusLabel(b.statusId),
+      filled: isRealAssignment(b.assignedUserId),
+      assignedEducatorName: isRealAssignment(b.assignedUserId) ? (names[b.assignedUserId] || null) : null
+    }));
+}
+
 // My Centres/Centre 360 — a Workforce Partner's real, live RT client book
 // of business (~360 active centres today; RT has no per-partner
 // assignment field, so this is unfiltered by partner for now — see the
@@ -513,8 +555,18 @@ router.get('/:centreKey/snapshot', async (req, res) => {
     const forCentre = bookings.filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id));
     const filled = forCentre.filter(b => isRealAssignment(b.assignedUserId)).length;
     const todayStr = new Date().toISOString().slice(0, 10);
-    const todayCount = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) === todayStr).length;
-    const upcomingCount = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) > todayStr).length;
+    const todayRaw = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) === todayStr);
+    // Capped rather than the full 100-day window's worth — this is a
+    // phone-screen "what's coming up" list, not a report; 20 is generous
+    // slack over what a single centre normally has booked ahead.
+    const upcomingRaw = forCentre
+      .filter(b => b.bookingDate && b.bookingDate.slice(0, 10) > todayStr)
+      .sort((a, b) => new Date(a.bookingDate) - new Date(b.bookingDate))
+      .slice(0, 20);
+    const [todayBookings, upcomingBookings] = await Promise.all([
+      resolveBookingsForDisplay(todayRaw),
+      resolveBookingsForDisplay(upcomingRaw)
+    ]);
 
     const educators = await topEducatorsForCentre(parsed, bookings, 5);
     const relationships = (await getDb().execute({
@@ -540,8 +592,10 @@ router.get('/:centreKey/snapshot', async (req, res) => {
       nurture: withHealth.nurture,
       lastBookingDate: lastBookingByCentreKey[centre.centreKey] || null,
       fillRate: forCentre.length ? Math.round((filled / forCentre.length) * 100) : null,
-      todayBookingsCount: todayCount,
-      upcomingBookingsCount: upcomingCount,
+      todayBookingsCount: todayRaw.length,
+      upcomingBookingsCount: upcomingRaw.length,
+      todayBookings,
+      upcomingBookings,
       educators: educatorsWithTags
     });
   } catch (err) {
