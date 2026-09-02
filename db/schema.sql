@@ -263,6 +263,41 @@ ALTER TABLE call_evaluation_feedback ADD COLUMN IF NOT EXISTS category_keys JSON
 CREATE INDEX IF NOT EXISTS idx_call_evaluation_feedback_eval_id ON call_evaluation_feedback(evaluation_id);
 ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS reviewer_feedback_category TEXT;
 
+-- Blind multi-grader calibration exercise (Joy, 2026-09-02) — distinct from
+-- the older per-evaluation "Calibration Only"/"Calibration Done" outcome
+-- override above (that one just excludes a single already-existing eval
+-- from a rep's real quality stats; this is a whole separate workflow: one
+-- call gets nominated as "the call to calibrate this week", and a fixed
+-- panel of QA staff (Sophia/Joy/Lorie/Adzi/Vicky — see users.
+-- can_calibrate_calls below) each independently grade that SAME call,
+-- blind to each other's scores until Joy reveals them for the calibration
+-- meeting. A calibration submission is still just a normal call_evaluations
+-- row (reuses gradeCall/gradeManual/computeResult as-is) — calibration_id
+-- links it back here, and its outcome is always forced to the existing
+-- 'calibration_only' value so it's automatically excluded from the Call
+-- Quality Dashboard/report exactly like that older mechanism already is,
+-- with zero new exclusion logic needed.
+CREATE TABLE IF NOT EXISTS call_calibrations (
+  id TEXT PRIMARY KEY,
+  recording_id TEXT NOT NULL,
+  added_by CITEXT,
+  added_at TIMESTAMPTZ DEFAULT now(),
+  revealed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_call_calibrations_recording ON call_calibrations(recording_id);
+
+-- Links a call_evaluations row to the calibration exercise it belongs to.
+-- One panelist has at most one evaluation per calibration_id (re-grading
+-- updates that same row in place — see routes/calls.js's calibration
+-- endpoints) so "everyone's score" is unambiguous once revealed.
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS calibration_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_call_evaluations_calibration ON call_evaluations(calibration_id);
+
+-- Per-person grant (Sophia/Lorie/Adzi/Vicky) for the calibration panel,
+-- same boolean-column pattern as can_build_training — super_admin (Joy)
+-- always has access regardless, checked in code, not stored here.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_calibrate_calls BOOLEAN DEFAULT false;
+
 -- Standing calibration notes from a reviewer, persisted so every future AI
 -- grading call applies the same corrections — not just the one call the
 -- feedback was given on. rubric_type/category_key are nullable: a note tied

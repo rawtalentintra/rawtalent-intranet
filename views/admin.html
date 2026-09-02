@@ -3193,96 +3193,144 @@
           </div>
         </div>
 
-        <div class="admin-table-card" style="margin-bottom:20px">
-          <div class="admin-table-header">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-              <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
-              <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
-            <input type="text" id="callsFilterRep" class="form-control" placeholder="Filter by rep name…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
-            <input type="text" id="callsFilterPhone" class="form-control" placeholder="Filter by phone #…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
-            <input type="text" id="callsFilterRecordingId" class="form-control" placeholder="Filter by recording ID…" style="flex:1;min-width:160px" oninput="debounceFilterCalls()">
-            <select id="callsFilterDirection" class="form-control" style="width:140px" onchange="filterCalls()">
-              <option value="">In + Out</option>
-              <option value="inbound">Inbound only</option>
-              <option value="outbound">Outbound only</option>
-            </select>
-            <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
-            <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
-          </div>
-          <div style="overflow-x:auto">
-            <table class="data-table" id="callsTable">
-              <thead>
-                <tr>
-                  <th style="width:130px">Rep</th>
-                  <th style="width:38px">Dir.</th>
-                  <th style="width:130px">Contact</th>
-                  <th style="width:42px">Dur.</th>
-                  <th style="width:190px">Date (Melbourne)</th>
-                  <th style="width:160px">Status</th>
-                  <th style="width:460px"></th>
-                </tr>
-              </thead>
-              <tbody id="callsListBody">
-                <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="callsPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
+        <div class="calls-tab-bar">
+          <button type="button" class="calls-tab-btn active" data-calls-tab="browse" onclick="switchCallsTab('browse')">Browse Calls</button>
+          <button type="button" class="calls-tab-btn" data-calls-tab="evaluations" onclick="switchCallsTab('evaluations')">Evaluations</button>
+          <button type="button" class="calls-tab-btn" data-calls-tab="calibration" onclick="switchCallsTab('calibration')">Calibration</button>
         </div>
 
-        <div id="callEvalResultCard" class="admin-table-card" style="display:none;margin-bottom:20px">
-          <div class="admin-table-header">
-            <span style="font-weight:600;font-size:14px;color:var(--navy)">Evaluation Result</span>
-            <span id="callEvalOutcome"></span>
+        <div id="callsTabPanel-browse">
+          <div class="admin-table-card" style="margin-bottom:20px">
+            <div class="admin-table-header">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span style="font-weight:600;font-size:14px;color:var(--navy)">Browse Calls</span>
+                <span id="callsListCount" style="font-size:13px;color:var(--text-muted)"></span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
+              <input type="text" id="callsFilterRep" class="form-control" placeholder="Filter by rep name…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
+              <input type="text" id="callsFilterPhone" class="form-control" placeholder="Filter by phone #…" style="flex:1;min-width:140px" oninput="debounceFilterCalls()">
+              <input type="text" id="callsFilterRecordingId" class="form-control" placeholder="Filter by recording ID…" style="flex:1;min-width:160px" oninput="debounceFilterCalls()">
+              <select id="callsFilterDirection" class="form-control" style="width:140px" onchange="filterCalls()">
+                <option value="">In + Out</option>
+                <option value="inbound">Inbound only</option>
+                <option value="outbound">Outbound only</option>
+              </select>
+              <input type="date" id="callsFilterFrom" class="form-control" style="width:150px" onchange="filterCalls()">
+              <input type="date" id="callsFilterTo" class="form-control" style="width:150px" onchange="filterCalls()">
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table" id="callsTable">
+                <thead>
+                  <tr>
+                    <th style="width:130px">Rep</th>
+                    <th style="width:38px">Dir.</th>
+                    <th style="width:130px">Contact</th>
+                    <th style="width:42px">Dur.</th>
+                    <th style="width:190px">Date (Melbourne)</th>
+                    <th style="width:160px">Status</th>
+                    <th style="width:460px"></th>
+                  </tr>
+                </thead>
+                <tbody id="callsListBody">
+                  <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="callsPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
           </div>
-          <div id="callEvalResultBody" style="padding:20px"></div>
+
+          <div id="callEvalResultCard" class="admin-table-card" style="display:none;margin-bottom:20px">
+            <div class="admin-table-header">
+              <span style="font-weight:600;font-size:14px;color:var(--navy)">Evaluation Result</span>
+              <span id="callEvalOutcome"></span>
+            </div>
+            <div id="callEvalResultBody" style="padding:20px"></div>
+          </div>
         </div>
 
-        <div class="admin-table-card">
-          <div class="admin-table-header">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-              <span style="font-weight:600;font-size:14px;color:var(--navy)">Recent Evaluations</span>
-              <span id="callEvalHistoryCount" style="font-size:13px;color:var(--text-muted)"></span>
+        <div id="callsTabPanel-evaluations" style="display:none">
+          <div class="admin-table-card">
+            <div class="admin-table-header">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span style="font-weight:600;font-size:14px;color:var(--navy)">Recent Evaluations</span>
+                <span id="callEvalHistoryCount" style="font-size:13px;color:var(--text-muted)"></span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
+              <input type="date" id="evalFilterFrom" class="form-control" style="width:150px" onchange="filterEvals()">
+              <input type="date" id="evalFilterTo" class="form-control" style="width:150px" onchange="filterEvals()">
+              <select id="evalFilterEvaluator" class="form-control" style="width:170px" onchange="filterEvals()">
+                <option value="">All Evaluators</option>
+              </select>
+              <select id="evalFilterRubricType" class="form-control" style="width:170px" onchange="filterEvals()">
+                <option value="">Educator + Centre</option>
+                <option value="educator">Educator-Facing</option>
+                <option value="centre">Centre-Facing</option>
+              </select>
+              <select id="evalFilterOutcome" class="form-control" style="width:180px" onchange="filterEvals()">
+                <option value="">All Statuses</option>
+              </select>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact" id="callEvalHistoryTable">
+                <thead>
+                  <tr>
+                    <th style="width:100px">Date</th>
+                    <th>Rep</th>
+                    <th style="width:90px">Type</th>
+                    <th style="width:70px">Source</th>
+                    <th style="width:170px">Evaluator</th>
+                    <th style="width:60px">Score</th>
+                    <th style="width:190px">Status</th>
+                    <th style="width:60px"></th>
+                  </tr>
+                </thead>
+                <tbody id="callEvalHistoryList">
+                  <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="callEvalHistoryPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
+          </div>
+        </div>
+
+        <!-- Calibration — Joy, 2026-09-02: a blind multi-grader exercise on
+             one nominated call per week (Sophia/Joy/Lorie/Adzi/Vicky —
+             whoever holds can_calibrate_calls, plus super_admin always).
+             Visible as a tab to everyone who can see this page, but only
+             panel members can actually open/grade a calibration call —
+             everyone else sees the list with an explanatory note instead. -->
+        <div id="callsTabPanel-calibration" style="display:none">
+          <div class="admin-table-card">
+            <div class="admin-table-header">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span style="font-weight:600;font-size:14px;color:var(--navy)">Calibration</span>
+                <span id="calibrationListCount" style="font-size:13px;color:var(--text-muted)"></span>
+              </div>
+            </div>
+            <div style="padding:14px 20px;border-bottom:1px solid var(--gray-200);font-size:12.5px;color:var(--text-muted)">
+              Each calibration call is graded independently by the panel — everyone's score stays hidden (even from each other) until it's revealed for the calibration meeting.
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table" id="calibrationTable">
+                <thead>
+                  <tr>
+                    <th style="width:130px">Rep</th>
+                    <th style="width:190px">Date (Melbourne)</th>
+                    <th style="width:42px">Dur.</th>
+                    <th style="width:150px">Added By</th>
+                    <th style="width:140px">Submissions</th>
+                    <th style="width:120px">Status</th>
+                    <th style="width:100px"></th>
+                  </tr>
+                </thead>
+                <tbody id="calibrationListBody">
+                  <tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--gray-200)">
-            <input type="date" id="evalFilterFrom" class="form-control" style="width:150px" onchange="filterEvals()">
-            <input type="date" id="evalFilterTo" class="form-control" style="width:150px" onchange="filterEvals()">
-            <select id="evalFilterEvaluator" class="form-control" style="width:170px" onchange="filterEvals()">
-              <option value="">All Evaluators</option>
-            </select>
-            <select id="evalFilterRubricType" class="form-control" style="width:170px" onchange="filterEvals()">
-              <option value="">Educator + Centre</option>
-              <option value="educator">Educator-Facing</option>
-              <option value="centre">Centre-Facing</option>
-            </select>
-            <select id="evalFilterOutcome" class="form-control" style="width:180px" onchange="filterEvals()">
-              <option value="">All Statuses</option>
-            </select>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="data-table data-table-compact" id="callEvalHistoryTable">
-              <thead>
-                <tr>
-                  <th style="width:100px">Date</th>
-                  <th>Rep</th>
-                  <th style="width:90px">Type</th>
-                  <th style="width:70px">Source</th>
-                  <th style="width:170px">Evaluator</th>
-                  <th style="width:60px">Score</th>
-                  <th style="width:190px">Status</th>
-                  <th style="width:60px"></th>
-                </tr>
-              </thead>
-              <tbody id="callEvalHistoryList">
-                <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="callEvalHistoryPagination" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:14px;align-items:center"></div>
         </div>
       </div>
       </template>
@@ -3838,6 +3886,24 @@
     </div>
   </div>
 
+  <!-- Calibration Detail Modal — one nominated call, the panel's own
+       grading area, and (once visible) the reveal/comparison table. See
+       routes/calls.js's "Calibration" section for the full workflow. -->
+  <div class="modal-overlay" id="calibrationDetailModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCalibrationDetailModal()">
+    <div class="modal" style="max-width:820px">
+      <div class="modal-header">
+        <div class="modal-title" id="calibrationDetailTitle">Calibration</div>
+        <button class="modal-close" onclick="closeCalibrationDetailModal()">×</button>
+      </div>
+      <div class="modal-body" id="calibrationDetailBody" style="max-height:76vh;overflow-y:auto">
+        <div class="loading-spinner"><div class="spinner"></div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeCalibrationDetailModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Team Profile Modal -->
   <div class="modal-overlay" id="teamProfileModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeTeamProfileModal()">
     <div class="modal" style="max-width:520px;padding:0;overflow:hidden">
@@ -4335,6 +4401,7 @@
     let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
     let currentUserCanCreateOutreachLists = false;
+    let currentUserCanCalibrateCalls = false;
     let currentUserIsPayrollAdmin = false;
     let currentUserWfpLabel = null;
 
@@ -4374,6 +4441,7 @@
         currentUserEmail = me.email;
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
+        currentUserCanCalibrateCalls = !!me.canCalibrateCalls;
         currentUserIsPayrollAdmin = !!me.isPayrollAdmin;
         currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
@@ -17527,6 +17595,10 @@
     let callRubrics = {}; // { educator: {label, description, categories:[{key,label,weight,critical,criteria}]}, centre: {...} }
 
     async function loadCallsSection() {
+      // Calibration is scoped to the panel (Sophia/Joy/Lorie/Adzi/Vicky) on
+      // the backend (requireCalibrationAccess) — hide the tab itself for
+      // everyone else rather than let them click into it and hit a 403.
+      document.querySelector('.calls-tab-btn[data-calls-tab="calibration"]').style.display = currentUserCanCalibrateCalls ? '' : 'none';
       // Dubber Connection / Groq Transcription / Sync Calls are super_admin-
       // only (both the UI card and the backend routes it calls) — skip the
       // status/sync fetches entirely for a plain admin rather than firing
@@ -18566,7 +18638,7 @@
                   <option value="centre" ${r.detected_rubric_type === 'centre' ? 'selected' : ''}>Centre${r.detected_rubric_type === 'centre' ? ' ✓' : ''}</option>
                 </select>
                 <button class="action-btn edit" onclick="evaluateCall('${r.id}', this)">Evaluate (AI)</button>
-                ${r.has_transcript ? `<button class="action-btn edit" onclick="openManualGradeModal('${r.id}')">Grade Manually</button>` : ''}
+                ${currentUserCanCalibrateCalls ? `<button class="action-btn edit" onclick="addToCalibration('${r.id}', this)" title="Nominate this call for the panel to independently grade">🔬 Add to Calibration</button>` : ''}
               </div>
             </td>
           </tr>`;
@@ -18723,11 +18795,18 @@
     }
 
     // ── Manual (human) grading form ──────────────────────────────────
-    let manualGradeRecordingId = null;
+    // Shared by the Calibration tab's "Grade Manually" (its only caller now
+    // that Browse Calls' own Grade Manually button is gone — see Joy,
+    // 2026-09-02) — mode/targetId say where submitManualGrade sends the
+    // result: a calibration submission (targetId = calibration id) vs. the
+    // original plain per-call evaluation (targetId = recording id, kept for
+    // symmetry/possible reuse even though nothing calls it that way today).
+    let manualGradeMode = 'call'; // 'call' | 'calibration'
+    let manualGradeTargetId = null;
 
-    async function openManualGradeModal(recordingId) {
-      manualGradeRecordingId = recordingId;
-      const rubricType = document.getElementById(`rubric-${recordingId}`).value;
+    async function openManualGradeModal(mode, targetId, rubricType) {
+      manualGradeMode = mode;
+      manualGradeTargetId = targetId;
       if (Object.keys(callRubrics).length === 0) {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
       }
@@ -18759,7 +18838,13 @@
       document.getElementById('manualGradeModal').classList.add('open');
     }
 
-    function closeManualGradeModal() { document.getElementById('manualGradeModal').classList.remove('open'); }
+    function closeManualGradeModal() {
+      document.getElementById('manualGradeModal').classList.remove('open');
+      // Cancelling out of a calibration grade should land back on the
+      // calibration call, not just close everything — same swap
+      // openCalibrationManualGrade did to get here.
+      if (manualGradeMode === 'calibration' && manualGradeTargetId) openCalibrationDetailModal(manualGradeTargetId);
+    }
 
     async function submitManualGrade() {
       const rubricType = document.getElementById('manualGradeRubricType').value;
@@ -18774,21 +18859,257 @@
       const btn = document.getElementById('manualGradeSubmitBtn');
       btn.disabled = true; btn.textContent = 'Saving…';
       try {
-        const res = await fetch(`/api/calls/${manualGradeRecordingId}/evaluate-manual`, {
+        const url = manualGradeMode === 'calibration'
+          ? `/api/calls/calibrations/${manualGradeTargetId}/evaluate-manual`
+          : `/api/calls/${manualGradeTargetId}/evaluate-manual`;
+        const res = await fetch(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rubricType, scores, summary })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Save failed', 'error'); return; }
+        // closeManualGradeModal() itself re-opens the calibration detail
+        // modal when manualGradeMode is 'calibration' (same swap used to
+        // get here) — no need to duplicate that call on this success path.
         closeManualGradeModal();
-        const card = document.getElementById('callEvalResultCard');
-        card.style.display = 'block';
-        renderEvalResult(data);
-        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        loadEvaluationHistory();
-        toast('Evaluation saved', 'success');
+        if (manualGradeMode === 'calibration') {
+          toast('Your calibration grade was saved', 'success');
+          loadCalibrationList();
+        } else {
+          const card = document.getElementById('callEvalResultCard');
+          card.style.display = 'block';
+          renderEvalResult(data);
+          card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          loadEvaluationHistory();
+          toast('Evaluation saved', 'success');
+        }
       } catch { toast('Network error', 'error'); }
       finally { btn.disabled = false; btn.textContent = 'Save Evaluation'; }
+    }
+
+    // ── Call Quality Evaluator tabs ──────────────────────────────────
+    function switchCallsTab(tab) {
+      ['browse', 'evaluations', 'calibration'].forEach(t => {
+        document.getElementById(`callsTabPanel-${t}`).style.display = t === tab ? '' : 'none';
+        document.querySelector(`.calls-tab-btn[data-calls-tab="${t}"]`).classList.toggle('active', t === tab);
+      });
+      if (tab === 'calibration') loadCalibrationList();
+    }
+
+    // ── Calibration (blind multi-grader exercise) ────────────────────
+    // Nominates a Browse Calls row for the panel to independently grade —
+    // see routes/calls.js's own Calibration section for the full model.
+    async function addToCalibration(recordingId, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+      try {
+        const res = await fetch(`/api/calls/${recordingId}/add-to-calibration`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to add to calibration', 'error'); return; }
+        toast(data.alreadyExists ? 'Already on the Calibration tab' : 'Added to Calibration — see the Calibration tab', 'success');
+      } catch { toast('Network error', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = '🔬 Add to Calibration'; } }
+    }
+
+    async function loadCalibrationList() {
+      const body = document.getElementById('calibrationListBody');
+      try {
+        const data = await fetch('/api/calls/calibrations').then(r => r.json());
+        document.getElementById('calibrationListCount').textContent = data.calibrations.length ? `${data.calibrations.length} call${data.calibrations.length === 1 ? '' : 's'}` : '';
+        if (!data.calibrations.length) {
+          body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No calls added to calibration yet — use "🔬 Add to Calibration" on a call in Browse Calls.</td></tr>';
+          return;
+        }
+        body.innerHTML = data.calibrations.map(c => {
+          const contact = c.call_type === 'outbound' ? c.to_number : c.from_number;
+          const statusChip = c.revealed_at
+            ? '<span class="badge badge-published">🔬✔️ Revealed</span>'
+            : '<span class="badge badge-user">🔒 Blind</span>';
+          const submittedLabel = `${c.submitted_count}/${data.panelSize} submitted` + (c.my_submitted ? ' · you ✓' : '');
+          return `
+          <tr>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(c.rep_name || 'Unknown')}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${escHtml(fmtCallDateTime(c.start_time_iso) || '—')}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${fmtDuration(c.duration_seconds)}</td>
+            <td style="color:var(--text-muted)">${escHtml(c.added_by || '—')}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${escHtml(submittedLabel)}</td>
+            <td>${statusChip}</td>
+            <td><button class="action-btn edit" onclick="openCalibrationDetailModal('${c.id}')">Open</button></td>
+          </tr>`;
+        }).join('');
+      } catch { body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calibration calls.</td></tr>'; }
+    }
+
+    async function openCalibrationDetailModal(id) {
+      const modal = document.getElementById('calibrationDetailModal');
+      const body = document.getElementById('calibrationDetailBody');
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      modal.classList.add('open');
+      if (Object.keys(callRubrics).length === 0) {
+        callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
+      }
+      try {
+        const data = await fetch(`/api/calls/calibrations/${id}`).then(r => r.json());
+        renderCalibrationDetail(data);
+      } catch { body.innerHTML = '<div style="padding:14px;color:#c0392b;font-size:13px">Failed to load this calibration call.</div>'; }
+    }
+
+    function closeCalibrationDetailModal() { document.getElementById('calibrationDetailModal').classList.remove('open'); }
+
+    // Read by playCalibrationRecording() below — same reason
+    // evalDetailCurrentData exists for playCurrentEvalRecording: playRecording's
+    // optional infoOverride is a live object, which an inline onclick string
+    // can't carry directly, so a named wrapper reads it from here instead.
+    let calibrationDetailCurrentData = null;
+
+    function playCalibrationRecording() {
+      const c = calibrationDetailCurrentData;
+      if (!c) return;
+      playRecording(c.recording_id, {
+        repName: c.rep_name || 'Unknown',
+        direction: c.call_type === 'outbound' ? 'Out' : c.call_type === 'inbound' ? 'In' : '—',
+        contact: (c.call_type === 'outbound' ? c.to_number : c.from_number) || '—',
+        dateLabel: fmtCallDateTime(c.start_time_iso) || '—'
+      });
+    }
+
+    function renderCalibrationDetail(data) {
+      const { calibration: c, submissions, calibrationScore, myEmail, isSuperAdmin } = data;
+      calibrationDetailCurrentData = c;
+      document.getElementById('calibrationDetailTitle').textContent = `Calibration — ${c.rep_name || 'Unknown'}`;
+      const contact = c.call_type === 'outbound' ? c.to_number : c.from_number;
+      const mine = submissions.find(s => s.email === myEmail);
+      const rubricTypeForMine = mine?.rubricType || c.detected_rubric_type || 'auto';
+
+      const metaRow = `
+        <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:var(--text-muted);margin-bottom:14px;padding:12px 14px;background:var(--offwhite);border-radius:var(--radius)">
+          <div><strong style="color:var(--navy)">Call type:</strong> ${escHtml(c.call_type || '—')}</div>
+          <div><strong style="color:var(--navy)">Date:</strong> ${escHtml(fmtCallDateTime(c.start_time_iso) || '—')}</div>
+          <div><strong style="color:var(--navy)">Duration:</strong> ${fmtDuration(c.duration_seconds)}</div>
+          <div><strong style="color:var(--navy)">Contact:</strong> ${escHtml(contact || '—')}</div>
+          <div><strong style="color:var(--navy)">Added by:</strong> ${escHtml(c.added_by || '—')}</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          ${c.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playCalibrationRecording()">▶ Play Recording</button>` : ''}
+          ${c.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${c.recording_id}')">📄 View Transcript</button>` : ''}
+        </div>`;
+
+      const myResultBox = mine?.submitted ? `
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 14px;margin-top:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span class="badge ${outcomeMeta[mine.realOutcome]?.badge || 'badge-user'}">${outcomeMeta[mine.realOutcome]?.label || mine.realOutcome}</span>
+            <span style="font-size:20px;font-weight:800;color:var(--orange)">${mine.overallScore}%</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted)">${escHtml(mine.summary || '')}</div>
+        </div>` : '<div style="font-size:12px;color:var(--text-muted);margin-top:8px">You haven\'t graded this call yet.</div>';
+
+      const myGradeSection = `
+        <div class="lead-group-label" style="margin-top:0">My Grade</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="calibRubric-${c.id}" class="form-control" style="font-size:12px;padding:5px 8px;width:150px">
+            <option value="auto" ${rubricTypeForMine === 'auto' ? 'selected' : ''}>🔍 Auto-detect</option>
+            <option value="educator" ${rubricTypeForMine === 'educator' ? 'selected' : ''}>Educator</option>
+            <option value="centre" ${rubricTypeForMine === 'centre' ? 'selected' : ''}>Centre</option>
+          </select>
+          <button class="action-btn edit" onclick="evaluateCalibration('${c.id}', this)">${mine?.submitted ? 'Re-grade (AI)' : 'Evaluate (AI)'}</button>
+          <button class="action-btn edit" onclick="openCalibrationManualGrade('${c.id}', '${c.detected_rubric_type || ''}')">${mine?.submitted ? 'Re-grade Manually' : 'Grade Manually'}</button>
+        </div>
+        ${myResultBox}`;
+
+      const panelSection = `
+        <div class="lead-group-label">Panel</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${submissions.map(s => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12.5px">
+              <span style="font-weight:600;color:var(--navy)">${escHtml(s.name || s.email)}${s.email === myEmail ? ' <span style="color:var(--text-muted);font-weight:400">(you)</span>' : ''}</span>
+              <span>${s.submitted
+                ? (s.hidden ? '<span style="color:var(--text-muted)">✅ Submitted · 🔒 hidden until revealed</span>' : `<span style="color:#15803d;font-weight:700">✅ Submitted — ${s.overallScore}%</span>`)
+                : '<span style="color:var(--text-muted)">— Not yet</span>'}</span>
+            </div>`).join('')}
+        </div>`;
+
+      const revealBtn = (isSuperAdmin && !c.revealed_at)
+        ? `<button class="btn-add" style="margin-top:12px" onclick="revealCalibration('${c.id}')">🔬 Reveal Everyone's Scores</button>`
+        : '';
+
+      let comparisonSection = '';
+      if (calibrationScore) {
+        const graders = submissions.filter(s => s.submitted && !s.hidden);
+        const categoryRows = calibrationScore.perCategory.map(cat => `
+          <tr>
+            <td>${escHtml(cat.label)}</td>
+            ${graders.map(g => {
+              const found = g.categoryScores.find(cs => cs.key === cat.key);
+              return `<td>${found ? found.score : '—'}</td>`;
+            }).join('')}
+            <td class="calib-avg-col">${cat.average}</td>
+          </tr>`).join('');
+        comparisonSection = `
+          <div class="lead-group-label">Everyone's Scores${c.revealed_at ? '' : ' (visible to you as Super Admin)'}</div>
+          <div style="overflow-x:auto">
+            <table class="data-table calibration-score-table" style="font-size:12.5px">
+              <thead><tr><th>Category</th>${graders.map(g => `<th>${escHtml((g.name || g.email).split(' ')[0])}</th>`).join('')}<th class="calib-avg-col">Average</th></tr></thead>
+              <tbody>
+                ${categoryRows}
+                <tr style="font-weight:800">
+                  <td>Overall Score</td>
+                  ${graders.map(g => `<td>${g.overallScore}%</td>`).join('')}
+                  <td class="calib-avg-col">${calibrationScore.overallAverage}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Calibration score across all ${calibrationScore.gradersCounted} grader${calibrationScore.gradersCounted === 1 ? '' : 's'}: <strong style="color:var(--navy)">${calibrationScore.overallAverage}%</strong></div>`;
+      }
+
+      document.getElementById('calibrationDetailBody').innerHTML = metaRow + myGradeSection + panelSection + revealBtn + comparisonSection;
+    }
+
+    // Resolves the rubric-type select's "🔍 Auto-detect" down to a real
+    // rubric before opening the manual-grade form, which (unlike Evaluate
+    // AI) has no server-side auto-detect step of its own to fall back on.
+    function openCalibrationManualGrade(calibrationId, detectedRubricType) {
+      const sel = document.getElementById(`calibRubric-${calibrationId}`).value;
+      const rubricType = sel === 'auto' ? (detectedRubricType || 'educator') : sel;
+      // Same "close this one, open that one" swap as Nurture Cadence →
+      // Log Call/Visit — two modal-overlays open at once would just stack
+      // as double-dark. submitManualGrade's calibration branch re-opens
+      // this detail modal on success (or on Cancel — see closeManualGradeModal).
+      closeCalibrationDetailModal();
+      openManualGradeModal('calibration', calibrationId, rubricType);
+    }
+
+    async function evaluateCalibration(calibrationId, btn) {
+      const rubricType = document.getElementById(`calibRubric-${calibrationId}`).value;
+      // On success the whole modal body re-renders (openCalibrationDetailModal),
+      // which gives this button a fresh, correct label for free — but on an
+      // error the DOM node itself survives, so its own label has to be put
+      // back by hand or it's stuck reading "Grading…" forever.
+      const originalLabel = btn?.textContent;
+      if (btn) { btn.disabled = true; btn.textContent = 'Grading…'; }
+      try {
+        const res = await fetch(`/api/calls/calibrations/${calibrationId}/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rubricType })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Evaluation failed', 'error'); if (btn) btn.textContent = originalLabel; return; }
+        toast('Your calibration grade was saved', 'success');
+        openCalibrationDetailModal(calibrationId);
+        loadCalibrationList();
+      } catch { toast('Network error', 'error'); if (btn) btn.textContent = originalLabel; }
+      finally { if (btn) { btn.disabled = false; } }
+    }
+
+    async function revealCalibration(calibrationId) {
+      if (!confirm("Reveal everyone's scores for this calibration call? This can't be undone.")) return;
+      try {
+        const res = await fetch(`/api/calls/calibrations/${calibrationId}/reveal`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to reveal', 'error'); return; }
+        toast('Revealed — everyone can now see each other\'s scores', 'success');
+        openCalibrationDetailModal(calibrationId);
+        loadCalibrationList();
+      } catch { toast('Network error', 'error'); }
     }
 
     let evalFiltersLoaded = false;

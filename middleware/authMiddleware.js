@@ -78,4 +78,16 @@ function requirePwaAccess(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder, requirePwaAccess };
+// Calibration panel (Sophia/Lorie/Adzi/Vicky), same per-person pattern as
+// requireTrainingBuilder — super_admin (Joy) always has it, everyone else
+// needs the grant regardless of role (an admin like Liam/Prince/Yuvraj, or
+// qa_view's Jemina, is NOT automatically on the panel just by role).
+function requireCalibrationAccess(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (req.user.role !== 'super_admin' && !req.user.can_calibrate_calls) {
+    return res.status(403).json({ error: 'You do not have access to this' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder, requirePwaAccess, requireCalibrationAccess };

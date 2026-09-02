@@ -767,19 +767,49 @@ function gradeManual(rubricType, rawScores, summary) {
   return computeResult(rubric, rawScores, summary);
 }
 
-async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, reviewerFeedback, reviewerFeedbackCategory }) {
+async function saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, reviewerFeedback, reviewerFeedbackCategory, calibrationId, dbOutcome }) {
   const db = getDb();
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO call_evaluations
-          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source, reviewer_feedback, reviewer_feedback_category)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, recording_id, rep_name, call_type, rubric_type, call_date, duration_seconds, category_scores, overall_score, outcome, summary, evaluated_by, source, reviewer_feedback, reviewer_feedback_category, calibration_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id, recordingId, repName || null, callType || null, rubricType, callDate || null, durationSeconds || null,
-      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary, evaluatedBy || null, source || 'ai', reviewerFeedback || null, reviewerFeedbackCategory || null
+      // dbOutcome lets a calibration submission store the real computed
+      // outcome (result.outcome) everywhere it's returned to the caller,
+      // while the row itself is always tagged 'calibration_only' in the DB
+      // — see call_calibrations' schema comment for why (reuses the
+      // existing quality-stats exclusion mechanism as-is).
+      JSON.stringify(result.categoryScores), result.overallScore, dbOutcome || result.outcome, result.summary, evaluatedBy || null, source || 'ai', reviewerFeedback || null, reviewerFeedbackCategory || null, calibrationId || null
     ]
   });
   return id;
+}
+
+// Insert-or-update for the calibration workflow: each panelist gets at most
+// one call_evaluations row per calibration_id, so re-grading (running
+// Evaluate AI again, or resubmitting the manual form) replaces their own
+// current submission in place rather than piling up duplicates — otherwise
+// "everyone's score" would be ambiguous once revealed. Always tags the row
+// 'calibration_only' (see call_calibrations' schema comment) regardless of
+// what computeResult actually derived, which is still returned to the
+// caller untouched so the grader's own view can show a real outcome label.
+async function upsertCalibrationEvaluation({ calibrationId, recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source }) {
+  const db = getDb();
+  const existing = await db.execute({ sql: 'SELECT id FROM call_evaluations WHERE calibration_id = ? AND evaluated_by = ?', args: [calibrationId, evaluatedBy] });
+  if (existing.rows[0]) {
+    const id = existing.rows[0].id;
+    await db.execute({
+      sql: `UPDATE call_evaluations
+            SET rep_name = ?, call_type = ?, rubric_type = ?, call_date = ?, duration_seconds = ?,
+                category_scores = ?, overall_score = ?, outcome = 'calibration_only', summary = ?, source = ?, updated_at = now()
+            WHERE id = ?`,
+      args: [repName || null, callType || null, rubricType, callDate || null, durationSeconds || null, JSON.stringify(result.categoryScores), result.overallScore, result.summary, source || 'ai', id]
+    });
+    return id;
+  }
+  return saveEvaluation({ recordingId, repName, callType, rubricType, callDate, durationSeconds, result, evaluatedBy, source, calibrationId, dbOutcome: 'calibration_only' });
 }
 
 // Re-grading updates the SAME evaluation row rather than inserting a new
@@ -828,7 +858,7 @@ async function listEvaluationFeedback(evaluationId) {
 }
 
 module.exports = {
-  RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult,
+  RUBRICS, gradeCall, gradeManual, saveEvaluation, updateEvaluationResult, upsertCalibrationEvaluation,
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,

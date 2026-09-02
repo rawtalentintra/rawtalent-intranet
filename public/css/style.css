@@ -2159,6 +2159,24 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-attachment-thumb button:hover, .task-attachment-file button:hover { color: #dc2626; }
 .task-attachment-pending { opacity: .6; cursor: default; border-style: dashed; }
 
+/* Call Quality Evaluator tabs (Joy, 2026-09-02) — Browse Calls / Evaluations
+   / Calibration. No existing tab-bar convention in this app to reuse, so a
+   small dedicated one: active = solid navy, inactive = plain text on a
+   light border — matching the app's existing button look without borrowing
+   the WFP state-filter pills' per-state colors, which don't apply here. */
+.calls-tab-bar { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.calls-tab-btn { border: 1px solid var(--gray-200); background: white; color: var(--text-muted); font-weight: 700; font-size: 13px; padding: 9px 18px; border-radius: 8px; cursor: pointer; font-family: inherit; transition: var(--transition); }
+.calls-tab-btn:hover { border-color: var(--navy); color: var(--navy); }
+.calls-tab-btn.active { background: var(--navy); border-color: var(--navy); color: white; }
+
+/* Calibration comparison table (reveal view) — each panelist's per-category
+   score in its own column plus a highlighted Average column on the right,
+   so the aggregate "calibration score across all of us" reads as part of
+   the same table rather than a separate number bolted on. */
+.calibration-score-table th, .calibration-score-table td { text-align: center; }
+.calibration-score-table td:first-child, .calibration-score-table th:first-child { text-align: left; }
+.calibration-score-table .calib-avg-col { background: #eff6ff; font-weight: 800; color: var(--navy); }
+
 /* Log a Call/Visit modal (#visitLogModal) mobile layout — Joy, 2026-09-02:
    "overlapping fields... Save buttons are not visible." Two real bugs,
    both scoped to this modal only (max-width:900px + #visitLogModal), so
