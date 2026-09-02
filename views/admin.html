@@ -1428,9 +1428,17 @@
             </div>
             <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
 
-            <div style="font-size:13px;font-weight:700;margin-top:20px;margin-bottom:4px">Partner Connections</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner connects their own Google Calendar with one click — no Workspace admin setup needed. They can also connect from their own login; this list is just visibility + a way to reconnect on their behalf.</div>
-            <div id="calPartnerConnections"><div class="loading-spinner"><div class="spinner"></div></div></div>
+            <!-- Only meaningful in CALENDAR_AUTH_MODE=oauth — "Connect" always
+                 tries to build a Google OAuth consent URL regardless of which
+                 auth mode is actually configured (it doesn't check authMode()
+                 at all), so it stays a 500 dead end in 'delegation'/
+                 'service-account' mode. Hidden there by loadCalendarSyncModeInfo()
+                 below rather than left visible to invite exactly that mistake. -->
+            <div id="calPartnerConnectionsSection">
+              <div style="font-size:13px;font-weight:700;margin-top:20px;margin-bottom:4px">Partner Connections</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner connects their own Google Calendar with one click — no Workspace admin setup needed. They can also connect from their own login; this list is just visibility + a way to reconnect on their behalf.</div>
+              <div id="calPartnerConnections"><div class="loading-spinner"><div class="spinner"></div></div></div>
+            </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
               <div style="font-size:13px;font-weight:700">Needs Review</div>
@@ -11431,32 +11439,51 @@
     function openCalendarSyncModal() {
       document.getElementById('calendarSyncModal').classList.add('open');
       loadCalendarSyncSection();
-      loadPartnerConnections();
       loadCalendarSyncModeInfo();
     }
 
     // Joy, 2026-09-03: the OAuth Connect flow (CALENDAR_AUTH_MODE=oauth)
     // started returning a generic Google 500 with no reachable config
     // issue found on our end — CALENDAR_AUTH_MODE=service-account routes
-    // around that entirely (see googleCalendarClient.js). This surfaces
-    // the one thing that mode actually needs from each partner: sharing
-    // their calendar with the service account's email, "Make changes to
-    // events" — same self-service action as sharing a calendar with a
-    // coworker, no Workspace admin involved.
+    // around that entirely (see googleCalendarClient.js). This drives two
+    // things off one status fetch: the mode-explainer banner, AND whether
+    // the "Partner Connections" section (Connect/Reconnect buttons) shows
+    // at all — "Connect" always tries to build a Google OAuth consent URL
+    // no matter which mode is configured (routes/calendarSync.js's
+    // /connect route doesn't check authMode() first), so leaving it
+    // visible outside 'oauth' mode is a guaranteed-500 trap, not a real
+    // option — better to hide it than let it get clicked by habit.
     async function loadCalendarSyncModeInfo() {
-      const el = document.getElementById('calSyncModeInfo');
+      const infoEl = document.getElementById('calSyncModeInfo');
+      const connectionsSection = document.getElementById('calPartnerConnectionsSection');
       try {
         const status = await fetch('/api/calendar-sync/status').then(r => r.json());
-        if (status.authMode !== 'service-account' || !status.serviceAccountEmail) { el.innerHTML = ''; return; }
-        el.innerHTML = `
-          <div style="padding:10px 12px;border-radius:var(--radius);background:var(--orange-glow);font-size:12px;margin-bottom:14px">
-            <strong>Service-account mode is active.</strong> Each partner (including you) needs to manually share
-            their own Google Calendar with this address, granting <strong>"Make changes to events"</strong>:
-            <div style="font-family:monospace;background:#fff;border-radius:6px;padding:5px 8px;margin:6px 0;word-break:break-all">${escHtml(status.serviceAccountEmail)}</div>
-            In Google Calendar: their calendar's <strong>⋮ → Settings and sharing → Share with specific people or groups → + Add people</strong>.
-            No "Connect" click needed on this end once that's done.
+        connectionsSection.style.display = status.authMode === 'oauth' ? '' : 'none';
+        if (status.authMode === 'oauth') { loadPartnerConnections(); infoEl.innerHTML = ''; return; }
+        if (status.authMode === 'service-account' && status.serviceAccountEmail) {
+          infoEl.innerHTML = `
+            <div style="padding:10px 12px;border-radius:var(--radius);background:var(--orange-glow);font-size:12px;margin-bottom:14px">
+              <strong>Service-account mode is active.</strong> Each partner (including you) needs to manually share
+              their own Google Calendar with this address, granting <strong>"Make changes to events"</strong>:
+              <div style="font-family:monospace;background:#fff;border-radius:6px;padding:5px 8px;margin:6px 0;word-break:break-all">${escHtml(status.serviceAccountEmail)}</div>
+              In Google Calendar: their calendar's <strong>⋮ → Settings and sharing → Share with specific people or groups → + Add people</strong>.
+              There's no "Connect" step in this mode — once sharing is done, hit Sync Now below.
+            </div>`;
+          return;
+        }
+        // Falls through here for 'delegation' — either genuinely configured
+        // (Workspace admin authorized it), or CALENDAR_AUTH_MODE has an
+        // unrecognized value and silently defaulted to this (see
+        // googleCalendarClient.js's authMode() — anything that isn't
+        // exactly 'oauth' or 'service-account' lands here). Worth a nudge
+        // rather than staying silent, since that specific mistake is easy
+        // to make (e.g. pasting an email into CALENDAR_AUTH_MODE itself).
+        infoEl.innerHTML = `
+          <div style="padding:10px 12px;border-radius:var(--radius);background:var(--gray-100);font-size:12px;margin-bottom:14px;color:var(--text-muted)">
+            Running in <strong>delegation</strong> mode (domain-wide delegation, needs Workspace admin authorization). If that
+            wasn't the intent, check <code>CALENDAR_AUTH_MODE</code> in Railway is set to exactly <code>service-account</code> or <code>oauth</code> — any other value lands here by default.
           </div>`;
-      } catch { el.innerHTML = ''; }
+      } catch { infoEl.innerHTML = ''; connectionsSection.style.display = ''; }
     }
 
     // Per-partner OAuth connect/disconnect (services/googleCalendarClient.js
