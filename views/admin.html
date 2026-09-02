@@ -220,7 +220,7 @@
   <nav class="navbar">
     <button class="mobile-sidebar-toggle" onclick="toggleMobileSidebar()" aria-label="Open menu">☰</button>
     <a class="nav-brand" href="/">
-      <img src="/images/logo-transparent.png" alt="RawTalent" height="26" style="display:block">
+      <img src="/images/logo-transparent.png" alt="RawTalent" height="34" style="display:block">
       <span class="nav-tag">Admin</span>
     </a>
     <div class="nav-actions">
@@ -783,7 +783,7 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Portfolio Snapshot — existing centres</div>
           <div class="sd-card-sub">Booking-trend health across your real, active client centres — see <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> for the full list</div>
-          <div id="salesPortfolioSnapshot" style="margin-top:14px"></div>
+          <div id="salesPortfolioSnapshot" style="margin-top:14px;display:grid;grid-template-columns:repeat(6,1fr);gap:10px"></div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
@@ -1037,6 +1037,17 @@
             <button class="btn-secondary" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
           </div>
         </div>
+
+        <!-- Joy, 2026-09-02: "This view should also be on the Leads
+             section but it will only apply to leads." Same KPI-card
+             treatment as the WFP Dashboard's own top row, minus anything
+             centre-specific (Pre-booking/With Bookings) — this page is
+             leads only. Calls/Visits Logged use the exact same
+             salesDashRange/salesPrevRange period math filterLeadsTable()
+             already uses for its Rep Breakdown "previous period"
+             comparison, not a re-derived version, so the two can't drift
+             apart ("make sure numbers are accurate across the board"). -->
+        <div class="kpi-row" id="leadsKpiRow" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
 
         <div class="leads-stats-bar" id="leadsStatsBar"></div>
 
@@ -8119,6 +8130,7 @@
       // applies the closed filter, since that one genuinely is about
       // which rows to show, not what happened historically.
       renderLeadsStatsBar(filtered, metroCount);
+      renderLeadsKpis(filtered, periodKey);
       if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
       else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
       leadsPage = 1; // any filter change starts back at page 1 — a stale page number from a much larger previous result set would otherwise show "no results" instead of the new filtered set
@@ -8158,6 +8170,50 @@
         <div class="leads-stat"><span class="leads-stat-num" style="color:#15803d">${called}</span><span class="leads-stat-label">Called</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#2563eb">${visited}</span><span class="leads-stat-label">Visited</span></div>
         <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>`;
+    }
+
+    // Leads-only version of the WFP Dashboard's KPI row — Joy, 2026-09-02.
+    // `filtered` here is exactly the set the table/stats bar above are
+    // already showing (every filter but closed/regional applied), and
+    // periodKey is this page's own Period dropdown — no separate period
+    // concept invented for this card row. "All time" skips the trend/
+    // previous-period math entirely (there's no "period before all time"),
+    // same as Leads by Rep's own handling of that same case just below.
+    function renderLeadsKpis(filtered, periodKey) {
+      const el = document.getElementById('leadsKpiRow');
+      if (!el) return;
+      const c = salesFunnelCounts(filtered);
+      let cards;
+      if (periodKey === 'all') {
+        cards = [
+          { label: 'Total Leads', value: c.total, hint: 'New leads logged (all time)' },
+          { label: '📞 Calls Logged', value: c.called, hint: `${c.called} of ${c.total} leads called` },
+          { label: '🚗 Visits Logged', value: c.visited, hint: `${c.visited} of ${c.total} leads visited` },
+          { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', hint: `${c.signed} of ${c.visited} visited leads signed` }
+        ];
+      } else {
+        const { from, to } = salesDashRange(periodKey);
+        const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
+        const previous = allLeads.filter(l => leadMatchesWfpFilter(l) && inDateRange(l.created_at, prevFrom, prevTo));
+        const p = salesFunnelCounts(previous);
+        const leadCalls = filtered.filter(l => l.lead_called_status === 'done' && inDateRange(l.lead_called_at, from, to)).length;
+        const leadVisits = filtered.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, from, to)).length;
+        const prevLeadCalls = previous.filter(l => l.lead_called_status === 'done' && inDateRange(l.lead_called_at, prevFrom, prevTo)).length;
+        const prevLeadVisits = previous.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, prevFrom, prevTo)).length;
+        cards = [
+          { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
+          { label: '📞 Calls Logged', value: leadCalls, trend: trendArrow(leadCalls, prevLeadCalls), hint: `${leadCalls} of ${c.total} leads` },
+          { label: '🚗 Visits Logged', value: leadVisits, trend: trendArrow(leadVisits, prevLeadVisits), hint: `${leadVisits} of ${c.total} leads` },
+          { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited leads signed` }
+        ];
+      }
+      el.innerHTML = cards.map(k => `
+        <div class="kpi-card">
+          <div class="kpi-label">${escHtml(k.label)}</div>
+          <div class="kpi-value">${k.value}</div>
+          <div class="kpi-foot">${k.trend || ''}</div>
+          <div class="kpi-hint">${escHtml(k.hint)}</div>
+        </div>`).join('');
     }
 
     // "—" while matches haven't loaded yet or none was found — this is a
@@ -8849,6 +8905,18 @@
     // decline" as a headline card — before this, the whole KPI row was
     // 100% pipeline (leads) metrics with zero signal about the real,
     // already-signed centre book of business.
+    //
+    // Joy, 2026-09-02: "add definition here" + "there may be a better way
+    // of viewing it... also take into account mobile view". Rebuilt as
+    // colored boxes (same .centre-health-box classes + CENTRE_HEALTH_META
+    // colors My Centres' own Portfolio Health strip already uses, so
+    // Growing/Declining/Needs Attention read identically wherever they
+    // show up in the app) with a hover tooltip on each — reusing the exact
+    // "ⓘ" + title convention already established on My Centres' own Health
+    // column header, rather than inventing a new one. #salesPortfolioSnapshot
+    // gets its own mobile grid rule (style.css) mirroring
+    // #myCentresHealthSummary's, so this collapses to a tidy 3-column grid
+    // on a phone instead of the old flex-wrap's unpredictable wrapping.
     function renderSalesPortfolioSnapshot() {
       const box = document.getElementById('salesPortfolioSnapshot');
       const data = myCentresData.filter(centreMatchesWfpFilter);
@@ -8865,28 +8933,24 @@
         if (c.isEscalated) escalatedCount++;
       });
       const cards = [
-        { label: 'Active centres', value: data.length },
-        { label: 'Portfolio bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d) },
-        { label: '📈 Growing', value: counts.growing || 0 },
-        { label: '📉 Declining', value: counts.declining || 0 },
-        { label: '⚠️ Needs Attention', value: counts.needs_attention || 0 },
-        { label: '🚨 Escalated', value: escalatedCount }
+        { label: 'Active Centres', value: data.length, bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Currently active, booking client centres in this territory — see My Centres for the full list.' },
+        { label: 'Bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d), bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Total bookings across the whole portfolio in the last 30 days, compared to the 30 days before that.' },
+        { label: 'Growing', value: counts.growing || 0, bg: CENTRE_HEALTH_META.growing.bg, color: CENTRE_HEALTH_META.growing.color, def: 'Bookings materially up vs the prior 30 days.' },
+        { label: 'Declining', value: counts.declining || 0, bg: CENTRE_HEALTH_META.declining.bg, color: CENTRE_HEALTH_META.declining.color, def: 'Bookings materially down vs the prior 30 days.' },
+        { label: 'Needs Attention', value: counts.needs_attention || 0, bg: CENTRE_HEALTH_META.needs_attention.bg, color: CENTRE_HEALTH_META.needs_attention.color, def: 'Booking activity just stopped, or a visit follow-up is overdue.' },
+        { label: 'Escalated', value: escalatedCount, bg: '#fee2e2', color: '#dc2626', def: "This centre's most recent logged call/visit raised an issue that hasn't been resolved yet." }
       ];
-      box.innerHTML = `<div style="display:flex;gap:32px;flex-wrap:wrap">
-        ${cards.map(c => `
-          <div>
-            <div style="font-size:22px;font-weight:700;color:var(--navy)">${c.value}</div>
-            <div style="font-size:11px;color:var(--text-muted)">${c.label}</div>
-            ${c.trend ? `<div style="margin-top:2px">${c.trend}</div>` : ''}
-          </div>`).join('')}
-      </div>`;
+      box.innerHTML = cards.map(c => `
+        <div class="centre-health-box" title="${escHtml(c.def)}" style="background:${c.bg};cursor:default">
+          <div class="centre-health-box-num" style="color:${c.color}">${c.value}</div>
+          <div class="centre-health-box-label" style="color:${c.color}">${escHtml(c.label)} ⓘ</div>
+          ${c.trend ? `<div style="margin-top:2px">${c.trend}</div>` : ''}
+        </div>`).join('');
     }
 
-    // Shared by renderSalesKpis (whatever period the top selector is on)
-    // and renderSalesActivitySummary (fixed Today/This Week) — call/visit
-    // counts, split lead vs centre, for ANY {from, to} window. Pulled out
-    // to one place so "what counts as a call" or "a visit" can never
-    // silently drift between the two views that both show it.
+    // Used by renderSalesKpis (the KPI row's Calls Logged/Visits Logged
+    // cards) for whatever period the top selector is on — call/visit
+    // counts, split lead vs centre, for ANY {from, to} window.
     //
     // A centre_visits row has no assignedWorkforcePartner of its own —
     // cross-referenced from myCentresData (already loaded) by centreKey,

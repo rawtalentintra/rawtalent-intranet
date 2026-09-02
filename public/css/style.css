@@ -1858,6 +1858,13 @@ body:has(> .navbar) { padding-top: 64px; }
      static HTML (unlike the boxes below, this container was never part
      of the JS template) — !important is genuinely still needed here. */
   #myCentresHealthSummary { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  /* WFP Dashboard's Portfolio Snapshot — same boxes/reasoning as
+     #myCentresHealthSummary above, just its own 6-category set (Active
+     Centres/Bookings/Growing/Declining/Needs Attention/Escalated) — 3
+     columns (2 rows of 3) reads better than 4 here since these labels
+     ("Needs Attention", "Bookings (30d)") run longer than My Centres'
+     own emoji-stripped short labels. Same !important-over-inline reason. */
+  #salesPortfolioSnapshot { grid-template-columns: repeat(3, 1fr) !important; gap: 5px !important; }
   .centre-health-box { min-width: 0; padding: 7px 3px; border-radius: 8px; text-align: center; }
   .centre-health-box-num { font-size: 14px; }
   /* Joy, 2026-09-02: "Opportunity" was still wrapping mid-word
