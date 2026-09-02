@@ -822,6 +822,15 @@
         </div>
 
         <div id="myCentresListScreen">
+          <!-- Joy, 2026-09-02: "This section should also show under My
+               Centres... it should be activity done for the centres."
+               Centres-only half of the same Calls/Visits Logged concept
+               on the WFP Dashboard/Leads pages — no Total Leads/Signed
+               Rate here, this page has nothing to do with new leads.
+               Fixed to "This Month" (no period selector on this page to
+               tie it to) — see renderMyCentresActivityKpis. -->
+          <div class="kpi-row" id="myCentresKpiRow" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px"></div>
+
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <div style="font-weight:700;color:var(--navy);font-size:13px">Portfolio Health</div>
@@ -9474,6 +9483,7 @@
       const body = document.getElementById('myCentresTableBody');
       try {
         myCentresData = await fetch('/api/centres').then(r => r.json());
+        await ensureCentreActivityLogLoaded();
         populateCentresStateFilter();
         populateCentresSuburbFilter();
         // Defaults a Workforce Partner to their own territory on first
@@ -9525,6 +9535,38 @@
             <div class="centre-health-box-label" style="color:${meta.color}">${meta.label.replace(/^\S+\s/, '')}</div>
           </div>`;
       }).join('');
+    }
+
+    // Centres-only Calls/Visits Logged — Joy, 2026-09-02: "activity done
+    // for the centres", not leads. `rows` is exactly the set
+    // renderCentresHealthSummary just used (search/state/suburb applied,
+    // NOT the health filter — same reasoning as that function's own
+    // comment: this should track "what's currently in view", not
+    // whichever single health category happens to be picked). No period
+    // selector exists on this page, so fixed to "This Month" — labelled
+    // explicitly in the hint rather than left ambiguous.
+    function renderMyCentresActivityKpis(rows) {
+      const el = document.getElementById('myCentresKpiRow');
+      if (!el) return;
+      const { from, to } = salesDashRange('month');
+      const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
+      const centreKeys = new Set(rows.map(c => c.centreKey));
+      const activity = centreActivityLog.filter(a => centreKeys.has(a.centreKey));
+      const calls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+      const visits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+      const prevCalls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, prevFrom, prevTo)).length;
+      const prevVisits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, prevFrom, prevTo)).length;
+      const cards = [
+        { label: '📞 Calls Logged', value: calls, trend: trendArrow(calls, prevCalls), hint: 'This month, across these centres' },
+        { label: '🚗 Visits Logged', value: visits, trend: trendArrow(visits, prevVisits), hint: 'This month, across these centres' }
+      ];
+      el.innerHTML = cards.map(k => `
+        <div class="kpi-card">
+          <div class="kpi-label">${escHtml(k.label)}</div>
+          <div class="kpi-value">${k.value}</div>
+          <div class="kpi-foot">${k.trend || ''}</div>
+          <div class="kpi-hint">${escHtml(k.hint)}</div>
+        </div>`).join('');
     }
 
     function toggleCentresHealthFilter(key) {
@@ -9583,6 +9625,7 @@
       // and need every category's count still visible to click between,
       // not just the one currently selected.
       renderCentresHealthSummary(rows);
+      renderMyCentresActivityKpis(rows);
       if (health) rows = rows.filter(c => c.health === health);
       myCentresPage = 1;
       renderMyCentresTable(rows);
