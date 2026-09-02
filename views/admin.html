@@ -723,12 +723,28 @@
             <div class="admin-page-title">📈 WFP Dashboard</div>
             <div class="admin-page-sub">New-business pipeline (leads → called → visited → signed) and what needs attention today. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
-          <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="loadSalesDashboard()">
-            <option value="week">This Week</option>
-            <option value="month" selected>This Month</option>
-            <option value="quarter">This Quarter</option>
-            <option value="all">All Time</option>
-          </select>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="onSalesDashRangeChange()">
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month" selected>This Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="all">All Time</option>
+              <option value="custom">Custom Range…</option>
+            </select>
+            <!-- Joy, 2026-09-02: "allow to select a range of dates as well" —
+                 shown only once Custom Range is picked, defaulted to this
+                 month on first show so it's never blank. Same salesPrevRange
+                 "equal-length window immediately before" logic the presets
+                 already use for the KPI row's trend arrows works unchanged
+                 here — it only needs {from, to}, not which preset produced
+                 them. -->
+            <div id="salesDashCustomRange" style="display:none;gap:6px;align-items:center">
+              <input type="date" id="salesDashRangeFrom" class="form-control" style="width:150px" onchange="renderSalesDashboard()">
+              <span style="color:var(--text-muted);font-size:12px">to</span>
+              <input type="date" id="salesDashRangeTo" class="form-control" style="width:150px" onchange="renderSalesDashboard()">
+            </div>
+          </div>
         </div>
 
         <!-- Bold, distinct fills (not the app's usual light badge tints) —
@@ -8805,9 +8821,42 @@
     // Split from loadSalesDashboard() so the territory filter buttons
     // (setWfpStateFilter) can re-render instantly against already-fetched
     // data instead of re-hitting /api/leads and /api/centres on every click.
+    // Reveals/hides the From-To date inputs and, the first time Custom
+    // Range is picked, defaults them to this month so switching to it
+    // never shows a blank dashboard. Actual re-render is the input's own
+    // onchange (renderSalesDashboard) — this just handles the visibility
+    // toggle and that one-time default.
+    function onSalesDashRangeChange() {
+      const isCustom = document.getElementById('salesDashRange').value === 'custom';
+      const box = document.getElementById('salesDashCustomRange');
+      box.style.display = isCustom ? 'flex' : 'none';
+      if (isCustom) {
+        const fromEl = document.getElementById('salesDashRangeFrom');
+        const toEl = document.getElementById('salesDashRangeTo');
+        if (!fromEl.value || !toEl.value) {
+          const now = new Date();
+          fromEl.value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+          toEl.value = ymd(now);
+        }
+      }
+      loadSalesDashboard();
+    }
+
+    // 'to' is treated as inclusive of that whole calendar day, matching
+    // salesDashRange's own presets (e.g. 'today' also ends at the START of
+    // the NEXT day, not literally midnight of the day itself) — an empty
+    // From/To falls back to "everything"/"today", same spirit as 'all'.
+    function getCustomSalesDashRange() {
+      const fromVal = document.getElementById('salesDashRangeFrom').value;
+      const toVal = document.getElementById('salesDashRangeTo').value;
+      const from = fromVal ? new Date(fromVal + 'T00:00:00') : new Date(2000, 0, 1);
+      const to = toVal ? new Date(new Date(toVal + 'T00:00:00').getTime() + 24 * 60 * 60 * 1000) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+      return { from, to };
+    }
+
     function renderSalesDashboard() {
       const rangeKey = document.getElementById('salesDashRange').value;
-      const { from, to } = salesDashRange(rangeKey);
+      const { from, to } = rangeKey === 'custom' ? getCustomSalesDashRange() : salesDashRange(rangeKey);
       const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
       let current = allLeads.filter(l => inDateRange(l.created_at, from, to)).filter(leadMatchesWfpFilter);
       let previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo)).filter(leadMatchesWfpFilter);
