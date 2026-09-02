@@ -129,6 +129,19 @@ app.get('/wfp/manifest.json', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'public', 'wfp', 'manifest.json'));
 });
+// Public, unauthenticated documentation pages — needed as the "Application
+// privacy policy link"/"Application Terms of Service link" on the Google
+// Cloud OAuth consent screen (required there to switch the Calendar Sync
+// OAuth client from Internal to External/Testing), and just genuinely
+// useful for HeartBeat to have regardless. Deliberately plain static HTML,
+// no auth check — Google's own servers need to be able to fetch these.
+app.get('/documentation/privacy-policy', (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'documentation-privacy-policy.html'));
+});
+app.get('/documentation/terms-of-service', (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'documentation-terms-of-service.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 app.use('/auth/login', loginLimiter);
