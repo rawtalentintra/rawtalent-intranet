@@ -2,6 +2,18 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { getCalendarClientFor, isConfigured: calendarConfigured, authMode } = require('./googleCalendarClient');
 
+// Every calendarId below is the partner's own email, not the literal
+// string 'primary'. For 'oauth' mode and 'delegation' mode (impersonation
+// via subject:ownerEmail) these are equivalent — a Google Calendar user's
+// own address always addresses their own primary calendar, same as
+// 'primary' would. For 'service-account' mode (googleCalendarClient.js —
+// no impersonation, just each partner manually sharing their calendar
+// with the service account's own email, "Make changes to events") it's
+// NOT equivalent: 'primary' there would resolve to the SERVICE ACCOUNT's
+// own calendar, not the partner's — the explicit email is what actually
+// targets their calendar. Using ownerEmail everywhere keeps this file
+// identical across all three auth modes rather than branching per call site.
+
 // ─── Partner ↔ calendar mapping ─────────────────────────────────────
 // CALENDAR_PARTNER_MAP is a JSON object in .env: { "email": "partner name" },
 // where "partner name" must exactly match the `assigned_workforce_partner`
@@ -158,13 +170,13 @@ async function syncLeadEventOutbound(lead, eventType) {
     });
 
     if (existing.rows[0]) {
-      await calendar.events.update({ calendarId: 'primary', eventId: existing.rows[0].google_event_id, requestBody });
+      await calendar.events.update({ calendarId: ownerEmail, eventId: existing.rows[0].google_event_id, requestBody });
       await getDb().execute({
         sql: `UPDATE lead_calendar_events SET updated_at = now() WHERE id = ?`,
         args: [existing.rows[0].id]
       });
     } else {
-      const created = await calendar.events.insert({ calendarId: 'primary', requestBody });
+      const created = await calendar.events.insert({ calendarId: ownerEmail, requestBody });
       await getDb().execute({
         sql: `INSERT INTO lead_calendar_events (id, lead_id, event_type, google_event_id, calendar_owner_email, source)
               VALUES (?, ?, ?, ?, ?, 'app')`,
@@ -263,7 +275,7 @@ async function listAndApplyChanges(ownerEmail) {
   let newSyncToken;
   try {
     do {
-      const params = { calendarId: 'primary', maxResults: 250, pageToken };
+      const params = { calendarId: ownerEmail, maxResults: 250, pageToken };
       if (syncToken) params.syncToken = syncToken;
       else params.timeMin = new Date().toISOString(); // first-ever run: don't walk history
 
@@ -303,7 +315,7 @@ async function registerOrRenewWatch(ownerEmail) {
   const db = getDb();
   const channelId = uuidv4();
   const res = await calendar.events.watch({
-    calendarId: 'primary',
+    calendarId: ownerEmail,
     requestBody: {
       id: channelId,
       type: 'web_hook',
@@ -376,7 +388,7 @@ async function syncRouteToCalendar(ownerEmail, blocks, actor) {
             : { rawtalentLeadId: stop.id, rawtalentEventType: 'visit' }
         }
       };
-      const res = await calendar.events.insert({ calendarId: 'primary', requestBody });
+      const res = await calendar.events.insert({ calendarId: ownerEmail, requestBody });
 
       if (isCentre) {
         // Logged as PLANNED, not completed — lastVisitDate() (see
@@ -410,7 +422,7 @@ async function syncRouteToCalendar(ownerEmail, blocks, actor) {
         end: { dateTime: new Date(block.end).toISOString() },
         extendedProperties: { private: { rawtalentEventType: 'lunch' } }
       };
-      const res = await calendar.events.insert({ calendarId: 'primary', requestBody });
+      const res = await calendar.events.insert({ calendarId: ownerEmail, requestBody });
       created.push({ eventId: res.data.id, type: 'lunch' });
     }
   }

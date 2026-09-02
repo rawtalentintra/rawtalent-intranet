@@ -33,8 +33,33 @@ function getServiceAccountCredentials() {
 // Workspace Admin dance) — reuses the OAuth client already registered for
 // "Sign in with Google" (GOOGLE_CLIENT_ID/SECRET), no new Google Cloud app
 // registration needed, and no Workspace admin involvement at all.
+// 'service-account': built 2026-09-03 after that same OAuth client's
+// consent screen started returning a generic Google 500 on Connect for
+// every account tried, with every reachable config item (client, scopes,
+// branding, Internal vs External/Testing) checked clean — routing around
+// Google's interactive consent flow entirely rather than continuing to
+// chase it. Uses the SAME service account as 'delegation', but with no
+// `subject` (no impersonation, so no Workspace admin authorization
+// needed) — instead, each partner manually shares THEIR OWN calendar
+// with the service account's own email (Calendar → Settings and sharing
+// → Share with specific people → add the service account's email →
+// "Make changes to events"), the same self-service action any two
+// coworkers use to share a calendar with each other. Every calendarId in
+// leadCalendarSyncService.js is already the partner's own email (not the
+// literal 'primary'), which is what makes this addressable at all without
+// impersonation — see that file's own top-of-file comment.
 function authMode() {
-  return process.env.CALENDAR_AUTH_MODE === 'oauth' ? 'oauth' : 'delegation';
+  if (process.env.CALENDAR_AUTH_MODE === 'oauth') return 'oauth';
+  if (process.env.CALENDAR_AUTH_MODE === 'service-account') return 'service-account';
+  return 'delegation';
+}
+
+// Surfaced in the Calendar Sync modal so Joy/partners know exactly which
+// address to share their calendar with in 'service-account' mode — not
+// meaningful in 'oauth' mode (no fixed identity; each partner brings their
+// own), but harmless to return there too.
+function getServiceAccountEmail() {
+  return getServiceAccountCredentials()?.client_email || null;
 }
 
 // ─── OAuth (per-partner) path ────────────────────────────────────────
@@ -139,7 +164,14 @@ async function getCalendarClientFor(ownerEmail) {
     email: credentials.client_email,
     key: credentials.private_key,
     scopes: SCOPES,
-    subject: ownerEmail
+    // 'delegation' impersonates the partner directly (needs domain-wide
+    // delegation authorized once by a Workspace admin) — 'service-account'
+    // deliberately omits `subject` and acts as the service account's own
+    // identity instead, relying on each partner having manually shared
+    // their calendar with it. No impersonation means no admin step, but
+    // also means calendarId must be their actual email, never 'primary'
+    // (see leadCalendarSyncService.js's top-of-file comment).
+    subject: authMode() === 'service-account' ? undefined : ownerEmail
   });
   return google.calendar({ version: 'v3', auth });
 }
@@ -150,6 +182,6 @@ function isConfigured() {
 }
 
 module.exports = {
-  getCalendarClientFor, isConfigured, authMode,
+  getCalendarClientFor, isConfigured, authMode, getServiceAccountEmail,
   buildConsentUrl, saveTokensForPartner, disconnectPartner, listOAuthConnections
 };

@@ -101,6 +101,17 @@ router.get('/connections', requireAdmin, async (req, res) => {
   }
 });
 
+// Lets the Calendar Sync modal show which auth mode is live and, in
+// 'service-account' mode, exactly which address each partner needs to
+// share their calendar with — no need to dig that out of Railway/Cloud
+// Console by hand.
+router.get('/status', requireAdmin, (req, res) => {
+  res.json({
+    authMode: googleCalendarClient.authMode(),
+    serviceAccountEmail: googleCalendarClient.getServiceAccountEmail()
+  });
+});
+
 router.use(requireAdmin);
 
 // Manual fallback for before push-notification channels are registered

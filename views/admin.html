@@ -1418,6 +1418,7 @@
           </div>
           <div class="modal-body" style="max-height:70vh;overflow-y:auto">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Scheduling a call/visit on a lead already creates the event on that partner's calendar automatically. This is just setup and cleanup: registering the push-notification channels, a manual catch-up sync, and linking anything it couldn't auto-match.</div>
+            <div id="calSyncModeInfo"></div>
 
             <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Register once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — renews automatically every 12h after that. "Sync Now" is a manual catch-up and doubles as a per-partner connection test.</div>
@@ -11431,6 +11432,31 @@
       document.getElementById('calendarSyncModal').classList.add('open');
       loadCalendarSyncSection();
       loadPartnerConnections();
+      loadCalendarSyncModeInfo();
+    }
+
+    // Joy, 2026-09-03: the OAuth Connect flow (CALENDAR_AUTH_MODE=oauth)
+    // started returning a generic Google 500 with no reachable config
+    // issue found on our end — CALENDAR_AUTH_MODE=service-account routes
+    // around that entirely (see googleCalendarClient.js). This surfaces
+    // the one thing that mode actually needs from each partner: sharing
+    // their calendar with the service account's email, "Make changes to
+    // events" — same self-service action as sharing a calendar with a
+    // coworker, no Workspace admin involved.
+    async function loadCalendarSyncModeInfo() {
+      const el = document.getElementById('calSyncModeInfo');
+      try {
+        const status = await fetch('/api/calendar-sync/status').then(r => r.json());
+        if (status.authMode !== 'service-account' || !status.serviceAccountEmail) { el.innerHTML = ''; return; }
+        el.innerHTML = `
+          <div style="padding:10px 12px;border-radius:var(--radius);background:var(--orange-glow);font-size:12px;margin-bottom:14px">
+            <strong>Service-account mode is active.</strong> Each partner (including you) needs to manually share
+            their own Google Calendar with this address, granting <strong>"Make changes to events"</strong>:
+            <div style="font-family:monospace;background:#fff;border-radius:6px;padding:5px 8px;margin:6px 0;word-break:break-all">${escHtml(status.serviceAccountEmail)}</div>
+            In Google Calendar: their calendar's <strong>⋮ → Settings and sharing → Share with specific people or groups → + Add people</strong>.
+            No "Connect" click needed on this end once that's done.
+          </div>`;
+      } catch { el.innerHTML = ''; }
     }
 
     // Per-partner OAuth connect/disconnect (services/googleCalendarClient.js
