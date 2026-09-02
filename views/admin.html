@@ -723,7 +723,7 @@
             <div class="admin-page-title">📈 WFP Dashboard</div>
             <div class="admin-page-sub">New-business pipeline (leads → called → visited → signed) and what needs attention today. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="onSalesDashRangeChange()">
               <option value="today">Today</option>
               <option value="week">This Week</option>
@@ -738,11 +738,13 @@
                  "equal-length window immediately before" logic the presets
                  already use for the KPI row's trend arrows works unchanged
                  here — it only needs {from, to}, not which preset produced
-                 them. -->
-            <div id="salesDashCustomRange" style="display:none;gap:6px;align-items:center">
-              <input type="date" id="salesDashRangeFrom" class="form-control" style="width:150px" onchange="renderSalesDashboard()">
-              <span style="color:var(--text-muted);font-size:12px">to</span>
-              <input type="date" id="salesDashRangeTo" class="form-control" style="width:150px" onchange="renderSalesDashboard()">
+                 them. Stacked under the select (not inline) and kept
+                 narrow — Joy, 2026-09-02: "looks a little messy and
+                 bulky" on the first, wider inline attempt. -->
+            <div id="salesDashCustomRange" style="display:none;gap:4px;align-items:center">
+              <input type="date" id="salesDashRangeFrom" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="renderSalesDashboard()">
+              <span style="color:var(--text-muted);font-size:11px">–</span>
+              <input type="date" id="salesDashRangeTo" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="renderSalesDashboard()">
             </div>
           </div>
         </div>
@@ -778,20 +780,6 @@
              avoids reintroducing that. -->
         <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(3,1fr)"></div>
 
-        <!-- Team Activity — Liam, 2026-09-02: the KPI row above was "just
-             leads" (new-business pipeline metrics only); he wants total
-             activity for the day/week, including calls/visits logged
-             against EXISTING centres, not only new leads. Combines
-             leads.lead_called_at/centre_visited_at (new-business contact)
-             with centre_visits rows via GET /api/centres/activity-log
-             (ongoing-account contact) into one real "what got done"
-             picture — see renderSalesActivitySummary(). -->
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">📅 Team Activity — Today &amp; This Week</div>
-          <div class="sd-card-sub">Every call/visit actually logged, whether it's a new lead or an existing centre — the full picture of what's getting done, not just new-lead volume.</div>
-          <div id="salesActivitySummary" style="margin-top:14px"></div>
-        </div>
-
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Portfolio Snapshot — existing centres</div>
           <div class="sd-card-sub">Booking-trend health across your real, active client centres — see <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> for the full list</div>
@@ -805,30 +793,6 @@
         </div>
 
         <div style="display:flex;gap:16px;margin-bottom:20px" id="salesPartnerRow"></div>
-
-        <div style="display:flex;gap:16px;margin-bottom:20px" id="salesSecondaryRow">
-          <div class="admin-table-card" style="padding:20px 24px;flex:1">
-            <div class="sd-card-title">Lead Source Performance</div>
-            <div class="sd-card-sub">Which lead type is converting better — worth knowing where to focus sourcing effort</div>
-            <div id="salesSourceBreakdown" style="margin-top:14px"></div>
-          </div>
-          <div class="admin-table-card" style="padding:20px 24px;flex:1">
-            <div class="sd-card-title">Leads Received — by month</div>
-            <div class="sd-card-sub">Volume trend across the pipeline</div>
-            <div id="salesMonthlyTrend" style="margin-top:14px"></div>
-          </div>
-        </div>
-
-        <!-- id on the card itself (not just the inner salesRepBreakdown div)
-             so the mobile stylesheet can hide the whole card — Joy, 2026-09-02:
-             this table is real data-density built for a wide desktop screen,
-             not something a Workforce Partner needs on their phone. Desktop
-             is untouched — see the #salesRepByCard rule's media query. -->
-        <div class="admin-table-card" id="salesRepByCard" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">Leads by Rep — this period vs last</div>
-          <div class="sd-card-sub">Same date range as the KPIs above (change it there) — sorted alphabetically by rep.</div>
-          <div id="salesRepBreakdown" style="margin-top:14px;overflow-x:auto"></div>
-        </div>
         </div>
       </div>
       </template>
@@ -8874,16 +8838,11 @@
       const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
       let current = allLeads.filter(l => inDateRange(l.created_at, from, to)).filter(leadMatchesWfpFilter);
       let previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo)).filter(leadMatchesWfpFilter);
-      let trendLeads = allLeads.filter(leadMatchesWfpFilter);
 
       renderSalesKpis(current, previous, from, to, prevFrom, prevTo);
-      renderSalesActivitySummary();
       renderSalesPortfolioSnapshot();
       renderSalesFunnel(current);
       renderSalesPartnerCards(current);
-      renderSalesSourceBreakdown(current);
-      renderSalesMonthlyTrend(trendLeads);
-      renderSalesRepBreakdown(current, previous);
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
@@ -8986,45 +8945,12 @@
         </div>`).join('');
     }
 
-    // Team Activity — Liam, 2026-09-02: wanted total daily/weekly activity
-    // including calls/visits logged against EXISTING centres, not just
-    // leads. NOT tied to the salesDashRange selector above (Today/This
-    // Week are fixed here on purpose — "productivity for the day" doesn't
-    // mean "productivity for whatever period is selected", unlike the KPI
-    // row right above it, which now IS period-aware — see renderSalesKpis).
-    function renderSalesActivitySummary() {
-      const box = document.getElementById('salesActivitySummary');
-      if (!box) return;
-
-      const tile = (label, value, hint) => `
-        <div>
-          <div style="font-size:24px;font-weight:800;color:var(--navy)">${value}</div>
-          <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted)">${label}</div>
-          ${hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(hint)}</div>` : ''}
-        </div>`;
-
-      const period = (label, rangeKey) => {
-        const { from, to } = salesDashRange(rangeKey);
-        const s = activityCountsFor(from, to);
-        return `
-          <div>
-            <div style="font-size:11.5px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">${label}</div>
-            <div style="display:flex;gap:28px;flex-wrap:wrap">
-              ${tile('Calls', s.calls, `${s.leadCalls} lead + ${s.centreCalls} centre`)}
-              ${tile('Visits', s.visits, `${s.leadVisits} lead + ${s.centreVisits} centre`)}
-              ${tile('Total Contacts', s.total)}
-            </div>
-          </div>`;
-      };
-
-      box.innerHTML = `
-        <div style="display:flex;gap:40px;flex-wrap:wrap">
-          ${period('Today', 'today')}
-          <div style="border-left:1px solid var(--gray-200);padding-left:40px">
-            ${period('This Week', 'week')}
-          </div>
-        </div>`;
-    }
+    // renderSalesActivitySummary() (the "Team Activity — Today & This
+    // Week" card) removed — Joy, 2026-09-02: once the KPI row's Calls
+    // Logged/Visits Logged cards became period-aware (including a Today
+    // option on the selector), this fixed-Today/Week card next to it was
+    // showing the same numbers a second time. activityCountsFor() above
+    // stays — renderSalesKpis still uses it for the now period-aware cards.
 
     function renderSalesFunnel(leads) {
       // Liam and Justine's "territories" are both manual assignments now
