@@ -762,6 +762,20 @@
              avoids reintroducing that. -->
         <div class="kpi-row" id="salesKpiRow" style="grid-template-columns:repeat(3,1fr)"></div>
 
+        <!-- Team Activity — Liam, 2026-09-02: the KPI row above was "just
+             leads" (new-business pipeline metrics only); he wants total
+             activity for the day/week, including calls/visits logged
+             against EXISTING centres, not only new leads. Combines
+             leads.lead_called_at/centre_visited_at (new-business contact)
+             with centre_visits rows via GET /api/centres/activity-log
+             (ongoing-account contact) into one real "what got done"
+             picture — see renderSalesActivitySummary(). -->
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div class="sd-card-title">📅 Team Activity — Today &amp; This Week</div>
+          <div class="sd-card-sub">Every call/visit actually logged, whether it's a new lead or an existing centre — the full picture of what's getting done, not just new-lead volume.</div>
+          <div id="salesActivitySummary" style="margin-top:14px"></div>
+        </div>
+
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
           <div class="sd-card-title">Portfolio Snapshot — existing centres</div>
           <div class="sd-card-sub">Booking-trend health across your real, active client centres — see <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a> for the full list</div>
@@ -772,18 +786,6 @@
           <div class="sd-card-title">Pipeline Funnel — by state</div>
           <div class="sd-card-sub">Where leads drop off between first contact and a signed centre</div>
           <div style="display:flex;gap:16px;margin-top:14px" id="salesFunnelRow"></div>
-        </div>
-
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">🎯 Priority Today</div>
-          <div class="sd-card-sub">What to prioritise right now, in order — overdue calls/visits, cold leads, centres waiting on a sign decision, and existing centres at risk. Each row shows why it matters and what to pursue; click it to act.</div>
-          <div id="salesAttentionQueue" style="margin-top:10px"></div>
-        </div>
-
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">🌱 Client Retention</div>
-          <div class="sd-card-sub">Did signing this centre actually stick — bookings since signing, trend, and how long we've retained them. Matched to RT by name/phone/suburb, same as the Leads list's "Existing Centre?" column — a centre shown as "not yet matched" just hasn't been confidently identified in RT yet, not a data problem to fix by hand.</div>
-          <div id="clientRetentionPanel" style="margin-top:10px"></div>
         </div>
 
         <div style="display:flex;gap:16px;margin-bottom:20px" id="salesPartnerRow"></div>
@@ -8761,12 +8763,29 @@
       } catch { myCentresData = []; }
     }
 
+    // Backs Team Activity's centre-side numbers (calls/visits logged
+    // against EXISTING centres, on top of the lead-side lead_called_at/
+    // centre_visited_at timestamps already fetched with allLeads). Same
+    // fetch-once-and-cache + 403-safety shape as ensureCentresLoaded just
+    // above (qa_view can reach this dashboard but isn't in routes/
+    // centres.js's allowed roles for this endpoint either).
+    let centreActivityLog = [];
+    async function ensureCentreActivityLogLoaded() {
+      if (centreActivityLog.length) return;
+      try {
+        const res = await fetch('/api/centres/activity-log');
+        const data = res.ok ? await res.json() : [];
+        centreActivityLog = Array.isArray(data) ? data : [];
+      } catch { centreActivityLog = []; }
+    }
+
     async function loadSalesDashboard() {
       document.getElementById('salesDashboardLoading').style.display = 'block';
       document.getElementById('salesDashboardBody').style.display = 'none';
       if (!allLeads.length) { try { allLeads = await fetch('/api/leads').then(r => r.json()); } catch { allLeads = []; } }
       await ensureCentresLoaded();
       await ensureSupplyLoaded();
+      await ensureCentreActivityLogLoaded();
       // Defaults a Workforce Partner to their own territory on first visit
       // only — never overrides a filter they've already picked (e.g. a
       // reload after adding a lead, or having manually switched states).
@@ -8793,10 +8812,9 @@
       let trendLeads = allLeads.filter(leadMatchesWfpFilter);
 
       renderSalesKpis(current, previous);
+      renderSalesActivitySummary();
       renderSalesPortfolioSnapshot();
       renderSalesFunnel(current);
-      renderSalesAttentionQueue();
-      renderClientRetention();
       renderSalesPartnerCards(current);
       renderSalesSourceBreakdown(current);
       renderSalesMonthlyTrend(trendLeads);
@@ -8868,6 +8886,68 @@
         </div>`).join('');
     }
 
+    // Team Activity — Liam, 2026-09-02: the KPI row above is entirely new-
+    // business pipeline (leads); he wants total daily/weekly activity
+    // including calls/visits logged against EXISTING centres too. Combines
+    // two sources: leads.lead_called_at/centre_visited_at (already in
+    // allLeads — a lead's own contact history) and centreActivityLog
+    // (GET /api/centres/activity-log — every completed centre_visits row
+    // across all centres). NOT tied to the salesDashRange selector above
+    // (Today/This Week are fixed here on purpose — "productivity for the
+    // day" doesn't mean "productivity for whatever period is selected").
+    function renderSalesActivitySummary() {
+      const box = document.getElementById('salesActivitySummary');
+      if (!box) return;
+      const leads = allLeads.filter(leadMatchesWfpFilter);
+      // A centre_visits row has no assignedWorkforcePartner of its own —
+      // cross-referenced from myCentresData (already loaded) by centreKey,
+      // same approach retentionRowMatchesWfpFilter uses for leads. A
+      // centre not found in myCentresData (hidden, or synced after this
+      // page's own fetch) is counted rather than silently dropped — the
+      // call/visit still happened, we just can't say which territory.
+      const activity = centreActivityLog.filter(a => {
+        const centre = myCentresData.find(c => c.centreKey === a.centreKey);
+        return centre ? centreMatchesWfpFilter(centre) : true;
+      });
+
+      function countFor(rangeKey) {
+        const { from, to } = salesDashRange(rangeKey);
+        const leadCalls = leads.filter(l => l.lead_called_status === 'done' && inDateRange(l.lead_called_at, from, to)).length;
+        const leadVisits = leads.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, from, to)).length;
+        const centreCalls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+        const centreVisits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+        return { leadCalls, leadVisits, centreCalls, centreVisits, calls: leadCalls + centreCalls, visits: leadVisits + centreVisits, total: leadCalls + leadVisits + centreCalls + centreVisits };
+      }
+
+      const tile = (label, value, hint) => `
+        <div>
+          <div style="font-size:24px;font-weight:800;color:var(--navy)">${value}</div>
+          <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted)">${label}</div>
+          ${hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(hint)}</div>` : ''}
+        </div>`;
+
+      const period = (label, key) => {
+        const s = countFor(key);
+        return `
+          <div>
+            <div style="font-size:11.5px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">${label}</div>
+            <div style="display:flex;gap:28px;flex-wrap:wrap">
+              ${tile('Calls', s.calls, `${s.leadCalls} lead + ${s.centreCalls} centre`)}
+              ${tile('Visits', s.visits, `${s.leadVisits} lead + ${s.centreVisits} centre`)}
+              ${tile('Total Contacts', s.total)}
+            </div>
+          </div>`;
+      };
+
+      box.innerHTML = `
+        <div style="display:flex;gap:40px;flex-wrap:wrap">
+          ${period('Today', 'today')}
+          <div style="border-left:1px solid var(--gray-200);padding-left:40px">
+            ${period('This Week', 'week')}
+          </div>
+        </div>`;
+    }
+
     function renderSalesFunnel(leads) {
       // Liam and Justine's "territories" are both manual assignments now
       // (Melbourne territory split, 2026-08-22), not geography — VIC leads
@@ -8902,50 +8982,10 @@
       }).join('');
     }
 
-    function renderSalesAttentionQueue() {
-      const items = computeAttentionItems();
-      const box = document.getElementById('salesAttentionQueue');
-      if (!items.length) {
-        box.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Nothing overdue — pipeline is current 🎉</div>`;
-        return;
-      }
-      // A flat sort-by-urgency-then-slice(15) buries centre signals
-      // completely once the lead backlog is large (verified against real
-      // data: 250+ leads sitting uncalled for 130+ days outrank every
-      // centre health signal on raw day-count alone) — lead staleness and
-      // centre booking-trend risk aren't really comparable on one numeric
-      // scale anyway. Reserving separate slots keeps both visible
-      // regardless of how big either backlog gets.
-      const leadItems = items.filter(it => it.type !== 'centre');
-      const centreItems = items.filter(it => it.type === 'centre');
-      const shown = [...leadItems.slice(0, 10), ...centreItems.slice(0, 5)].sort((a, b) => b.urgency - a.urgency);
-      box.innerHTML = `
-        ${shown.map(it => it.type === 'centre' ? `
-          <div class="attn-row" onclick="goToCentre360('${it.centreKey}')">
-            <div class="attn-row-top">
-              <span class="attn-chip ${it.cls}">🏢 ${escHtml((CENTRE_HEALTH_META[it.health] || {}).label || it.health)}</span>
-              <span class="attn-centre">${escHtml(it.name)}</span>
-              <span class="attn-meta">${escHtml(it.suburb || '—')}, ${escHtml(it.state || '—')}</span>
-              <span class="attn-meta" title="${escHtml(it.reason)}">${escHtml(it.reason)}</span>
-            </div>
-            <div class="attn-outcome">👉 ${escHtml(it.outcome)}</div>
-          </div>` : `
-          <div class="attn-row" onclick="openLeadDetail('${it.lead.id}')">
-            <div class="attn-row-top">
-              <span class="attn-chip ${it.cls}">🆕 ${escHtml(it.reason)}</span>
-              <span class="attn-centre">${escHtml(it.lead.centre_name)}</span>
-              <span class="attn-meta">${escHtml(it.lead.suburb || '—')}, ${escHtml(it.lead.state || '—')}</span>
-              <span class="attn-meta">${escHtml(it.lead.assigned_workforce_partner || 'Unassigned')}</span>
-            </div>
-            <div class="attn-outcome">
-              <span>👉 ${escHtml(it.outcome)}</span>
-              ${it.supply
-                ? `<span class="attn-supply-badge attn-supply-good" style="cursor:pointer" title="Click to see who's nearby" onclick="event.stopPropagation();openSupplyEducatorsPopover('${it.supply.podId}')">🧑‍🏫 ${it.supply.activeSupplyCount} educators within ${Math.round(it.supply.distanceKm)}km</span>`
-                : `<span class="attn-supply-badge attn-supply-low">⚠️ No nearby educator supply found</span>`}
-            </div>
-          </div>`).join('')}
-        ${items.length > shown.length ? `<div class="attn-more">+ ${items.length - shown.length} more need attention — open the full Leads list or My Centres to work through them</div>` : ''}`;
-    }
+    // renderSalesAttentionQueue() (the "Priority Today" panel) removed —
+    // Joy, 2026-09-02: "a bit of noise". computeAttentionItems() itself is
+    // still used by renderSalesPartnerCards' per-partner attention counts,
+    // so that stays.
 
     // Client Retention — "did signing this centre lead to activation,
     // booking growth and retention" (see GET /api/leads/retention). Fetched
@@ -8978,43 +9018,11 @@
       return { preBooking: scoped.length - withBookings, withBookings, total: scoped.length };
     }
 
-    function renderClientRetention() {
-      const box = document.getElementById('clientRetentionPanel');
-      if (!box) return;
-      const scoped = clientRetentionData.filter(retentionRowMatchesWfpFilter);
-      if (!scoped.length) {
-        box.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12.5px">No signed centres yet — retention tracking starts once a lead is marked Profile Created.</div>`;
-        return;
-      }
-      box.innerHTML = scoped.map(r => {
-        if (!r.matched) {
-          return `
-            <div class="attn-row" style="cursor:default">
-              <div class="attn-row-top">
-                <span class="attn-chip" style="background:var(--gray-100);color:var(--text-muted)">❓ Not yet matched</span>
-                <span class="attn-centre">${escHtml(r.centreName)}</span>
-                <span class="attn-meta">${escHtml(r.suburb || '—')}, ${escHtml(r.state || '—')}</span>
-                <span class="attn-meta">Signed ${escHtml(fmtDateShort(r.signedAt))}</span>
-              </div>
-              <div class="attn-outcome">Couldn't confidently match this to a real RT centre yet — check My Centres to link it.</div>
-            </div>`;
-        }
-        return `
-          <div class="attn-row" onclick="goToCentre360('${r.centreKey}')">
-            <div class="attn-row-top">
-              <span class="attn-chip" style="background:#dcfce7;color:#15803d">✅ Retained ${r.retainedDays}d</span>
-              <span class="attn-centre">${escHtml(r.centreName)}</span>
-              <span class="attn-meta">${escHtml(r.suburb || '—')}, ${escHtml(r.state || '—')}</span>
-              <span class="attn-meta">${r.bookingsSinceSigned} booking${r.bookingsSinceSigned === 1 ? '' : 's'} since signed</span>
-            </div>
-            <div class="attn-outcome">
-              <span>${trendArrow(r.bookings30d, r.bookingsPrev30d)}</span>
-              <span>${r.lastVisitDate ? `Last visit ${escHtml(fmtDateShort(r.lastVisitDate))}` : 'No visit logged yet'}</span>
-              <span>${r.nextStepDueDate ? `· Next check-in due ${escHtml(fmtDateShort(r.nextStepDueDate))}` : '· No check-in scheduled'}</span>
-            </div>
-          </div>`;
-      }).join('');
-    }
+    // renderClientRetention() (the "Client Retention" panel) removed —
+    // Joy, 2026-09-02: "a bit of noise". clientRetentionData/
+    // signedCentreBookingCounts()/retentionRowMatchesWfpFilter() above all
+    // stay — signedCentreBookingCounts() still feeds the KPI row's Pre-
+    // booking/With Bookings cards.
 
     function renderSalesPartnerCards(leads) {
       const allPartners = [{ key: 'LIAM', short: '📍 Liam - VIC' }, { key: 'VIC', short: '📍 Justine - VIC' }, { key: 'SA', short: '📍 Gwen - SA' }];

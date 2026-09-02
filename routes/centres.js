@@ -370,6 +370,37 @@ router.get('/activity-types', (req, res) => {
   });
 });
 
+// Aggregate call/visit activity across ALL centres, for the WFP
+// Dashboard's Team Activity section (Liam, 2026-09-02 — the KPI row was
+// "just leads", he wants total activity for the day including centres
+// visited, not just the new-business funnel). Same "fetch everything
+// once, filter client-side" shape as GET / and /api/leads (state-filter
+// buttons re-slice already-fetched data instantly rather than re-hitting
+// the server), so no date range is applied here — the frontend buckets
+// by today/this week itself. Registered ahead of GET /:centreKey below
+// for the same reason as /activity-types above.
+router.get('/activity-log', async (req, res) => {
+  try {
+    const { centres } = await getCentresAndBookings();
+    const hidden = await getHiddenCentreKeys();
+    const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
+    const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
+    const rows = Object.entries(visits).flatMap(([centreKey, list]) =>
+      list.filter(v => v.status === 'completed').map(v => ({
+        centreKey,
+        channel: v.channel || 'visit',
+        visitDate: v.visit_date,
+        createdAt: v.created_at,
+        createdByEmail: v.created_by_email,
+        createdByName: v.created_by_name
+      }))
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // Centre 360 overview — re-fetches this one client live from RT so the
 // name/contact/active status shown is always current even if the bulk
 // list cache is a few minutes stale (same "list can lag, detail is
