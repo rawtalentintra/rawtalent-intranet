@@ -1457,6 +1457,26 @@
         </div>
       </div>
 
+      <!-- KPI drill-down — Joy, 2026-09-03: "when you tap on these boxes it
+           should answer the question who?" One shared modal reused by every
+           clickable box on the WFP Dashboard (KPI row + Portfolio
+           Snapshot) — openKpiDrilldown(kind) below builds the list from
+           the exact same filtered data + period the number itself came
+           from, so the list can never drift out of sync with what's shown
+           on the card. -->
+      <div class="modal-overlay" id="kpiDrilldownModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeKpiDrilldownModal()">
+        <div class="modal" style="max-width:640px">
+          <div class="modal-header">
+            <div>
+              <div class="modal-title" id="kpiDrilldownTitle">—</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px" id="kpiDrilldownSub"></div>
+            </div>
+            <button class="modal-close" onclick="closeKpiDrilldownModal()">×</button>
+          </div>
+          <div class="modal-body" style="max-height:65vh;overflow-y:auto" id="kpiDrilldownBody"></div>
+        </div>
+      </div>
+
       <!-- Wrapped in <template>, lazy-loaded from showSection() — see the
            matching comment on My Centres above. -->
       <template id="__lazy_document_checker">
@@ -8897,12 +8917,22 @@
       return { from, to };
     }
 
-    function renderSalesDashboard() {
+    // Extracted out of renderSalesDashboard so openKpiDrilldown() below can
+    // recompute the exact same {current leads, period} a KPI card's number
+    // was built from — same range selector, same territory filter, same
+    // leadMatchesWfpFilter — rather than keeping a second copy that could
+    // drift out of sync with what's actually on screen.
+    function getSalesDashPeriod() {
       const rangeKey = document.getElementById('salesDashRange').value;
       const { from, to } = rangeKey === 'custom' ? getCustomSalesDashRange() : salesDashRange(rangeKey);
       const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
-      let current = allLeads.filter(l => inDateRange(l.created_at, from, to)).filter(leadMatchesWfpFilter);
-      let previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo)).filter(leadMatchesWfpFilter);
+      const current = allLeads.filter(l => inDateRange(l.created_at, from, to)).filter(leadMatchesWfpFilter);
+      const previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo)).filter(leadMatchesWfpFilter);
+      return { current, previous, from, to, prevFrom, prevTo };
+    }
+
+    function renderSalesDashboard() {
+      const { current, previous, from, to, prevFrom, prevTo } = getSalesDashPeriod();
 
       renderSalesKpis(current, previous, from, to, prevFrom, prevTo);
       renderSalesPortfolioSnapshot();
@@ -8942,15 +8972,18 @@
         if (c.isEscalated) escalatedCount++;
       });
       const cards = [
-        { label: 'Active Centres', value: data.length, bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Currently active, booking client centres in this territory — see My Centres for the full list.' },
-        { label: 'Bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d), bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Total bookings across the whole portfolio in the last 30 days, compared to the 30 days before that.' },
-        { label: 'Growing', value: counts.growing || 0, bg: CENTRE_HEALTH_META.growing.bg, color: CENTRE_HEALTH_META.growing.color, def: 'Bookings materially up vs the prior 30 days.' },
-        { label: 'Declining', value: counts.declining || 0, bg: CENTRE_HEALTH_META.declining.bg, color: CENTRE_HEALTH_META.declining.color, def: 'Bookings materially down vs the prior 30 days.' },
-        { label: 'Needs Attention', value: counts.needs_attention || 0, bg: CENTRE_HEALTH_META.needs_attention.bg, color: CENTRE_HEALTH_META.needs_attention.color, def: 'Booking activity just stopped, or a visit follow-up is overdue.' },
-        { label: 'Escalated', value: escalatedCount, bg: '#fee2e2', color: '#dc2626', def: "This centre's most recent logged call/visit raised an issue that hasn't been resolved yet." }
+        { kind: 'active-centres', label: 'Active Centres', value: data.length, bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Currently active, booking client centres in this territory — see My Centres for the full list.' },
+        { kind: 'bookings-30d', label: 'Bookings (30d)', value: bookings30d, trend: trendArrow(bookings30d, bookingsPrev30d), bg: 'var(--gray-100)', color: 'var(--navy)', def: 'Total bookings across the whole portfolio in the last 30 days, compared to the 30 days before that.' },
+        { kind: 'growing', label: 'Growing', value: counts.growing || 0, bg: CENTRE_HEALTH_META.growing.bg, color: CENTRE_HEALTH_META.growing.color, def: 'Bookings materially up vs the prior 30 days.' },
+        { kind: 'declining', label: 'Declining', value: counts.declining || 0, bg: CENTRE_HEALTH_META.declining.bg, color: CENTRE_HEALTH_META.declining.color, def: 'Bookings materially down vs the prior 30 days.' },
+        { kind: 'needs-attention', label: 'Needs Attention', value: counts.needs_attention || 0, bg: CENTRE_HEALTH_META.needs_attention.bg, color: CENTRE_HEALTH_META.needs_attention.color, def: 'Booking activity just stopped, or a visit follow-up is overdue.' },
+        { kind: 'escalated', label: 'Escalated', value: escalatedCount, bg: '#fee2e2', color: '#dc2626', def: "This centre's most recent logged call/visit raised an issue that hasn't been resolved yet." }
       ];
+      // Joy, 2026-09-03: "when you tap on these boxes it should answer the
+      // question who?" — every box now opens openKpiDrilldown(kind) with
+      // the actual list of centres behind that number.
       box.innerHTML = cards.map(c => `
-        <div class="centre-health-box" title="${escHtml(c.def)}" style="background:${c.bg};cursor:default">
+        <div class="centre-health-box" title="${escHtml(c.def)}" style="background:${c.bg};cursor:pointer" onclick="openKpiDrilldown('${c.kind}')">
           <div class="centre-health-box-num" style="color:${c.color}">${c.value}</div>
           <div class="centre-health-box-label" style="color:${c.color}">${escHtml(c.label)} ⓘ</div>
           ${c.trend ? `<div style="margin-top:2px">${c.trend}</div>` : ''}
@@ -8999,23 +9032,144 @@
       const act = activityCountsFor(from, to);
       const actPrev = activityCountsFor(prevFrom, prevTo);
       const cards = [
-        { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
-        { label: '📞 Calls Logged', value: act.calls, trend: trendArrow(act.calls, actPrev.calls), hint: `${act.leadCalls} lead + ${act.centreCalls} centre` },
-        { label: '🚗 Visits Logged', value: act.visits, trend: trendArrow(act.visits, actPrev.visits), hint: `${act.leadVisits} lead + ${act.centreVisits} centre` },
-        { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
+        { kind: 'total-leads', label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
+        { kind: 'calls-logged', label: '📞 Calls Logged', value: act.calls, trend: trendArrow(act.calls, actPrev.calls), hint: `${act.leadCalls} lead + ${act.centreCalls} centre` },
+        { kind: 'visits-logged', label: '🚗 Visits Logged', value: act.visits, trend: trendArrow(act.visits, actPrev.visits), hint: `${act.leadVisits} lead + ${act.centreVisits} centre` },
+        { kind: 'signed-rate', label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
         // Not period-bound like the cards above — a centre signed months
         // ago that only just started booking is still worth surfacing
         // today (see signedCentreBookingCounts).
-        { label: '📕 Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
-        { label: '🎉 Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
+        { kind: 'pre-booking-centres', label: '📕 Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
+        { kind: 'centres-with-bookings', label: '🎉 Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
       ];
+      // Joy, 2026-09-03: "when you tap on these boxes it should answer the
+      // question who?" — every card now opens openKpiDrilldown(kind) with
+      // the actual leads/centres/calls/visits behind that number.
       document.getElementById('salesKpiRow').innerHTML = cards.map(k => `
-        <div class="kpi-card">
+        <div class="kpi-card" style="cursor:pointer" onclick="openKpiDrilldown('${k.kind}')">
           <div class="kpi-label">${escHtml(k.label)}</div>
           <div class="kpi-value">${k.value}</div>
           <div class="kpi-foot">${k.trend || ''}</div>
           <div class="kpi-hint">${escHtml(k.hint)}</div>
         </div>`).join('');
+    }
+
+    // ─── KPI drill-down ("who?") ─────────────────────────────────────────
+    // Joy, 2026-09-03: "when you tap on these boxes it should answer the
+    // question who? So there should be a list of the leads/centres/calls/
+    // visits/signed depending on which box is tapped." One shared modal
+    // (#kpiDrilldownModal) + one entry point (openKpiDrilldown(kind))
+    // reused by every clickable box on this page — each branch rebuilds
+    // its list from the exact same source arrays + filters the card's own
+    // number came from (getSalesDashPeriod/centreMatchesWfpFilter/
+    // leadMatchesWfpFilter/activityCountsFor's own logic), so the list can
+    // never show a different set than what the number implies.
+    function closeKpiDrilldownModal() {
+      document.getElementById('kpiDrilldownModal').classList.remove('open');
+    }
+
+    function openKpiDrilldownModal(title, sub, rowsHtml) {
+      document.getElementById('kpiDrilldownTitle').textContent = title;
+      document.getElementById('kpiDrilldownSub').textContent = sub || '';
+      document.getElementById('kpiDrilldownBody').innerHTML = rowsHtml ||
+        `<div style="text-align:center;color:var(--text-muted);font-size:13px;padding:28px 0">Nothing here for this period.</div>`;
+      document.getElementById('kpiDrilldownModal').classList.add('open');
+    }
+
+    // `onclick` here is a bare JS statement string, same pattern already
+    // used throughout this file (e.g. openLeadDetail('${l.id}')) — safe
+    // because every id interpolated into it is an internal UUID/centreKey,
+    // never free-text a user typed.
+    function kpiDrilldownRow(name, meta, onclick) {
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--gray-100);${onclick ? 'cursor:pointer' : ''}"${onclick ? ` onclick="${onclick}"` : ''}>
+          <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml(name || 'Unknown')}</div>
+          <div style="font-size:12px;color:var(--text-muted);text-align:right;white-space:nowrap">${escHtml(meta || '—')}</div>
+        </div>`;
+    }
+
+    function openKpiDrilldown(kind) {
+      const { current, from, to } = getSalesDashPeriod();
+      const leadMeta = l => [l.suburb, l.state].filter(Boolean).join(', ') || '—';
+      const leadRow = l => kpiDrilldownRow(l.centre_name, leadMeta(l), `closeKpiDrilldownModal();openLeadDetail('${l.id}')`);
+      const centreRow = (c, meta) => kpiDrilldownRow(c.name, meta != null ? meta : ([c.suburb, c.state].filter(Boolean).join(', ') || '—'), `closeKpiDrilldownModal();goToCentre360('${c.centreKey}')`);
+
+      if (kind === 'total-leads') {
+        const rows = [...current].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        openKpiDrilldownModal('Total Leads', `${rows.length} new lead${rows.length === 1 ? '' : 's'} logged this period`, rows.map(leadRow).join(''));
+        return;
+      }
+
+      if (kind === 'calls-logged' || kind === 'visits-logged') {
+        const isCalls = kind === 'calls-logged';
+        const leads = allLeads.filter(leadMatchesWfpFilter).filter(l => isCalls
+          ? (l.lead_called_status === 'done' && inDateRange(l.lead_called_at, from, to))
+          : (l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, from, to)));
+        const activity = centreActivityLog.filter(a => {
+          const centre = myCentresData.find(c => c.centreKey === a.centreKey);
+          return (centre ? centreMatchesWfpFilter(centre) : true) &&
+            a.channel === (isCalls ? 'call' : 'visit') && inDateRange(a.visitDate || a.createdAt, from, to);
+        });
+        const entries = [
+          ...leads.map(l => ({ when: isCalls ? l.lead_called_at : l.centre_visited_at, html: kpiDrilldownRow(l.centre_name, `Lead · ${fmtDateShort(isCalls ? l.lead_called_at : l.centre_visited_at)}`, `closeKpiDrilldownModal();openLeadDetail('${l.id}')`) })),
+          ...activity.map(a => {
+            const centre = myCentresData.find(c => c.centreKey === a.centreKey);
+            const when = a.visitDate || a.createdAt;
+            const who = a.createdByName || a.createdByEmail || '';
+            const meta = `Centre · ${fmtDateShort(when)}${who ? ' · ' + who : ''}`;
+            return { when, html: kpiDrilldownRow(centre ? centre.name : (a.centreKey || 'Unknown centre'), meta, centre ? `closeKpiDrilldownModal();goToCentre360('${a.centreKey}')` : '') };
+          })
+        ].sort((x, y) => new Date(y.when) - new Date(x.when));
+        openKpiDrilldownModal(isCalls ? '📞 Calls Logged' : '🚗 Visits Logged', `${entries.length} logged this period — leads + centres`, entries.map(e => e.html).join(''));
+        return;
+      }
+
+      if (kind === 'signed-rate') {
+        const signed = current.filter(l => l.signed_status === 'signed').sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at));
+        const visited = current.filter(l => l.centre_visited_status === 'done').length;
+        openKpiDrilldownModal('Signed Rate', `${signed.length} of ${visited} visited centres signed this period`, signed.map(leadRow).join(''));
+        return;
+      }
+
+      if (kind === 'pre-booking-centres' || kind === 'centres-with-bookings') {
+        const wantBookings = kind === 'centres-with-bookings';
+        const rows = clientRetentionData.filter(retentionRowMatchesWfpFilter)
+          .filter(r => ((r.matched && r.bookingsSinceSigned > 0) === wantBookings))
+          .sort((a, b) => (a.matchedClientName || a.centreName || '').localeCompare(b.matchedClientName || b.centreName || ''));
+        const rowsHtml = rows.map(r => kpiDrilldownRow(
+          r.matchedClientName || r.centreName,
+          [r.suburb, r.state].filter(Boolean).join(', ') || '—',
+          r.matched ? `closeKpiDrilldownModal();goToCentre360('${r.centreKey}')` : `closeKpiDrilldownModal();openLeadDetail('${r.leadId}')`
+        )).join('');
+        openKpiDrilldownModal(wantBookings ? '🎉 Centres With Bookings' : '📕 Pre-booking Centres', `${rows.length} signed centre${rows.length === 1 ? '' : 's'}`, rowsHtml);
+        return;
+      }
+
+      // Portfolio Snapshot boxes — all scoped to myCentresData, not a
+      // period, same as renderSalesPortfolioSnapshot itself.
+      const centres = myCentresData.filter(centreMatchesWfpFilter);
+      if (kind === 'active-centres') {
+        const rows = [...centres].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        openKpiDrilldownModal('Active Centres', `${rows.length} active centre${rows.length === 1 ? '' : 's'} in this territory`, rows.map(c => centreRow(c)).join(''));
+        return;
+      }
+      if (kind === 'bookings-30d') {
+        const rows = centres.filter(c => c.bookings30dCount > 0).sort((a, b) => b.bookings30dCount - a.bookings30dCount);
+        openKpiDrilldownModal('Bookings (30d)', `${rows.length} centre${rows.length === 1 ? '' : 's'} with bookings in the last 30 days`,
+          rows.map(c => centreRow(c, `${c.bookings30dCount} booking${c.bookings30dCount === 1 ? '' : 's'}`)).join(''));
+        return;
+      }
+      const healthByKind = { growing: 'growing', declining: 'declining', 'needs-attention': 'needs_attention' };
+      if (healthByKind[kind]) {
+        const health = healthByKind[kind];
+        const rows = centres.filter(c => c.health === health).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        openKpiDrilldownModal(CENTRE_HEALTH_META[health].label, `${rows.length} centre${rows.length === 1 ? '' : 's'}`, rows.map(c => centreRow(c)).join(''));
+        return;
+      }
+      if (kind === 'escalated') {
+        const rows = centres.filter(c => c.isEscalated).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        openKpiDrilldownModal('🚨 Escalated', `${rows.length} centre${rows.length === 1 ? '' : 's'} with an unresolved issue raised at the last visit`, rows.map(c => centreRow(c)).join(''));
+      }
     }
 
     // renderSalesActivitySummary() (the "Team Activity — Today & This
