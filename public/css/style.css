@@ -1669,8 +1669,18 @@ body:has(> .navbar) { padding-top: 64px; }
   /* The KPI row's hardcoded 3-column grid is an inline style (added for a
      real 1280px desktop squeeze bug — see its own HTML comment), so
      overriding it here needs !important: an external stylesheet rule
-     otherwise never beats an inline style regardless of selector. */
-  #salesKpiRow { grid-template-columns: 1fr !important; }
+     otherwise never beats an inline style regardless of selector.
+     Joy, 2026-09-02: Total Leads/Called Rate should share a row, same for
+     Visited/Signed Rate — a straight 2-column grid does that for free
+     (cards 1+2, then 3+4), while Pre-booking/Centres-With-Bookings (5+6,
+     longer hint text, an icon each) stay full-width one-per-row via
+     nth-child so they don't get squeezed just because the row went 2-up. */
+  #salesKpiRow { grid-template-columns: 1fr 1fr !important; gap: 10px; }
+  #salesKpiRow .kpi-card:nth-child(n+5) { grid-column: 1 / -1; }
+  #salesKpiRow .kpi-card { padding: 12px 14px; }
+  #salesKpiRow .kpi-value { font-size: 21px; margin-bottom: 5px; }
+  #salesKpiRow .kpi-label { font-size: 10.5px; margin-bottom: 4px; }
+  #salesKpiRow .kpi-hint { font-size: 10px; }
 
   /* These wrapper rows only set display:flex/gap inline — flex-direction
      was never part of that inline style, so no !important is needed to
@@ -2148,3 +2158,38 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-attachment-thumb button, .task-attachment-file button { background: none; border: none; color: var(--gray-400); cursor: pointer; font-size: 11px; padding: 2px 6px 2px 0; font-family: inherit; line-height: 1; }
 .task-attachment-thumb button:hover, .task-attachment-file button:hover { color: #dc2626; }
 .task-attachment-pending { opacity: .6; cursor: default; border-style: dashed; }
+
+/* Log a Call/Visit modal (#visitLogModal) mobile layout — Joy, 2026-09-02:
+   "overlapping fields... Save buttons are not visible." Two real bugs,
+   both scoped to this modal only (max-width:900px + #visitLogModal), so
+   /admin and /allapp at a real desktop width are untouched:
+
+   1. Its .modal-body carries its own inline max-height:78vh;overflow-y:auto
+      (needed on desktop, where .modal itself also scrolls at max-height:
+      90vh — a working double-scroll there since 78vh + header + footer
+      comfortably clears 90vh on a tall screen). On a phone, iOS Safari's
+      viewport is short enough that header+78vh+footer can exceed the
+      outer .modal's own 90vh, pushing .modal-footer (Cancel/Save) into
+      the OUTER scroll — behind the inner .modal-body's own scroll, which
+      is what actually swallowed the Save button. Turning .modal into a
+      flex column here pins header/footer and gives modal-body the exact
+      remaining space as its own scroll area, so footer is never clipped.
+      !important beats the inline max-height (inline always wins otherwise).
+   2. Every "Channel/Activity type", "Visit date/Status", etc. field pair
+      is an inline `display:grid;grid-template-columns:1fr 1fr` (or 2fr 1fr
+      for Next step/Due) — fine at 560px+ but crushed to ~90px-wide fields
+      at phone width, which is the "overlapping fields" Joy saw. Matched
+      via [style*=...] (inline, no shared class exists to hook) and forced
+      to stack one per row, same as every other mobile form pass in this
+      file. */
+@media (max-width: 900px) {
+  #visitLogModal .modal { display: flex; flex-direction: column; max-height: 88vh; }
+  #visitLogModal .modal-header { flex: 0 0 auto; }
+  #visitLogModal .modal-body { flex: 1 1 auto; min-height: 0; max-height: none !important; padding: 16px 16px; }
+  #visitLogModal .modal-footer { flex: 0 0 auto; }
+
+  #visitLogModal [style*="grid-template-columns:1fr 1fr"],
+  #visitLogModal [style*="grid-template-columns:2fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+}
