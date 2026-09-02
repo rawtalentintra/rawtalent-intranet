@@ -119,6 +119,16 @@ app.use(passport.session());
 // three authenticated page shells (index/admin/article) deliberately live
 // outside public/, in views/, and are only ever served via guardRoute()'s
 // own res.sendFile below — never through this static mount.
+// no-store on the manifest specifically (2026-09-02, same "still shows RT
+// Partner" chase as wfpGuard's own no-store above) — it's small and rarely
+// changes, exactly the kind of response a cache holds onto longest, and
+// it's one of the couple of places the OS's "Add to Home Screen" naming
+// could plausibly be reading from. Registered before the static mount so
+// it wins; everything else under public/wfp/ (icons, sw.js) is unaffected.
+app.get('/wfp/manifest.json', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'wfp', 'manifest.json'));
+});
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 app.use('/auth/login', loginLimiter);
@@ -244,6 +254,14 @@ function wfpGuard(req, res) {
   if (!req.isAuthenticated()) return res.redirect('/login.html');
   const hasAccess = ['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role) || req.user.can_use_wfp_pwa;
   if (!hasAccess) return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
+  // Explicit no-store (2026-09-02, chasing the "still shows RT Partner"
+  // report) — res.sendFile sets Last-Modified/ETag by default but no
+  // Cache-Control, which is enough for Safari/an intermediate cache to
+  // hold onto a stale copy of this document rather than always
+  // revalidating. Ruling that out entirely; the real suspected culprit is
+  // the service worker (see public/wfp/sw.js's own v3 comment), this is
+  // just cheap, unconditional insurance alongside it.
+  res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'views', 'admin.html'));
 }
 app.get('/wfp', wfpGuard);
