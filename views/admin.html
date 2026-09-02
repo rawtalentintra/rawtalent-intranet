@@ -7615,6 +7615,20 @@
     // First-name-only, for the dense Leads table column — full names stay
     // everywhere else (filters, lead detail modal) where space isn't tight.
     const WORKFORCE_PARTNER_SHORT = { 'Gwen Stocks (SA)': 'Gwen', 'Justine Hardware (VIC)': 'Justine', 'Liam Baxter (VIC)': 'Liam' };
+    // Calendar Sync's own "Partner Connections" list (loadPartnerConnections
+    // below) — deliberately a SEPARATE list from WORKFORCE_PARTNER_OPTIONS
+    // above, not that one with Joy appended, since WORKFORCE_PARTNER_OPTIONS
+    // is also every lead/centre assignment dropdown in the app (adding Joy
+    // there would offer her as an assignable Workforce Partner everywhere,
+    // which isn't what she asked for — she just wants to test her own
+    // calendar connection). This label is only a free-text key stored in
+    // calendar_oauth_connections.partner_label (see googleCalendarClient.js)
+    // — it doesn't need to match CALENDAR_PARTNER_MAP's value for her email,
+    // though "Joy — Administrator" mirrors her existing name elsewhere in
+    // this app for consistency. Since no lead is ever assigned to her as a
+    // workforce partner, connecting tests the OAuth connection itself, not
+    // real lead-event auto-sync the way it works for the three real partners.
+    const CALENDAR_SYNC_PARTNER_OPTIONS = [...WORKFORCE_PARTNER_OPTIONS, 'Joy — Administrator'];
     // Former reps with no active account — their historical leads stay put,
     // just excluded from the "Submitted by" filter's option list.
     const LEADS_SUBMITTER_HIDDEN = new Set(['allyssa@rawtalent.com.au', 'jane@rawtalent.com.au']);
@@ -8862,7 +8876,7 @@
       let previous = allLeads.filter(l => inDateRange(l.created_at, prevFrom, prevTo)).filter(leadMatchesWfpFilter);
       let trendLeads = allLeads.filter(leadMatchesWfpFilter);
 
-      renderSalesKpis(current, previous);
+      renderSalesKpis(current, previous, from, to, prevFrom, prevTo);
       renderSalesActivitySummary();
       renderSalesPortfolioSnapshot();
       renderSalesFunnel(current);
@@ -8909,22 +8923,57 @@
       </div>`;
     }
 
-    function renderSalesKpis(current, previous) {
+    // Shared by renderSalesKpis (whatever period the top selector is on)
+    // and renderSalesActivitySummary (fixed Today/This Week) — call/visit
+    // counts, split lead vs centre, for ANY {from, to} window. Pulled out
+    // to one place so "what counts as a call" or "a visit" can never
+    // silently drift between the two views that both show it.
+    //
+    // A centre_visits row has no assignedWorkforcePartner of its own —
+    // cross-referenced from myCentresData (already loaded) by centreKey,
+    // same approach retentionRowMatchesWfpFilter uses for leads. A centre
+    // not found in myCentresData (hidden, or synced after this page's own
+    // fetch) is counted rather than silently dropped — the call/visit
+    // still happened, we just can't say which territory.
+    function activityCountsFor(from, to) {
+      const leads = allLeads.filter(leadMatchesWfpFilter);
+      const activity = centreActivityLog.filter(a => {
+        const centre = myCentresData.find(c => c.centreKey === a.centreKey);
+        return centre ? centreMatchesWfpFilter(centre) : true;
+      });
+      const leadCalls = leads.filter(l => l.lead_called_status === 'done' && inDateRange(l.lead_called_at, from, to)).length;
+      const leadVisits = leads.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, from, to)).length;
+      const centreCalls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+      const centreVisits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
+      return { leadCalls, leadVisits, centreCalls, centreVisits, calls: leadCalls + centreCalls, visits: leadVisits + centreVisits, total: leadCalls + leadVisits + centreCalls + centreVisits };
+    }
+
+    // Joy, 2026-09-02: "these boxes... should consider Centres and Leads.
+    // Since we do not have a target number of Centre Visits I am not sure
+    // yet how to do this." Called Rate/Visited Rate were % of TOTAL LEADS
+    // — centres have no equivalent denominator (no fixed visit quota to
+    // divide by), so a rate can't cover both without inventing a target
+    // that doesn't exist. Counts sidestep that entirely: Calls Logged/
+    // Visits Logged for the selected period, lead + centre combined, with
+    // a trend arrow against the equal-length prior period — same shape
+    // Total Leads already used, just extended to both sources. The real
+    // lead-conversion-rate story (called/visited/signed as % of the
+    // funnel) isn't lost, it's one section down in Pipeline Funnel, which
+    // already shows it per state.
+    function renderSalesKpis(current, previous, from, to, prevFrom, prevTo) {
       const c = salesFunnelCounts(current);
       const p = salesFunnelCounts(previous);
       const booking = signedCentreBookingCounts();
+      const act = activityCountsFor(from, to);
+      const actPrev = activityCountsFor(prevFrom, prevTo);
       const cards = [
         { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
-        { label: 'Called Rate', value: pct(c.called, c.total) + '%', trend: trendArrow(pct(c.called, c.total), pct(p.called, p.total)), hint: `${c.called} of ${c.total} leads called` },
-        // % of total leads, not % of called — visited leads aren't a strict
-        // subset of called ones (an N/A'd or skipped call still lets a
-        // centre reach Visited/Signed), so visited/called could read over
-        // 100% and never meant "conversion from called" in the first place.
-        { label: 'Visited Rate', value: pct(c.visited, c.total) + '%', trend: trendArrow(pct(c.visited, c.total), pct(p.visited, p.total)), hint: `${c.visited} of ${c.total} leads visited` },
+        { label: '📞 Calls Logged', value: act.calls, trend: trendArrow(act.calls, actPrev.calls), hint: `${act.leadCalls} lead + ${act.centreCalls} centre` },
+        { label: '🚗 Visits Logged', value: act.visits, trend: trendArrow(act.visits, actPrev.visits), hint: `${act.leadVisits} lead + ${act.centreVisits} centre` },
         { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
-        // Not period-bound like the four cards above — a centre signed
-        // months ago that only just started booking is still worth
-        // surfacing today (see signedCentreBookingCounts).
+        // Not period-bound like the cards above — a centre signed months
+        // ago that only just started booking is still worth surfacing
+        // today (see signedCentreBookingCounts).
         { label: '📕 Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
         { label: '🎉 Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
       ];
@@ -8937,38 +8986,15 @@
         </div>`).join('');
     }
 
-    // Team Activity — Liam, 2026-09-02: the KPI row above is entirely new-
-    // business pipeline (leads); he wants total daily/weekly activity
-    // including calls/visits logged against EXISTING centres too. Combines
-    // two sources: leads.lead_called_at/centre_visited_at (already in
-    // allLeads — a lead's own contact history) and centreActivityLog
-    // (GET /api/centres/activity-log — every completed centre_visits row
-    // across all centres). NOT tied to the salesDashRange selector above
-    // (Today/This Week are fixed here on purpose — "productivity for the
-    // day" doesn't mean "productivity for whatever period is selected").
+    // Team Activity — Liam, 2026-09-02: wanted total daily/weekly activity
+    // including calls/visits logged against EXISTING centres, not just
+    // leads. NOT tied to the salesDashRange selector above (Today/This
+    // Week are fixed here on purpose — "productivity for the day" doesn't
+    // mean "productivity for whatever period is selected", unlike the KPI
+    // row right above it, which now IS period-aware — see renderSalesKpis).
     function renderSalesActivitySummary() {
       const box = document.getElementById('salesActivitySummary');
       if (!box) return;
-      const leads = allLeads.filter(leadMatchesWfpFilter);
-      // A centre_visits row has no assignedWorkforcePartner of its own —
-      // cross-referenced from myCentresData (already loaded) by centreKey,
-      // same approach retentionRowMatchesWfpFilter uses for leads. A
-      // centre not found in myCentresData (hidden, or synced after this
-      // page's own fetch) is counted rather than silently dropped — the
-      // call/visit still happened, we just can't say which territory.
-      const activity = centreActivityLog.filter(a => {
-        const centre = myCentresData.find(c => c.centreKey === a.centreKey);
-        return centre ? centreMatchesWfpFilter(centre) : true;
-      });
-
-      function countFor(rangeKey) {
-        const { from, to } = salesDashRange(rangeKey);
-        const leadCalls = leads.filter(l => l.lead_called_status === 'done' && inDateRange(l.lead_called_at, from, to)).length;
-        const leadVisits = leads.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, from, to)).length;
-        const centreCalls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
-        const centreVisits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, from, to)).length;
-        return { leadCalls, leadVisits, centreCalls, centreVisits, calls: leadCalls + centreCalls, visits: leadVisits + centreVisits, total: leadCalls + leadVisits + centreCalls + centreVisits };
-      }
 
       const tile = (label, value, hint) => `
         <div>
@@ -8977,8 +9003,9 @@
           ${hint ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(hint)}</div>` : ''}
         </div>`;
 
-      const period = (label, key) => {
-        const s = countFor(key);
+      const period = (label, rangeKey) => {
+        const { from, to } = salesDashRange(rangeKey);
+        const s = activityCountsFor(from, to);
         return `
           <div>
             <div style="font-size:11.5px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">${label}</div>
@@ -11221,15 +11248,17 @@
 
     // Per-partner OAuth connect/disconnect (services/googleCalendarClient.js
     // CALENDAR_AUTH_MODE=oauth) — the workaround for not wanting to do the
-    // Google Workspace Admin domain-wide-delegation dance. WORKFORCE_PARTNER_OPTIONS
-    // is the same fixed list used everywhere else a partner gets picked from.
+    // Google Workspace Admin domain-wide-delegation dance.
+    // CALENDAR_SYNC_PARTNER_OPTIONS (not the shared WORKFORCE_PARTNER_OPTIONS
+    // every lead/centre assignment dropdown uses) — see its own comment for
+    // why this list needs to be separate.
     async function loadPartnerConnections() {
       const el = document.getElementById('calPartnerConnections');
       try {
         const connections = await fetch('/api/calendar-sync/connections').then(r => r.json());
         const byLabel = {};
         for (const c of connections) byLabel[c.partner_label] = c;
-        el.innerHTML = WORKFORCE_PARTNER_OPTIONS.map(label => {
+        el.innerHTML = CALENDAR_SYNC_PARTNER_OPTIONS.map(label => {
           const c = byLabel[label];
           return `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100)">
