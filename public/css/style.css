@@ -147,6 +147,19 @@ body:has(> .navbar) { padding-top: 64px; }
   gap: 16px;
 }
 
+/* RawTalent wordmark moves to the right, next to the bell/actions, on
+   desktop (Joy, 2026-09-02 — "in HeartBeat, upper right corner in
+   desktop"). Mobile is untouched and keeps today's roughly-centered look
+   (an already-existing side effect of .navbar's justify-content:
+   space-between when the hamburger and bell are similarly sized) —
+   scoped to min-width:901px, the exact complement of this file's existing
+   max-width:900px mobile breakpoint, so there's no gap or overlap between
+   the two. */
+@media (min-width: 901px) {
+  .nav-brand { order: 2; }
+  .nav-actions { order: 1; }
+}
+
 .nav-user {
   display: flex;
   align-items: center;
