@@ -147,24 +147,6 @@ body:has(> .navbar) { padding-top: 64px; }
   gap: 16px;
 }
 
-/* RawTalent wordmark moves to the right, next to the bell/actions, on
-   desktop (Joy, 2026-09-02 — "in HeartBeat, upper right corner in
-   desktop"). First attempt at this swapped order on .nav-brand/.nav-
-   actions, which — with .navbar's own justify-content:space-between —
-   just pins whichever element is now FIRST to the far-left edge instead
-   of grouping the two together (that's what "you've interchanged them"
-   caught: the bell jumped to the opposite corner instead of the logo
-   joining it). flex-end with no reordering is the actual fix: it
-   clusters both remaining visible children (brand, then actions, their
-   existing DOM order — the hamburger's slot is empty here, hidden on
-   desktop) flush against the right edge, right next to each other.
-   Mobile is untouched (still space-between, still today's existing
-   roughly-centered look) — scoped to min-width:901px, the exact
-   complement of this file's existing max-width:900px mobile breakpoint. */
-@media (min-width: 901px) {
-  .navbar { justify-content: flex-end; gap: 20px; }
-}
-
 .nav-user {
   display: flex;
   align-items: center;
