@@ -1078,22 +1078,27 @@
           <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
         </div>
 
-        <!-- Regional (outside the Melbourne/Adelaide/Brisbane metro
-             radius) leads are archived, not deleted (Liam, 2026-08-24) —
-             hidden from the main view by default so the day-to-day board
-             stays focused on the metro pipeline, with this as the
-             "review the archived pool" tab for when RawTalent starts
-             going out to regional areas. -->
-        <div class="leads-closed-tabs" id="leadsRegionalTabs" style="margin-top:8px">
-          <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsRegionalFilter('active')">🏙️ Metro Leads</button>
-          <button type="button" class="leads-closed-tab" data-value="regional" onclick="setLeadsRegionalFilter('regional')">🗺️ Regional (Archived)</button>
-          <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsRegionalFilter('all')">All</button>
-          <button type="button" id="leadsBackfillBtn" style="display:none;margin-left:auto;background:none;border:1px solid var(--gray-200);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;color:var(--text-muted);cursor:pointer" onclick="runLeadsRegionalBackfill()" title="Geocodes+classifies any lead that's never been checked yet — safe to run any time, only touches unclassified leads">🗺️ Run Regional Classification</button>
-        </div>
-
         <div class="admin-table-card">
           <div class="leads-filter-bar">
             <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
+            <!-- Regional (outside the Melbourne/Adelaide/Brisbane metro
+                 radius) leads are archived, not deleted (Liam, 2026-08-24)
+                 — hidden from the main view by default. Was its own second
+                 tab row stacked directly under Open/Closed Leads (Joy,
+                 2026-09-02: "tabs and tabs stacked on top of another...
+                 is there a better way") — folded into this filter bar
+                 instead, alongside every other secondary refinement
+                 (Called/Visited/Profile/...), since unlike Open/Closed
+                 (a primary, load-bearing view every visit needs) this one
+                 is a rare "review the archived pool" toggle, for when
+                 RawTalent starts going out to regional areas — it doesn't
+                 need tab-level visual weight. -->
+            <select id="leadsFilterRegional" onchange="setLeadsRegionalFilter(this.value)">
+              <option value="active" selected>🏙️ Metro Leads</option>
+              <option value="regional">🗺️ Regional (Archived)</option>
+              <option value="all">Metro + Regional</option>
+            </select>
+            <button type="button" id="leadsBackfillBtn" style="display:none;background:none;border:1px solid var(--gray-200);border-radius:var(--radius);padding:3px 8px;font-size:11px;font-weight:700;color:var(--text-muted);cursor:pointer;font-family:inherit" onclick="runLeadsRegionalBackfill()" title="Geocodes+classifies any lead that's never been checked yet — safe to run any time, only touches unclassified leads">🗺️ Run Regional Classification</button>
             <select id="leadsFilterPeriod" onchange="filterLeadsTable()">
               <option value="all" selected>All time</option>
               <option value="week">This week</option>
@@ -7570,9 +7575,6 @@
     }
     function setLeadsRegionalFilter(value) {
       leadsRegionalFilter = value;
-      document.querySelectorAll('#leadsRegionalTabs .leads-closed-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === value);
-      });
       filterLeadsTable();
     }
     async function runLeadsRegionalBackfill() {
