@@ -45,7 +45,11 @@ router.get('/connect/:partnerLabel', requireAuth, (req, res) => {
   if (!partnerLabel) return res.status(400).send('Missing partner label.');
   if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).send('You can only connect your own calendar.');
   try {
-    res.redirect(googleCalendarClient.buildConsentUrl(partnerLabel));
+    const consentUrl = googleCalendarClient.buildConsentUrl(partnerLabel);
+    // TEMPORARY diagnostic — chasing a generic Google "500. That's an
+    // error." on connect after the APP_URL fix. Remove once resolved.
+    console.log(`[calendar-oauth] partner=${JSON.stringify(partnerLabel)} APP_URL=${JSON.stringify(process.env.APP_URL)} consentUrl=${consentUrl}`);
+    res.redirect(consentUrl);
   } catch (err) {
     res.status(500).send(err.message);
   }
