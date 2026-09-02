@@ -19008,19 +19008,46 @@
           <div><strong style="color:var(--navy)">Contact:</strong> ${escHtml(contact || '—')}</div>
           <div><strong style="color:var(--navy)">Added by:</strong> ${escHtml(c.added_by || '—')}</div>
         </div>
+        <div id="calibEducatorMatch" style="margin-bottom:14px"></div>
         <div style="display:flex;gap:8px;margin-bottom:16px">
           ${c.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playCalibrationRecording()">▶ Play Recording</button>` : ''}
           ${c.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${c.recording_id}')">📄 View Transcript</button>` : ''}
           <button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="copyCalibrationLink('${c.id}')">🔗 Copy Link</button>
         </div>`;
 
+      // Joy, 2026-09-02: "howcome it's just a summary... no comments on
+      // each section of the rubric?" — this was only ever showing the
+      // headline (outcome/score/summary), never the per-category
+      // breakdown the Evaluations section's own result view always has
+      // (Wt./Category/Notes/Score — see renderEvalResult, mirrored here
+      // against mine.categoryScores instead of a fresh AI response).
+      const myRubricForRows = callRubrics[mine?.rubricType];
+      const myCategoryRows = (mine?.categoryScores || []).map(cs => {
+        const def = myRubricForRows?.categories.find(x => x.key === cs.key);
+        return `
+        <tr>
+          <td style="width:50px;text-align:center;font-weight:800;color:var(--orange);font-variant-numeric:tabular-nums">${cs.weight}%</td>
+          <td style="font-weight:700;color:var(--navy);width:190px">
+            ${escHtml(cs.category)}${cs.critical ? '<div style="font-size:9.5px;font-weight:700;color:#c0392b;background:#fef2f2;padding:1px 6px;border-radius:5px;margin-top:3px;display:inline-block">⛔ Zero-tolerance</div>' : ''}
+            ${def ? `<ul style="margin:6px 0 0;padding-left:14px;font-size:10.5px;color:var(--text-muted);font-weight:400;line-height:1.5">${def.criteria.map(x => `<li>${escHtml(x)}</li>`).join('')}</ul>` : ''}
+          </td>
+          <td style="font-size:12.5px;color:var(--text-muted);line-height:1.6">${escHtml(cs.notes) || '<span style="font-style:italic">No notes</span>'}</td>
+          <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${cs.score}/5</td>
+        </tr>`;
+      }).join('');
       const myResultBox = mine?.submitted ? `
         <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 14px;margin-top:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span class="badge ${outcomeMeta[mine.realOutcome]?.badge || 'badge-user'}">${outcomeMeta[mine.realOutcome]?.label || mine.realOutcome}</span>
             <span style="font-size:20px;font-weight:800;color:var(--orange)">${mine.overallScore}%</span>
           </div>
-          <div style="font-size:12px;color:var(--text-muted)">${escHtml(mine.summary || '')}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(mine.summary || '')}</div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="font-size:12.5px">
+              <thead><tr><th>Wt.</th><th>Category</th><th>Notes</th><th>Score</th></tr></thead>
+              <tbody>${myCategoryRows}</tbody>
+            </table>
+          </div>
         </div>` : '<div style="font-size:12px;color:var(--text-muted);margin-top:8px">You haven\'t graded this call yet.</div>';
 
       // Not-yet-submitted: plain first-time Evaluate/Grade — there's nothing
@@ -19117,6 +19144,37 @@
       }
 
       document.getElementById('calibrationDetailBody').innerHTML = metaRow + myGradeSection + panelSection + revealBtn + comparisonSection;
+      loadCalibEducatorMatch(contact);
+    }
+
+    // Links this call's contact number to a real RT educator, exactly the
+    // same live phone-match Tasks already uses for its own Linked
+    // Educators (routes/tasks.js's GET /match-person, open to any signed-
+    // in role — nothing calibration-specific needed here). Nothing is
+    // saved anywhere; it's recomputed fresh every time this modal opens,
+    // since the match is entirely derived from the call's own phone
+    // number already on file — there's nothing to persist.
+    async function loadCalibEducatorMatch(contact) {
+      const box = document.getElementById('calibEducatorMatch');
+      if (!box || !contact) { if (box) box.innerHTML = ''; return; }
+      box.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted)">🔍 Checking for a matching educator…</span>';
+      try {
+        const data = await fetch(`/api/tasks/match-person?q=${encodeURIComponent(contact)}`).then(r => r.json());
+        // A phone match is close to unique (see taskPersonMatchService.js)
+        // — only surface it at that confidence, same bar Tasks itself
+        // uses before auto-linking. Name-only matches don't apply here at
+        // all (a phone number was searched, never a name), and quietly
+        // showing nothing when there's no real match beats a false "no
+        // educator found" for what might just be a centre's front-desk line.
+        const match = data?.candidates?.[0];
+        if (!match || match.confidence !== 'phone') { box.innerHTML = ''; return; }
+        box.innerHTML = `
+          <div style="display:inline-flex;align-items:center;gap:8px;background:var(--offwhite);border:1px solid var(--gray-200);border-radius:50px;padding:6px 14px 6px 10px;font-size:12.5px">
+            <span>🎓</span>
+            <span style="font-weight:700;color:var(--navy)">${escHtml(match.name)}</span>
+            <a href="${match.portalUrl}" target="_blank" rel="noopener" style="color:#1550ff;font-weight:600;text-decoration:none">View Profile ↗</a>
+          </div>`;
+      } catch { box.innerHTML = ''; }
     }
 
     // Resolves the rubric-type select's "🔍 Auto-detect" down to a real

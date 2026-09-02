@@ -175,7 +175,19 @@ app.use('/', require('./routes/mcpOAuth'));
 // (articles, FAQ management, call quality), enforced both client-side and
 // on every underlying API route.
 function guardRoute(req, res, file, adminOnly = false) {
-  if (!req.isAuthenticated()) return res.redirect('/login.html');
+  // Preserves wherever this link actually pointed (2026-09-02 — traced
+  // from "Liam wasn't logged in, the /wfp link asked him to sign in, and
+  // he ended up somewhere other than /wfp") — login.html already knows
+  // how to honor a ?returnTo= (built for the MCP OAuth flow), this just
+  // hadn't been wired up here yet. Without it, every not-yet-logged-in
+  // recipient of ANY shared link (a /wfp link, a Task's Copy Link, a
+  // Calibration Copy Link) loses that destination the moment they have
+  // to log in first, landing on the plain homepage instead — from there
+  // an admin like Liam naturally clicks into /admin (the only nav path
+  // they have to "get anywhere"), which is unrestricted, and looks
+  // exactly like "he could see everything" even though nothing about the
+  // actual /wfp restriction was ever broken.
+  if (!req.isAuthenticated()) return res.redirect(`/login.html?returnTo=${encodeURIComponent(req.originalUrl)}`);
   if (adminOnly && !['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role)) {
     return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
   }
@@ -251,7 +263,9 @@ app.get('/partners/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 // reachable via the express.static mount above — nothing in them is
 // sensitive — only the app shell itself needs the auth check.
 function wfpGuard(req, res) {
-  if (!req.isAuthenticated()) return res.redirect('/login.html');
+  // See guardRoute's own comment on this same returnTo fix — this is the
+  // exact route Liam's link was for.
+  if (!req.isAuthenticated()) return res.redirect(`/login.html?returnTo=${encodeURIComponent(req.originalUrl)}`);
   const hasAccess = ['admin', 'super_admin', 'qa_view', 'workforce_partner'].includes(req.user.role) || req.user.can_use_wfp_pwa;
   if (!hasAccess) return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
   // Explicit no-store (2026-09-02, chasing the "still shows RT Partner"
@@ -273,7 +287,10 @@ app.get('/wfp/*', wfpGuard);
 // page here; an unknown code (its task was deleted, or it was just made
 // up) 404s in plain text rather than redirecting into a broken task view.
 app.get('/t/:code', async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect('/login.html');
+  // Same returnTo fix as guardRoute/wfpGuard — a Task's own Copy Link had
+  // the identical gap (whoever wasn't already logged in lost the task
+  // link the moment they had to sign in first).
+  if (!req.isAuthenticated()) return res.redirect(`/login.html?returnTo=${encodeURIComponent(req.originalUrl)}`);
   try {
     const result = await getDb().execute({ sql: 'SELECT task_id FROM task_short_links WHERE code = ?', args: [req.params.code] });
     const row = result.rows[0];
