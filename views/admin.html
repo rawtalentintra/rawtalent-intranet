@@ -11471,6 +11471,20 @@
             </div>`;
           return;
         }
+        // CALENDAR_AUTH_MODE=service-account is correctly set, but
+        // GOOGLE_SERVICE_ACCOUNT_KEY isn't (missing, empty, or fails to
+        // decode) — a real, distinct problem from 'delegation' actually
+        // being active, and worth saying so plainly rather than falling
+        // into the generic message below, which would wrongly claim
+        // delegation mode when the mode itself is set correctly.
+        if (status.authMode === 'service-account') {
+          infoEl.innerHTML = `
+            <div style="padding:10px 12px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12px;margin-bottom:14px">
+              <strong>Service-account mode is set, but no usable key found.</strong> <code>GOOGLE_SERVICE_ACCOUNT_KEY</code> is missing, empty,
+              or not valid base64-encoded JSON in Railway — nothing will sync until that's set.
+            </div>`;
+          return;
+        }
         // Falls through here for 'delegation' — either genuinely configured
         // (Workspace admin authorized it), or CALENDAR_AUTH_MODE has an
         // unrecognized value and silently defaulted to this (see
