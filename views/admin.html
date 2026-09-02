@@ -4537,6 +4537,22 @@
         // permanently hijacked every future refresh of that tab.
         history.replaceState(null, '', location.pathname);
       }
+
+      // "Copy Link" on a calibration call (Joy, 2026-09-02) — same
+      // override-and-strip pattern as openCentreKey just above. Only acts
+      // if the Calibration tab button is actually there (loadCallsSection
+      // hides it entirely for anyone without calibration access) — a link
+      // shared with someone off the panel just lands them on Browse Calls
+      // instead of a broken/silent deep link.
+      const openCalibrationId = new URLSearchParams(location.search).get('calibration');
+      if (openCalibrationId) {
+        showSection('calls', document.querySelector(`[onclick*="showSection('calls'"]`));
+        if (document.querySelector('.calls-tab-btn[data-calls-tab="calibration"]')?.style.display !== 'none') {
+          switchCallsTab('calibration');
+          openCalibrationDetailModal(openCalibrationId);
+        }
+        history.replaceState(null, '', location.pathname);
+      }
     }
 
     // The small set of admin-panel sections each restricted role can
@@ -18933,7 +18949,11 @@
             <td style="color:var(--text-muted)">${escHtml(c.added_by || '—')}</td>
             <td style="font-size:12px;color:var(--text-muted)">${escHtml(submittedLabel)}</td>
             <td>${statusChip}</td>
-            <td><button class="action-btn edit" onclick="openCalibrationDetailModal('${c.id}')">Open</button></td>
+            <td style="white-space:nowrap">
+              <button class="action-btn edit" onclick="openCalibrationDetailModal('${c.id}')">Open</button>
+              <button class="action-btn view" title="Copy a link straight to this calibration call" onclick="copyCalibrationLink('${c.id}')">🔗</button>
+              ${currentUserRole === 'super_admin' ? `<button class="action-btn delete" title="Removes it from Calibration only — the call itself stays in Browse Calls" onclick="deleteCalibration('${c.id}')">🗑️</button>` : ''}
+            </td>
           </tr>`;
         }).join('');
       } catch { body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Failed to load calibration calls.</td></tr>'; }
@@ -18991,6 +19011,7 @@
         <div style="display:flex;gap:8px;margin-bottom:16px">
           ${c.has_audio ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="playCalibrationRecording()">▶ Play Recording</button>` : ''}
           ${c.has_transcript ? `<button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="viewTranscript('${c.recording_id}')">📄 View Transcript</button>` : ''}
+          <button class="btn-secondary" style="font-size:12.5px;padding:6px 14px" onclick="copyCalibrationLink('${c.id}')">🔗 Copy Link</button>
         </div>`;
 
       const myResultBox = mine?.submitted ? `
@@ -19002,6 +19023,28 @@
           <div style="font-size:12px;color:var(--text-muted)">${escHtml(mine.summary || '')}</div>
         </div>` : '<div style="font-size:12px;color:var(--text-muted);margin-top:8px">You haven\'t graded this call yet.</div>';
 
+      // Not-yet-submitted: plain first-time Evaluate/Grade — there's nothing
+      // to give feedback ON yet. Already submitted: re-running Evaluate (AI)
+      // blind (no input) was the exact complaint (Joy, 2026-09-02) — this
+      // now matches the Evaluations section's own "Give Feedback & Re-
+      // grade" (pick a category, add a note, the AI builds on top of the
+      // current result) instead of silently re-grading from scratch.
+      // Re-grade Manually is unchanged — re-entering your own scores by
+      // hand never needed feedback text in the first place.
+      const myGradeButtons = mine?.submitted
+        ? `<button class="action-btn edit" onclick="toggleCalibFeedbackBox('${mine.evaluationId}', '${mine.rubricType}', '${c.id}')">💬 Give Feedback &amp; Re-grade</button>
+           <button class="action-btn edit" onclick="openCalibrationManualGrade('${c.id}', '${c.detected_rubric_type || ''}')">Re-grade Manually</button>`
+        : `<button class="action-btn edit" onclick="evaluateCalibration('${c.id}', this)">Evaluate (AI)</button>
+           <button class="action-btn edit" onclick="openCalibrationManualGrade('${c.id}', '${c.detected_rubric_type || ''}')">Grade Manually</button>`;
+
+      const feedbackBox = mine?.submitted ? `
+        <div id="calibFeedbackBox" style="display:none;margin-top:10px">
+          <label class="form-label-modal">Pick a category and add your comment below it. A new dropdown appears for the next category once you've made a selection.</label>
+          <div id="calibFeedbackRowsContainer" style="margin-top:8px"></div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">This re-grades YOUR OWN submission, updating the categories you've selected while keeping every other category exactly as it is. Scoped to your own calibration grade only — unlike the Evaluations section's version of this, it does NOT become a standing rule for future AI grading, so it can't affect anyone else's independent score on this same call.</div>
+          <button class="btn-add" style="margin-top:10px" id="calibFeedbackSubmitBtn" onclick="submitCalibFeedbackRegrade()">Re-grade with This Feedback</button>
+        </div>` : '';
+
       const myGradeSection = `
         <div class="lead-group-label" style="margin-top:0">My Grade</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -19010,10 +19053,10 @@
             <option value="educator" ${rubricTypeForMine === 'educator' ? 'selected' : ''}>Educator</option>
             <option value="centre" ${rubricTypeForMine === 'centre' ? 'selected' : ''}>Centre</option>
           </select>
-          <button class="action-btn edit" onclick="evaluateCalibration('${c.id}', this)">${mine?.submitted ? 'Re-grade (AI)' : 'Evaluate (AI)'}</button>
-          <button class="action-btn edit" onclick="openCalibrationManualGrade('${c.id}', '${c.detected_rubric_type || ''}')">${mine?.submitted ? 'Re-grade Manually' : 'Grade Manually'}</button>
+          ${myGradeButtons}
         </div>
-        ${myResultBox}`;
+        ${myResultBox}
+        ${feedbackBox}`;
 
       const panelSection = `
         <div class="lead-group-label">Panel</div>
@@ -19031,8 +19074,20 @@
         ? `<button class="btn-add" style="margin-top:12px" onclick="revealCalibration('${c.id}')">🔬 Reveal Everyone's Scores</button>`
         : '';
 
+      // Real bug fix (Joy, 2026-09-02 — "they can also see what I see as
+      // super admin"): `calibrationScore` comes back non-null the moment
+      // ANY submission is visible to this viewer — including a plain
+      // panelist's OWN single row, which always passes the per-viewer
+      // visibility filter server-side (you can always see your own).
+      // Rendering the "Everyone's Scores" comparison table off that alone
+      // meant an ordinary panelist saw a full comparison-table-shaped box
+      // (just with only themselves in it) the moment they submitted —
+      // structurally identical to the real super-admin view, which is
+      // exactly what looked like "seeing what I see". This section must
+      // only ever render for the two cases that actually mean "more than
+      // just my own row": true super_admin access, or an actual reveal.
       let comparisonSection = '';
-      if (calibrationScore) {
+      if (calibrationScore && (isSuperAdmin || c.revealed_at)) {
         const graders = submissions.filter(s => s.submitted && !s.hidden);
         const categoryRows = calibrationScore.perCategory.map(cat => `
           <tr>
@@ -19044,7 +19099,7 @@
             <td class="calib-avg-col">${cat.average}</td>
           </tr>`).join('');
         comparisonSection = `
-          <div class="lead-group-label">Everyone's Scores${c.revealed_at ? '' : ' (visible to you as Super Admin)'}</div>
+          <div class="lead-group-label">Everyone's Scores${c.revealed_at ? '' : ' — only visible to you, not yet revealed to the panel'}</div>
           <div style="overflow-x:auto">
             <table class="data-table calibration-score-table" style="font-size:12.5px">
               <thead><tr><th>Category</th>${graders.map(g => `<th>${escHtml((g.name || g.email).split(' ')[0])}</th>`).join('')}<th class="calib-avg-col">Average</th></tr></thead>
@@ -19100,6 +19155,89 @@
       finally { if (btn) { btn.disabled = false; } }
     }
 
+    // Calibration's own "Give Feedback & Re-grade" — mirrors the Evaluations
+    // section's detailFeedbackRows/submitDetailFeedbackRegrade (search for
+    // "renderDetailFeedbackRows" — same progressive-dropdown mechanic, same
+    // PUT .../regrade endpoint underneath) against a different modal/DOM,
+    // so a fresh, parallel set of state/functions rather than reaching into
+    // the other modal's globals. See routes/calls.js's own comment on why
+    // this doesn't save a standing calibration note the way that one does.
+    let calibFeedbackRows = [{ categoryKey: null, feedbackText: '' }];
+    let calibFeedbackEvalId = null;
+    let calibFeedbackRubricType = null;
+    let calibFeedbackCalibrationId = null;
+
+    function toggleCalibFeedbackBox(evaluationId, rubricType, calibrationId) {
+      calibFeedbackEvalId = evaluationId;
+      calibFeedbackRubricType = rubricType;
+      calibFeedbackCalibrationId = calibrationId;
+      calibFeedbackRows = [{ categoryKey: null, feedbackText: '' }];
+      const box = document.getElementById('calibFeedbackBox');
+      const opening = box.style.display === 'none' || !box.style.display;
+      box.style.display = opening ? 'block' : 'none';
+      if (opening) renderCalibFeedbackRows();
+    }
+
+    function renderCalibFeedbackRows() {
+      const container = document.getElementById('calibFeedbackRowsContainer');
+      if (!container) return;
+      const rubric = callRubrics[calibFeedbackRubricType];
+      const allOptions = [
+        { key: 'general', label: 'General — applies to every category' },
+        ...(rubric?.categories || []).map(c => ({ key: c.key, label: c.label }))
+      ];
+      container.innerHTML = calibFeedbackRows.map((row, i) => {
+        const usedElsewhere = calibFeedbackRows.filter((r, j) => j !== i).map(r => r.categoryKey).filter(Boolean);
+        const opts = allOptions.filter(o => o.key === row.categoryKey || !usedElsewhere.includes(o.key));
+        return `
+        <div style="margin-bottom:10px;padding:10px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">
+          <select class="form-control" style="margin-bottom:8px" onchange="updateCalibFeedbackRowCategory(${i}, this.value)">
+            <option value="">— Select a category —</option>
+            ${opts.map(o => `<option value="${o.key}" ${o.key === row.categoryKey ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
+          </select>
+          <textarea id="calib-feedback-text-${i}" class="form-control textarea" style="min-height:60px" placeholder="Your feedback for this category…" oninput="updateCalibFeedbackRowText(${i}, this.value)">${escHtml(row.feedbackText || '')}</textarea>
+        </div>`;
+      }).join('');
+    }
+
+    function updateCalibFeedbackRowCategory(i, value) {
+      calibFeedbackRows[i].categoryKey = value || null;
+      const rubric = callRubrics[calibFeedbackRubricType];
+      const totalOptions = (rubric?.categories?.length || 0) + 1; // + General
+      const usedCount = calibFeedbackRows.filter(r => r.categoryKey).length;
+      if (i === calibFeedbackRows.length - 1 && value && usedCount < totalOptions) {
+        calibFeedbackRows.push({ categoryKey: null, feedbackText: '' });
+      }
+      renderCalibFeedbackRows();
+      if (value) document.getElementById(`calib-feedback-text-${i}`)?.focus();
+    }
+
+    function updateCalibFeedbackRowText(i, value) {
+      calibFeedbackRows[i].feedbackText = value;
+    }
+
+    async function submitCalibFeedbackRegrade() {
+      const items = calibFeedbackRows
+        .filter(r => r.categoryKey && r.feedbackText.trim())
+        .map(r => ({ categoryKey: r.categoryKey === 'general' ? null : r.categoryKey, feedbackText: r.feedbackText.trim() }));
+      if (!items.length) { toast('Select a category and enter feedback for at least one row', 'error'); return; }
+      if (!calibFeedbackEvalId) { toast('Nothing to re-grade', 'error'); return; }
+      const btn = document.getElementById('calibFeedbackSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Re-grading…';
+      try {
+        const res = await fetch(`/api/calls/evaluations/${calibFeedbackEvalId}/regrade`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Re-grade failed', 'error'); return; }
+        toast('Re-graded with your feedback', 'success');
+        openCalibrationDetailModal(calibFeedbackCalibrationId);
+        loadCalibrationList();
+      } catch { toast('Re-grade failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Re-grade with This Feedback'; }
+    }
+
     async function revealCalibration(calibrationId) {
       if (!confirm("Reveal everyone's scores for this calibration call? This can't be undone.")) return;
       try {
@@ -19110,6 +19248,34 @@
         openCalibrationDetailModal(calibrationId);
         loadCalibrationList();
       } catch { toast('Network error', 'error'); }
+    }
+
+    // Removes it from the Calibration tab only (and every panelist's
+    // submission for it) — the underlying call is untouched in Browse
+    // Calls, it's just no longer nominated for calibration.
+    async function deleteCalibration(calibrationId) {
+      if (!confirm("Delete this from the Calibration tab? Every panelist's submitted grade for it goes with it — the call itself stays in Browse Calls.")) return;
+      try {
+        const res = await fetch(`/api/calls/calibrations/${calibrationId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to delete', 'error'); return; }
+        toast('Removed from Calibration', 'success');
+        loadCalibrationList();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    // "Copy Link" — /admin specifically (not /partners or /wfp, which
+    // restrict client-side to just the Workforce Partners nav group and
+    // wouldn't show Call Quality Evaluator at all), consumed by init()'s
+    // own `?calibration=` handling right after the openCentre one it mirrors.
+    async function copyCalibrationLink(calibrationId) {
+      const url = `${location.origin}/admin?calibration=${calibrationId}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('Link copied', 'success');
+      } catch {
+        toast('Could not copy — your browser blocked clipboard access', 'error');
+      }
     }
 
     let evalFiltersLoaded = false;

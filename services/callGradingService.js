@@ -817,7 +817,7 @@ async function upsertCalibrationEvaluation({ calibrationId, recordingId, repName
 // new call. The new scores/notes become the current state; the feedback
 // itself is preserved separately (see logEvaluationFeedback) so nothing is
 // lost across any number of re-grades.
-async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, reviewerFeedbackCategories }) {
+async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, reviewerFeedbackCategories, dbOutcome }) {
   const db = getDb();
   const keys = reviewerFeedbackCategories || [];
   await db.execute({
@@ -826,7 +826,12 @@ async function updateEvaluationResult(evaluationId, { result, reviewerFeedback, 
               reviewer_feedback = ?, reviewer_feedback_category = ?, reviewer_feedback_categories = ?, updated_at = now()
           WHERE id = ?`,
     args: [
-      JSON.stringify(result.categoryScores), result.overallScore, result.outcome, result.summary,
+      // dbOutcome lets a calibration submission's re-grade stay tagged
+      // 'calibration_only' in the DB — otherwise "Give Feedback & Re-
+      // grade" (reused as-is for calibration, see routes/calls.js) would
+      // overwrite it back to the real computed outcome and silently pull
+      // that submission back into the real quality-stats aggregates.
+      JSON.stringify(result.categoryScores), result.overallScore, dbOutcome || result.outcome, result.summary,
       reviewerFeedback || null, keys[0] || null, keys.length ? JSON.stringify(keys) : null, evaluationId
     ]
   });

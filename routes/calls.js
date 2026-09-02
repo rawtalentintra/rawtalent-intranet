@@ -488,6 +488,17 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     const evaluation = evalRes.rows[0];
     if (!evaluation) return res.status(404).json({ error: 'Evaluation not found' });
 
+    // This route is reused as-is for calibration submissions (same "Give
+    // Feedback & Re-grade" UI, same conversation-about-one-call model) —
+    // but a calibration evaluation belongs to one specific panelist, so
+    // the generic "any admin/qa_view can regrade any evaluation" access
+    // this router normally allows would otherwise let someone re-grade a
+    // panelist's blind submission out from under them. Only that panelist
+    // (or super_admin) may regrade it.
+    if (evaluation.calibration_id && req.user.role !== 'super_admin' && evaluation.evaluated_by !== req.user.email) {
+      return res.status(403).json({ error: 'Only the panelist who submitted this calibration grade (or Super Admin) can re-grade it' });
+    }
+
     const localRes = await db.execute({ sql: 'SELECT transcript, sentiment_score, document_emotion, sentence_emotion FROM call_recordings WHERE id = ?', args: [evaluation.recording_id] });
     const local = localRes.rows[0];
     if (!local?.transcript) return res.status(400).json({ error: 'No transcript available for this call' });
@@ -516,15 +527,27 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     await updateEvaluationResult(evaluation.id, {
       result,
       reviewerFeedback: combinedFeedback,
-      reviewerFeedbackCategories: combinedCategoryKeys
+      reviewerFeedbackCategories: combinedCategoryKeys,
+      dbOutcome: evaluation.calibration_id ? 'calibration_only' : undefined
     });
 
     // One history row and one standing calibration note per item, so each
     // category-specific correction is logged and applied to future grading
     // separately rather than merged into a single ambiguous blob.
+    //
+    // NOT for a calibration submission, though: the whole point of the
+    // blind panel exercise is seeing how differently each person (and the
+    // AI) independently grade the SAME call — a standing note is global
+    // (every future AI grading run on this rubric applies it, including
+    // another panelist's own separate grade of this exact call), so saving
+    // one here would silently contaminate everyone else's independence.
+    // The feedback is still logged to this evaluation's own history below,
+    // just not promoted into a standing rule.
     for (const item of items) {
       await logEvaluationFeedback(evaluation.id, item.feedbackText, item.categoryKey ? [item.categoryKey] : [], req.user.email);
-      await addCalibrationNote(item.feedbackText, req.user.email, evaluation.rubric_type, item.categoryKey || null);
+      if (!evaluation.calibration_id) {
+        await addCalibrationNote(item.feedbackText, req.user.email, evaluation.rubric_type, item.categoryKey || null);
+      }
     }
 
     res.json({ id: evaluation.id, repName: evaluation.rep_name, rubricType: evaluation.rubric_type, source: 'ai', ...result });
@@ -861,6 +884,25 @@ router.post('/calibrations/:id/reveal', requireSuperAdmin, async (req, res) => {
       const check = await getDb().execute({ sql: 'SELECT id FROM call_calibrations WHERE id = ?', args: [req.params.id] });
       if (!check.rows[0]) return res.status(404).json({ error: 'Calibration call not found' });
     }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Removes a call from the Calibration tab only — every panelist's
+// submission for it goes with it, but call_recordings (the underlying
+// call in Browse Calls) is never touched, so it stays exactly where it
+// was, just no longer nominated for calibration. Super_admin only, same
+// as reveal — this deletes other people's submitted grades, not just the
+// caller's own.
+router.delete('/calibrations/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const check = await db.execute({ sql: 'SELECT id FROM call_calibrations WHERE id = ?', args: [req.params.id] });
+    if (!check.rows[0]) return res.status(404).json({ error: 'Calibration call not found' });
+    await db.execute({ sql: 'DELETE FROM call_evaluations WHERE calibration_id = ?', args: [req.params.id] });
+    await db.execute({ sql: 'DELETE FROM call_calibrations WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
