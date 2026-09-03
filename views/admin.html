@@ -3735,6 +3735,10 @@
           <div class="form-hint">Ties this login to their own leads/centres in /wfp — without it, a Workforce Partner sees every territory's leads/centres instead of just their own.</div>
         </div>
         <div class="checkbox-row">
+          <input type="checkbox" id="userCanViewAllWfpTerritories">
+          <label for="userCanViewAllWfpTerritories">Full territory access on /wfp (sees the same all-territories filter Joy does, even with a Workforce Partner Territory set above — e.g. Liam)</label>
+        </div>
+        <div class="checkbox-row">
           <input type="checkbox" id="userCanBuildTraining">
           <label for="userCanBuildTraining">Can build training courses (grants Build Training access to this person specifically, regardless of role)</label>
         </div>
@@ -6580,6 +6584,7 @@
           document.getElementById('userActive').checked = !!u.active;
           document.getElementById('userCanBuildTraining').checked = !!u.can_build_training;
           document.getElementById('userCanCreateOutreachLists').checked = !!u.can_create_outreach_lists;
+          document.getElementById('userCanViewAllWfpTerritories').checked = !!u.can_view_all_wfp_territories;
           wfpSel.value = u.wfp_label || '';
         }
       } else {
@@ -6590,6 +6595,7 @@
         document.getElementById('userActive').checked = true;
         document.getElementById('userCanBuildTraining').checked = false;
         document.getElementById('userCanCreateOutreachLists').checked = false;
+        document.getElementById('userCanViewAllWfpTerritories').checked = false;
         wfpSel.value = '';
       }
       document.getElementById('userPassword').value = '';
@@ -6611,6 +6617,7 @@
       const canBuildTraining = document.getElementById('userCanBuildTraining').checked;
       const canCreateOutreachLists = document.getElementById('userCanCreateOutreachLists').checked;
       const wfpLabel = document.getElementById('userWfpLabel').value;
+      const canViewAllWfpTerritories = document.getElementById('userCanViewAllWfpTerritories').checked;
 
       if (!name) { toast('Name is required', 'error'); return; }
       if (!id && !email) { toast('Email is required', 'error'); return; }
@@ -6620,8 +6627,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, ...(password ? { password } : {}) }
-          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel };
+          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories };
 
         const res = await fetch(url, {
           method,

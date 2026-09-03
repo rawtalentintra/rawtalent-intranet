@@ -148,7 +148,7 @@
     .note-line { font-size: 12.5px; color: var(--text-muted); padding: 8px 0; }
 
     label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin: 12px 0 5px; }
-    input[type=text], input[type=date], input[type=tel], input[type=email], select, textarea {
+    input[type=text], input[type=date], input[type=time], input[type=tel], input[type=email], select, textarea {
       width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
       font-size: 15px; background: var(--card); font-family: inherit;
     }
@@ -210,6 +210,11 @@
     let wfpFilterLabel = null; // admin-only territory toggle — null = All States (see ensureDataLoaded)
     let logTarget = null; // { type: 'lead'|'centre', id, followUpOnly, prefillOutcome }
     let editingLeadId = null;
+    let plannedRoute = null; // today's saved wfp_planned_routes row (or null), fetched fresh each Today load
+    let routeBuilderDate = null;
+    let routeBuilderStart = '';
+    let routeBuilderDeparture = '';
+    let routeBuilderStops = []; // [{type:'lead'|'centre', id, label} | {type:'manual', label, address}]
 
     function toast(msg, kind) {
       const el = document.getElementById('toast');
@@ -287,6 +292,7 @@
       if (view === 'centres') return renderCentresList();
       if (view === 'centre-detail') return renderCentreDetail();
       if (view === 'log-activity') return renderLogActivity();
+      if (view === 'plan-route') return renderPlanRoute();
       if (view === 'educators') return renderEducatorSearch();
       if (view === 'educator-profile') return renderEducatorProfile();
     }
@@ -302,7 +308,7 @@
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
       let q = '';
-      if (currentUser.wfpLabel) q = '?mine=true';
+      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) q = '?mine=true';
       else if (wfpFilterLabel) q = '?partnerLabel=' + encodeURIComponent(wfpFilterLabel);
       try {
         const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
@@ -321,7 +327,7 @@
       { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' }
     ];
     function wfpFilterBarHtml() {
-      if (currentUser.wfpLabel) return '';
+      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return '';
       return `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px">
         ${WFP_FILTER_OPTIONS.map(o => `
           <button onclick="setWfpFilterLabel('${o.key.replace(/'/g, "\\'")}')" style="flex-shrink:0;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:${o.bg};color:white;opacity:${wfpFilterLabel === o.key ? '1' : '.55'}">${escHtml(o.label)}</button>
@@ -334,8 +340,16 @@
       render(viewStack[viewStack.length - 1]);
     }
     function wfpTagText() {
-      if (currentUser.wfpLabel) return `📍 ${currentUser.wfpLabel}`;
+      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return `📍 ${currentUser.wfpLabel}`;
       return wfpFilterLabel ? `📍 ${wfpFilterLabel}` : '';
+    }
+    // Which territory a save/read of a mobile route plan is for — mirrors
+    // ensureDataLoaded's own q logic. A real WFP (no cross-territory grant)
+    // always plans their own day; Joy/Liam plan whichever territory the
+    // filter bar has picked (defaulting to nothing until one is chosen).
+    function activeWfpLabelForPlanning() {
+      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return currentUser.wfpLabel;
+      return wfpFilterLabel || null;
     }
 
     // ── Lead stage (derived — no dedicated DB field, see db/schema.sql's
@@ -357,12 +371,49 @@
       return 'new';
     }
 
+    // ── Priority (Joy's 8-tier list, 2026-09-03 call follow-up) ─────────
+    // "1. a centre who completed their first booking / 2. escalated centre /
+    // 3. high-agency lead / 4. regular lead / 5. needs attention centre /
+    // 6. dormant centre / 7. centres along the way / 8. the rest" — verbatim.
+    // Tier 1 didn't exist anywhere in the app before ("I don't have that
+    // yet. Let me add that." — Joy, on the call); derived entirely from
+    // fields GET /api/centres already returns, no schema/backend change.
+    function needsFirstBookingVisit(c) {
+      return c.bookings90dCount === 1 && !c.nurture?.lastContactDate;
+    }
+    function itemPriorityTier(item) {
+      if (item.kind === 'centre' && needsFirstBookingVisit(item.centre)) return 1;
+      if (item.kind === 'centre' && item.centre.isEscalated) return 2;
+      if (item.kind === 'lead' && item.lead.agency_usage === 'high_agency_user') return 3;
+      if (item.kind === 'lead') return 4;
+      if (item.kind === 'centre' && (item.centre.health === 'needs_attention' || item.centre.nurture?.status === 'needs_attention')) return 5;
+      if (item.kind === 'centre' && (item.centre.health === 'declining' || item.centre.nurture?.status === 'reactivation_candidate')) return 6;
+      if (item._alongRoute) return 7;
+      return 8;
+    }
+    function sortByPriorityTier(items) {
+      return items.slice().sort((a, b) => itemPriorityTier(a) - itemPriorityTier(b));
+    }
+
     // ── Today ──────────────────────────────────────────────────────────
     let todaySearchVal = '';
+    function todayDateStr(d) {
+      const dt = d || new Date();
+      return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    }
     async function renderToday() {
       document.getElementById('headerTitle').textContent = 'Today';
       document.getElementById('wfpTag').textContent = wfpTagText();
       await ensureDataLoaded();
+      plannedRoute = null;
+      const targetLabel = activeWfpLabelForPlanning();
+      if (targetLabel) {
+        try {
+          const q = '?date=' + todayDateStr() + '&wfpLabel=' + encodeURIComponent(targetLabel);
+          const res = await api('/api/route-planner/mobile-plan' + q);
+          plannedRoute = res.plan;
+        } catch { plannedRoute = null; }
+      }
       if (!userLocation && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           pos => { userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude }; if (viewStack[viewStack.length - 1] === 'today') paintToday(); },
@@ -371,6 +422,131 @@
         );
       }
       paintToday();
+    }
+
+    // Leads/centres within ~5km of any stop in today's planned route — the
+    // route-based "nearby" Joy asked for, replacing live-GPS nearby when a
+    // route exists (a route stop's location is a much stronger "you'll be
+    // near this" signal than the WFP's current live position, which mostly
+    // just reflects wherever they happened to open the app).
+    function itemsAlongPlannedRoute() {
+      if (!plannedRoute?.stops?.length) return [];
+      const routeStops = plannedRoute.stops.filter(s => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
+      if (!routeStops.length) return [];
+      const routeStopIds = new Set(plannedRoute.stops.map(s => s.id));
+      const candidates = [
+        ...allLeads.filter(l => !l.closed_at && !routeStopIds.has(l.id) && Number.isFinite(l.latitude)).map(l => ({ kind: 'lead', lead: l, label: l.centre_name })),
+        ...allCentres.filter(c => !routeStopIds.has(c.centreKey) && Number.isFinite(c.latitude)).map(c => ({ kind: 'centre', centre: c }))
+      ];
+      return candidates
+        .map(item => {
+          const obj = item.kind === 'lead' ? item.lead : item.centre;
+          const dist = Math.min(...routeStops.map(s => haversineKm(obj.latitude, obj.longitude, s.latitude, s.longitude)));
+          return { ...item, _alongRoute: true, _distanceKm: dist };
+        })
+        .filter(item => item._distanceKm <= 5)
+        .sort((a, b) => a._distanceKm - b._distanceKm)
+        .slice(0, 10);
+    }
+
+    // ── Plan a Route ─────────────────────────────────────────────────
+    // "They should just be able to enter a starting address and either
+    // select a centre for their destination, select a lead, or enter an
+    // address/suburb manually. Don't make it complicated." — Joy, verbatim.
+    function openPlanRoute() {
+      routeBuilderDate = todayDateStr();
+      routeBuilderStart = '';
+      routeBuilderDeparture = '09:00';
+      routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
+        type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
+      }));
+      routeBuilderStart = plannedRoute?.startAddress || '';
+      setView('plan-route');
+    }
+    async function renderPlanRoute() {
+      document.getElementById('headerTitle').textContent = 'Plan a Route';
+      document.getElementById('wfpTag').textContent = wfpTagText();
+      await ensureDataLoaded();
+      paintPlanRoute();
+    }
+    function paintPlanRoute() {
+      const main = document.getElementById('mainContent');
+      const q = (document.getElementById('routeStopSearch')?.value || '').toLowerCase().trim();
+      const matches = q ? [
+        ...allLeads.filter(l => !l.closed_at && !routeBuilderStops.some(s => s.type === 'lead' && s.id === l.id) && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(l => ({ type: 'lead', id: l.id, label: l.centre_name + (l.suburb ? ' — ' + l.suburb : '') })),
+        ...allCentres.filter(c => !routeBuilderStops.some(s => s.type === 'centre' && s.id === c.centreKey) && ((c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(c => ({ type: 'centre', id: c.centreKey, label: c.name + (c.suburb ? ' — ' + c.suburb : '') }))
+      ] : [];
+
+      main.innerHTML = `
+        <label>Route date</label>
+        <input type="date" id="routeDateInput" value="${escHtml(routeBuilderDate)}" onchange="routeBuilderDate=this.value">
+        <label>Starting address</label>
+        <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" onchange="routeBuilderStart=this.value">
+        <label>Departure time</label>
+        <input type="time" id="routeDepartureInput" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
+
+        <div class="section-title">Stops (${routeBuilderStops.length}/${10})</div>
+        <div class="field-hint" style="margin-bottom:8px">🎯 Aim for around 5 quality stops — a guideline, not a rule.</div>
+        ${routeBuilderStops.length ? routeBuilderStops.map((s, i) => `
+          <div class="card" style="cursor:default;display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div><div class="name">${escHtml(s.label)}</div><div class="sub">${s.type === 'manual' ? 'Manual address' : (s.type === 'lead' ? 'Lead' : 'Centre')}</div></div>
+            <button class="icon-btn" onclick="removeRouteStop(${i})">🗑️</button>
+          </div>`).join('') : `<div class="note-line">No stops added yet.</div>`}
+
+        <label>Add a stop — search leads/centres</label>
+        <input type="text" class="search-box" id="routeStopSearch" placeholder="Search by name or suburb…" oninput="paintPlanRoute()">
+        ${matches.length ? matches.map(m => `
+          <div class="card" onclick="addRouteStop('${m.type}','${m.id}',${JSON.stringify(m.label)})">
+            <div class="name">${escHtml(m.label)}</div>
+            <div class="sub">${m.type === 'lead' ? 'Lead' : 'Centre'}</div>
+          </div>`).join('') : ''}
+
+        <label>Or enter an address/suburb manually <span class="optional">(optional)</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="routeManualInput" placeholder="e.g. 42 Smith St, Preston VIC">
+          <button class="btn btn-secondary" style="flex:0 0 auto" onclick="addManualRouteStop()">Add</button>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;margin-top:18px" onclick="buildMobileRoute()" ${routeBuilderStops.length ? '' : 'disabled'}>🗺️ Build My Route</button>
+      `;
+    }
+    function addRouteStop(type, id, label) {
+      if (routeBuilderStops.length >= 10) return toast('Smart Routing supports up to 10 stops per run', 'error');
+      routeBuilderStops.push({ type, id, label });
+      paintPlanRoute();
+    }
+    function addManualRouteStop() {
+      const val = document.getElementById('routeManualInput').value.trim();
+      if (!val) return;
+      if (routeBuilderStops.length >= 10) return toast('Smart Routing supports up to 10 stops per run', 'error');
+      routeBuilderStops.push({ type: 'manual', label: val, address: val });
+      paintPlanRoute();
+    }
+    function removeRouteStop(i) {
+      routeBuilderStops.splice(i, 1);
+      paintPlanRoute();
+    }
+    async function buildMobileRoute() {
+      if (!routeBuilderStart.trim()) return toast('Enter a starting address', 'error');
+      if (!routeBuilderStops.length) return toast('Add at least one stop', 'error');
+      const targetLabel = activeWfpLabelForPlanning();
+      if (!targetLabel) return toast('Pick a territory filter above before planning a route', 'error');
+      const departureTime = new Date(`${routeBuilderDate}T${routeBuilderDeparture}:00`).toISOString();
+      try {
+        toast('Building your route…');
+        const res = await api('/api/route-planner/mobile-plan', {
+          method: 'POST',
+          body: JSON.stringify({
+            routeDate: routeBuilderDate, startAddress: routeBuilderStart, departureTime,
+            stops: routeBuilderStops.map(s => s.type === 'manual' ? { type: 'manual', label: s.label, address: s.address } : { type: s.type, id: s.id }),
+            wfpLabel: targetLabel
+          })
+        });
+        if (routeBuilderDate === todayDateStr()) plannedRoute = { routeDate: res.routeDate, startAddress: routeBuilderStart, departureTime, stops: res.stops, itinerary: res.itinerary };
+        toast('Route built!');
+        viewStack = ['today'];
+        setView('today', false);
+      } catch (err) { toast(err.message, 'error'); }
     }
 
     function todayBuckets() {
@@ -404,7 +580,14 @@
       }
 
       for (const c of allCentres) {
-        if (c.isEscalated || c.health === 'declining' || c.health === 'needs_attention') {
+        // Tier 1 first — a centre landing here isn't necessarily escalated/
+        // declining/needs_attention (often it's health:'new_activating',
+        // which none of those three catch), so this needs its own explicit
+        // inclusion check, not just a sort-priority over whatever the other
+        // rules already happened to surface.
+        if (needsFirstBookingVisit(c)) {
+          attention.push({ kind: 'centre', centre: c, reason: '🎉 Just got their first booking — needs a visit' });
+        } else if (c.isEscalated || c.health === 'declining' || c.health === 'needs_attention') {
           attention.push({ kind: 'centre', centre: c, reason: c.healthReasons?.[0] || (c.isEscalated ? 'Issue raised at last visit' : 'Needs attention') });
         }
         if (c.nurture?.status === 'follow_up_overdue' || c.nurture?.status === 'recurring_overdue' || c.nurture?.status === 'first_contact_overdue') {
@@ -414,12 +597,14 @@
         }
       }
 
-      const nearby = userLocation ? [...allLeads.filter(l => !l.closed_at && Number.isFinite(l.latitude)), ...allCentres.filter(c => Number.isFinite(c.latitude))]
+      // Live-GPS nearby stays as the fallback when there's no planned route
+      // for today to be "along" instead (see itemsAlongPlannedRoute).
+      const nearby = (!plannedRoute && userLocation) ? [...allLeads.filter(l => !l.closed_at && Number.isFinite(l.latitude)), ...allCentres.filter(c => Number.isFinite(c.latitude))]
         .map(x => ({ ...x, _distanceKm: haversineKm(userLocation.lat, userLocation.lng, x.latitude, x.longitude) }))
         .sort((a, b) => a._distanceKm - b._distanceKm)
         .slice(0, 8) : [];
 
-      return { overdue, dueToday, scheduled, attention, nearby };
+      return { overdue, dueToday, scheduled, attention: sortByPriorityTier(attention), nearby };
     }
 
     function todayItemRow(item) {
@@ -460,6 +645,46 @@
         </div>`;
     }
 
+    // "Your Route Today" — the planned-route block at the top of Today
+    // when one exists for the day, built from the exact itinerary shape
+    // routes/routePlanner.js's computeOptimizedItinerary returns
+    // (blocks: drive/lunch/visit). Falls through to a "Plan a Route"
+    // prompt when nothing's been built for today yet.
+    function routeTodayHtml() {
+      if (!plannedRoute) {
+        return `
+          <div class="card" style="cursor:default">
+            <div class="name">No route planned for today</div>
+            <div class="sub">Build a quick route and it'll show here every morning.</div>
+            <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute()">🗺️ Plan a Route</button>
+          </div>`;
+      }
+      const blocks = plannedRoute.itinerary?.blocks || [];
+      const rows = blocks.map(b => {
+        if (b.type === 'lunch') return `<div class="note-line">🍽️ ${escHtml(b.label)} — ${fmtTime(b.start)}–${fmtTime(b.end)}</div>`;
+        if (b.type === 'drive') return `<div class="note-line">🚗 ${b.minutes != null ? Math.round(b.minutes) + ' min' : 'Drive'}${b.km != null ? ' (' + b.km.toFixed(1) + ' km)' : ''} to ${escHtml(b.to)}</div>`;
+        const stop = b.stop;
+        const isReal = stop.type === 'lead' || stop.type === 'centre';
+        const stopId = stop.type === 'lead' ? stop.id : (stop.type === 'centre' ? stop.id : null);
+        const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ');
+        return `
+          <div class="card" style="cursor:default">
+            <div class="name">${fmtTime(b.start)}–${fmtTime(b.end)} · ${escHtml(stop.centre_name)}</div>
+            ${address ? `<div class="sub">${escHtml(address)}</div>` : ''}
+            <div class="quick-actions">
+              <a class="qa-btn" href="${directionsUrl(stop.latitude, stop.longitude, address)}" target="_blank" rel="noopener">🧭 Directions</a>
+              ${isReal ? `<button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stopId}')">📝 Log</button>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+      return `
+        <div class="section-title">🗺️ Your Route Today</div>
+        ${rows}
+        <div class="action-row">
+          <button class="btn btn-secondary" onclick="openPlanRoute()">✏️ Rebuild Route</button>
+        </div>`;
+    }
+
     function paintToday() {
       const main = document.getElementById('mainContent');
       const q = (document.getElementById('todaySearchInput')?.value || todaySearchVal).toLowerCase();
@@ -480,15 +705,19 @@
       }
 
       const b = todayBuckets();
+      const alongRoute = plannedRoute ? itemsAlongPlannedRoute() : [];
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="paintToday()">
+        ${routeTodayHtml()}
         ${b.overdue.length ? `<div class="section-title">⚠️ Overdue (${b.overdue.length})</div>${b.overdue.map(todayItemRow).join('')}` : ''}
         ${b.dueToday.length ? `<div class="section-title">Due Today (${b.dueToday.length})</div>${b.dueToday.map(todayItemRow).join('')}` : ''}
         ${b.attention.length ? `<div class="section-title">Centres Requiring Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
         ${b.scheduled.length ? `<div class="section-title">Scheduled (${b.scheduled.length})</div>${b.scheduled.map(todayItemRow).join('')}` : ''}
-        ${b.nearby.length ? `<div class="section-title">Nearby</div>${b.nearby.map(x => todayItemRow(x.centreKey ? { kind: 'centre', centre: x } : { kind: 'lead', lead: x, label: x.centre_name })).join('')}` : (userLocation === null ? `<div class="section-title">Nearby</div><div class="note-line">Allow location access to see what's near you.</div>` : '')}
-        ${!b.overdue.length && !b.dueToday.length && !b.attention.length && !b.scheduled.length ? `<div class="empty-state">Nothing needs attention right now. 🎉</div>` : ''}
+        ${alongRoute.length ? `<div class="section-title">Along Your Route</div>${alongRoute.map(todayItemRow).join('')}` : ''}
+        ${!plannedRoute && b.nearby.length ? `<div class="section-title">Nearby</div>${b.nearby.map(x => todayItemRow(x.centreKey ? { kind: 'centre', centre: x } : { kind: 'lead', lead: x, label: x.centre_name })).join('')}` : ''}
+        ${!plannedRoute && !b.nearby.length && userLocation === null ? `<div class="section-title">Nearby</div><div class="note-line">Allow location access to see what's near you.</div>` : ''}
+        ${!b.overdue.length && !b.dueToday.length && !b.attention.length && !b.scheduled.length && !alongRoute.length ? `<div class="empty-state">Nothing else needs attention right now. 🎉</div>` : ''}
       `;
     }
 

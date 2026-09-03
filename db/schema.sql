@@ -66,6 +66,37 @@ UPDATE users SET restricted_task_department_id = 'app_dev'
 -- (see requirePwaAccess in middleware/authMiddleware.js).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_wfp_pwa BOOLEAN DEFAULT false;
 
+-- Same per-person grant pattern again (Joy, 2026-09-03, after a client call
+-- with Liam): lets one workforce_partner login see every territory's data
+-- on /wfp via the same admin-only filter picker Joy herself gets, despite
+-- having their own wfp_label — NOT a role change (still workforce_partner),
+-- just this one extra grant. admin/super_admin already see everything
+-- regardless (they have no wfp_label at all), so this only matters for a
+-- workforce_partner account. See views/wfp.html's wfpFilterBarHtml().
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_all_wfp_territories BOOLEAN DEFAULT false;
+
+-- A Workforce Partner's Monday-planned Tue/Wed/Thu route, so /wfp's Today
+-- screen can show "Your Route Today" instead of just a live-attention feed.
+-- One row per (partner, day) — rebuilding a day's route overwrites it
+-- rather than versioning, since only the current plan for a given day is
+-- ever useful. stops/itinerary are the exact objects
+-- routes/routePlanner.js's computeOptimizedItinerary() already returns
+-- (order, lat/lng, timeline blocks) — cached here so Today doesn't need to
+-- re-hit Mapbox just to redisplay a plan someone already built.
+CREATE TABLE IF NOT EXISTS wfp_planned_routes (
+  id TEXT PRIMARY KEY,
+  wfp_label TEXT NOT NULL,
+  route_date DATE NOT NULL,
+  start_address TEXT,
+  departure_time TIMESTAMPTZ,
+  stops JSONB NOT NULL,
+  itinerary JSONB,
+  created_by_email CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(wfp_label, route_date)
+);
+
 CREATE TABLE IF NOT EXISTS articles (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
