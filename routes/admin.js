@@ -291,7 +291,7 @@ router.get('/stats', async (req, res) => {
 router.get('/users', requireSuperAdmin, async (req, res) => {
   try {
     const result = await getDb().execute(
-      'SELECT id, email, name, role, active, can_build_training, can_create_outreach_lists, created_at, last_login FROM users ORDER BY created_at DESC'
+      'SELECT id, email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label, created_at, last_login FROM users ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {
@@ -300,7 +300,7 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.post('/users', requireSuperAdmin, async (req, res) => {
-  const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false } = req.body;
+  const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false, wfpLabel } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });
   if (!email.toLowerCase().endsWith('@rawtalent.com.au')) {
     return res.status(400).json({ error: 'Only @rawtalent.com.au email addresses are allowed' });
@@ -313,8 +313,8 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 
     const hash = password ? await bcrypt.hash(password, 12) : null;
     await db.execute({
-      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training, can_create_outreach_lists) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining, !!canCreateOutreachLists]
+      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training, can_create_outreach_lists, wfp_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining, !!canCreateOutreachLists, wfpLabel || null]
     });
     await logActivity('user', email.toLowerCase(), 'created', `User "${name}" (${role}) created`, req.user.email);
     res.json({ success: true });
@@ -324,10 +324,10 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.put('/users/:id', requireSuperAdmin, async (req, res) => {
-  const { name, role, active, password, canBuildTraining, canCreateOutreachLists } = req.body;
+  const { name, role, active, password, canBuildTraining, canCreateOutreachLists, wfpLabel } = req.body;
   try {
     const db = getDb();
-    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training, can_create_outreach_lists FROM users WHERE id = ?', args: [req.params.id] });
+    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label FROM users WHERE id = ?', args: [req.params.id] });
     const target = targetRes.rows[0];
     if (!target) return res.status(404).json({ error: 'User not found' });
 
@@ -347,6 +347,14 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     if (active !== undefined && Boolean(active) !== Boolean(target.active)) { await db.execute({ sql: 'UPDATE users SET active = ? WHERE id = ?', args: [!!active, req.params.id] }); changes.push(active ? 'Account activated' : 'Account deactivated'); }
     if (canBuildTraining !== undefined && Boolean(canBuildTraining) !== Boolean(target.can_build_training)) { await db.execute({ sql: 'UPDATE users SET can_build_training = ? WHERE id = ?', args: [!!canBuildTraining, req.params.id] }); changes.push(canBuildTraining ? 'Granted Build Training access' : 'Revoked Build Training access'); }
     if (canCreateOutreachLists !== undefined && Boolean(canCreateOutreachLists) !== Boolean(target.can_create_outreach_lists)) { await db.execute({ sql: 'UPDATE users SET can_create_outreach_lists = ? WHERE id = ?', args: [!!canCreateOutreachLists, req.params.id] }); changes.push(canCreateOutreachLists ? 'Granted Outreach List access' : 'Revoked Outreach List access'); }
+    // Ties a workforce_partner login to their existing leads.assigned_
+    // workforce_partner/centre_partner_assignments label (see db/schema.sql's
+    // own comment on this column) — was DB-only until now (2026-09-03, the
+    // /wfp mobile app's territory scoping), set directly via Supabase/SQL.
+    // Free text, not validated against WORKFORCE_PARTNER_OPTIONS here —
+    // matching convention is on the person setting it, same as every other
+    // place this string gets typed in this app.
+    if (wfpLabel !== undefined && (wfpLabel || null) !== (target.wfp_label || null)) { await db.execute({ sql: 'UPDATE users SET wfp_label = ? WHERE id = ?', args: [wfpLabel || null, req.params.id] }); changes.push(`Workforce Partner label: "${target.wfp_label || '—'}" → "${wfpLabel || '—'}"`); }
 
     invalidateUserCache(Number(req.params.id));
     await logActivity('user', target.email, 'updated', changes.length ? changes.join(' | ') : 'Minor edits', req.user.email);

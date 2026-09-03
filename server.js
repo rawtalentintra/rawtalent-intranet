@@ -287,7 +287,13 @@ function wfpGuard(req, res) {
   // the service worker (see public/wfp/sw.js's own v3 comment), this is
   // just cheap, unconditional insurance alongside it.
   res.set('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, 'views', 'admin.html'));
+  // 2026-09-03: repointed from admin.html (the desktop panel, restricted
+  // to 5 sections via IS_PARTNERS_VIEW but otherwise the same dense
+  // desktop-table UI) to wfp.html — a genuinely separate, purpose-built
+  // mobile shell (Today/Leads/My Centres/Educators), previously dormant.
+  // /admin, /partners, /allapp are untouched, still on admin.html — only
+  // this one route's target changed.
+  res.sendFile(path.join(__dirname, 'views', 'wfp.html'));
 }
 app.get('/wfp', wfpGuard);
 app.get('/wfp/*', wfpGuard);

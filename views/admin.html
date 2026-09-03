@@ -3727,6 +3727,13 @@
           <input type="checkbox" id="userActive" checked>
           <label for="userActive">Account active (user can sign in)</label>
         </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Workforce Partner Territory <span class="optional">(for the /wfp mobile app — Workforce Partner role only)</span></label>
+          <select id="userWfpLabel" class="form-control">
+            <option value="">— None —</option>
+          </select>
+          <div class="form-hint">Ties this login to their own leads/centres in /wfp — without it, a Workforce Partner sees every territory's leads/centres instead of just their own.</div>
+        </div>
         <div class="checkbox-row">
           <input type="checkbox" id="userCanBuildTraining">
           <label for="userCanBuildTraining">Can build training courses (grants Build Training access to this person specifically, regardless of role)</label>
@@ -6555,6 +6562,14 @@
       document.getElementById('passwordRequired').textContent = id ? '(leave blank to keep current)' : '(required)';
       document.getElementById('passwordHint').style.display = id ? 'none' : 'block';
 
+      // Same free-text 3-value set every lead/centre assignment dropdown
+      // uses (WORKFORCE_PARTNER_OPTIONS) — a select rather than the raw
+      // text input db/schema.sql's wfp_label column actually is, so this
+      // can't be typo'd into silently breaking a partner's /wfp scoping.
+      const wfpSel = document.getElementById('userWfpLabel');
+      wfpSel.innerHTML = '<option value="">— None —</option>' +
+        WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join('');
+
       if (id) {
         const u = allUsers.find(x => x.id === id);
         if (u) {
@@ -6565,6 +6580,7 @@
           document.getElementById('userActive').checked = !!u.active;
           document.getElementById('userCanBuildTraining').checked = !!u.can_build_training;
           document.getElementById('userCanCreateOutreachLists').checked = !!u.can_create_outreach_lists;
+          wfpSel.value = u.wfp_label || '';
         }
       } else {
         document.getElementById('userName').value = '';
@@ -6574,6 +6590,7 @@
         document.getElementById('userActive').checked = true;
         document.getElementById('userCanBuildTraining').checked = false;
         document.getElementById('userCanCreateOutreachLists').checked = false;
+        wfpSel.value = '';
       }
       document.getElementById('userPassword').value = '';
       document.getElementById('userModal').classList.add('open');
@@ -6593,6 +6610,7 @@
       const active = document.getElementById('userActive').checked;
       const canBuildTraining = document.getElementById('userCanBuildTraining').checked;
       const canCreateOutreachLists = document.getElementById('userCanCreateOutreachLists').checked;
+      const wfpLabel = document.getElementById('userWfpLabel').value;
 
       if (!name) { toast('Name is required', 'error'); return; }
       if (!id && !email) { toast('Email is required', 'error'); return; }
@@ -6602,8 +6620,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, canBuildTraining, canCreateOutreachLists, ...(password ? { password } : {}) }
-          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists };
+          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel };
 
         const res = await fetch(url, {
           method,

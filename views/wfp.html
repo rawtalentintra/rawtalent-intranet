@@ -31,6 +31,8 @@
       --amber-bg: #fff7ed;
       --red: #b91c1c;
       --red-bg: #fef2f2;
+      --purple: #6d28d9;
+      --purple-bg: #f3e8ff;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -86,6 +88,7 @@
     }
     .card .name { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
     .card .sub { font-size: 13px; color: var(--text-muted); }
+    .card .why { font-size: 12px; color: var(--amber); margin-top: 4px; }
     .badge {
       display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px;
       border-radius: 20px; margin-top: 6px;
@@ -94,6 +97,8 @@
     .badge.warn { background: var(--amber-bg); color: var(--amber); }
     .badge.bad { background: var(--red-bg); color: var(--red); }
     .badge.neutral { background: #eef1f8; color: var(--text-muted); }
+    .badge.purple { background: var(--purple-bg); color: var(--purple); }
+    .badge.inline { margin-top: 0; flex-shrink: 0; }
 
     .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 14px; }
     .spinner-wrap { display: flex; justify-content: center; padding: 30px 0; }
@@ -109,14 +114,26 @@
     .stat .num { font-size: 19px; font-weight: 800; color: var(--navy); }
     .stat .label { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
 
-    .action-row { display: flex; gap: 8px; margin: 14px 0; }
+    .action-row { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
     .btn {
       flex: 1; padding: 11px 10px; border-radius: 10px; border: none; font-size: 13.5px;
-      font-weight: 700; cursor: pointer; text-align: center;
+      font-weight: 700; cursor: pointer; text-align: center; min-width: 90px;
+      text-decoration: none; display: inline-block;
     }
     .btn-primary { background: var(--blue); color: white; }
     .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid #fecaca; }
     .btn:disabled { opacity: 0.55; }
+
+    /* Compact quick-action row on a card — Call/Directions/Log/Follow-up.
+       Smaller than the full-size .btn row above, meant to sit inline on a
+       list card without dominating it. */
+    .quick-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    .qa-btn {
+      background: #eef1f8; color: var(--navy); border: none; border-radius: 8px;
+      padding: 6px 9px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+    }
 
     .educator-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
     .educator-row:last-child { border-bottom: none; }
@@ -131,11 +148,13 @@
     .note-line { font-size: 12.5px; color: var(--text-muted); padding: 8px 0; }
 
     label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-muted); margin: 12px 0 5px; }
-    input[type=text], input[type=date], input[type=tel], select, textarea {
+    input[type=text], input[type=date], input[type=tel], input[type=email], select, textarea {
       width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
       font-size: 15px; background: var(--card); font-family: inherit;
     }
     textarea { min-height: 70px; resize: vertical; }
+    .field-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+    label .optional { font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--text-muted); }
 
     .toast {
       position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom));
@@ -145,13 +164,19 @@
     }
     .toast.show { opacity: 1; }
     .toast.error { background: var(--red); }
+
+    /* Recorder — one shared component (Leads + Centres) */
+    .recorder-box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 10px 0; text-align: center; }
+    .recorder-status { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; }
+    .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); margin-right: 5px; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
   </style>
 </head>
 <body>
   <header>
     <button class="back-btn" id="backBtn" style="display:none" onclick="goBack()">←</button>
     <div style="flex:1">
-      <h1 id="headerTitle">My Centres</h1>
+      <h1 id="headerTitle">Today</h1>
       <div class="wfp-tag" id="wfpTag"></div>
     </div>
   </header>
@@ -159,7 +184,9 @@
   <main id="mainContent"><div class="spinner-wrap"><div class="spinner"></div></div></main>
 
   <nav class="bottom-nav">
-    <button id="navCentres" class="active" onclick="setView('centres')"><span class="icon">🏢</span>Centres</button>
+    <button id="navToday" class="active" onclick="setView('today')"><span class="icon">🏠</span>Today</button>
+    <button id="navLeads" onclick="setView('leads')"><span class="icon">📋</span>Leads</button>
+    <button id="navCentres" onclick="setView('centres')"><span class="icon">🏢</span>Centres</button>
     <button id="navEducators" onclick="setView('educators')"><span class="icon">🔍</span>Educators</button>
   </nav>
 
@@ -168,13 +195,20 @@
   <script>
     // ── State ──────────────────────────────────────────────────────────
     let currentUser = null;
-    let viewStack = ['centres'];
+    let viewStack = ['today'];
     let allCentres = [];
-    let showMineOnly = true;
+    let allLeads = [];
+    let dataLoadedAt = 0; // re-fetch leads/centres if it's been a while (someone else's edit, a new visit logged elsewhere)
     let currentCentreKey = null;
     let currentSnapshot = null;
+    let currentLeadId = null;
+    let currentLeadActivities = [];
+    let currentLeadNotes = [];
     let currentEducatorUserId = null;
     let activityTypes = { callTypes: [], visitTypes: [] };
+    let userLocation = null; // {lat,lng} once geolocation succeeds — null means "don't know/denied"
+    let logTarget = null; // { type: 'lead'|'centre', id, followUpOnly, prefillOutcome }
+    let editingLeadId = null;
 
     function toast(msg, kind) {
       const el = document.getElementById('toast');
@@ -193,11 +227,46 @@
       return data;
     }
 
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; }
+    }
+    function fmtTime(iso) {
+      try { return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }); } catch { return ''; }
+    }
+    function daysSince(iso) {
+      if (!iso) return null;
+      return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    }
+    // Straight-line distance — good enough for "nearby", not a driving ETA.
+    function haversineKm(lat1, lng1, lat2, lng2) {
+      const R = 6371, toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+    function phoneLink(phone, label) {
+      return phone ? `<a href="tel:${escHtml(phone)}" onclick="event.stopPropagation()">${escHtml(label || phone)}</a>` : '';
+    }
+    function mailtoLink(email, label) {
+      return email ? `<a href="mailto:${escHtml(email)}" onclick="event.stopPropagation()">${escHtml(label || email)}</a>` : '';
+    }
+    // Single-stop version of admin.html's openRouteInGoogleMaps — coords
+    // preferred when we have them (same reasoning: a re-geocoded address
+    // string can mismatch and place the pin somewhere else entirely), a
+    // free-text address as the fallback.
+    function directionsUrl(lat, lng, address) {
+      const dest = Number.isFinite(lat) && Number.isFinite(lng) ? `${lat},${lng}` : encodeURIComponent(address || '');
+      return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${dest}`;
+    }
+
     // ── Navigation ─────────────────────────────────────────────────────
     function setView(view, push = true) {
       if (push) viewStack.push(view);
       document.getElementById('backBtn').style.display = viewStack.length > 1 ? 'block' : 'none';
-      document.getElementById('navCentres').classList.toggle('active', view === 'centres' || view === 'centre-detail' || view === 'log-visit');
+      document.getElementById('navToday').classList.toggle('active', view === 'today');
+      document.getElementById('navLeads').classList.toggle('active', view === 'leads' || view === 'lead-detail' || view === 'create-lead' || view === 'edit-lead');
+      document.getElementById('navCentres').classList.toggle('active', view === 'centres' || view === 'centre-detail');
       document.getElementById('navEducators').classList.toggle('active', view === 'educators' || view === 'educator-profile');
       render(view);
     }
@@ -209,24 +278,409 @@
     function render(view) {
       const main = document.getElementById('mainContent');
       main.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      if (view === 'today') return renderToday();
+      if (view === 'leads') return renderLeadsList();
+      if (view === 'lead-detail') return renderLeadDetail();
+      if (view === 'create-lead') return renderLeadForm(null);
+      if (view === 'edit-lead') return renderLeadForm(editingLeadId);
       if (view === 'centres') return renderCentresList();
       if (view === 'centre-detail') return renderCentreDetail();
+      if (view === 'log-activity') return renderLogActivity();
       if (view === 'educators') return renderEducatorSearch();
       if (view === 'educator-profile') return renderEducatorProfile();
-      if (view === 'log-visit') return renderLogVisit();
+    }
+
+    // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
+    async function ensureDataLoaded(force) {
+      if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
+      const q = currentUser.wfpLabel ? '?mine=true' : '';
+      try {
+        const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
+        allLeads = leads;
+        allCentres = centres;
+        dataLoadedAt = Date.now();
+      } catch { toast('Could not load your leads/centres', 'error'); }
+    }
+
+    // ── Lead stage (derived — no dedicated DB field, see db/schema.sql's
+    // own comment on why leads only carry 3 status/date pairs) ──────────
+    const LEAD_STAGE_META = {
+      new: { label: 'New', cls: 'neutral' },
+      contacted: { label: 'Contacted', cls: 'neutral' },
+      visit_scheduled: { label: 'Visit Scheduled', cls: 'warn' },
+      visited: { label: 'Visited', cls: 'warn' },
+      signed: { label: 'Signed', cls: 'good' },
+      closed_lost: { label: 'Closed/Lost', cls: 'bad' }
+    };
+    function deriveLeadStage(l) {
+      if (l.closed_at && l.signed_status !== 'signed') return 'closed_lost';
+      if (l.signed_status === 'signed') return 'signed';
+      if (l.centre_visited_status === 'done') return 'visited';
+      if (l.centre_visited_status === 'scheduled') return 'visit_scheduled';
+      if (l.lead_called_status === 'done') return 'contacted';
+      return 'new';
+    }
+
+    // ── Today ──────────────────────────────────────────────────────────
+    let todaySearchVal = '';
+    async function renderToday() {
+      document.getElementById('headerTitle').textContent = 'Today';
+      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      await ensureDataLoaded();
+      if (!userLocation && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => { userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude }; if (viewStack[viewStack.length - 1] === 'today') paintToday(); },
+          () => { /* denied/unavailable — Nearby just won't show, no error toast, this is expected on first load */ },
+          { timeout: 8000 }
+        );
+      }
+      paintToday();
+    }
+
+    function todayBuckets() {
+      const now = Date.now();
+      const overdue = [], dueToday = [], scheduled = [], attention = [];
+      const isToday = iso => iso && new Date(iso).toDateString() === new Date().toDateString();
+
+      for (const l of allLeads) {
+        if (l.closed_at) continue;
+        // Same 5 rules admin.html's computeAttentionItems uses for leads,
+        // reimplemented here against real dates (not just an urgency score)
+        // so Today can bucket into overdue/due-today/scheduled properly.
+        if (l.lead_called_status === 'scheduled' && l.lead_called_at) {
+          const item = { kind: 'lead', lead: l, channel: 'call', label: `Call: ${l.centre_name}`, when: l.lead_called_at };
+          if (new Date(l.lead_called_at).getTime() < now) overdue.push(item);
+          else if (isToday(l.lead_called_at)) dueToday.push(item);
+          else scheduled.push(item);
+        }
+        if (l.centre_visited_status === 'scheduled' && l.centre_visited_at) {
+          const item = { kind: 'lead', lead: l, channel: 'visit', label: `Visit: ${l.centre_name}`, when: l.centre_visited_at };
+          if (new Date(l.centre_visited_at).getTime() < now) overdue.push(item);
+          else if (isToday(l.centre_visited_at)) dueToday.push(item);
+          else scheduled.push(item);
+        }
+        if (l.lead_called_status === 'to_schedule' && daysSince(l.created_at) >= 3) {
+          overdue.push({ kind: 'lead', lead: l, channel: 'call', label: `Not yet called: ${l.centre_name}`, when: l.created_at });
+        }
+        if (l.lead_called_status === 'done' && l.centre_visited_status === 'to_schedule' && daysSince(l.lead_called_at) >= 5) {
+          overdue.push({ kind: 'lead', lead: l, channel: 'visit', label: `Visit not booked: ${l.centre_name}`, when: l.lead_called_at });
+        }
+      }
+
+      for (const c of allCentres) {
+        if (c.isEscalated || c.health === 'declining' || c.health === 'needs_attention') {
+          attention.push({ kind: 'centre', centre: c, reason: c.healthReasons?.[0] || (c.isEscalated ? 'Issue raised at last visit' : 'Needs attention') });
+        }
+        if (c.nurture?.status === 'follow_up_overdue' || c.nurture?.status === 'recurring_overdue' || c.nurture?.status === 'first_contact_overdue') {
+          overdue.push({ kind: 'centre', centre: c, label: `Follow-up overdue: ${c.name}`, when: c.nurture.dueDate });
+        } else if (c.nurture?.status === 'follow_up_pending' && c.nurture.dueDate && isToday(c.nurture.dueDate)) {
+          dueToday.push({ kind: 'centre', centre: c, label: `Follow-up due: ${c.name}`, when: c.nurture.dueDate });
+        }
+      }
+
+      const nearby = userLocation ? [...allLeads.filter(l => !l.closed_at && Number.isFinite(l.latitude)), ...allCentres.filter(c => Number.isFinite(c.latitude))]
+        .map(x => ({ ...x, _distanceKm: haversineKm(userLocation.lat, userLocation.lng, x.latitude, x.longitude) }))
+        .sort((a, b) => a._distanceKm - b._distanceKm)
+        .slice(0, 8) : [];
+
+      return { overdue, dueToday, scheduled, attention, nearby };
+    }
+
+    function todayItemRow(item) {
+      if (item.kind === 'lead') {
+        const l = item.lead;
+        return `
+          <div class="card" onclick="openLead('${l.id}')">
+            <div class="name">${escHtml(item.label)}</div>
+            <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
+            ${quickActionsHtml('lead', l)}
+          </div>`;
+      }
+      const c = item.centre;
+      return `
+        <div class="card" onclick="openCentre('${c.centreKey}')">
+          <div class="name">${escHtml(item.label || c.name)}</div>
+          <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
+          ${item.reason ? `<div class="why">⚠️ ${escHtml(item.reason)}</div>` : ''}
+          ${quickActionsHtml('centre', c)}
+        </div>`;
+    }
+
+    // Call/Directions/Log activity/Create follow-up — the 4 quick actions
+    // Joy asked for on every Today item. `stopPropagation` on each so
+    // tapping an action doesn't also trigger the card's own onclick (open
+    // detail). Call is omitted for a centre/lead with no phone on file.
+    function quickActionsHtml(type, obj) {
+      const phone = type === 'lead' ? obj.centre_phone : obj.contactNo;
+      const id = type === 'lead' ? obj.id : obj.centreKey;
+      const lat = obj.latitude, lng = obj.longitude;
+      const address = [obj.street_address || obj.streetAddress, obj.suburb, obj.state].filter(Boolean).join(', ');
+      return `
+        <div class="quick-actions">
+          ${phone ? `<a class="qa-btn" href="tel:${escHtml(phone)}" onclick="event.stopPropagation()">📞 Call</a>` : ''}
+          <a class="qa-btn" href="${directionsUrl(lat, lng, address)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 Directions</a>
+          <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}')">📝 Log</button>
+          <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}',{followUpOnly:true})">⏭️ Follow-up</button>
+        </div>`;
+    }
+
+    function paintToday() {
+      const main = document.getElementById('mainContent');
+      const q = (document.getElementById('todaySearchInput')?.value || todaySearchVal).toLowerCase();
+      todaySearchVal = q;
+
+      if (q) {
+        const matchedLeads = allLeads.filter(l => !l.closed_at && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)));
+        const matchedCentres = allCentres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
+        main.innerHTML = `
+          <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="${escHtml(q)}" oninput="paintToday()" autofocus>
+          <div class="section-title">Leads</div>
+          ${matchedLeads.length ? matchedLeads.map(l => todayItemRow({ kind: 'lead', lead: l, label: l.centre_name })).join('') : `<div class="note-line">No matching leads.</div>`}
+          <div class="section-title">Centres</div>
+          ${matchedCentres.length ? matchedCentres.map(c => todayItemRow({ kind: 'centre', centre: c })).join('') : `<div class="note-line">No matching centres.</div>`}
+        `;
+        return;
+      }
+
+      const b = todayBuckets();
+      main.innerHTML = `
+        <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="paintToday()">
+        ${b.overdue.length ? `<div class="section-title">⚠️ Overdue (${b.overdue.length})</div>${b.overdue.map(todayItemRow).join('')}` : ''}
+        ${b.dueToday.length ? `<div class="section-title">Due Today (${b.dueToday.length})</div>${b.dueToday.map(todayItemRow).join('')}` : ''}
+        ${b.attention.length ? `<div class="section-title">Centres Requiring Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
+        ${b.scheduled.length ? `<div class="section-title">Scheduled (${b.scheduled.length})</div>${b.scheduled.map(todayItemRow).join('')}` : ''}
+        ${b.nearby.length ? `<div class="section-title">Nearby</div>${b.nearby.map(x => todayItemRow(x.centreKey ? { kind: 'centre', centre: x } : { kind: 'lead', lead: x, label: x.centre_name })).join('')}` : (userLocation === null ? `<div class="section-title">Nearby</div><div class="note-line">Allow location access to see what's near you.</div>` : '')}
+        ${!b.overdue.length && !b.dueToday.length && !b.attention.length && !b.scheduled.length ? `<div class="empty-state">Nothing needs attention right now. 🎉</div>` : ''}
+      `;
+    }
+
+    // ── Leads ──────────────────────────────────────────────────────────
+    async function renderLeadsList() {
+      document.getElementById('headerTitle').textContent = 'Leads';
+      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      await ensureDataLoaded();
+      paintLeadsList();
+    }
+    function paintLeadsList() {
+      const main = document.getElementById('mainContent');
+      const searchVal = document.getElementById('leadSearchInput')?.value || '';
+      const open = allLeads.filter(l => !l.closed_at);
+      const filtered = open.filter(l => !searchVal || (l.centre_name || '').toLowerCase().includes(searchVal.toLowerCase()) || (l.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
+      main.innerHTML = `
+        <input type="text" class="search-box" id="leadSearchInput" placeholder="Search leads or suburb…" value="${escHtml(searchVal)}" oninput="paintLeadsList()">
+        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">➕ Create Lead</button>
+        ${filtered.length ? filtered.map(l => {
+          const stage = LEAD_STAGE_META[deriveLeadStage(l)];
+          return `
+          <div class="card" onclick="openLead('${l.id}')">
+            <div class="name">${escHtml(l.centre_name)}</div>
+            <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
+            <span class="badge ${stage.cls}">${escHtml(stage.label)}</span>
+          </div>`;
+        }).join('') : `<div class="empty-state">No leads found.</div>`}
+      `;
+    }
+    function openLead(id) {
+      currentLeadId = id;
+      setView('lead-detail');
+    }
+    async function renderLeadDetail() {
+      const lead = allLeads.find(l => l.id === currentLeadId);
+      if (!lead) { toast('Lead not found', 'error'); return goBack(); }
+      document.getElementById('headerTitle').textContent = lead.centre_name;
+      document.getElementById('wfpTag').textContent = '';
+      try {
+        const [activities, notes] = await Promise.all([
+          api(`/api/leads/${currentLeadId}/activities`),
+          api(`/api/leads/${currentLeadId}/notes`)
+        ]);
+        currentLeadActivities = activities;
+        currentLeadNotes = notes;
+      } catch { currentLeadActivities = []; currentLeadNotes = []; }
+      paintLeadDetail();
+    }
+    function paintLeadDetail() {
+      const l = allLeads.find(x => x.id === currentLeadId);
+      const main = document.getElementById('mainContent');
+      if (!l) { main.innerHTML = `<div class="empty-state">This lead could not be loaded.</div>`; return; }
+      const stage = LEAD_STAGE_META[deriveLeadStage(l)];
+      const contactName = [l.contact_first_name, l.contact_last_name].filter(Boolean).join(' ');
+      const lastActivity = currentLeadActivities[0];
+      const lastNote = currentLeadNotes[currentLeadNotes.length - 1]; // lead_notes is oldest-first
+      const nextFollowUp = currentLeadActivities.find(a => a.next_step && a.next_step_due_date);
+
+      main.innerHTML = `
+        <span class="badge ${stage.cls}">${escHtml(stage.label)}</span>
+        <div class="sub" style="margin-top:6px">${escHtml(l.street_address || '')}${l.street_address ? ', ' : ''}${escHtml(l.suburb || '')} ${escHtml(l.state || '')}</div>
+        ${contactName || l.position ? `<div class="sub">${escHtml(contactName || '')}${contactName && l.position ? ' · ' : ''}${escHtml(l.position || '')}</div>` : ''}
+        <div class="sub">${phoneLink(l.centre_phone)}${l.centre_phone && l.contact_email ? ' · ' : ''}${mailtoLink(l.contact_email)}</div>
+        <div class="sub" style="margin-top:4px">${l.agency_usage ? escHtml((LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)) : ''}${l.agency_usage && l.entry_type ? ' · ' : ''}${l.entry_type === 'centre' ? 'Added directly' : 'From vetting call'}</div>
+
+        <div class="action-row">
+          <a class="btn btn-secondary" href="${directionsUrl(l.latitude, l.longitude, [l.street_address, l.suburb, l.state].filter(Boolean).join(', '))}" target="_blank" rel="noopener">🧭 Directions</a>
+          <button class="btn btn-secondary" onclick="openEditLead('${l.id}')">✏️ Edit</button>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'call'})">📞 Log a Call</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'visit'})">🚗 Log a Visit</button>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-secondary" onclick="openLogActivityFor('lead','${l.id}',{followUpOnly:true})">⏭️ Create Follow-up</button>
+          <button class="btn btn-secondary" onclick="startVoiceNote('lead','${l.id}')">🎙️ Voice Note</button>
+        </div>
+        <div id="recorderBox"></div>
+
+        <div class="section-title">Update Stage</div>
+        <select id="stagePicker" onchange="applyLeadStage(this.value)">
+          ${Object.entries(LEAD_STAGE_META).map(([k, v]) => `<option value="${k}" ${deriveLeadStage(l) === k ? 'selected' : ''}>${escHtml(v.label)}</option>`).join('')}
+        </select>
+
+        <div class="section-title">Last Activity</div>
+        ${lastActivity ? `
+          <div class="note-line">
+            <strong>${lastActivity.channel === 'call' ? '📞 Call' : '🚗 Visit'}</strong> — ${fmtDate(lastActivity.created_at)}${lastActivity.contact_name ? ' with ' + escHtml(lastActivity.contact_name) : ''}<br>
+            ${lastActivity.outcome ? `Outcome: ${escHtml(lastActivity.outcome)}<br>` : ''}
+            ${lastActivity.notes ? escHtml(lastActivity.notes) : ''}
+          </div>` : `<div class="note-line">Nothing logged yet.</div>`}
+
+        ${nextFollowUp ? `<div class="section-title">Next Follow-up</div><div class="note-line">${escHtml(nextFollowUp.next_step)} — due ${fmtDate(nextFollowUp.next_step_due_date)}</div>` : ''}
+
+        <div class="section-title">Most Recent Note</div>
+        <div class="note-line">${lastNote ? escHtml(lastNote.note) : 'No notes yet.'}</div>
+
+        ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
+      `;
+    }
+
+    // Update Stage picker writes back through the SAME 3 fields the rest
+    // of the app uses (lead_called_status/centre_visited_status/
+    // signed_status) — there's no separate "stage" column to write to, see
+    // deriveLeadStage's own comment.
+    async function applyLeadStage(newStage) {
+      const l = allLeads.find(x => x.id === currentLeadId);
+      if (!l) return;
+      try {
+        if (newStage === 'closed_lost') {
+          const reason = prompt('Why is this lead being closed as lost?') || '';
+          await api(`/api/leads/${l.id}/closed`, { method: 'PATCH', body: JSON.stringify({ closed: true, reason }) });
+        } else {
+          const body = {};
+          if (newStage === 'new') { body.leadCalledStatus = 'to_schedule'; }
+          else if (newStage === 'contacted') { body.leadCalledStatus = 'done'; }
+          else if (newStage === 'visit_scheduled') {
+            body.leadCalledStatus = l.lead_called_status === 'to_schedule' ? 'done' : l.lead_called_status;
+            body.centreVisitedStatus = 'scheduled';
+            if (!l.centre_visited_at) body.centreVisitedAt = new Date().toISOString();
+          } else if (newStage === 'visited') { body.centreVisitedStatus = 'done'; }
+          else if (newStage === 'signed') { body.signedStatus = 'signed'; }
+          await api(`/api/leads/${l.id}`, { method: 'PUT', body: JSON.stringify(body) });
+        }
+        toast('Stage updated');
+        await ensureDataLoaded(true);
+        paintLeadDetail();
+      } catch (e) { toast(e.message, 'error'); paintLeadDetail(); }
+    }
+
+    // ── Create / Edit Lead ────────────────────────────────────────────
+    // A workforce_partner can only edit contact/position/status fields —
+    // never centre_name/address/phone/agency_usage/assignment (routes/
+    // leads.js's own WORKFORCE_PARTNER_FIELDS) — the Edit form only shows
+    // what actually saves, rather than offering fields that would silently
+    // no-op. Create (a brand-new lead) is a different endpoint with no such
+    // restriction, so it gets the full set.
+    const LEAD_POSITIONS = ['Director', 'Nominated Supervisor', 'Assistant Director / Room Leader', 'Educator', 'Office Manager', 'Other'];
+    const AU_STATES = ['VIC', 'NSW', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
+    const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
+
+    function openEditLead(id) {
+      editingLeadId = id;
+      setView('edit-lead');
+    }
+    function renderLeadForm(id) {
+      const l = id ? allLeads.find(x => x.id === id) : null;
+      document.getElementById('headerTitle').textContent = id ? 'Edit Lead' : 'Create Lead';
+      document.getElementById('wfpTag').textContent = '';
+      const main = document.getElementById('mainContent');
+      main.innerHTML = `
+        ${!id ? `
+        <label>Centre Name *</label>
+        <input type="text" id="lfCentreName" placeholder="Centre name">
+        <label>Street Address *</label>
+        <input type="text" id="lfStreetAddress" placeholder="Street address">
+        <div style="display:flex;gap:8px">
+          <div style="flex:2"><label>Suburb</label><input type="text" id="lfSuburb"></div>
+          <div style="flex:1"><label>State</label><select id="lfState">${AU_STATES.map(s => `<option value="${s}">${s}</option>`).join('')}</select></div>
+        </div>
+        <label>Centre Phone *</label>
+        <input type="tel" id="lfCentrePhone" placeholder="Centre phone number">
+        <label>Agency Usage *</label>
+        <select id="lfAgencyUsage">
+          <option value="">— Select —</option>
+          <option value="target_temp">Target Temp</option>
+          <option value="high_agency_user">High Agency User</option>
+        </select>
+        ` : ''}
+        <label>Position</label>
+        <select id="lfPosition">
+          <option value="">— Select —</option>
+          ${LEAD_POSITIONS.map(p => `<option value="${escHtml(p)}" ${l?.position === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+        </select>
+        <label>Contact First Name</label>
+        <input type="text" id="lfContactFirstName" value="${escHtml(l?.contact_first_name || '')}">
+        <label>Contact Last Name</label>
+        <input type="text" id="lfContactLastName" value="${escHtml(l?.contact_last_name || '')}">
+        <label>Contact Email</label>
+        <input type="email" id="lfContactEmail" value="${escHtml(l?.contact_email || '')}">
+        <div class="action-row">
+          <button class="btn btn-primary" id="lfSaveBtn" onclick="saveLead('${id || ''}')">Save</button>
+        </div>
+      `;
+    }
+    async function saveLead(id) {
+      const btn = document.getElementById('lfSaveBtn');
+      btn.disabled = true;
+      try {
+        if (id) {
+          const body = {
+            position: document.getElementById('lfPosition').value || null,
+            contactFirstName: document.getElementById('lfContactFirstName').value.trim() || null,
+            contactLastName: document.getElementById('lfContactLastName').value.trim() || null,
+            contactEmail: document.getElementById('lfContactEmail').value.trim() || null
+          };
+          await api(`/api/leads/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+          toast('Lead updated');
+        } else {
+          const centreName = document.getElementById('lfCentreName').value.trim();
+          const streetAddress = document.getElementById('lfStreetAddress').value.trim();
+          const centrePhone = document.getElementById('lfCentrePhone').value.trim();
+          const agencyUsage = document.getElementById('lfAgencyUsage').value;
+          if (!centreName || !streetAddress || !centrePhone || !agencyUsage) { toast('Centre name, address, phone and agency usage are required', 'error'); btn.disabled = false; return; }
+          const body = {
+            centreName, streetAddress, centrePhone, agencyUsage,
+            suburb: document.getElementById('lfSuburb').value.trim() || null,
+            state: document.getElementById('lfState').value || null,
+            position: document.getElementById('lfPosition').value || null,
+            contactFirstName: document.getElementById('lfContactFirstName').value.trim() || null,
+            contactLastName: document.getElementById('lfContactLastName').value.trim() || null,
+            contactEmail: document.getElementById('lfContactEmail').value.trim() || null
+          };
+          await api('/api/leads', { method: 'POST', body: JSON.stringify(body) });
+          toast('Lead created');
+        }
+        await ensureDataLoaded(true);
+        goBack();
+      } catch (e) { toast(e.message, 'error'); }
+      finally { btn.disabled = false; }
     }
 
     // ── My Centres ─────────────────────────────────────────────────────
-    async function loadCentres() {
-      try {
-        const q = showMineOnly && currentUser.wfpLabel ? '?mine=true' : '';
-        allCentres = await api('/api/centres' + q);
-      } catch { toast('Could not load centres', 'error'); allCentres = []; }
+    async function loadCentresIfNeeded() {
+      await ensureDataLoaded();
     }
     async function renderCentresList() {
       document.getElementById('headerTitle').textContent = 'My Centres';
       document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
-      await loadCentres();
+      await loadCentresIfNeeded();
       paintCentresList();
     }
     function paintCentresList() {
@@ -240,21 +694,16 @@
       const filtered = allCentres.filter(c => !searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
         <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="paintCentresList()">
-        ${currentUser.wfpLabel ? `<label class="toggle-row"><input type="checkbox" id="mineToggle" ${showMineOnly ? 'checked' : ''} onchange="onMineToggle()"> Show only my centres</label>` : ''}
         ${filtered.length ? filtered.map(c => `
           <div class="card" onclick="openCentre('${c.centreKey}')">
             <div class="name">${escHtml(c.name)}</div>
             <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
             <span class="badge ${HEALTH_BADGE[c.health] || 'neutral'}">${escHtml((c.health || '').replace(/_/g, ' '))}</span>
+            ${c.isEscalated ? `<span class="badge bad">🚨 Escalated</span>` : ''}
+            ${c.healthReasons?.[0] ? `<div class="why">${escHtml(c.healthReasons[0])}</div>` : ''}
           </div>
         `).join('') : `<div class="empty-state">No centres found.</div>`}
       `;
-    }
-    async function onMineToggle() {
-      showMineOnly = document.getElementById('mineToggle').checked;
-      document.getElementById('mainContent').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
-      await loadCentres();
-      paintCentresList();
     }
 
     // ── Centre Detail / Snapshot ───────────────────────────────────────
@@ -269,11 +718,11 @@
       try {
         currentSnapshot = await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/snapshot`);
       } catch { toast('Could not load this centre', 'error'); currentSnapshot = null; }
+      // The plain list already loaded (allCentres, via ?mine=true) carries
+      // health/nurture/escalation — reused here rather than teaching
+      // /snapshot a second copy of that same computation.
+      await loadCentresIfNeeded();
       paintCentreDetail();
-    }
-    function fmtDate(iso) {
-      if (!iso) return '—';
-      try { return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; }
     }
     let upcomingExpanded = false;
 
@@ -290,19 +739,36 @@
         </div>
       `;
     }
-    function fmtTime(iso) {
-      try { return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }); } catch { return ''; }
-    }
+
+    const CENTRE_HEALTH_LABELS = {
+      needs_attention: '⚠️ Needs Attention', declining: '📉 Declining', opportunity: '💡 Opportunity',
+      new_activating: '🌱 New/Activating', growing: '📈 Growing', healthy: '✅ Healthy', dormant: '💤 Dormant'
+    };
+    const NURTURE_STATUS_LABELS = {
+      escalated: 'Escalated — needs contact now', reactivation_candidate: 'Dormant — reactivation candidate',
+      needs_first_contact: 'Needs first contact', first_contact_overdue: 'First contact overdue',
+      follow_up_pending: 'Follow-up pending', follow_up_overdue: 'Follow-up overdue',
+      on_track: 'On track', recurring_overdue: 'Check-in overdue'
+    };
 
     function paintCentreDetail() {
       const main = document.getElementById('mainContent');
       const s = currentSnapshot;
+      const c = allCentres.find(x => x.centreKey === currentCentreKey);
       if (!s) { main.innerHTML = `<div class="empty-state">This centre could not be loaded.</div>`; return; }
       document.getElementById('headerTitle').textContent = s.name;
       const upcomingShown = upcomingExpanded ? s.upcomingBookings : s.upcomingBookings.slice(0, 3);
+      const address = [s.streetAddress, s.suburb, s.state].filter(Boolean).join(', ');
       main.innerHTML = `
         <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
-        ${s.contactName || s.contactNo ? `<div class="sub">${escHtml(s.contactName || '')}${s.contactName && s.contactNo ? ' · ' : ''}${s.contactNo ? `<a href="tel:${escHtml(s.contactNo)}">${escHtml(s.contactNo)}</a>` : ''}</div>` : ''}
+        ${s.contactName || s.contactNo ? `<div class="sub">${escHtml(s.contactName || '')}${s.contactName && s.contactNo ? ' · ' : ''}${phoneLink(s.contactNo)}</div>` : ''}
+
+        ${c ? `
+          <span class="badge ${{healthy:'good',growing:'good',opportunity:'neutral',needs_attention:'warn',new_activating:'warn',declining:'bad',dormant:'bad'}[c.health] || 'neutral'}">${escHtml(CENTRE_HEALTH_LABELS[c.health] || c.health || '')}</span>
+          ${c.isEscalated ? `<span class="badge bad">🚨 Outstanding Issue</span>` : ''}
+          ${c.healthReasons?.[0] ? `<div class="why">${escHtml(c.healthReasons[0])}</div>` : ''}
+          ${c.nurture ? `<div class="sub" style="margin-top:6px"><strong>Next action:</strong> ${escHtml(NURTURE_STATUS_LABELS[c.nurture.status] || c.nurture.status)}${c.nurture.dueDate ? ' — due ' + fmtDate(c.nurture.dueDate) : ''}</div>` : ''}
+        ` : ''}
 
         <div class="stat-row">
           <div class="stat"><div class="num">${s.fillRate != null ? s.fillRate + '%' : '—'}</div><div class="label">Fill rate</div></div>
@@ -311,9 +777,21 @@
         </div>
 
         <div class="action-row">
-          <button class="btn btn-primary" onclick="setView('log-visit')">📝 Log Visit/Call</button>
+          <a class="btn btn-secondary" href="${directionsUrl(c?.latitude, c?.longitude, address)}" target="_blank" rel="noopener">🧭 Directions</a>
           <button class="btn btn-secondary" onclick="requestCentreBooking()">📅 Request Booking</button>
         </div>
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">📞 Log a Call</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">🚗 Log a Visit</button>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{followUpOnly:true})">⏭️ Create Follow-up</button>
+          <button class="btn btn-secondary" onclick="startVoiceNote('centre','${currentCentreKey}')">🎙️ Voice Note</button>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-danger" style="flex:none;width:100%" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit',prefillOutcome:'issue_raised'})">🚨 Escalate an Issue</button>
+        </div>
+        <div id="recorderBox"></div>
 
         <div class="section-title">Today</div>
         ${s.todayBookings.length ? s.todayBookings.map(bookingRow).join('') : `<div class="sub">No bookings today. Last booking: ${fmtDate(s.lastBookingDate)}</div>`}
@@ -335,6 +813,9 @@
             <button class="icon-btn" onclick="tagEducator('${e.userId}', '${escHtml(e.name).replace(/'/g, "\\'")}')" title="Tag relationship">🏷️</button>
           </div>
         `).join('') : `<div class="sub">No educators with shifts here yet.</div>`}
+
+        <div class="section-title">Key Contacts</div>
+        <div class="note-line">${s.contactName || s.contactNo ? `${escHtml(s.contactName || 'Contact')} — ${phoneLink(s.contactNo) || 'no phone on file'}` : 'No contact on file.'} <br>Contact details come from RT and can't be edited here — update them in the RawTalent app.</div>
 
         <div class="section-title">Centre Users</div>
         <div class="note-line">Not available yet — RT doesn't expose centre login users to us. Flagged for the team's API review.</div>
@@ -365,84 +846,178 @@
       } catch (e) { toast(e.message, 'error'); }
     }
 
-    // ── Log Visit/Call ─────────────────────────────────────────────────
-    async function renderLogVisit() {
-      document.getElementById('headerTitle').textContent = 'Log Visit/Call';
-      if (!activityTypes.callTypes.length) {
+    // ── Log Activity (shared: Leads → lead_activities, Centres → centre_visits) ──
+    // One sheet for both — Joy, 2026-09-03: leads now get the exact same
+    // 4-part post-contact prompt centres already had (who/outcome/market
+    // intelligence/next step). `followUpOnly` (the "Create Follow-up" quick
+    // action) just narrows the same form to the Next Step fields instead of
+    // being a separate mechanism — there's no freestanding "follow-up" concept
+    // in either backend table, only next_step/next_step_due_date on a logged
+    // contact.
+    function openLogActivityFor(type, id, opts) {
+      logTarget = { type, id, ...opts };
+      setView('log-activity');
+    }
+    async function renderLogActivity() {
+      document.getElementById('headerTitle').textContent = logTarget.followUpOnly ? 'Create Follow-up' : 'Log Activity';
+      document.getElementById('wfpTag').textContent = '';
+      if (logTarget.type === 'centre' && !activityTypes.callTypes.length) {
         try { activityTypes = await api('/api/centres/activity-types'); } catch {}
       }
-      paintLogVisit();
+      paintLogActivity();
     }
-    function paintLogVisit() {
+    function paintLogActivity() {
       const main = document.getElementById('mainContent');
+      const isCentre = logTarget.type === 'centre';
       const today = new Date().toISOString().slice(0, 10);
+      const followUpOnly = !!logTarget.followUpOnly;
       main.innerHTML = `
-        <label>Date</label>
-        <input type="date" id="lvDate" value="${today}">
+        ${!followUpOnly ? `
         <label>Channel</label>
-        <select id="lvChannel" onchange="paintLvActivityOptions()">
-          <option value="visit">Visit</option>
-          <option value="call">Call</option>
+        <select id="laChannel" onchange="${isCentre ? 'paintLaActivityOptions()' : ''}">
+          <option value="call" ${logTarget.channel === 'call' ? 'selected' : ''}>📞 Call</option>
+          <option value="visit" ${logTarget.channel === 'visit' ? 'selected' : ''}>🚗 Visit</option>
         </select>
-        <label>Activity Type</label>
-        <select id="lvActivityType"></select>
+        ${isCentre ? `<label>Activity Type</label><select id="laActivityType"></select>` : ''}
+        ${isCentre ? `
         <label>Status</label>
-        <select id="lvStatus" onchange="document.getElementById('lvOutcomeWrap').style.display = this.value === 'completed' ? 'block' : 'none'">
+        <select id="laStatus" onchange="document.getElementById('laOutcomeWrap').style.display = this.value === 'completed' ? 'block' : 'none'">
           <option value="completed">Called / Visited</option>
           <option value="planned">Planned</option>
           <option value="rescheduled">Rescheduled</option>
-        </select>
-        <div id="lvOutcomeWrap">
+        </select>` : `<input type="hidden" id="laStatus" value="completed">`}
+        <div id="laOutcomeWrap">
+          <label>Who did you speak with?</label>
+          <input type="text" id="laContactName" placeholder="Contact name">
           <label>Outcome</label>
-          <select id="lvOutcome">
-            <option value="positive">Positive</option>
-            <option value="neutral">Neutral</option>
-            <option value="concern">Concern</option>
-            <option value="issue_raised">Issue Raised</option>
+          <select id="laOutcome">
+            <option value="positive" ${logTarget.prefillOutcome === 'positive' ? 'selected' : ''}>Positive</option>
+            <option value="neutral" ${logTarget.prefillOutcome === 'neutral' ? 'selected' : ''}>Neutral</option>
+            <option value="concern" ${logTarget.prefillOutcome === 'concern' ? 'selected' : ''}>Concern</option>
+            <option value="issue_raised" ${logTarget.prefillOutcome === 'issue_raised' ? 'selected' : ''}>Issue Raised</option>
           </select>
+          <label>Notes</label>
+          <textarea id="laNotes" placeholder="What happened…"></textarea>
+          <label>Market intelligence <span class="optional">(anything useful about this centre/lead — competitor use, staffing gaps, etc.)</span></label>
+          <textarea id="laOpportunityNotes" placeholder="Anything worth knowing…"></textarea>
         </div>
-        <label>Who did you speak with?</label>
-        <input type="text" id="lvContactName" placeholder="Contact name">
-        <label>Notes</label>
-        <textarea id="lvNotes" placeholder="What happened…"></textarea>
-        <label>Next step (optional — leave blank if nothing further is needed)</label>
-        <input type="text" id="lvNextStep" placeholder="e.g. Send pricing sheet">
-        <label>Next step due date</label>
-        <input type="date" id="lvNextStepDue">
+        ` : ''}
+        <label>Next step <span class="optional">(what needs to happen, and when)</span></label>
+        <input type="text" id="laNextStep" placeholder="e.g. Send pricing sheet" ${followUpOnly ? 'autofocus' : ''}>
+        <label>Due date</label>
+        <input type="date" id="laNextStepDue" value="${followUpOnly ? today : ''}">
         <div class="action-row">
-          <button class="btn btn-primary" id="lvSaveBtn" onclick="saveVisit()">Save</button>
+          <button class="btn btn-primary" id="laSaveBtn" onclick="saveActivity()">Save</button>
         </div>
       `;
-      paintLvActivityOptions();
+      if (isCentre && !followUpOnly) paintLaActivityOptions();
     }
-    function paintLvActivityOptions() {
-      const channel = document.getElementById('lvChannel').value;
+    function paintLaActivityOptions() {
+      const channel = document.getElementById('laChannel').value;
       const options = channel === 'call' ? activityTypes.callTypes : activityTypes.visitTypes;
-      document.getElementById('lvActivityType').innerHTML = (options || []).map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
+      document.getElementById('laActivityType').innerHTML = (options || []).map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
     }
-    async function saveVisit() {
-      const btn = document.getElementById('lvSaveBtn');
+    async function saveActivity() {
+      const btn = document.getElementById('laSaveBtn');
       if (btn.disabled) return;
-      btn.disabled = true; const originalLabel = btn.textContent; btn.textContent = 'Saving…';
+      btn.disabled = true; const original = btn.textContent; btn.textContent = 'Saving…';
+      const followUpOnly = !!logTarget.followUpOnly;
+      const el = id => document.getElementById(id);
       try {
-        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/visits`, {
-          method: 'POST',
-          body: JSON.stringify({
-            visitDate: document.getElementById('lvDate').value,
-            channel: document.getElementById('lvChannel').value,
-            activityType: document.getElementById('lvActivityType').value,
-            status: document.getElementById('lvStatus').value,
-            outcome: document.getElementById('lvStatus').value === 'completed' ? document.getElementById('lvOutcome').value : null,
-            contactName: document.getElementById('lvContactName').value || null,
-            notes: document.getElementById('lvNotes').value || null,
-            nextStep: document.getElementById('lvNextStep').value || null,
-            nextStepDueDate: document.getElementById('lvNextStepDue').value || null
-          })
-        });
-        toast('Visit logged');
+        if (logTarget.type === 'lead') {
+          const body = {
+            channel: followUpOnly ? (logTarget.channel || 'call') : el('laChannel').value,
+            contactName: !followUpOnly ? (el('laContactName').value || null) : null,
+            outcome: !followUpOnly ? (el('laOutcome').value || null) : null,
+            notes: !followUpOnly ? (el('laNotes').value || null) : null,
+            opportunityNotes: !followUpOnly ? (el('laOpportunityNotes').value || null) : null,
+            nextStep: el('laNextStep').value || null,
+            nextStepDueDate: el('laNextStepDue').value || null
+          };
+          await api(`/api/leads/${logTarget.id}/activities`, { method: 'POST', body: JSON.stringify(body) });
+        } else {
+          const body = {
+            visitDate: today0(),
+            channel: followUpOnly ? (logTarget.channel || 'visit') : el('laChannel').value,
+            activityType: (!followUpOnly && el('laActivityType')) ? el('laActivityType').value : null,
+            status: followUpOnly ? 'completed' : el('laStatus').value,
+            outcome: !followUpOnly ? (el('laOutcome').value || null) : null,
+            contactName: !followUpOnly ? (el('laContactName').value || null) : null,
+            notes: !followUpOnly ? (el('laNotes').value || null) : null,
+            opportunityNotes: !followUpOnly ? (el('laOpportunityNotes').value || null) : null,
+            nextStep: el('laNextStep').value || null,
+            nextStepDueDate: el('laNextStepDue').value || null
+          };
+          if (followUpOnly && !body.activityType) body.activityType = 'Follow-up';
+          await api(`/api/centres/${encodeURIComponent(logTarget.id)}/visits`, { method: 'POST', body: JSON.stringify(body) });
+        }
+        toast(followUpOnly ? 'Follow-up created' : 'Logged');
+        await ensureDataLoaded(true);
         goBack();
+        if (logTarget.type === 'lead') renderLeadDetail(); else renderCentreDetail();
       } catch (e) { toast(e.message, 'error'); }
-      finally { btn.disabled = false; btn.textContent = originalLabel; }
+      finally { btn.disabled = false; btn.textContent = original; }
+    }
+    function today0() { return new Date().toISOString(); }
+
+    // ── Voice notes (shared — Leads and Centres each already have a
+    // working, AI-transcribed backend; this is one lighter recorder UI for
+    // both instead of two, matching centres' "prefill the open form"
+    // pattern rather than admin.html's separate leads-only review step) ──
+    let mediaRecorder = null, voiceChunks = [], voiceTarget = null;
+    function pickVoiceMimeType() {
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      return candidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+    }
+    async function startVoiceNote(type, id) {
+      voiceTarget = { type, id };
+      const box = document.getElementById('recorderBox');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = pickVoiceMimeType();
+        mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        voiceChunks = [];
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) voiceChunks.push(e.data); };
+        mediaRecorder.onstop = () => finishVoiceNote(mediaRecorder.mimeType || mimeType || 'audio/webm');
+        mediaRecorder.start();
+        box.innerHTML = `<div class="recorder-box"><span class="rec-dot"></span>Recording…<div class="action-row"><button class="btn btn-danger" onclick="stopVoiceNote()">⏹ Stop</button></div></div>`;
+      } catch {
+        toast('Microphone access denied or unavailable', 'error');
+      }
+    }
+    function stopVoiceNote() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    }
+    async function finishVoiceNote(mimeType) {
+      const box = document.getElementById('recorderBox');
+      box.innerHTML = `<div class="recorder-box"><div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div><div class="recorder-status">Transcribing…</div></div>`;
+      const blob = new Blob(voiceChunks, { type: mimeType });
+      const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+      const form = new FormData();
+      try {
+        if (voiceTarget.type === 'lead') {
+          form.append('file', blob, `voice-note.${ext}`);
+          const res = await fetch(`/api/leads/${voiceTarget.id}/recordings/voice-note`, { method: 'POST', body: form });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Upload failed');
+          box.innerHTML = `<div class="recorder-box"><div class="recorder-status">✅ Saved${data.notesSummary ? ' — summary ready' : ''}</div>${data.notesSummary ? `<div class="note-line" style="text-align:left">${escHtml(data.notesSummary)}</div><button class="btn btn-secondary" onclick="acceptVoiceSummary(${escHtml(JSON.stringify(data.notesSummary))})">Add as Note</button>` : ''}</div>`;
+        } else {
+          form.append('files', blob, `voice-note.${ext}`);
+          const res = await fetch(`/api/centres/${encodeURIComponent(voiceTarget.id)}/recordings`, { method: 'POST', body: form });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Upload failed');
+          box.innerHTML = `<div class="recorder-box"><div class="recorder-status">✅ Saved — attach it next time you Log a Call/Visit${data.notesSummary ? ', summary ready' : ''}</div>${data.notesSummary ? `<div class="note-line" style="text-align:left">${escHtml(data.notesSummary)}</div>` : ''}</div>`;
+        }
+      } catch (e) {
+        box.innerHTML = `<div class="recorder-box"><div class="recorder-status" style="color:var(--red)">${escHtml(e.message)}</div></div>`;
+      }
+    }
+    async function acceptVoiceSummary(summary) {
+      try {
+        await api(`/api/leads/${voiceTarget.id}/notes`, { method: 'POST', body: JSON.stringify({ note: summary }) });
+        toast('Added as a note');
+        renderLeadDetail();
+      } catch (e) { toast(e.message, 'error'); }
     }
 
     // ── Educator Search ─────────────────────────────────────────────────
@@ -489,12 +1064,12 @@
       document.getElementById('headerTitle').textContent = p.name;
       const main = document.getElementById('mainContent');
       main.innerHTML = `
-        <div class="sub">${p.contactNo ? `<a href="tel:${escHtml(p.contactNo)}">${escHtml(p.contactNo)}</a>` : 'No phone'}${p.email ? ' · ' + escHtml(p.email) : ''}</div>
+        <div class="sub">${p.contactNo ? phoneLink(p.contactNo) : 'No phone'}${p.email ? ' · ' + mailtoLink(p.email) : ''}</div>
         <span class="badge ${p.isActive ? 'good' : 'neutral'}">${p.isActive ? 'Active' : 'Inactive'}</span>
 
         <div class="action-row">
           <button class="btn btn-primary" onclick="requestEducatorBooking(${p.userId}, '${escHtml(p.name).replace(/'/g, "\\'")}')">📅 Request / Rebook</button>
-          <a class="btn btn-secondary" style="text-decoration:none" href="${escHtml(p.profileUrl)}" target="_blank" rel="noopener">Full RT Profile ↗</a>
+          <a class="btn btn-secondary" href="${escHtml(p.profileUrl)}" target="_blank" rel="noopener">Full RT Profile ↗</a>
         </div>
 
         ${p.qualifications.length ? `<div class="section-title">Qualifications</div>${p.qualifications.map(q => `<div class="sub">• ${escHtml(q.qualificationName || 'Qualification')}${q.qualified ? ' (qualified)' : ''}</div>`).join('')}` : ''}
@@ -521,11 +1096,10 @@
         location.href = '/login.html';
         return;
       }
-      showMineOnly = !!currentUser.wfpLabel;
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
       }
-      render('centres');
+      render('today');
     })();
   </script>
 </body>

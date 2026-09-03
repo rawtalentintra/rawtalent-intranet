@@ -15,7 +15,7 @@ const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisS
 const groqTranscription = require('../services/groqTranscriptionService');
 const { BUCKETS, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, ensureBucket, setFileResponseHeaders } = require('../services/storageService');
 const { MELBOURNE_SUBURB_PARTNER, partnerForSuburbState } = require('../services/melbourneTerritoryService');
-const { getGeocodesForCentres } = require('../services/centreGeoService');
+const { getGeocodesForCentres, getCachedGeocodesOnly } = require('../services/centreGeoService');
 const { shortState } = require('../services/centreMatchService');
 const { computeSystemMilestones } = require('../services/centreMilestoneService');
 const { CALL_ACTIVITY_TYPES, VISIT_ACTIVITY_TYPES, DECISIONS_REQUIRED } = require('../services/centreActivityTypeService');
@@ -295,6 +295,17 @@ async function getCentreStopsByKeys(centreKeys) {
   return withHealth.map(c => toRouteStop(c, geocodes));
 }
 
+// Non-VIC state default — partnerForSuburbState only covers VIC (split by
+// suburb between Liam/Justine); mirrors the identical constant in
+// routes/leads.js's own autoAssignWorkforcePartner. Found missing here
+//2026-09-03 while verifying the /wfp mobile app: every SA centre lacking
+// an explicit centre_partner_assignments row (apparently all of them
+// today) was falling through to `undefined`, so `?mine=true` returned
+// zero centres for Gwen — leads never showed this bug since a lead's
+// assigned_workforce_partner is set explicitly at creation time
+// (autoAssignWorkforcePartner), so this fallback rarely even runs there.
+const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)' };
+
 // The full My Centres portfolio — matches the pattern of other full-
 // dataset list endpoints in this app (Leads, Reports): compute everything
 // once server-side, let the frontend filter/sort/search client-side
@@ -306,9 +317,11 @@ async function getCentreStopsByKeys(centreKeys) {
 // PWA plan). Scopes to a real centre_partner_assignments row matching the
 // caller's own wfp_label, falling back to the same suburb-default
 // (partnerForSuburbState) the frontend already uses cosmetically for a
-// centre with no explicit assignment. A caller with no wfp_label at all
-// (Liam and every admin/super_admin today) has nothing to scope by, so
-// `mine=true` is a no-op for them rather than returning an empty list.
+// centre with no explicit assignment, and to STATE_WORKFORCE_PARTNER for
+// the non-VIC states partnerForSuburbState doesn't cover. A caller with no
+// wfp_label at all (Liam and every admin/super_admin today) has nothing to
+// scope by, so `mine=true` is a no-op for them rather than returning an
+// empty list.
 router.get('/', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();
@@ -318,11 +331,27 @@ router.get('/', async (req, res) => {
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates(visible);
     if (req.query.mine === 'true' && req.user.wfp_label) {
-      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state)) === req.user.wfp_label);
+      // c.state on the raw RT object is inconsistent — sometimes 'SA',
+      // sometimes 'South Australia' (confirmed live 2026-09-03: 'Victoria'/
+      // 'VIC', 'South Australia', 'Western Australia', etc. all appear) —
+      // shortState() (already used elsewhere in this file) normalizes it
+      // before the STATE_WORKFORCE_PARTNER lookup; partnerForSuburbState
+      // does its own normalizing internally already.
+      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)]) === req.user.wfp_label);
     }
+    // Coordinates (2026-09-03, the /wfp mobile app's "nearby centres" on
+    // Today) — cache/RT-coordinate-only, never triggers a live Mapbox
+    // geocode the way the routing endpoints above do (getGeocodesForCentres
+    // itself now just wraps this for their fuller "geocode whatever's
+    // still missing" needs — see centreGeoService.js). Absent entirely for
+    // a centre with neither an RT coordinate nor a cache hit, same "just
+    // omit it" contract those endpoints already follow.
+    const geocodes = await getCachedGeocodesOnly(visible);
     const withHealth = visible.map(c => ({
       ...healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
-      assignedWorkforcePartner: assignments[c.centreKey] || null
+      assignedWorkforcePartner: assignments[c.centreKey] || null,
+      latitude: geocodes[c.centreKey]?.lat ?? null,
+      longitude: geocodes[c.centreKey]?.lng ?? null
     }));
     res.json(withHealth);
   } catch (err) {

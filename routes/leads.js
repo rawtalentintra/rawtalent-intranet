@@ -143,10 +143,24 @@ router.get('/mine', async (req, res) => {
   }
 });
 
+// `?mine=true` (the /wfp mobile app, 2026-09-03) — mirrors routes/centres.js's
+// own `?mine=true` exactly: a real backend territory filter, not just the
+// client-side partner-picker every other Leads view still uses. Simpler
+// than centres' version since leads already carry assigned_workforce_partner
+// directly on the row (no separate assignments table to join) — falls back
+// to the same suburb/state default (partnerForSuburbState) centres use for
+// the handful of leads with no explicit assignment. No-ops (same as
+// centres') when the caller has no wfp_label — admin/super_admin, or any
+// workforce_partner account that hasn't had it set yet, still get
+// everything rather than an empty list.
 router.get('/', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
-    res.json(result.rows);
+    let rows = result.rows;
+    if (req.query.mine === 'true' && req.user.wfp_label) {
+      rows = rows.filter(l => (l.assigned_workforce_partner || partnerForSuburbState(l.suburb, l.state)) === req.user.wfp_label);
+    }
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -514,16 +528,20 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
 // endpoint rather than folded into the generic field-mapping PUT above,
 // since closed_at/closed_by_email need to come from the server session,
 // not a client-supplied value. Reopening (closed: false) just clears
-// both columns — nothing else about the lead is touched either way.
+// all three columns — nothing else about the lead is touched either way.
+// `reason` (2026-09-03, the /wfp mobile app's Closed/Lost stage) is
+// optional and only ever written when closing — the auto-close on
+// signed_status='signed' elsewhere in this file never passes one, since
+// that path is a win, not a loss, and has nothing to explain.
 router.patch('/:id/closed', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
-  const { closed } = req.body;
+  const { closed, reason } = req.body;
   if (typeof closed !== 'boolean') return res.status(400).json({ error: 'closed must be a boolean' });
   try {
     const existing = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Lead not found' });
     await getDb().execute({
-      sql: 'UPDATE leads SET closed_at = ?, closed_by_email = ?, updated_at = now() WHERE id = ?',
-      args: [closed ? new Date().toISOString() : null, closed ? req.user.email : null, req.params.id]
+      sql: 'UPDATE leads SET closed_at = ?, closed_by_email = ?, closed_reason = ?, updated_at = now() WHERE id = ?',
+      args: [closed ? new Date().toISOString() : null, closed ? req.user.email : null, closed ? (reason || null) : null, req.params.id]
     });
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     res.json(result.rows[0]);
@@ -612,6 +630,50 @@ router.delete('/:id/notes/:noteId', requireAdmin, async (req, res) => {
   try {
     await getDb().execute({ sql: 'DELETE FROM lead_notes WHERE id = ? AND lead_id = ?', args: [req.params.noteId, req.params.id] });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Structured call/visit log for leads — the /wfp mobile app's "Log a phone
+// call"/"Log a visit" (2026-09-03). Same 4-part shape as centre_visits
+// (routes/centres.js's own POST /:centreKey/visits): who they spoke with,
+// the outcome, market intelligence, and what's next + when. See
+// db/schema.sql's lead_activities comment for why this is a real table
+// rather than folding into lead_notes' flat thread.
+router.get('/:id/activities', leadsViewAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: 'SELECT * FROM lead_activities WHERE lead_id = ? ORDER BY created_at DESC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/activities', async (req, res) => {
+  const { channel, contactName, outcome, notes, opportunityNotes, nextStep, nextStepDueDate } = req.body;
+  if (!channel) return res.status(400).json({ error: 'channel is required' });
+  try {
+    const lead = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+
+    const id = uuidv4();
+    await getDb().execute({
+      sql: `INSERT INTO lead_activities (
+              id, lead_id, channel, contact_name, outcome, notes, opportunity_notes,
+              next_step, next_step_due_date, created_by_email, created_by_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id, req.params.id, channel, contactName || null, outcome || null, notes || null,
+        opportunityNotes || null, nextStep || null, nextStepDueDate || null,
+        req.user.email, req.user.name || req.user.email
+      ]
+    });
+    const row = (await getDb().execute({ sql: 'SELECT * FROM lead_activities WHERE id = ?', args: [id] })).rows[0];
+    res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

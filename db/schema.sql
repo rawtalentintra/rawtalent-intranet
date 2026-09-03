@@ -1161,6 +1161,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_rt_location_id ON leads(rt_location_
 -- not a boolean — closed_at doubles as "when", closed_by_email as "who".
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_by_email TEXT;
+-- Why a lead was closed as lost — distinct from closed_at/closed_by_email
+-- (when/who). Only meaningful for a genuine "this one's dead" close, not
+-- the auto-close that already happens on signed_status='signed' (routes/
+-- leads.js) — that path is a win, not a loss, and never asks for a reason.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_reason TEXT;
 
 -- Set by services/leadAutoSignService.js when it signs a lead on its own,
 -- from an RT centre creation, with nobody having touched the lead. Drives
@@ -1191,6 +1196,30 @@ CREATE TABLE IF NOT EXISTS lead_notes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lead_notes_lead_id ON lead_notes(lead_id);
+
+-- Structured pre-sign call/visit log for leads — the /wfp mobile app's
+-- "Log a phone call"/"Log a visit" (2026-09-03), mirroring centre_visits'
+-- own shape below (same 4-part post-contact prompt: who/outcome/market
+-- intelligence/next-step) rather than leaving leads with only the plain
+-- lead_called_status/at + centre_visited_status/at pair and a flat
+-- lead_notes thread. FK to leads (unlike centre_visits, which can't FK to
+-- leads — see that table's own comment) since every lead genuinely has a
+-- leads row to key off, no equivalent "most rows predate this app" problem.
+CREATE TABLE IF NOT EXISTS lead_activities (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL, -- 'call' | 'visit'
+  contact_name TEXT,     -- who they spoke with
+  outcome TEXT,          -- 'positive' | 'neutral' | 'concern' | 'issue_raised'
+  notes TEXT,
+  opportunity_notes TEXT, -- market intelligence
+  next_step TEXT,
+  next_step_due_date DATE,
+  created_by_email CITEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_activities_lead_id ON lead_activities(lead_id);
 
 -- Structured post-sign visit records — distinct from the single
 -- centre_visited_status/at pair above, which is the one-time pre-sign

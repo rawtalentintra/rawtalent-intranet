@@ -47,25 +47,33 @@ async function saveGeocode(centreKey, coord) {
   });
 }
 
+// RT's own coordinate wins outright wherever it has one, else whatever's
+// already sitting in the centre_geocodes cache — never touches Mapbox.
+// Split out of getGeocodesForCentres so a plain list load (GET /, the
+// /wfp mobile app's "nearby centres" — 2026-09-03) can get coordinates
+// for whatever's already resolved without ever triggering a live geocode
+// call for the rest, unlike the routing endpoints below which need every
+// selected centre placed and are fine paying for that.
+async function getCachedGeocodesOnly(centres) {
+  const byKey = {};
+  const needsCacheLookup = [];
+  for (const c of centres) {
+    if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) byKey[c.centreKey] = { lat: c.latitude, lng: c.longitude };
+    else needsCacheLookup.push(c.centreKey);
+  }
+  if (needsCacheLookup.length) Object.assign(byKey, await getCachedGeocodes(needsCacheLookup));
+  return byKey;
+}
+
 // Returns { [centreKey]: {lat, lng} } for every centre it could place —
 // centres with no usable address, or whose address Mapbox can't resolve,
 // are simply absent from the result rather than failing the whole call.
 async function getGeocodesForCentres(centres) {
-  const byKey = {};
-
-  // RT's own coordinate wins outright wherever it has one — never even
-  // consults the Mapbox cache/API for these, see the comment above.
-  const needsGeocoding = [];
-  for (const c of centres) {
-    if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) byKey[c.centreKey] = { lat: c.latitude, lng: c.longitude };
-    else needsGeocoding.push(c);
-  }
+  const byKey = await getCachedGeocodesOnly(centres);
+  const needsGeocoding = centres.filter(c => !byKey[c.centreKey]);
   if (!needsGeocoding.length || !mapboxService.isConfigured()) return byKey;
 
-  const cached = await getCachedGeocodes(needsGeocoding.map(c => c.centreKey));
-  Object.assign(byKey, cached);
-
-  const missing = needsGeocoding.filter(c => !byKey[c.centreKey] && c.streetAddress && c.suburb && c.state);
+  const missing = needsGeocoding.filter(c => c.streetAddress && c.suburb && c.state);
   for (let i = 0; i < missing.length; i += GEOCODE_CONCURRENCY) {
     const batch = missing.slice(i, i + GEOCODE_CONCURRENCY);
     await Promise.all(batch.map(async (c) => {
@@ -84,4 +92,4 @@ async function getGeocodesForCentres(centres) {
   return byKey;
 }
 
-module.exports = { getGeocodesForCentres };
+module.exports = { getGeocodesForCentres, getCachedGeocodesOnly };
