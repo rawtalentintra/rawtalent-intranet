@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { getCalendarClientFor, isConfigured: calendarConfigured, authMode } = require('./googleCalendarClient');
 
@@ -71,6 +72,14 @@ const EVENT_TAG = { call: 'Lead Call', visit: 'Centre Visit' };
 
 function buildEventTitle(eventType, centreName) {
   return `[${EVENT_TAG[eventType]}] ${centreName}`;
+}
+
+// Most leads.centre_phone values are a bare number, but a few were typed
+// in with the label already included (found while testing the .ics feed
+// — real example: "Phone: (08) 8365 7571") — strips any such prefix so
+// prepending our own "Phone: " label never doubles up either way.
+function formatPhoneForDescription(phone) {
+  return (phone || '').replace(/^\s*(phone|ph)\s*:\s*/i, '').trim();
 }
 
 const BRACKET_TAG_RE = /^\s*\[(lead call|call|centre visit|site visit|visit)\]\s*/i;
@@ -155,7 +164,7 @@ async function syncLeadEventOutbound(lead, eventType) {
       summary: buildEventTitle(eventType, lead.centre_name),
       description: [
         lead.street_address ? `Address: ${lead.street_address}${lead.suburb ? ', ' + lead.suburb : ''}${lead.state ? ' ' + lead.state : ''}` : null,
-        lead.centre_phone ? `Phone: ${lead.centre_phone}` : null,
+        lead.centre_phone ? `Phone: ${formatPhoneForDescription(lead.centre_phone)}` : null,
         lead.agency_usage ? `Agency usage: ${lead.agency_usage}` : null,
         `HeartBeat lead: ${process.env.APP_URL || ''}/admin?lead=${lead.id}`
       ].filter(Boolean).join('\n'),
@@ -430,6 +439,136 @@ async function syncRouteToCalendar(ownerEmail, blocks, actor) {
   return created;
 }
 
+// ─── Read-only .ics subscription feed ────────────────────────────────
+// See db/schema.sql's comment on calendar_feed_tokens for the "why" —
+// this sidesteps Google's OAuth/service-account/API surface entirely.
+// Each partner subscribes to their own private URL directly from their
+// Google Calendar's own "Add calendar → From URL" (or the one-click
+// calendar.google.com/render?cid= link built in routes/calendarSync.js).
+// One-way (HeartBeat → their calendar), refreshed periodically by
+// Google rather than live — the trade-off for zero Google-side setup.
+async function getOrCreateFeedToken(partnerLabel) {
+  const existing = await getDb().execute({ sql: 'SELECT token FROM calendar_feed_tokens WHERE partner_label = ?', args: [partnerLabel] });
+  if (existing.rows[0]) return existing.rows[0].token;
+  // Generate-then-insert-ignore-then-reread rather than trusting our own
+  // generated value, in case of a concurrent first-request race between
+  // two tabs both hitting "get my link" for the same partner at once.
+  await getDb().execute({
+    sql: `INSERT INTO calendar_feed_tokens (partner_label, token) VALUES (?, ?) ON CONFLICT (partner_label) DO NOTHING`,
+    args: [partnerLabel, crypto.randomBytes(24).toString('hex')]
+  });
+  const row = await getDb().execute({ sql: 'SELECT token FROM calendar_feed_tokens WHERE partner_label = ?', args: [partnerLabel] });
+  return row.rows[0].token;
+}
+
+// The token IS the credential (no session cookie arrives here — Google's
+// subscription fetcher is an anonymous HTTP client) — this is the only
+// lookup the public /feed/:token route does, deliberately not also
+// trusting a partner label supplied in the URL itself.
+async function partnerLabelForFeedToken(token) {
+  const row = await getDb().execute({ sql: 'SELECT partner_label FROM calendar_feed_tokens WHERE token = ?', args: [token] });
+  return row.rows[0]?.partner_label || null;
+}
+
+// Invalidates the old link (e.g. if it leaked) — old URL 404s immediately,
+// a fresh one has to be fetched and re-subscribed to.
+async function regenerateFeedToken(partnerLabel) {
+  const token = crypto.randomBytes(24).toString('hex');
+  await getDb().execute({
+    sql: `INSERT INTO calendar_feed_tokens (partner_label, token) VALUES (?, ?)
+          ON CONFLICT (partner_label) DO UPDATE SET token = excluded.token, created_at = now()`,
+    args: [partnerLabel, token]
+  });
+  return token;
+}
+
+// RFC 5545 TEXT escaping — backslash, semicolon, comma, and embedded
+// newlines all need escaping inside a property value.
+function icsEscapeText(s) {
+  return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+}
+
+function icsDateTimeUtc(d) {
+  return new Date(d).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+// RFC 5545 line folding: no content line may exceed 75 octets: split at
+// 75, continuation lines start with a single space. Most calendar apps
+// tolerate long lines anyway, but Google Calendar is the one client
+// this feed is actually built for, worth doing properly rather than
+// hoping it's lenient.
+function icsFold(line) {
+  if (line.length <= 75) return line;
+  const chunks = [];
+  let rest = line;
+  while (rest.length > 75) {
+    chunks.push(rest.slice(0, 75));
+    rest = rest.slice(75);
+  }
+  chunks.push(rest);
+  return chunks.map((c, i) => (i === 0 ? c : ' ' + c)).join('\r\n');
+}
+
+// One partner's scheduled leads calls/visits, as a snapshot .ics document
+// — same trigger condition syncLeadEventOutbound uses (status='scheduled'
+// plus a real timestamp), just read instead of pushed live. Smart
+// Routing's centre-visit/lunch blocks (syncRouteToCalendar) aren't
+// included yet — a natural follow-up using this same shape, not
+// attempted here.
+async function buildIcsFeed(partnerLabel) {
+  const leads = (await getDb().execute({
+    sql: `SELECT id, centre_name, street_address, suburb, state, centre_phone,
+                 lead_called_status, lead_called_at, centre_visited_status, centre_visited_at
+          FROM leads WHERE assigned_workforce_partner = ?`,
+    args: [partnerLabel]
+  })).rows;
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//RawTalent HeartBeat//Calendar Feed//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    `X-WR-CALNAME:${icsEscapeText(`${partnerLabel} — HeartBeat`)}`,
+    // Both are hints, not guarantees — Google Calendar decides its own
+    // actual poll interval for subscribed URLs regardless.
+    'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
+    'X-PUBLISHED-TTL:PT1H'
+  ];
+
+  const now = icsDateTimeUtc(new Date());
+  for (const lead of leads) {
+    for (const eventType of ['call', 'visit']) {
+      const status = eventType === 'call' ? lead.lead_called_status : lead.centre_visited_status;
+      const scheduledAt = eventType === 'call' ? lead.lead_called_at : lead.centre_visited_at;
+      if (status !== 'scheduled' || !scheduledAt) continue;
+
+      const start = new Date(scheduledAt);
+      const durationMinutes = eventType === 'call' ? 30 : 45;
+      const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+      const location = [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ');
+      const description = [
+        lead.centre_phone ? `Phone: ${formatPhoneForDescription(lead.centre_phone)}` : null,
+        `HeartBeat lead: ${process.env.APP_URL || ''}/admin?lead=${lead.id}`
+      ].filter(Boolean).join('\n');
+
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:heartbeat-${eventType}-${lead.id}@rawtalent-internal.app`,
+        `DTSTAMP:${now}`,
+        `DTSTART:${icsDateTimeUtc(start)}`,
+        `DTEND:${icsDateTimeUtc(end)}`,
+        `SUMMARY:${icsEscapeText(buildEventTitle(eventType, lead.centre_name))}`
+      );
+      if (location) lines.push(`LOCATION:${icsEscapeText(location)}`);
+      lines.push(`DESCRIPTION:${icsEscapeText(description)}`, 'END:VEVENT');
+    }
+  }
+
+  lines.push('END:VCALENDAR');
+  return lines.map(icsFold).join('\r\n') + '\r\n';
+}
+
 module.exports = {
   getPartnerCalendarMap,
   emailForPartner,
@@ -441,5 +580,9 @@ module.exports = {
   processInboundEvent,
   listAndApplyChanges,
   registerOrRenewWatch,
-  renewWatchesNearingExpiry
+  renewWatchesNearingExpiry,
+  getOrCreateFeedToken,
+  partnerLabelForFeedToken,
+  regenerateFeedToken,
+  buildIcsFeed
 };

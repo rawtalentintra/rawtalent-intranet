@@ -112,6 +112,65 @@ router.get('/status', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Read-only .ics subscription feed ────────────────────────────────
+// Joy, 2026-09-03: after the OAuth Connect flow (a generic Google 500
+// with no reachable cause) and 'service-account' mode (blocked by a GCP
+// org policy disabling key creation) both hit walls needing access
+// nobody could confirm holding, this sidesteps Google's OAuth/API
+// surface entirely — see db/schema.sql's calendar_feed_tokens comment.
+// Same access rule as /connect above: a non-admin WFP partner can fetch
+// their OWN link (canManageCalendarConnection), so these sit ahead of
+// the router.use(requireAdmin) gate below, not behind it.
+router.get('/feed-link/:partnerLabel', requireAuth, async (req, res) => {
+  const partnerLabel = decodeURIComponent(req.params.partnerLabel || '').trim();
+  if (!partnerLabel) return res.status(400).json({ error: 'Missing partner label.' });
+  if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).json({ error: 'You can only get your own feed link.' });
+  try {
+    const token = await calendarSync.getOrCreateFeedToken(partnerLabel);
+    res.json(feedLinks(token));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Invalidates the old link — for if it ever leaks, or just to force a
+// clean re-subscribe.
+router.post('/feed-link/:partnerLabel/regenerate', requireAuth, async (req, res) => {
+  const partnerLabel = decodeURIComponent(req.params.partnerLabel || '').trim();
+  if (!canManageCalendarConnection(req.user, partnerLabel)) return res.status(403).json({ error: 'You can only reset your own feed link.' });
+  try {
+    const token = await calendarSync.regenerateFeedToken(partnerLabel);
+    res.json(feedLinks(token));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function feedLinks(token) {
+  const icsUrl = `${(process.env.APP_URL || '').replace(/\/$/, '')}/api/calendar-sync/feed/${token}`;
+  // The one-click "Add calendar" trick — opens straight into Google
+  // Calendar's own add-by-URL confirmation instead of making someone
+  // copy/paste through Settings → Add calendar → From URL by hand.
+  return { icsUrl, googleAddUrl: `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(icsUrl)}` };
+}
+
+// Public, unauthenticated on purpose — Google's calendar-subscription
+// fetcher has no HeartBeat session cookie to send; the token itself is
+// the credential (see calendarSync.partnerLabelForFeedToken's own
+// comment on why the URL carries no separately-trusted partner label).
+router.get('/feed/:token', async (req, res) => {
+  try {
+    const partnerLabel = await calendarSync.partnerLabelForFeedToken(req.params.token);
+    if (!partnerLabel) return res.status(404).send('Feed not found.');
+    const ics = await calendarSync.buildIcsFeed(partnerLabel);
+    res.set('Content-Type', 'text/calendar; charset=utf-8');
+    res.set('Content-Disposition', `inline; filename="${partnerLabel.replace(/[^a-z0-9]+/gi, '-')}.ics"`);
+    res.send(ics);
+  } catch (err) {
+    res.status(500).send('Could not build calendar feed.');
+  }
+});
+
 router.use(requireAdmin);
 
 // Manual fallback for before push-notification channels are registered

@@ -1420,6 +1420,18 @@
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Scheduling a call/visit on a lead already creates the event on that partner's calendar automatically. This is just setup and cleanup: registering the push-notification channels, a manual catch-up sync, and linking anything it couldn't auto-match.</div>
             <div id="calSyncModeInfo"></div>
 
+            <!-- Joy, 2026-09-03: "This is a lot of trouble just to connect a
+                 Google calendar" — after OAuth and service-account mode both
+                 hit walls needing Google admin access nobody could confirm
+                 holding, this is the actually-simple option: no Google Cloud
+                 setup at all, each partner subscribes to a private read-only
+                 URL from their own Google Calendar. One-way and not
+                 instant (Google polls a subscribed URL every so often, not
+                 live) — see db/schema.sql's calendar_feed_tokens comment. -->
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">📅 Calendar Feed — no Google Cloud setup needed</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner subscribes once, straight from their own Google Calendar — read-only, refreshes every hour or so. Nothing to configure on the Google side at all.</div>
+            <div id="calFeedLinks" style="margin-bottom:20px"><div class="loading-spinner"><div class="spinner"></div></div></div>
+
             <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Register once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — renews automatically every 12h after that. "Sync Now" is a manual catch-up and doubles as a per-partner connection test.</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -11440,6 +11452,51 @@
       document.getElementById('calendarSyncModal').classList.add('open');
       loadCalendarSyncSection();
       loadCalendarSyncModeInfo();
+      loadCalendarFeedLinks();
+    }
+
+    // Joy, 2026-09-03: "This is a lot of trouble just to connect a Google
+    // calendar" — the .ics subscription feed alternative (routes/
+    // calendarSync.js's /feed-link, /feed/:token). Fetches each partner's
+    // link individually rather than one bulk endpoint — canManageCalendarConnection
+    // on the server naturally narrows this to "just your own row" for a
+    // non-admin WFP user (their request for anyone else's label 403s and
+    // is just skipped here, no separate role check needed client-side).
+    async function loadCalendarFeedLinks() {
+      const el = document.getElementById('calFeedLinks');
+      try {
+        const rows = (await Promise.all(CALENDAR_SYNC_PARTNER_OPTIONS.map(async label => {
+          const res = await fetch(`/api/calendar-sync/feed-link/${encodeURIComponent(label)}`);
+          if (!res.ok) return null;
+          return { label, ...(await res.json()) };
+        }))).filter(Boolean);
+        if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No feed links available for your account.</div>'; return; }
+        el.innerHTML = rows.map(r => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100);flex-wrap:wrap">
+            <div style="font-size:13px;font-weight:600">${escHtml(r.label)}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <a href="${r.googleAddUrl}" target="_blank" rel="noopener" class="btn-add" style="padding:4px 10px;font-size:11.5px;text-decoration:none;display:inline-block">📅 Add to Google Calendar</a>
+              <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="copyCalendarFeedLink('${r.icsUrl.replace(/'/g, "\\'")}')">Copy link</button>
+              <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="resetCalendarFeedLink('${escHtml(r.label).replace(/'/g, "\\'")}')">Reset</button>
+            </div>
+          </div>`).join('');
+      } catch {
+        el.innerHTML = '<div style="font-size:12px;color:#c0392b">Could not load feed links.</div>';
+      }
+    }
+    function copyCalendarFeedLink(url) {
+      navigator.clipboard.writeText(url)
+        .then(() => toast('Link copied — paste into Google Calendar → Settings → Add calendar → From URL'))
+        .catch(() => toast('Could not copy automatically — select and copy the link manually', 'error'));
+    }
+    async function resetCalendarFeedLink(label) {
+      if (!confirm(`Reset ${label}'s calendar feed link? The old URL stops working immediately — they'll need to re-subscribe with the new one.`)) return;
+      try {
+        const res = await fetch(`/api/calendar-sync/feed-link/${encodeURIComponent(label)}/regenerate`, { method: 'POST' });
+        if (!res.ok) { toast('Failed to reset', 'error'); return; }
+        toast('Link reset');
+        loadCalendarFeedLinks();
+      } catch { toast('Network error', 'error'); }
     }
 
     // Joy, 2026-09-03: the OAuth Connect flow (CALENDAR_AUTH_MODE=oauth)

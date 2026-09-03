@@ -1824,3 +1824,24 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
   redirect_uris JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Read-only calendar subscription feed (services/leadCalendarSyncService.js
+-- buildIcsFeed/routes/calendarSync.js's /feed/:token) — built 2026-09-03
+-- after both the OAuth Connect flow (a generic Google 500 with no
+-- reachable cause) and the service-account mode (blocked by a GCP org
+-- policy disabling service-account key creation) hit walls needing access
+-- nobody could confirm holding. Each partner subscribes to their own
+-- private .ics URL directly from their Google Calendar's own "Add
+-- calendar → From URL" — no Google Cloud project, OAuth, or service
+-- account involved on our end at all. One-way (HeartBeat → their
+-- calendar) and refreshed periodically by Google (not live), the
+-- trade-off for needing zero Google-side configuration. token is a
+-- random 192-bit value, not derived from anything guessable — knowing it
+-- is what authorizes the request, the same trust model as a private
+-- RSS/ics link anywhere else; it identifies a partner_label, never a
+-- specific user account.
+CREATE TABLE IF NOT EXISTS calendar_feed_tokens (
+  partner_label TEXT PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
