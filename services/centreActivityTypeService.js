@@ -19,7 +19,13 @@ const CALL_ACTIVITY_TYPES = [
   'Growth conversation',
   'Decline investigation',
   'Service recovery',
-  'Dormant reactivation'
+  'Dormant reactivation',
+  // Ops/customer-success raising an issue on a Workforce Partner's behalf
+  // (Liam, 2026-09-03: "you, Sofia, and your teams" escalating a centre as
+  // a note) — not a WFP's own logged call/visit, but reuses the same
+  // centre_visits row/outcome='issue_raised' pipeline rather than a
+  // parallel mechanism. See views/admin.html's Centre 360 "🚨 Escalate".
+  'Escalation note'
 ];
 
 const VISIT_ACTIVITY_TYPES = [

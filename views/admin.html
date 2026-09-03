@@ -9933,7 +9933,10 @@
             <div style="font-weight:700;color:var(--navy);font-size:18px">${escHtml(c.name)}</div>
             <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${escHtml([c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file')}</div>
           </div>
-          ${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            ${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;white-space:nowrap" onclick="openEscalateCentreModal('${c.centreKey}')" title="Raise a note that shows up as an escalation on this centre's Workforce Partner's Today">🚨 Escalate</button>
+          </div>
         </div>
 
         <div style="padding:14px 20px;margin-bottom:16px;background:${healthMeta.bg};border-left:4px solid ${healthMeta.color};border-radius:var(--radius)">
@@ -11347,6 +11350,26 @@
       }
       renderVisitLogAttachedRecordings();
       document.getElementById('visitLogModal').classList.add('open');
+    }
+
+    // Ops/customer-success (Sofia's team) raising a centre issue that
+    // surfaces to that centre's assigned Workforce Partner — Liam,
+    // 2026-09-03: "you, Sofia, and your teams" escalating "as a note".
+    // Reuses openVisitLogModal/submitVisitLog wholesale (same
+    // centre_visits row, same POST/PUT, same isEscalated pipeline the
+    // Escalated badge/KPI already read) — just a shortcut into it with
+    // Channel/Activity Type/Status/Outcome pre-set and locked to "this is
+    // an escalation", so the only thing left to actually type is the note.
+    async function openEscalateCentreModal(centreKey) {
+      await openVisitLogModal(centreKey, null);
+      document.getElementById('visitLogModalTitle').textContent = '🚨 Escalate to Workforce Partner';
+      document.getElementById('visitLogChannel').value = 'call';
+      onVisitLogChannelChange();
+      document.getElementById('visitLogActivityType').value = 'Escalation note';
+      document.getElementById('visitLogStatus').value = 'completed';
+      onVisitLogScheduleChange();
+      document.getElementById('visitLogOutcome').value = 'issue_raised';
+      document.getElementById('visitLogNotes').focus();
     }
 
     function closeVisitLogModal() {

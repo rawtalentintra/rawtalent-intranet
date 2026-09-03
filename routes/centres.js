@@ -199,6 +199,7 @@ function healthForCentre(centre, bookings, visits, lastBookingDate = null) {
     healthReasons: health.reasons,
     isStrategic: health.isStrategic,
     isEscalated: health.isEscalated,
+    escalationNote: health.escalationNote,
     nurture,
     bookings30dCount: buckets.bookings30d.length,
     bookingsPrev30dCount: buckets.bookingsPrev30d.length,
@@ -549,9 +550,16 @@ router.get('/:centreKey/bookings', async (req, res) => {
 
 // Shared by GET /:centreKey/educators below and the snapshot endpoint —
 // "recent" educators, ranked by how often they've actually worked this
-// centre, resolved to names via a live candidate lookup (mirrors the
-// report dashboard's existing candidateName-by-id pattern). `limit` caps
-// how many get their name resolved (the snapshot only wants a handful).
+// centre. Resolved via the same local rt_candidates_cache table
+// routes/educators.js already reads for its own search/profile/Active
+// badge (services/rtCandidatesSyncService.js keeps it synced) — one
+// batched local query instead of N live RT calls, and it comes with
+// isActive already attached, which the mobile Centre Detail educators
+// panel needs (Liam, 2026-09-03: "are they active yet or currently
+// onboarding" — this only answers active-or-not; RT's own numeric status
+// code isn't mapped to a real "onboarding" meaning anywhere in this app,
+// so that finer distinction isn't guessed at here). `limit` caps how many
+// get resolved (the snapshot only wants a handful).
 async function topEducatorsForCentre(parsed, bookings, limit = null) {
   const forCentre = bookings.filter(b =>
     (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id) &&
@@ -563,20 +571,36 @@ async function topEducatorsForCentre(parsed, bookings, limit = null) {
   if (limit) educatorIds = educatorIds.slice(0, limit);
   if (!educatorIds.length) return [];
 
-  // Only worth resolving names for the educators who actually appear
-  // here (a handful per centre), not every candidate in RT.
-  const names = {};
-  await Promise.all(educatorIds.map(async id => {
+  const numericIds = educatorIds.map(Number);
+  const placeholders = numericIds.map(() => '?').join(',');
+  const cached = (await getDb().execute({
+    sql: `SELECT user_id, first_name, last_name, is_active FROM rt_candidates_cache WHERE user_id IN (${placeholders})`,
+    args: numericIds
+  })).rows;
+  const byId = {};
+  for (const row of cached) byId[row.user_id] = row;
+
+  // A candidate not yet in the sync cache (brand new, or synced since the
+  // last nightly run) falls back to a live RT fetch rather than showing a
+  // blank name — same "only worth it for the handful who actually appear
+  // here" reasoning this always had.
+  const missingIds = educatorIds.filter(id => !byId[Number(id)]);
+  const liveNames = {};
+  await Promise.all(missingIds.map(async id => {
     try {
       const candidate = await rtApi.fetchById('candidates', id);
-      names[id] = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || `Educator #${id}`;
+      liveNames[id] = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || `Educator #${id}`;
     } catch {
-      names[id] = `Educator #${id}`;
+      liveNames[id] = `Educator #${id}`;
     }
   }));
 
   return educatorIds
-    .map(id => ({ userId: Number(id), name: names[id], bookingCount: countByEducator[id] }))
+    .map(id => {
+      const row = byId[Number(id)];
+      const name = row ? ([row.first_name, row.last_name].filter(Boolean).join(' ') || `Educator #${id}`) : liveNames[id];
+      return { userId: Number(id), name, bookingCount: countByEducator[id], isActive: row ? !!row.is_active : null };
+    })
     .sort((a, b) => b.bookingCount - a.bookingCount);
 }
 

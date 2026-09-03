@@ -100,6 +100,21 @@ function latestVisitIsEscalated(visits) {
   return (sorted[0]?.outcome === 'issue_raised') || false;
 }
 
+// The actual escalation text, not just the boolean above — added
+// 2026-09-03 (Liam, on a call with Joy: "Sofia and your teams" should be
+// able to escalate a centre as a note that "shows up as an escalation for
+// workforce partners"). Redoes the identical latest-visit sort rather than
+// changing latestVisitIsEscalated's own return shape — that function has
+// exactly one call site today, but it's a load-bearing boolean threaded
+// through health/nurture computation everywhere, not worth risking for
+// this. Null whenever the latest visit isn't actually an escalation, or
+// has no notes recorded.
+function latestEscalationNote(visits) {
+  const sorted = (visits || []).slice().sort((a, b) => new Date(b.visit_date) - new Date(a.visit_date));
+  const latest = sorted[0];
+  return (latest?.outcome === 'issue_raised' && latest.notes) || null;
+}
+
 // Strategic / High Volume (Decision Area 3, @1:01:12-@1:01:41 — Justine:
 // "Yarra Road... high volume, that could be like weekly bookings", Gwen:
 // "of two or more per week"). A modifier, not its own health category — a
@@ -146,9 +161,10 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
   const reasons = [];
   const isStrategic = bookings90d.length >= STRATEGIC_BOOKINGS_90D_THRESHOLD;
   const isEscalated = latestVisitIsEscalated(visits);
+  const escalationNote = isEscalated ? latestEscalationNote(visits) : null;
 
   if (centre.isActive === false) {
-    return { category: 'dormant', reasons: ['Marked inactive in RT.'], isStrategic, isEscalated };
+    return { category: 'dormant', reasons: ['Marked inactive in RT.'], isStrategic, isEscalated, escalationNote };
   }
 
   const daysSinceCreated = daysSince(centre.createdDate, now);
@@ -159,7 +175,7 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
 
   if (daysSinceCreated <= 60 && bookings90d.length < 5) {
     reasons.push(`New in RT ${Math.round(daysSinceCreated)} days ago, ${bookings90d.length} booking(s) so far — still activating.`);
-    return { category: 'new_activating', reasons, isStrategic, isEscalated };
+    return { category: 'new_activating', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   // Confirmed 12-month dormancy window — checked against the real last
@@ -170,14 +186,14 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
   // comment already describes for stale-visit checks).
   if (daysSinceLastBooking !== null && daysSinceLastBooking >= DORMANCY_DAYS) {
     reasons.push(`No booking in ${Math.round(daysSinceLastBooking)} days (12+ months) — dormant.`);
-    return { category: 'dormant', reasons, isStrategic, isEscalated };
+    return { category: 'dormant', reasons, isStrategic, isEscalated, escalationNote };
   }
   // No booking on record anywhere in the 366-day lookback at all, and not
   // a brand-new centre — nothing recent enough to call this anything but
   // dormant either.
   if (lastBookingDate === null && daysSinceCreated > 60) {
     reasons.push('No booking on record in the last 12 months.');
-    return { category: 'dormant', reasons, isStrategic, isEscalated };
+    return { category: 'dormant', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   // Zero bookings in the last 90 days but a real booking happened more
@@ -189,7 +205,7 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
   // definition) describes this gap better than treating it as fine.
   if (bookings90d.length === 0) {
     reasons.push(`No bookings in the last 90 days (last booking ${daysSinceLastBooking !== null ? Math.round(daysSinceLastBooking) + ' days ago' : 'unknown'}).`);
-    return { category: 'declining', reasons, isStrategic, isEscalated };
+    return { category: 'declining', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   // Booking-volume decline, weighted by the centre's own established
@@ -204,34 +220,34 @@ function computeCentreHealth(centre, { visits = [], bookings30d = [], bookingsPr
   const MIN_TREND_FLOOR = 4;
   if (bookingsPrev30d.length >= MIN_TREND_FLOOR && bookings30d.length < bookingsPrev30d.length * 0.5) {
     reasons.push(`Bookings dropped from ${bookingsPrev30d.length} to ${bookings30d.length} over the last 30 days.`);
-    return { category: 'declining', reasons, isStrategic, isEscalated };
+    return { category: 'declining', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   if (bookings30d.length === 0 && bookingsPrev30d.length > 0) {
     reasons.push('No bookings in the last 30 days after prior activity.');
-    return { category: 'needs_attention', reasons, isStrategic, isEscalated };
+    return { category: 'needs_attention', reasons, isStrategic, isEscalated, escalationNote };
   }
   if (overdueStep) {
     reasons.push(`Next step "${overdueStep.next_step || 'follow-up'}" was due ${overdueStep.next_step_due_date}.`);
-    return { category: 'needs_attention', reasons, isStrategic, isEscalated };
+    return { category: 'needs_attention', reasons, isStrategic, isEscalated, escalationNote };
   }
   if (daysSinceVisit !== null && daysSinceVisit > 45) {
     reasons.push(`No visit logged in ${Math.round(daysSinceVisit)} days.`);
-    return { category: 'needs_attention', reasons, isStrategic, isEscalated };
+    return { category: 'needs_attention', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   if (bookingsPrev30d.length > 0 && bookings30d.length > bookingsPrev30d.length * 1.2) {
     reasons.push(`Bookings grew from ${bookingsPrev30d.length} to ${bookings30d.length} over the last 30 days.`);
-    return { category: 'growing', reasons, isStrategic, isEscalated };
+    return { category: 'growing', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   if (daysSinceVisit !== null && daysSinceVisit > 60) {
     reasons.push('Steady booking volume, but no recent relationship visit — likely under-engaged.');
-    return { category: 'opportunity', reasons, isStrategic, isEscalated };
+    return { category: 'opportunity', reasons, isStrategic, isEscalated, escalationNote };
   }
 
   reasons.push('Booking activity looks steady.' + (lastVisit ? '' : ' No visit logged yet in this system.'));
-  return { category: 'healthy', reasons, isStrategic, isEscalated };
+  return { category: 'healthy', reasons, isStrategic, isEscalated, escalationNote };
 }
 
 module.exports = {

@@ -104,6 +104,46 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date(), 
     };
   }
 
+  const lastContact = lastVisitDate(visits);
+
+  // Smart Routing auto-deprioritization (Aug 24 meeting, Liam/Justine/Joy):
+  // "if there's a follow-up, they can stay in the mix" — a completed
+  // call/visit that left a next_step open must NOT reset the centre onto
+  // Dormant's no-cadence exception OR the ordinary weeks/months-long
+  // recurring cadence below, or a real outstanding action would silently
+  // vanish right when it's most likely to be forgotten. Moved ABOVE the
+  // Dormant check 2026-09-03 — Liam's own live example (a compliance
+  // concern he promised to chase up within 48 hours) surfaced that a
+  // Dormant centre's own overdue follow-up was being masked by
+  // reactivation_candidate status, silently dropping it off /wfp's Today.
+  // Only the LATEST completed visit counts (same "superseded by a newer
+  // visit" rule latestOverdueNextStep/latestVisitIsEscalated already use
+  // in centreHealthService.js) — once a later visit closes things out
+  // without leaving its own next_step, the centre falls through exactly
+  // as before. No next_step_due_date on that follow-up (a rep can leave it
+  // blank) is treated as due now rather than parked indefinitely — the
+  // whole point of this branch is "known outstanding work", not
+  // "eventually".
+  if (lastContact) {
+    const sortedCompleted = (visits || [])
+      .filter(v => v.status === 'completed')
+      .sort((a, b) => new Date(b.visit_date) - new Date(a.visit_date));
+    const openFollowUp = sortedCompleted[0]?.next_step?.trim() ? sortedCompleted[0] : null;
+    if (openFollowUp) {
+      const dueDate = openFollowUp.next_step_due_date ? new Date(openFollowUp.next_step_due_date) : now;
+      const overdue = now >= dueDate;
+      return {
+        status: overdue ? 'follow_up_overdue' : 'follow_up_pending',
+        lastContactDate: lastContact.toISOString(),
+        dueDate: dueDate.toISOString(),
+        daysUntilDue: overdue ? null : Math.ceil((dueDate - now) / DAY_MS),
+        daysOverdue: overdue ? Math.floor((now - dueDate) / DAY_MS) : null,
+        cadenceDays: null,
+        cadenceLabel: 'follow-up owed'
+      };
+    }
+  }
+
   // Dormant: no blanket cadence at all (see NURTURE_CADENCE_DAYS' comment)
   // — a distinct status, excluded from the automatic due-for-routing pool
   // (routes/centres.js's getDueCentreStops) rather than surfaced as
@@ -112,7 +152,6 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date(), 
   // or current opportunity justifies it" means a deliberate choice, not
   // an automatic one.
   if (healthCategory === 'dormant') {
-    const lastContact = lastVisitDate(visits);
     return {
       status: 'reactivation_candidate', lastContactDate: lastContact ? lastContact.toISOString() : null,
       dueDate: null, daysUntilDue: null, daysOverdue: null,
@@ -121,7 +160,6 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date(), 
   }
 
   const cadence = cadenceFor(healthCategory, isStrategic);
-  const lastContact = lastVisitDate(visits);
 
   if (!lastContact) {
     const createdDate = centre.createdDate ? new Date(centre.createdDate) : null;
@@ -136,39 +174,6 @@ function computeCentreNurture(centre, visits, healthCategory, now = new Date(), 
       daysOverdue: overdue ? Math.floor((now - dueDate) / DAY_MS) : null,
       cadenceDays: cadence.firstContactDays,
       cadenceLabel: 'first contact'
-    };
-  }
-
-  // Smart Routing auto-deprioritization (Aug 24 meeting, Liam/Justine/Joy):
-  // "if there's a follow-up, they can stay in the mix" — a completed
-  // call/visit that left a next_step open must NOT reset the centre onto
-  // the ordinary weeks/months-long recurring cadence below, or a real
-  // outstanding action would silently vanish from Smart Routing's due
-  // pool right when it's most likely to be forgotten. Only the LATEST
-  // completed visit counts (same "superseded by a newer visit" rule
-  // latestOverdueNextStep/latestVisitIsEscalated already use in
-  // centreHealthService.js) — once a later visit closes things out
-  // without leaving its own next_step, the centre falls through to the
-  // normal cadence below exactly as before.
-  //
-  // No next_step_due_date on that follow-up (a rep can leave it blank)
-  // is treated as due now rather than parked indefinitely — the whole
-  // point of this branch is "known outstanding work", not "eventually".
-  const sortedCompleted = (visits || [])
-    .filter(v => v.status === 'completed')
-    .sort((a, b) => new Date(b.visit_date) - new Date(a.visit_date));
-  const openFollowUp = sortedCompleted[0]?.next_step?.trim() ? sortedCompleted[0] : null;
-  if (openFollowUp) {
-    const dueDate = openFollowUp.next_step_due_date ? new Date(openFollowUp.next_step_due_date) : now;
-    const overdue = now >= dueDate;
-    return {
-      status: overdue ? 'follow_up_overdue' : 'follow_up_pending',
-      lastContactDate: lastContact.toISOString(),
-      dueDate: dueDate.toISOString(),
-      daysUntilDue: overdue ? null : Math.ceil((dueDate - now) / DAY_MS),
-      daysOverdue: overdue ? Math.floor((now - dueDate) / DAY_MS) : null,
-      cadenceDays: null,
-      cadenceLabel: 'follow-up owed'
     };
   }
 

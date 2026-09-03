@@ -187,7 +187,6 @@
     <button id="navToday" class="active" onclick="setView('today')"><span class="icon">🏠</span>Today</button>
     <button id="navLeads" onclick="setView('leads')"><span class="icon">📋</span>Leads</button>
     <button id="navCentres" onclick="setView('centres')"><span class="icon">🏢</span>Centres</button>
-    <button id="navEducators" onclick="setView('educators')"><span class="icon">🔍</span>Educators</button>
   </nav>
 
   <div class="toast" id="toast"></div>
@@ -204,9 +203,7 @@
     let currentLeadId = null;
     let currentLeadActivities = [];
     let currentLeadNotes = [];
-    let currentEducatorUserId = null;
     let activityTypes = { callTypes: [], visitTypes: [] };
-    let userLocation = null; // {lat,lng} once geolocation succeeds — null means "don't know/denied"
     let wfpFilterLabel = null; // admin-only territory toggle — null = All States (see ensureDataLoaded)
     let logTarget = null; // { type: 'lead'|'centre', id, followUpOnly, prefillOutcome }
     let editingLeadId = null;
@@ -240,10 +237,6 @@
     function fmtTime(iso) {
       try { return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }); } catch { return ''; }
     }
-    function daysSince(iso) {
-      if (!iso) return null;
-      return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-    }
     // Straight-line distance — good enough for "nearby", not a driving ETA.
     function haversineKm(lat1, lng1, lat2, lng2) {
       const R = 6371, toRad = d => d * Math.PI / 180;
@@ -273,7 +266,6 @@
       document.getElementById('navToday').classList.toggle('active', view === 'today');
       document.getElementById('navLeads').classList.toggle('active', view === 'leads' || view === 'lead-detail' || view === 'create-lead' || view === 'edit-lead');
       document.getElementById('navCentres').classList.toggle('active', view === 'centres' || view === 'centre-detail');
-      document.getElementById('navEducators').classList.toggle('active', view === 'educators' || view === 'educator-profile');
       render(view);
     }
     function goBack() {
@@ -293,8 +285,6 @@
       if (view === 'centre-detail') return renderCentreDetail();
       if (view === 'log-activity') return renderLogActivity();
       if (view === 'plan-route') return renderPlanRoute();
-      if (view === 'educators') return renderEducatorSearch();
-      if (view === 'educator-profile') return renderEducatorProfile();
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
@@ -372,27 +362,13 @@
     }
 
     // ── Priority (Joy's 8-tier list, 2026-09-03 call follow-up) ─────────
-    // "1. a centre who completed their first booking / 2. escalated centre /
-    // 3. high-agency lead / 4. regular lead / 5. needs attention centre /
-    // 6. dormant centre / 7. centres along the way / 8. the rest" — verbatim.
-    // Tier 1 didn't exist anywhere in the app before ("I don't have that
-    // yet. Let me add that." — Joy, on the call); derived entirely from
-    // fields GET /api/centres already returns, no schema/backend change.
+    // Tier 1 of Today's "Needs Attention" list — a centre that just
+    // converted its first booking and has never been visited. Didn't exist
+    // anywhere in the app before ("I don't have that yet. Let me add
+    // that." — Joy, on an earlier call); derived entirely from fields
+    // GET /api/centres already returns, no schema/backend change.
     function needsFirstBookingVisit(c) {
       return c.bookings90dCount === 1 && !c.nurture?.lastContactDate;
-    }
-    function itemPriorityTier(item) {
-      if (item.kind === 'centre' && needsFirstBookingVisit(item.centre)) return 1;
-      if (item.kind === 'centre' && item.centre.isEscalated) return 2;
-      if (item.kind === 'lead' && item.lead.agency_usage === 'high_agency_user') return 3;
-      if (item.kind === 'lead') return 4;
-      if (item.kind === 'centre' && (item.centre.health === 'needs_attention' || item.centre.nurture?.status === 'needs_attention')) return 5;
-      if (item.kind === 'centre' && (item.centre.health === 'declining' || item.centre.nurture?.status === 'reactivation_candidate')) return 6;
-      if (item._alongRoute) return 7;
-      return 8;
-    }
-    function sortByPriorityTier(items) {
-      return items.slice().sort((a, b) => itemPriorityTier(a) - itemPriorityTier(b));
     }
 
     // ── Today ──────────────────────────────────────────────────────────
@@ -413,13 +389,6 @@
           const res = await api('/api/route-planner/mobile-plan' + q);
           plannedRoute = res.plan;
         } catch { plannedRoute = null; }
-      }
-      if (!userLocation && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => { userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude }; if (viewStack[viewStack.length - 1] === 'today') paintToday(); },
-          () => { /* denied/unavailable — Nearby just won't show, no error toast, this is expected on first load */ },
-          { timeout: 8000 }
-        );
       }
       paintToday();
     }
@@ -549,62 +518,36 @@
       } catch (err) { toast(err.message, 'error'); }
     }
 
+    // Today's "Needs Attention" — deliberately narrow (Liam, 2026-09-03,
+    // live on a call reviewing this exact screen: "we want to reduce what
+    // we show there, because if we show everything that needs action,
+    // there's like hundreds of centers that haven't had a follow-up yet").
+    // Supersedes the previous broader 8-tier list (leads, dormant centres,
+    // "the rest" all drop off Today entirely — Leads keeps its own tab for
+    // that). Exactly 3 categories, centres only, in this priority order:
+    //   1. Just got their first booking, never been visited.
+    //   2. Escalated — an ops/Sofia-raised note ("you, Sofia, and your
+    //      teams" should be able to escalate a centre), or the WFP's own
+    //      last visit raising an issue — both are the same isEscalated
+    //      signal under the hood (see services/centreHealthService.js).
+    //   3. The WFP's OWN overdue follow-up on that centre — "I told
+    //      Rosemarie I'd get back to her in 48 hours" — nurture.status
+    //      'follow_up_overdue' already reads exactly this (the latest
+    //      visit's own next_step/next_step_due_date, not a system-wide
+    //      cadence), see services/centreNurtureService.js.
     function todayBuckets() {
-      const now = Date.now();
-      const overdue = [], dueToday = [], scheduled = [], attention = [];
-      const isToday = iso => iso && new Date(iso).toDateString() === new Date().toDateString();
-
-      for (const l of allLeads) {
-        if (l.closed_at) continue;
-        // Same 5 rules admin.html's computeAttentionItems uses for leads,
-        // reimplemented here against real dates (not just an urgency score)
-        // so Today can bucket into overdue/due-today/scheduled properly.
-        if (l.lead_called_status === 'scheduled' && l.lead_called_at) {
-          const item = { kind: 'lead', lead: l, channel: 'call', label: `Call: ${l.centre_name}`, when: l.lead_called_at };
-          if (new Date(l.lead_called_at).getTime() < now) overdue.push(item);
-          else if (isToday(l.lead_called_at)) dueToday.push(item);
-          else scheduled.push(item);
-        }
-        if (l.centre_visited_status === 'scheduled' && l.centre_visited_at) {
-          const item = { kind: 'lead', lead: l, channel: 'visit', label: `Visit: ${l.centre_name}`, when: l.centre_visited_at };
-          if (new Date(l.centre_visited_at).getTime() < now) overdue.push(item);
-          else if (isToday(l.centre_visited_at)) dueToday.push(item);
-          else scheduled.push(item);
-        }
-        if (l.lead_called_status === 'to_schedule' && daysSince(l.created_at) >= 3) {
-          overdue.push({ kind: 'lead', lead: l, channel: 'call', label: `Not yet called: ${l.centre_name}`, when: l.created_at });
-        }
-        if (l.lead_called_status === 'done' && l.centre_visited_status === 'to_schedule' && daysSince(l.lead_called_at) >= 5) {
-          overdue.push({ kind: 'lead', lead: l, channel: 'visit', label: `Visit not booked: ${l.centre_name}`, when: l.lead_called_at });
-        }
-      }
-
+      const attention = [];
       for (const c of allCentres) {
-        // Tier 1 first — a centre landing here isn't necessarily escalated/
-        // declining/needs_attention (often it's health:'new_activating',
-        // which none of those three catch), so this needs its own explicit
-        // inclusion check, not just a sort-priority over whatever the other
-        // rules already happened to surface.
         if (needsFirstBookingVisit(c)) {
-          attention.push({ kind: 'centre', centre: c, reason: '🎉 Just got their first booking — needs a visit' });
-        } else if (c.isEscalated || c.health === 'declining' || c.health === 'needs_attention') {
-          attention.push({ kind: 'centre', centre: c, reason: c.healthReasons?.[0] || (c.isEscalated ? 'Issue raised at last visit' : 'Needs attention') });
-        }
-        if (c.nurture?.status === 'follow_up_overdue' || c.nurture?.status === 'recurring_overdue' || c.nurture?.status === 'first_contact_overdue') {
-          overdue.push({ kind: 'centre', centre: c, label: `Follow-up overdue: ${c.name}`, when: c.nurture.dueDate });
-        } else if (c.nurture?.status === 'follow_up_pending' && c.nurture.dueDate && isToday(c.nurture.dueDate)) {
-          dueToday.push({ kind: 'centre', centre: c, label: `Follow-up due: ${c.name}`, when: c.nurture.dueDate });
+          attention.push({ kind: 'centre', centre: c, reason: '🎉 Just got their first booking — needs a visit', _tier: 1 });
+        } else if (c.isEscalated) {
+          attention.push({ kind: 'centre', centre: c, reason: c.escalationNote ? `🚨 ${c.escalationNote}` : '🚨 Issue raised — needs attention', _tier: 2 });
+        } else if (c.nurture?.status === 'follow_up_overdue') {
+          attention.push({ kind: 'centre', centre: c, reason: `Your follow-up was due ${fmtDate(c.nurture.dueDate)}`, _tier: 3 });
         }
       }
-
-      // Live-GPS nearby stays as the fallback when there's no planned route
-      // for today to be "along" instead (see itemsAlongPlannedRoute).
-      const nearby = (!plannedRoute && userLocation) ? [...allLeads.filter(l => !l.closed_at && Number.isFinite(l.latitude)), ...allCentres.filter(c => Number.isFinite(c.latitude))]
-        .map(x => ({ ...x, _distanceKm: haversineKm(userLocation.lat, userLocation.lng, x.latitude, x.longitude) }))
-        .sort((a, b) => a._distanceKm - b._distanceKm)
-        .slice(0, 8) : [];
-
-      return { overdue, dueToday, scheduled, attention: sortByPriorityTier(attention), nearby };
+      attention.sort((a, b) => a._tier - b._tier);
+      return { attention };
     }
 
     function todayItemRow(item) {
@@ -710,14 +653,9 @@
         ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="paintToday()">
         ${routeTodayHtml()}
-        ${b.overdue.length ? `<div class="section-title">⚠️ Overdue (${b.overdue.length})</div>${b.overdue.map(todayItemRow).join('')}` : ''}
-        ${b.dueToday.length ? `<div class="section-title">Due Today (${b.dueToday.length})</div>${b.dueToday.map(todayItemRow).join('')}` : ''}
-        ${b.attention.length ? `<div class="section-title">Centres Requiring Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
-        ${b.scheduled.length ? `<div class="section-title">Scheduled (${b.scheduled.length})</div>${b.scheduled.map(todayItemRow).join('')}` : ''}
+        ${b.attention.length ? `<div class="section-title">⚠️ Needs Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
         ${alongRoute.length ? `<div class="section-title">Along Your Route</div>${alongRoute.map(todayItemRow).join('')}` : ''}
-        ${!plannedRoute && b.nearby.length ? `<div class="section-title">Nearby</div>${b.nearby.map(x => todayItemRow(x.centreKey ? { kind: 'centre', centre: x } : { kind: 'lead', lead: x, label: x.centre_name })).join('')}` : ''}
-        ${!plannedRoute && !b.nearby.length && userLocation === null ? `<div class="section-title">Nearby</div><div class="note-line">Allow location access to see what's near you.</div>` : ''}
-        ${!b.overdue.length && !b.dueToday.length && !b.attention.length && !b.scheduled.length && !alongRoute.length ? `<div class="empty-state">Nothing else needs attention right now. 🎉</div>` : ''}
+        ${!b.attention.length && !alongRoute.length ? `<div class="empty-state">Nothing needs attention right now. 🎉</div>` : ''}
       `;
     }
 
@@ -789,14 +727,12 @@
           <button class="btn btn-secondary" onclick="openEditLead('${l.id}')">✏️ Edit</button>
         </div>
         <div class="action-row">
-          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'call'})">📞 Log a Call</button>
-          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'visit'})">🚗 Log a Visit</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'call'})">📞 Log Call</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'visit'})">🚗 Log Visit</button>
         </div>
         <div class="action-row">
           <button class="btn btn-secondary" onclick="openLogActivityFor('lead','${l.id}',{followUpOnly:true})">⏭️ Create Follow-up</button>
-          <button class="btn btn-secondary" onclick="startVoiceNote('lead','${l.id}')">🎙️ Voice Note</button>
         </div>
-        <div id="recorderBox"></div>
 
         <div class="section-title">Update Stage</div>
         <select id="stagePicker" onchange="applyLeadStage(this.value)">
@@ -1009,6 +945,31 @@
       `;
     }
 
+    // "Have they worked there a lot? Have they been favorited or not?"
+    // (Liam, 2026-09-03) — the data already existed (currentSnapshot.
+    // educators, via centre_educator_relationships) just wasn't shown on
+    // mobile; Joy's own words on the same call: "right now it just gives
+    // the total shifts... but nothing else." isActive comes from the local
+    // rt_candidates_cache (routes/centres.js) — RT's own numeric status
+    // code isn't mapped to a real "onboarding" meaning anywhere in this
+    // app, so this only distinguishes active/not-yet-active, same wording
+    // used everywhere else in HeartBeat for this signal.
+    function educatorRow(e) {
+      const isFav = (e.relationships || []).some(r => r.type === 'favourite');
+      const isKnown = (e.relationships || []).some(r => r.type === 'known_to_centre');
+      return `
+        <div class="educator-row">
+          <div>
+            <div class="name">${escHtml(e.name)}</div>
+            <div class="meta">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'} here</div>
+            ${isFav ? `<span class="tag-chip favourite">⭐ Favourite</span>` : ''}
+            ${isKnown ? `<span class="tag-chip known">🔗 Known to Centre</span>` : ''}
+          </div>
+          ${e.isActive != null ? `<span class="badge inline ${e.isActive ? 'good' : 'neutral'}">${e.isActive ? 'Active' : 'Not yet active'}</span>` : ''}
+        </div>
+      `;
+    }
+
     const CENTRE_HEALTH_LABELS = {
       needs_attention: '⚠️ Needs Attention', declining: '📉 Declining', opportunity: '💡 Opportunity',
       new_activating: '🌱 New/Activating', growing: '📈 Growing', healthy: '✅ Healthy', dormant: '💤 Dormant'
@@ -1050,17 +1011,15 @@
           <button class="btn btn-secondary" onclick="requestCentreBooking(this)">📅 Request Booking</button>
         </div>
         <div class="action-row">
-          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">📞 Log a Call</button>
-          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">🚗 Log a Visit</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">📞 Log Call</button>
+          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">🚗 Log Visit</button>
         </div>
         <div class="action-row">
           <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{followUpOnly:true})">⏭️ Create Follow-up</button>
-          <button class="btn btn-secondary" onclick="startVoiceNote('centre','${currentCentreKey}')">🎙️ Voice Note</button>
         </div>
         <div class="action-row">
           <button class="btn btn-danger" style="flex:none;width:100%" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit',prefillOutcome:'issue_raised'})">🚨 Escalate an Issue</button>
         </div>
-        <div id="recorderBox"></div>
 
         <div class="section-title">Today</div>
         ${s.todayBookings.length ? s.todayBookings.map(bookingRow).join('') : `<div class="sub">No bookings today. Last booking: ${fmtDate(s.lastBookingDate)}</div>`}
@@ -1071,15 +1030,11 @@
           ${s.upcomingBookings.length > 3 ? `<button class="show-more-btn" onclick="toggleUpcoming()">${upcomingExpanded ? 'Show less' : `Show ${s.upcomingBookings.length - 3} more`}</button>` : ''}
         ` : ''}
 
-        <div class="section-title">Educators</div>
+        <div class="section-title">Educators Who've Worked Here</div>
         ${s.educators.length ? s.educators.map(e => `
-          <div class="educator-row">
-            <div>
-              <div class="name">${escHtml(e.name)}</div>
-              <div class="meta">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'} here</div>
-              ${e.relationships.map(r => `<span class="tag-chip ${r.type === 'favourite' ? 'favourite' : 'known'}">${r.type === 'favourite' ? '⭐ Favourite' : '🔗 Known to Centre'}</span>`).join('')}
-            </div>
-            <button class="icon-btn" onclick="tagEducator('${e.userId}', '${escHtml(e.name).replace(/'/g, "\\'")}')" title="Tag relationship">🏷️</button>
+          <div style="position:relative">
+            ${educatorRow(e)}
+            <button class="icon-btn" style="position:absolute;top:8px;right:0" onclick="tagEducator('${e.userId}', '${escHtml(e.name).replace(/'/g, "\\'")}')" title="Tag relationship">🏷️</button>
           </div>
         `).join('') : `<div class="sub">No educators with shifts here yet.</div>`}
 
@@ -1152,6 +1107,7 @@
       paintLogActivity();
     }
     function paintLogActivity() {
+      pendingRecordingId = null; // fresh sheet, fresh recording state
       const main = document.getElementById('mainContent');
       const isCentre = logTarget.type === 'centre';
       const today = new Date().toISOString().slice(0, 10);
@@ -1183,6 +1139,8 @@
           </select>
           <label>Notes</label>
           <textarea id="laNotes" placeholder="What happened…"></textarea>
+          <button type="button" class="btn btn-secondary" id="laRecordBtn" style="width:100%;margin-top:4px" onclick="startVoiceNote('${logTarget.type}','${logTarget.id}')">🎙️ Record Notes</button>
+          <div id="laRecorderBox"></div>
           <label>Market intelligence <span class="optional">(anything useful about this centre/lead — competitor use, staffing gaps, etc.)</span></label>
           <textarea id="laOpportunityNotes" placeholder="Anything worth knowing…"></textarea>
         </div>
@@ -1231,7 +1189,8 @@
             notes: !followUpOnly ? (el('laNotes').value || null) : null,
             opportunityNotes: !followUpOnly ? (el('laOpportunityNotes').value || null) : null,
             nextStep: el('laNextStep').value || null,
-            nextStepDueDate: el('laNextStepDue').value || null
+            nextStepDueDate: el('laNextStepDue').value || null,
+            recordingIds: pendingRecordingId ? [pendingRecordingId] : undefined
           };
           if (followUpOnly && !body.activityType) body.activityType = 'Follow-up';
           await api(`/api/centres/${encodeURIComponent(logTarget.id)}/visits`, { method: 'POST', body: JSON.stringify(body) });
@@ -1245,18 +1204,24 @@
     }
     function today0() { return new Date().toISOString(); }
 
-    // ── Voice notes (shared — Leads and Centres each already have a
-    // working, AI-transcribed backend; this is one lighter recorder UI for
-    // both instead of two, matching centres' "prefill the open form"
-    // pattern rather than admin.html's separate leads-only review step) ──
-    let mediaRecorder = null, voiceChunks = [], voiceTarget = null;
+    // ── Voice notes — Liam, 2026-09-03: "it's not a standalone thing" —
+    // this used to be its own action outside Log Call/Visit (a lead's
+    // summary landed as a separate lead_notes entry, a centre's summary
+    // just sat there with "attach it next time you log"). Now it lives
+    // *inside* the Log Activity sheet itself: record → transcribe → the AI
+    // summary lands straight in the open Notes field (still editable
+    // before Save), exactly like Desktop's visit-log modal already works
+    // (startVisitLogVoiceRecording() inside admin.html's #visitLogModal).
+    // Same two existing transcription endpoints/backends, just a different
+    // landing spot for the result.
+    let mediaRecorder = null, voiceChunks = [], voiceTarget = null, pendingRecordingId = null;
     function pickVoiceMimeType() {
       const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
       return candidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
     }
     async function startVoiceNote(type, id) {
       voiceTarget = { type, id };
-      const box = document.getElementById('recorderBox');
+      const box = document.getElementById('laRecorderBox');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mimeType = pickVoiceMimeType();
@@ -1274,104 +1239,41 @@
       if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     }
     async function finishVoiceNote(mimeType) {
-      const box = document.getElementById('recorderBox');
+      const box = document.getElementById('laRecorderBox');
       box.innerHTML = `<div class="recorder-box"><div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div><div class="recorder-status">Transcribing…</div></div>`;
       const blob = new Blob(voiceChunks, { type: mimeType });
       const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
       const form = new FormData();
       try {
+        let data;
         if (voiceTarget.type === 'lead') {
           form.append('file', blob, `voice-note.${ext}`);
           const res = await fetch(`/api/leads/${voiceTarget.id}/recordings/voice-note`, { method: 'POST', body: form });
-          const data = await res.json();
+          data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Upload failed');
-          box.innerHTML = `<div class="recorder-box"><div class="recorder-status">✅ Saved${data.notesSummary ? ' — summary ready' : ''}</div>${data.notesSummary ? `<div class="note-line" style="text-align:left">${escHtml(data.notesSummary)}</div><button class="btn btn-secondary" onclick="acceptVoiceSummary(${escHtml(JSON.stringify(data.notesSummary))})">Add as Note</button>` : ''}</div>`;
         } else {
           form.append('files', blob, `voice-note.${ext}`);
           const res = await fetch(`/api/centres/${encodeURIComponent(voiceTarget.id)}/recordings`, { method: 'POST', body: form });
-          const data = await res.json();
+          data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Upload failed');
-          box.innerHTML = `<div class="recorder-box"><div class="recorder-status">✅ Saved — attach it next time you Log a Call/Visit${data.notesSummary ? ', summary ready' : ''}</div>${data.notesSummary ? `<div class="note-line" style="text-align:left">${escHtml(data.notesSummary)}</div>` : ''}</div>`;
+          pendingRecordingId = data.recordings?.[0]?.id || null; // linked to the visit at Save time (saveActivity's recordingIds)
         }
+        if (data.notesSummary) {
+          const notesEl = document.getElementById('laNotes');
+          if (notesEl) notesEl.value = data.notesSummary;
+        }
+        box.innerHTML = `<div class="recorder-box"><div class="recorder-status">✅ ${data.notesSummary ? 'Added to Notes above' : 'Saved'}</div></div>`;
       } catch (e) {
         box.innerHTML = `<div class="recorder-box"><div class="recorder-status" style="color:var(--red)">${escHtml(e.message)}</div></div>`;
       }
     }
-    async function acceptVoiceSummary(summary) {
-      try {
-        await api(`/api/leads/${voiceTarget.id}/notes`, { method: 'POST', body: JSON.stringify({ note: summary }) });
-        toast('Added as a note');
-        renderLeadDetail();
-      } catch (e) { toast(e.message, 'error'); }
-    }
 
-    // ── Educator Search ─────────────────────────────────────────────────
-    let educatorSearchTimer = null;
-    function renderEducatorSearch() {
-      document.getElementById('headerTitle').textContent = 'Educators';
-      document.getElementById('wfpTag').textContent = '';
-      const main = document.getElementById('mainContent');
-      main.innerHTML = `
-        <input type="text" class="search-box" id="educatorSearchInput" placeholder="Search by name or phone…" oninput="onEducatorSearchInput()" autofocus>
-        <div id="educatorResults"></div>
-      `;
-    }
-    function onEducatorSearchInput() {
-      clearTimeout(educatorSearchTimer);
-      const q = document.getElementById('educatorSearchInput').value.trim();
-      if (q.length < 2) { document.getElementById('educatorResults').innerHTML = ''; return; }
-      educatorSearchTimer = setTimeout(async () => {
-        try {
-          const results = await api(`/api/educators/search?q=${encodeURIComponent(q)}`);
-          document.getElementById('educatorResults').innerHTML = results.length ? results.map(r => `
-            <div class="card" onclick="openEducator(${r.userId})">
-              <div class="name">${escHtml(r.name)}</div>
-              <div class="sub">${escHtml(r.contactNo || 'no phone')}${r.suburb ? ' · ' + escHtml(r.suburb) : ''}</div>
-              <span class="badge ${r.isActive ? 'good' : 'neutral'}">${r.isActive ? 'Active' : 'Inactive'}</span>
-              ${r.expiringDocsCount ? `<span class="badge warn">⚠️ ${r.expiringDocsCount} expiring doc(s)</span>` : ''}
-            </div>
-          `).join('') : `<div class="empty-state">No matches.</div>`;
-        } catch { toast('Search failed', 'error'); }
-      }, 350);
-    }
-    function openEducator(userId) {
-      currentEducatorUserId = userId;
-      setView('educator-profile');
-    }
-    async function renderEducatorProfile() {
-      document.getElementById('headerTitle').textContent = 'Educator';
-      try {
-        const p = await api(`/api/educators/${currentEducatorUserId}`);
-        paintEducatorProfile(p);
-      } catch { toast('Could not load this educator', 'error'); }
-    }
-    function paintEducatorProfile(p) {
-      document.getElementById('headerTitle').textContent = p.name;
-      const main = document.getElementById('mainContent');
-      main.innerHTML = `
-        <div class="sub">${p.contactNo ? phoneLink(p.contactNo) : 'No phone'}${p.email ? ' · ' + mailtoLink(p.email) : ''}</div>
-        <span class="badge ${p.isActive ? 'good' : 'neutral'}">${p.isActive ? 'Active' : 'Inactive'}</span>
-
-        <div class="action-row">
-          <button class="btn btn-primary" onclick="requestEducatorBooking(${p.userId}, '${escHtml(p.name).replace(/'/g, "\\'")}')">📅 Request / Rebook</button>
-          <a class="btn btn-secondary" href="${escHtml(p.profileUrl)}" target="_blank" rel="noopener">Full RT Profile ↗</a>
-        </div>
-
-        ${p.qualifications.length ? `<div class="section-title">Qualifications</div>${p.qualifications.map(q => `<div class="sub">• ${escHtml(q.qualificationName || 'Qualification')}${q.qualified ? ' (qualified)' : ''}</div>`).join('')}` : ''}
-
-        ${p.complianceDocuments.length ? `<div class="section-title">Compliance Documents</div>${p.complianceDocuments.map(d => `<div class="sub">• ${escHtml(d.name)}${d.expiryDate ? ' — expires ' + fmtDate(d.expiryDate) : ''}${d.mandatory ? ' (mandatory)' : ''}</div>`).join('')}` : ''}
-      `;
-    }
-    async function requestEducatorBooking(userId, name) {
-      const note = prompt(`Request/rebook ${name} — any note for the team?`) || '';
-      try {
-        await api(`/api/educators/${userId}/request-booking`, {
-          method: 'POST',
-          body: JSON.stringify({ note, centreKey: currentCentreKey, centreName: currentSnapshot?.name || null })
-        });
-        toast('Request sent to the team');
-      } catch (e) { toast(e.message, 'error'); }
-    }
+    // Standalone Educators tab (search-by-name) removed 2026-09-03 — Liam,
+    // live on a call: "what's the point of that... I think we can probably
+    // take it out." What he actually wanted instead — which educators
+    // have worked a given centre, how much, and whether they're
+    // favourited — already existed as data (centre_educator_relationships)
+    // and now shows directly on Centre Detail (see educatorRow() above).
 
     // Joy, 2026-09-03: "every time I make changes... we'd have to add this
     // to homepage from Safari on iPhone every time" — iOS doesn't actually
@@ -1403,6 +1305,13 @@
         location.href = '/login.html';
         return;
       }
+      // Liam, 2026-09-03 (live on a call, testing this exact screen): "when
+      // a workforce partner logs in on the mobile, they should just see
+      // their territory" — true even for a canViewAllTerritories account
+      // (his own), which otherwise defaulted to unfiltered/"All States".
+      // The picker itself still renders and is still switchable — this
+      // only changes what's selected before anyone taps anything.
+      if (currentUser.wfpLabel) wfpFilterLabel = currentUser.wfpLabel;
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
       }
