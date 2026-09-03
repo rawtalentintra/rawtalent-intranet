@@ -1088,6 +1088,28 @@
       } catch (e) { toast(e.message, 'error'); }
     }
 
+    // Joy, 2026-09-03: "every time I make changes... we'd have to add this
+    // to homepage from Safari on iPhone every time" — iOS doesn't actually
+    // close a home-screen web app when you leave it, it suspends the page
+    // in the background (same as backgrounding a native app). Reopening
+    // the icon normally just resumes that SAME already-loaded session
+    // rather than fetching whatever's currently deployed — no code change
+    // ever reaches an already-installed icon on its own, no matter how
+    // many times the server redeploys. Forcing a reload whenever the app
+    // comes back to the foreground means every reopen always picks up the
+    // latest version instead. Guarded to standalone/home-screen mode only
+    // (`navigator.standalone` is iOS Safari's own flag for this; the
+    // matchMedia check is the general PWA equivalent) — someone just
+    // visiting /wfp in an ordinary browser tab switches tabs far more
+    // often, and reloading on every tab-switch-back there would be
+    // needlessly disruptive (lost scroll position, an in-progress form).
+    const isStandaloneApp = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (isStandaloneApp) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') location.reload();
+      });
+    }
+
     // ── Boot ─────────────────────────────────────────────────────────
     (async function init() {
       try {
