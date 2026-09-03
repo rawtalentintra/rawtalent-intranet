@@ -143,22 +143,29 @@ router.get('/mine', async (req, res) => {
   }
 });
 
-// `?mine=true` (the /wfp mobile app, 2026-09-03) — mirrors routes/centres.js's
-// own `?mine=true` exactly: a real backend territory filter, not just the
-// client-side partner-picker every other Leads view still uses. Simpler
-// than centres' version since leads already carry assigned_workforce_partner
-// directly on the row (no separate assignments table to join) — falls back
-// to the same suburb/state default (partnerForSuburbState) centres use for
-// the handful of leads with no explicit assignment. No-ops (same as
-// centres') when the caller has no wfp_label — admin/super_admin, or any
-// workforce_partner account that hasn't had it set yet, still get
-// everything rather than an empty list.
+// `?mine=true` (the /wfp mobile app, 2026-09-03) — a real backend
+// territory filter, not just the client-side partner-picker every other
+// Leads view still uses. Falls back to the same suburb/state default
+// (partnerForSuburbState) centres use for the handful of leads with no
+// explicit assignment. No-ops when the caller has no wfp_label —
+// admin/super_admin, or any workforce_partner account that hasn't had it
+// set yet, still get everything rather than an empty list.
+// `?partnerLabel=<label>` (2026-09-03) — the SAME filter, explicit label
+// instead of the caller's own wfp_label. For /wfp's own admin-facing
+// territory toggle (Joy: "add the filters... similar to what we have on
+// the Desktop app", but only shown there to a caller with no wfp_label of
+// their own — a real Workforce Partner never gets a picker at all, still
+// always auto-scoped via ?mine=true). Reuses this exact filter rather
+// than a second client-side reimplementation, so it can't drift out of
+// sync with what ?mine=true itself considers "this partner's leads".
+// `mine` wins if somehow both are sent.
 router.get('/', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
     let rows = result.rows;
-    if (req.query.mine === 'true' && req.user.wfp_label) {
-      rows = rows.filter(l => (l.assigned_workforce_partner || partnerForSuburbState(l.suburb, l.state)) === req.user.wfp_label);
+    const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
+    if (targetLabel) {
+      rows = rows.filter(l => (l.assigned_workforce_partner || partnerForSuburbState(l.suburb, l.state)) === targetLabel);
     }
     res.json(rows);
   } catch (err) {

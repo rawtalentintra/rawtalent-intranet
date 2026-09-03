@@ -207,6 +207,7 @@
     let currentEducatorUserId = null;
     let activityTypes = { callTypes: [], visitTypes: [] };
     let userLocation = null; // {lat,lng} once geolocation succeeds — null means "don't know/denied"
+    let wfpFilterLabel = null; // admin-only territory toggle — null = All States (see ensureDataLoaded)
     let logTarget = null; // { type: 'lead'|'centre', id, followUpOnly, prefillOutcome }
     let editingLeadId = null;
 
@@ -291,15 +292,50 @@
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
+    // A real Workforce Partner (wfpLabel set) is always auto-scoped to
+    // their own territory via ?mine=true — never a picker, per Joy's own
+    // original spec ("should not need to select between different
+    // Workforce Partners"). Only a caller with NO wfp_label (Joy herself,
+    // any admin/super_admin) gets the territory toggle below, mirroring
+    // ?partnerLabel= instead — same server-side filter, just an explicit
+    // label instead of the caller's own.
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
-      const q = currentUser.wfpLabel ? '?mine=true' : '';
+      let q = '';
+      if (currentUser.wfpLabel) q = '?mine=true';
+      else if (wfpFilterLabel) q = '?partnerLabel=' + encodeURIComponent(wfpFilterLabel);
       try {
         const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
         allLeads = leads;
         allCentres = centres;
         dataLoadedAt = Date.now();
       } catch { toast('Could not load your leads/centres', 'error'); }
+    }
+
+    // ── Territory filter (admin-facing only — see ensureDataLoaded's own
+    // comment) — same 3 partners + All, same look Desktop already uses. ──
+    const WFP_FILTER_OPTIONS = [
+      { key: '', label: 'All States', bg: '#0b1d3e' },
+      { key: 'Liam Baxter (VIC)', label: 'Liam - VIC', bg: '#2563eb' },
+      { key: 'Justine Hardware (VIC)', label: 'Justine - VIC', bg: '#0d9488' },
+      { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' }
+    ];
+    function wfpFilterBarHtml() {
+      if (currentUser.wfpLabel) return '';
+      return `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px">
+        ${WFP_FILTER_OPTIONS.map(o => `
+          <button onclick="setWfpFilterLabel('${o.key.replace(/'/g, "\\'")}')" style="flex-shrink:0;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:${o.bg};color:white;opacity:${wfpFilterLabel === o.key ? '1' : '.55'}">${escHtml(o.label)}</button>
+        `).join('')}
+      </div>`;
+    }
+    async function setWfpFilterLabel(label) {
+      wfpFilterLabel = label || null;
+      await ensureDataLoaded(true);
+      render(viewStack[viewStack.length - 1]);
+    }
+    function wfpTagText() {
+      if (currentUser.wfpLabel) return `📍 ${currentUser.wfpLabel}`;
+      return wfpFilterLabel ? `📍 ${wfpFilterLabel}` : '';
     }
 
     // ── Lead stage (derived — no dedicated DB field, see db/schema.sql's
@@ -325,7 +361,7 @@
     let todaySearchVal = '';
     async function renderToday() {
       document.getElementById('headerTitle').textContent = 'Today';
-      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      document.getElementById('wfpTag').textContent = wfpTagText();
       await ensureDataLoaded();
       if (!userLocation && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -433,6 +469,7 @@
         const matchedLeads = allLeads.filter(l => !l.closed_at && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)));
         const matchedCentres = allCentres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
         main.innerHTML = `
+          ${wfpFilterBarHtml()}
           <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="${escHtml(q)}" oninput="paintToday()" autofocus>
           <div class="section-title">Leads</div>
           ${matchedLeads.length ? matchedLeads.map(l => todayItemRow({ kind: 'lead', lead: l, label: l.centre_name })).join('') : `<div class="note-line">No matching leads.</div>`}
@@ -444,6 +481,7 @@
 
       const b = todayBuckets();
       main.innerHTML = `
+        ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="paintToday()">
         ${b.overdue.length ? `<div class="section-title">⚠️ Overdue (${b.overdue.length})</div>${b.overdue.map(todayItemRow).join('')}` : ''}
         ${b.dueToday.length ? `<div class="section-title">Due Today (${b.dueToday.length})</div>${b.dueToday.map(todayItemRow).join('')}` : ''}
@@ -457,7 +495,7 @@
     // ── Leads ──────────────────────────────────────────────────────────
     async function renderLeadsList() {
       document.getElementById('headerTitle').textContent = 'Leads';
-      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      document.getElementById('wfpTag').textContent = wfpTagText();
       await ensureDataLoaded();
       paintLeadsList();
     }
@@ -467,6 +505,7 @@
       const open = allLeads.filter(l => !l.closed_at);
       const filtered = open.filter(l => !searchVal || (l.centre_name || '').toLowerCase().includes(searchVal.toLowerCase()) || (l.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
+        ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="leadSearchInput" placeholder="Search leads or suburb…" value="${escHtml(searchVal)}" oninput="paintLeadsList()">
         <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">➕ Create Lead</button>
         ${filtered.length ? filtered.map(l => {
@@ -679,7 +718,7 @@
     }
     async function renderCentresList() {
       document.getElementById('headerTitle').textContent = 'My Centres';
-      document.getElementById('wfpTag').textContent = currentUser.wfpLabel ? `📍 ${currentUser.wfpLabel}` : '';
+      document.getElementById('wfpTag').textContent = wfpTagText();
       await loadCentresIfNeeded();
       paintCentresList();
     }
@@ -693,6 +732,7 @@
       };
       const filtered = allCentres.filter(c => !searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
+        ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="paintCentresList()">
         ${filtered.length ? filtered.map(c => `
           <div class="card" onclick="openCentre('${c.centreKey}')">

@@ -322,6 +322,14 @@ const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)' };
 // wfp_label at all (Liam and every admin/super_admin today) has nothing to
 // scope by, so `mine=true` is a no-op for them rather than returning an
 // empty list.
+// `?partnerLabel=<label>` (2026-09-03) — the SAME filter, explicit label
+// instead of the caller's own wfp_label. Backs /wfp's own admin-facing
+// territory toggle (only shown there to a caller with no wfp_label — a
+// real Workforce Partner stays auto-scoped via ?mine=true, never gets a
+// picker) — reuses this exact filter rather than a second client-side
+// reimplementation of the assignment/suburb/state fallback chain, so it
+// can't drift out of sync with what ?mine=true itself shows that partner.
+// `mine` wins if somehow both are sent.
 router.get('/', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();
@@ -330,14 +338,15 @@ router.get('/', async (req, res) => {
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates(visible);
-    if (req.query.mine === 'true' && req.user.wfp_label) {
+    const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
+    if (targetLabel) {
       // c.state on the raw RT object is inconsistent — sometimes 'SA',
       // sometimes 'South Australia' (confirmed live 2026-09-03: 'Victoria'/
       // 'VIC', 'South Australia', 'Western Australia', etc. all appear) —
       // shortState() (already used elsewhere in this file) normalizes it
       // before the STATE_WORKFORCE_PARTNER lookup; partnerForSuburbState
       // does its own normalizing internally already.
-      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)]) === req.user.wfp_label);
+      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)]) === targetLabel);
     }
     // Coordinates (2026-09-03, the /wfp mobile app's "nearby centres" on
     // Today) — cache/RT-coordinate-only, never triggers a live Mapbox
