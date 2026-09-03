@@ -189,19 +189,24 @@ router.post('/optimize', async (req, res) => {
 });
 
 // Which partner's day a mobile-plan request is for. Normally each WFP
-// plans only their own day (req.user.wfp_label). An admin/super_admin (no
-// wfp_label at all) or a workforce_partner granted
-// can_view_all_wfp_territories (Liam — see db/schema.sql) can instead pass
-// a target wfpLabel explicitly, e.g. to plan/view someone else's day. Same
+// plans only their own day (req.user.wfp_label). An account with NO
+// wfp_label of its own (Joy, or any other admin) can instead pass a
+// target wfpLabel explicitly, e.g. to plan/view someone else's day. Same
 // resolution shape as GET /api/leads|centres's own ?mine=true/?partnerLabel=
 // (routes/leads.js, routes/centres.js) — kept consistent on purpose.
 // Same guard as routes/leads.js|centres.js's own copy — `?partnerLabel=`/
 // `wfpLabel` was previously trusted from any authenticated caller with no
 // server-side check. Found while wiring up Gwen's second territory
 // (2026-09-03, SA + QLD — see db/schema.sql's additional_wfp_territories).
+//
+// Joy, 2026-09-04, correcting an earlier design: Liam/Justine/Gwen must
+// ALWAYS be locked to their own territory/territories on /wfp — no
+// per-account override (the old can_view_all_wfp_territories flag is no
+// longer read anywhere). Only an account with no wfp_label of its own
+// gets to plan/check any territory.
 function canUsePartnerLabel(user, label) {
   if (!label) return true;
-  if (user.can_view_all_wfp_territories) return true;
+  if (!user.wfp_label) return true;
   if (user.wfp_label === label) return true;
   return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
 }

@@ -335,14 +335,19 @@
     }
 
     // ── Territory filter ─────────────────────────────────────────────
-    // Two different bars, depending on the account:
-    //  - canViewAllTerritories (Liam/Joy-as-admin): the full admin-style
-    //    picker across every territory, same look Desktop already uses.
-    //  - A plain wfp_label'd account with additionalTerritories set
-    //    (Gwen: SA + QLD) gets a SMALL bar of just their own territories —
-    //    "she can see two buttons, SA and QLD" (Liam, 2026-09-03), not
-    //    everyone else's.
-    //  - Everyone else (a normal single-territory WFP) gets no bar at all.
+    // Corrected 2026-09-04 (Joy, direct): "their territories are already
+    // pre-selected for them... for their own territories, they should
+    // only see automatically filtered for their OWN territories only. For
+    // Liam, Justine, and Gwen." — no per-account override, ever, even one
+    // they personally hold. The ONE thing that decides which bar shows is
+    // whether the account has a wfp_label at all:
+    //  - NO wfp_label (Joy, or any other admin not personally tied to a
+    //    territory) — "we should be able to see all their filters... so
+    //    we can check accordingly per territory" — the full admin-style
+    //    picker across every territory.
+    //  - HAS a wfp_label — locked to just their own (+ additionalTerritories
+    //    if set, e.g. Gwen: SA + QLD — still "their own", just two of
+    //    them) — no cross-territory picker, full stop.
     const WFP_FILTER_OPTIONS = [
       { key: '', label: 'All States', bg: '#0b1d3e' },
       { key: 'Liam Baxter (VIC)', label: 'Liam - VIC', bg: '#2563eb' },
@@ -355,8 +360,8 @@
       return known ? known.label : fullLabel;
     }
     function wfpFilterOptionsForCurrentUser() {
-      if (currentUser.canViewAllTerritories) return WFP_FILTER_OPTIONS;
-      if (currentUser.wfpLabel && currentUser.additionalTerritories?.length) {
+      if (!currentUser.wfpLabel) return WFP_FILTER_OPTIONS;
+      if (currentUser.additionalTerritories?.length) {
         const own = WFP_FILTER_OPTIONS.find(o => o.key === currentUser.wfpLabel) || { key: currentUser.wfpLabel, label: shortFilterLabel(currentUser.wfpLabel), bg: '#0b1d3e' };
         const extra = currentUser.additionalTerritories.map(label => WFP_FILTER_OPTIONS.find(o => o.key === label) || { key: label, label: shortFilterLabel(label), bg: '#6b7590' });
         return [own, ...extra];
@@ -1456,10 +1461,12 @@
       }
       // Liam, 2026-09-03 (live on a call, testing this exact screen): "when
       // a workforce partner logs in on the mobile, they should just see
-      // their territory" — true even for a canViewAllTerritories account
-      // (his own), which otherwise defaulted to unfiltered/"All States".
-      // The picker itself still renders and is still switchable — this
-      // only changes what's selected before anyone taps anything.
+      // their territory" — a wfp_label'd account (Liam/Justine/Gwen)
+      // otherwise defaulted to unfiltered/"All States" here. For Gwen
+      // (additionalTerritories set) the picker still renders across her
+      // own two territories and is still switchable between them — this
+      // only changes what's selected before she taps anything. Liam/
+      // Justine get no picker at all (see wfpFilterOptionsForCurrentUser).
       if (currentUser.wfpLabel) wfpFilterLabel = currentUser.wfpLabel;
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});

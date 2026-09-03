@@ -3732,14 +3732,10 @@
           <select id="userWfpLabel" class="form-control">
             <option value="">— None —</option>
           </select>
-          <div class="form-hint">Ties this login to their own leads/centres in /wfp — without it, a Workforce Partner sees every territory's leads/centres instead of just their own.</div>
-        </div>
-        <div class="checkbox-row">
-          <input type="checkbox" id="userCanViewAllWfpTerritories">
-          <label for="userCanViewAllWfpTerritories">Full territory access on /wfp (sees the same all-territories filter Joy does, even with a Workforce Partner Territory set above — e.g. Liam)</label>
+          <div class="form-hint">Ties this login to their own leads/centres in /wfp — without it, a Workforce Partner sees every territory's leads/centres instead of just their own. Whoever holds this ALWAYS stays locked to it on /wfp (no full-access override) — leave it blank only for someone who should be able to check any territory.</div>
         </div>
         <div class="form-group-modal">
-          <label class="form-label-modal">Additional territories on /wfp <span class="optional">(a SECOND territory this person can also see, e.g. Gwen: SA + QLD — not the same as full access above)</span></label>
+          <label class="form-label-modal">Additional territories on /wfp <span class="optional">(a SECOND territory this person can also see, e.g. Gwen: SA + QLD — still just their OWN, never anyone else's)</span></label>
           <div id="userAdditionalWfpTerritories"></div>
         </div>
         <div class="checkbox-row">
@@ -6599,7 +6595,6 @@
           document.getElementById('userActive').checked = !!u.active;
           document.getElementById('userCanBuildTraining').checked = !!u.can_build_training;
           document.getElementById('userCanCreateOutreachLists').checked = !!u.can_create_outreach_lists;
-          document.getElementById('userCanViewAllWfpTerritories').checked = !!u.can_view_all_wfp_territories;
           wfpSel.value = u.wfp_label || '';
           const additional = Array.isArray(u.additional_wfp_territories) ? u.additional_wfp_territories : [];
           WORKFORCE_PARTNER_OPTIONS.forEach((p, i) => { document.getElementById(`userAdditionalTerritory_${i}`).checked = additional.includes(p); });
@@ -6612,7 +6607,6 @@
         document.getElementById('userActive').checked = true;
         document.getElementById('userCanBuildTraining').checked = false;
         document.getElementById('userCanCreateOutreachLists').checked = false;
-        document.getElementById('userCanViewAllWfpTerritories').checked = false;
         wfpSel.value = '';
         WORKFORCE_PARTNER_OPTIONS.forEach((p, i) => { document.getElementById(`userAdditionalTerritory_${i}`).checked = false; });
       }
@@ -6635,7 +6629,6 @@
       const canBuildTraining = document.getElementById('userCanBuildTraining').checked;
       const canCreateOutreachLists = document.getElementById('userCanCreateOutreachLists').checked;
       const wfpLabel = document.getElementById('userWfpLabel').value;
-      const canViewAllWfpTerritories = document.getElementById('userCanViewAllWfpTerritories').checked;
       const additionalWfpTerritories = WORKFORCE_PARTNER_OPTIONS.filter((p, i) => document.getElementById(`userAdditionalTerritory_${i}`).checked);
 
       if (!name) { toast('Name is required', 'error'); return; }
@@ -6646,8 +6639,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, additionalWfpTerritories, ...(password ? { password } : {}) }
-          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, additionalWfpTerritories };
+          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, additionalWfpTerritories, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, additionalWfpTerritories };
 
         const res = await fetch(url, {
           method,

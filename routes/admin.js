@@ -291,7 +291,7 @@ router.get('/stats', async (req, res) => {
 router.get('/users', requireSuperAdmin, async (req, res) => {
   try {
     const result = await getDb().execute(
-      'SELECT id, email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label, can_view_all_wfp_territories, additional_wfp_territories, created_at, last_login FROM users ORDER BY created_at DESC'
+      'SELECT id, email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label, additional_wfp_territories, created_at, last_login FROM users ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {
@@ -300,7 +300,7 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.post('/users', requireSuperAdmin, async (req, res) => {
-  const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false, wfpLabel, canViewAllWfpTerritories = false, additionalWfpTerritories = [] } = req.body;
+  const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false, wfpLabel, additionalWfpTerritories = [] } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });
   if (!email.toLowerCase().endsWith('@rawtalent.com.au')) {
     return res.status(400).json({ error: 'Only @rawtalent.com.au email addresses are allowed' });
@@ -313,8 +313,8 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 
     const hash = password ? await bcrypt.hash(password, 12) : null;
     await db.execute({
-      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training, can_create_outreach_lists, wfp_label, can_view_all_wfp_territories, additional_wfp_territories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining, !!canCreateOutreachLists, wfpLabel || null, !!canViewAllWfpTerritories, JSON.stringify(Array.isArray(additionalWfpTerritories) ? additionalWfpTerritories : [])]
+      sql: 'INSERT INTO users (email, name, password_hash, role, active, can_build_training, can_create_outreach_lists, wfp_label, additional_wfp_territories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      args: [email.toLowerCase(), name, hash, role, !!active, !!canBuildTraining, !!canCreateOutreachLists, wfpLabel || null, JSON.stringify(Array.isArray(additionalWfpTerritories) ? additionalWfpTerritories : [])]
     });
     await logActivity('user', email.toLowerCase(), 'created', `User "${name}" (${role}) created`, req.user.email);
     res.json({ success: true });
@@ -324,10 +324,10 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.put('/users/:id', requireSuperAdmin, async (req, res) => {
-  const { name, role, active, password, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, additionalWfpTerritories } = req.body;
+  const { name, role, active, password, canBuildTraining, canCreateOutreachLists, wfpLabel, additionalWfpTerritories } = req.body;
   try {
     const db = getDb();
-    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label, can_view_all_wfp_territories, additional_wfp_territories FROM users WHERE id = ?', args: [req.params.id] });
+    const targetRes = await db.execute({ sql: 'SELECT email, name, role, active, can_build_training, can_create_outreach_lists, wfp_label, additional_wfp_territories FROM users WHERE id = ?', args: [req.params.id] });
     const target = targetRes.rows[0];
     if (!target) return res.status(404).json({ error: 'User not found' });
 
@@ -355,14 +355,12 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     // matching convention is on the person setting it, same as every other
     // place this string gets typed in this app.
     if (wfpLabel !== undefined && (wfpLabel || null) !== (target.wfp_label || null)) { await db.execute({ sql: 'UPDATE users SET wfp_label = ? WHERE id = ?', args: [wfpLabel || null, req.params.id] }); changes.push(`Workforce Partner label: "${target.wfp_label || '—'}" → "${wfpLabel || '—'}"`); }
-    // Lets one workforce_partner login see every territory's /wfp data via
-    // the same admin-only filter picker Joy gets, despite having their own
-    // wfp_label (Liam, 2026-09-03) — see db/schema.sql's column comment.
-    if (canViewAllWfpTerritories !== undefined && Boolean(canViewAllWfpTerritories) !== Boolean(target.can_view_all_wfp_territories)) { await db.execute({ sql: 'UPDATE users SET can_view_all_wfp_territories = ? WHERE id = ?', args: [!!canViewAllWfpTerritories, req.params.id] }); changes.push(canViewAllWfpTerritories ? 'Granted cross-territory /wfp access' : 'Revoked cross-territory /wfp access'); }
     // A second (or third) real territory this person can ALSO see on /wfp,
     // beyond their own wfp_label — Gwen's SA+QLD case (Liam, 2026-09-03).
-    // Distinct from canViewAllWfpTerritories above: that grants everyone's
-    // territories (Liam/Joy's use case), this grants specific extra ones.
+    // Note this only ever ADDS more of their OWN territories — an account
+    // with a wfp_label never gets everyone else's (Joy, 2026-09-04: "for
+    // their own territories... only see automatically filtered for their
+    // OWN territories only. For Liam, Justine, and Gwen" — no exceptions).
     if (additionalWfpTerritories !== undefined) {
       const newList = Array.isArray(additionalWfpTerritories) ? additionalWfpTerritories : [];
       const oldList = Array.isArray(target.additional_wfp_territories) ? target.additional_wfp_territories : [];

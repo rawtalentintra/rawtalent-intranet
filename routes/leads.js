@@ -51,9 +51,19 @@ function autoAssignWorkforcePartner(suburb, state) {
 // Found while wiring up Gwen's second territory (2026-09-03) — this is
 // the same duplicated-per-file small-helper pattern STATE_WORKFORCE_PARTNER
 // itself already uses (see routes/centres.js's own copy).
+//
+// Joy, 2026-09-04, correcting an earlier design: Liam/Justine/Gwen (any
+// account with its own wfp_label) must ALWAYS be locked to their own
+// territory/territories on /wfp, full stop — no per-account "full access"
+// override, even one they hold. Only an account with NO wfp_label of its
+// own (Joy, or any other admin not personally tied to a territory) gets
+// to check any/all of them — "we should be able to see all their filters
+// ... so we can check accordingly per territory." Replaces the old
+// can_view_all_wfp_territories flag-based check, which is no longer read
+// anywhere (see db/schema.sql's column comment).
 function canUsePartnerLabel(user, label) {
   if (!label) return true;
-  if (user.can_view_all_wfp_territories) return true;
+  if (!user.wfp_label) return true;
   if (user.wfp_label === label) return true;
   return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
 }

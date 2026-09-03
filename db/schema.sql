@@ -66,13 +66,19 @@ UPDATE users SET restricted_task_department_id = 'app_dev'
 -- (see requirePwaAccess in middleware/authMiddleware.js).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_wfp_pwa BOOLEAN DEFAULT false;
 
--- Same per-person grant pattern again (Joy, 2026-09-03, after a client call
--- with Liam): lets one workforce_partner login see every territory's data
--- on /wfp via the same admin-only filter picker Joy herself gets, despite
--- having their own wfp_label — NOT a role change (still workforce_partner),
--- just this one extra grant. admin/super_admin already see everything
--- regardless (they have no wfp_label at all), so this only matters for a
--- workforce_partner account. See views/wfp.html's wfpFilterBarHtml().
+-- DEPRECATED 2026-09-04, no longer read anywhere. Was meant to let one
+-- workforce_partner login (Liam) see every territory's data on /wfp
+-- despite having their own wfp_label. Joy corrected this directly the
+-- next day, having actually seen it live on Liam's phone: "for their own
+-- territories, they should only see automatically filtered for their OWN
+-- territories only. For Liam, Justine, and Gwen" — no per-account
+-- override, ever. The real rule now: NO wfp_label at all (Joy, or any
+-- other admin not personally tied to a territory) = full cross-territory
+-- access; HAS a wfp_label = locked to just that (+ additional_wfp_
+-- territories below, still only their own). See
+-- views/wfp.html's wfpFilterOptionsForCurrentUser() and routes/leads.js|
+-- centres.js|routePlanner.js's canUsePartnerLabel(). Column left in place
+-- (unread, harmless) rather than dropped — no UI sets it any more.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_all_wfp_territories BOOLEAN DEFAULT false;
 
 -- Gwen's account now genuinely covers two real territories — SA and QLD
