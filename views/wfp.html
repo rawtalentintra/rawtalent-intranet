@@ -962,15 +962,11 @@
         <div class="sub" style="margin-top:4px">${l.agency_usage ? escHtml((LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)) : ''}${l.agency_usage && l.entry_type ? ' · ' : ''}${l.entry_type === 'centre' ? 'Added directly' : 'From vetting call'}</div>
 
         <div class="action-row">
-          <a class="btn btn-secondary" href="${directionsUrl(l.latitude, l.longitude, [l.street_address, l.suburb, l.state].filter(Boolean).join(', '))}" target="_blank" rel="noopener">🧭 Directions</a>
-          <button class="btn btn-secondary" onclick="openEditLead('${l.id}')">✏️ Edit</button>
+          <button class="btn btn-secondary" style="flex:none;width:100%" onclick="openEditLead('${l.id}')">✏️ Edit Contact</button>
         </div>
         <div class="action-row">
           <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'call'})">📞 Log Call</button>
           <button class="btn btn-primary" onclick="openLogActivityFor('lead','${l.id}',{channel:'visit'})">🚗 Log Visit</button>
-        </div>
-        <div class="action-row">
-          <button class="btn btn-secondary" onclick="openLogActivityFor('lead','${l.id}',{followUpOnly:true})">⏭️ Create Follow-up</button>
         </div>
 
         <div class="section-title">Update Stage</div>
