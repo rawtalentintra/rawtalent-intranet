@@ -225,6 +225,8 @@
     let routeBuilderDeparture = '';
     let routeBuilderStops = []; // [{type:'lead'|'centre', id, label} | {type:'manual', label, address}]
     let routeBuilderStartCoord = null; // {lat,lng} once the starting address resolves — gates + ranks Suggested Stops (see paintPlanRoute)
+    let routeDraftPreview = null; // background, non-persisted preview of the optimized route so far (see refreshRouteDraftPreview)
+    let routeReviewResult = null; // the just-built (and already-saved) route, shown on the Accept/Rebuild review screen
 
     function toast(msg, kind) {
       const el = document.getElementById('toast');
@@ -290,14 +292,6 @@
     function mailtoLink(email, label) {
       return email ? `<a href="mailto:${escHtml(email)}" onclick="event.stopPropagation()">${escHtml(label || email)}</a>` : '';
     }
-    // Single-stop version of admin.html's openRouteInGoogleMaps — coords
-    // preferred when we have them (same reasoning: a re-geocoded address
-    // string can mismatch and place the pin somewhere else entirely), a
-    // free-text address as the fallback.
-    function directionsUrl(lat, lng, address) {
-      const dest = Number.isFinite(lat) && Number.isFinite(lng) ? `${lat},${lng}` : encodeURIComponent(address || '');
-      return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${dest}`;
-    }
 
     // ── Navigation ─────────────────────────────────────────────────────
     const TOP_LEVEL_TABS = ['today', 'leads', 'centres'];
@@ -338,6 +332,7 @@
       if (view === 'centre-detail') return renderCentreDetail();
       if (view === 'log-activity') return renderLogActivity();
       if (view === 'plan-route') return renderPlanRoute();
+      if (view === 'route-review') return renderRouteReview();
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
@@ -524,12 +519,109 @@
       // Suggested Stops rank by proximity right away instead of waiting
       // for the WFP to retype/reselect an address already on file.
       if (routeBuilderStart && !routeBuilderStartCoord) resolveStartCoordIfNeeded();
+      // Stops can already be pre-populated here too (rebuilding an
+      // existing route, or handed off from Today's "Add to Route" with no
+      // route yet) — kick off an initial draft rather than waiting for
+      // the WFP to add/remove something before ever seeing one.
+      else if (routeBuilderStops.length) refreshRouteDraftPreview();
     }
     async function renderPlanRoute() {
       document.getElementById('headerTitle').textContent = 'Plan Route';
       await ensureDataLoaded();
       paintPlanRoute();
     }
+    // Every known coordinate the route currently has to work with — the
+    // starting address plus whichever already-added stops are real
+    // (resolvable) leads/centres. Manual stops aren't included (their
+    // coordinate is only ever resolved server-side, at Build/Preview
+    // time) — a small, acceptable gap since most days lean on real
+    // leads/centres, not typed addresses.
+    function routeReferenceCoords() {
+      const points = [];
+      if (routeBuilderStartCoord) points.push(routeBuilderStartCoord);
+      for (const s of routeBuilderStops) {
+        if (s.type === 'centre') {
+          const c = allCentres.find(x => x.centreKey === s.id);
+          if (c && Number.isFinite(c.latitude)) points.push({ lat: c.latitude, lng: c.longitude });
+        } else if (s.type === 'lead') {
+          const l = allLeads.find(x => x.id === s.id);
+          if (l && Number.isFinite(l.latitude)) points.push({ lat: l.latitude, lng: l.longitude });
+        }
+      }
+      return points;
+    }
+
+    // Shared block-rendering for any computed itinerary — Your Route
+    // Today, the post-Build Route Preview screen, and the live in-progress
+    // draft below — so all three read identically. `showLogButton` is
+    // Your Route Today only (a draft/preview stop isn't something to log
+    // against in the same immediate sense, even though it points at a
+    // real lead/centre).
+    function itineraryBlocksHtml(blocks, { showLogButton = false } = {}) {
+      return (blocks || []).map(b => {
+        if (b.type === 'lunch') return `<div class="note-line">🍽️ ${escHtml(b.label)} — ${fmtTime(b.start)}–${fmtTime(b.end)}</div>`;
+        if (b.type === 'drive') return `<div class="note-line">🚗 ${b.minutes != null ? Math.round(b.minutes) + ' min' : 'Drive'}${b.km != null ? ' (' + b.km.toFixed(1) + ' km)' : ''} to ${escHtml(b.to)}</div>`;
+        const stop = b.stop;
+        const isReal = stop.type === 'lead' || stop.type === 'centre';
+        const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ');
+        return `
+          <div class="card" style="cursor:default">
+            <div class="name">${fmtTime(b.start)}–${fmtTime(b.end)} · ${escHtml(stop.centre_name)}</div>
+            ${address ? `<div class="sub">${escHtml(address)}</div>` : ''}
+            ${showLogButton && isReal ? `<div class="quick-actions"><button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stop.id}')">📝 Log</button></div>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    // A single Google Maps multi-stop directions link — "the whole route
+    // should be seen on their Maps app... have the route plotted there
+    // already" (Joy, 2026-09-04). Same URL shape Desktop's Smart Routing
+    // already uses (openRouteInGoogleMaps in views/admin.html) — one
+    // origin, one destination (the last stop), everything in between as
+    // `waypoints`, so the entire day opens as one plotted route instead of
+    // a separate point-to-point link per stop. Needs every stop to have a
+    // real coordinate (won't have one locally without Mapbox configured,
+    // or for a manual stop whose geocode failed) — returns null rather
+    // than a half-built link when that's not the case.
+    function routeMapsUrl(startAddress, stops) {
+      const real = (stops || []).filter(s => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
+      if (!real.length) return null;
+      const point = s => `${s.latitude},${s.longitude}`;
+      const origin = encodeURIComponent(startAddress || '');
+      const destination = point(real[real.length - 1]);
+      const waypoints = real.slice(0, -1).map(point).join('|');
+      let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
+      if (waypoints) url += `&waypoints=${waypoints}`;
+      return url;
+    }
+
+    // "It should ideally be already building a rough draft of their route
+    // for the day even before being able to click Build My Route" — Joy,
+    // 2026-09-04. Calls the non-persisting /preview endpoint (same
+    // resolve→optimize pipeline as the real Build, just nothing saved)
+    // after every stop add/remove and whenever the start address resolves
+    // — see the call sites in addRouteStop/removeRouteStop/
+    // addManualRouteStop/resolveStartCoordIfNeeded/selectAddressSuggestion/
+    // useHomeAddress. Best-effort and silent: a draft that fails to
+    // compute (address not ready, departure time blank) just clears
+    // itself rather than showing an error for what was never an explicit
+    // user action.
+    async function refreshRouteDraftPreview() {
+      if (!routeBuilderStart.trim() || !routeBuilderStops.length) { routeDraftPreview = null; if (viewStack[viewStack.length - 1] === 'plan-route') paintPlanRoute(); return; }
+      const departureTime = new Date(`${routeBuilderDate}T${routeBuilderDeparture || '09:00'}:00`).toISOString();
+      try {
+        const res = await api('/api/route-planner/preview', {
+          method: 'POST',
+          body: JSON.stringify({
+            startAddress: routeBuilderStart, departureTime,
+            stops: routeBuilderStops.map(s => s.type === 'manual' ? { type: 'manual', label: s.label, address: s.address } : { type: s.type, id: s.id })
+          })
+        });
+        routeDraftPreview = res.itinerary ? res : null;
+      } catch { routeDraftPreview = null; }
+      if (viewStack[viewStack.length - 1] === 'plan-route') paintPlanRoute();
+    }
+
     function paintPlanRoute() {
       const main = document.getElementById('mainContent');
       // Raw (original-cased) text kept for the input's own value — this
@@ -549,18 +641,21 @@
       // so typing a search is only needed for anything else — same
       // underlying list Today itself uses (todayBuckets), just re-filtered
       // to what isn't already on the stop list.
-      // Gated on a resolved starting address, and ranked by ROUTING (how
-      // close it is to that start) as well as PRIORITISATION (the same
-      // tier order Needs Attention already uses) — Joy, 2026-09-04:
-      // suggestions "should make sense in terms of routing and
-      // prioritisation", not just be the flat tier list regardless of
-      // where the day's drive actually starts. Tier stays the primary
-      // sort (an urgent tier-1 centre isn't buried under a nearby tier-3
-      // one); distance only breaks ties within a tier.
-      const suggested = routeBuilderStartCoord
+      // Gated on a resolved starting address, and ranked by ROUTING as well
+      // as PRIORITISATION (the same tier order Needs Attention already
+      // uses) — Joy, 2026-09-04: suggestions "should make sense in terms
+      // of routing and prioritisation", and should "also improve based on
+      // the selected centres or leads that are close to" — so proximity
+      // isn't just measured from the start address, it's the distance to
+      // the NEAREST of (start address + every stop already added), via
+      // routeReferenceCoords(). Tier stays the primary sort (an urgent
+      // tier-1 centre isn't buried under a merely-nearby tier-3 one);
+      // distance only breaks ties within a tier.
+      const refCoords = routeReferenceCoords();
+      const suggested = refCoords.length
         ? todayBuckets().attention
             .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey) && Number.isFinite(item.centre.latitude))
-            .map(item => ({ ...item, _distanceKm: haversineKm(routeBuilderStartCoord.lat, routeBuilderStartCoord.lng, item.centre.latitude, item.centre.longitude) }))
+            .map(item => ({ ...item, _distanceKm: Math.min(...refCoords.map(p => haversineKm(p.lat, p.lng, item.centre.latitude, item.centre.longitude))) }))
             .sort((a, b) => (a._tier - b._tier) || (a._distanceKm - b._distanceKm))
             .slice(0, 8)
         : [];
@@ -610,7 +705,13 @@
             <button class="icon-btn" onclick="removeRouteStop(${i})">🗑️</button>
           </div>`).join('') : `<div class="note-line">No stops added yet.</div>`}
 
-        ${routeBuilderStartCoord ? (suggested.length ? `
+        ${routeDraftPreview?.itinerary ? `
+        <div class="section-title">📝 Rough Draft</div>
+        <div class="field-hint" style="margin-bottom:6px">A preview of today's route so far — nothing's saved yet. Tap Build My Route below once you're happy with it.</div>
+        ${itineraryBlocksHtml(routeDraftPreview.itinerary.blocks)}
+        ` : ''}
+
+        ${refCoords.length ? (suggested.length ? `
         <div class="section-title">Suggested Stops</div>
         ${suggested.map(item => `
           <div class="card" onclick="addRouteStop('centre','${item.centre.centreKey}')">
@@ -679,6 +780,7 @@
         routeBuilderStart = s.label;
         routeBuilderStartCoord = { lat: s.lat, lng: s.lng };
         paintPlanRoute(); // refresh Suggested Stops now that we know where the day starts
+        refreshRouteDraftPreview();
       }
     }
     // Covers typing a full address and tabbing/tapping away without ever
@@ -693,7 +795,7 @@
         const best = res.suggestions?.[0];
         if (best && routeBuilderStart.trim()) { // still the same address, not superseded by further typing
           routeBuilderStartCoord = { lat: best.lat, lng: best.lng };
-          if (viewStack[viewStack.length - 1] === 'plan-route') paintPlanRoute();
+          if (viewStack[viewStack.length - 1] === 'plan-route') { paintPlanRoute(); refreshRouteDraftPreview(); }
         }
       } catch { /* best-effort — Suggested Stops just stays gated */ }
     }
@@ -729,6 +831,7 @@
       routeBuilderStartCoord = (currentUser.homeLat != null && currentUser.homeLng != null) ? { lat: currentUser.homeLat, lng: currentUser.homeLng } : null;
       paintPlanRoute();
       if (!routeBuilderStartCoord) resolveStartCoordIfNeeded();
+      else refreshRouteDraftPreview();
     }
     // Looks the label up internally by id rather than taking it as a
     // caller-supplied argument — found live 2026-09-03: a caller passing
@@ -745,6 +848,7 @@
         : (allLeads.find(l => l.id === id)?.centre_name || id);
       routeBuilderStops.push({ type, id, label });
       paintPlanRoute();
+      refreshRouteDraftPreview();
     }
     function addManualRouteStop() {
       const val = document.getElementById('routeManualInput').value.trim();
@@ -752,10 +856,12 @@
       if (routeBuilderStops.length >= 10) return toast('Smart Routing supports up to 10 stops per run', 'error');
       routeBuilderStops.push({ type: 'manual', label: val, address: val });
       paintPlanRoute();
+      refreshRouteDraftPreview();
     }
     function removeRouteStop(i) {
       routeBuilderStops.splice(i, 1);
       paintPlanRoute();
+      refreshRouteDraftPreview();
     }
     async function buildMobileRoute() {
       if (!routeBuilderStart.trim()) return toast('Enter a starting address', 'error');
@@ -774,10 +880,41 @@
           })
         });
         if (routeBuilderDate === todayDateStr()) plannedRoute = { routeDate: res.routeDate, startAddress: routeBuilderStart, departureTime, stops: res.stops, itinerary: res.itinerary };
-        toast('Route built!');
-        viewStack = ['today'];
-        setView('today', false);
+        // "Once route has been built there should be another button to
+        // Accept or Rebuild" — Joy, 2026-09-04. Already saved (the row's
+        // in wfp_planned_routes/plannedRoute above, matching how this
+        // always worked) — this is a review step before treating it as
+        // final, not a second save. Rebuild is just the header/goBack()
+        // arrow — it pops back to Plan a Route with everything (stops,
+        // start address, departure time) exactly as it was, ready to
+        // adjust and Build again.
+        routeReviewResult = { startAddress: routeBuilderStart, departureTime, stops: res.stops, itinerary: res.itinerary };
+        setView('route-review');
       } catch (err) { toast(err.message, 'error'); }
+    }
+    async function renderRouteReview() {
+      document.getElementById('headerTitle').textContent = 'Route Preview';
+      paintRouteReview();
+    }
+    function paintRouteReview() {
+      const main = document.getElementById('mainContent');
+      const r = routeReviewResult;
+      if (!r) { main.innerHTML = `<div class="empty-state">Nothing to review — try building a route again.</div>`; return; }
+      const mapsUrl = routeMapsUrl(r.startAddress, r.stops);
+      main.innerHTML = `
+        <div class="section-title">🗺️ Route Built</div>
+        ${mapsUrl ? `<a class="btn btn-secondary" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">📍 View on Maps</a>` : ''}
+        ${itineraryBlocksHtml(r.itinerary?.blocks)}
+        <div class="action-row" style="margin-top:14px">
+          <button class="btn btn-secondary" onclick="goBack()">🔄 Rebuild</button>
+          <button class="btn btn-primary" onclick="acceptRoute()">✅ Accept</button>
+        </div>
+      `;
+    }
+    function acceptRoute() {
+      toast('Route accepted!');
+      viewStack = ['today'];
+      setView('today', false);
     }
 
     // Today's "Needs Attention" — deliberately narrow (Liam, 2026-09-03,
@@ -907,27 +1044,14 @@
             <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute()">Plan Route</button>
           </div>`;
       }
-      const blocks = plannedRoute.itinerary?.blocks || [];
-      const rows = blocks.map(b => {
-        if (b.type === 'lunch') return `<div class="note-line">🍽️ ${escHtml(b.label)} — ${fmtTime(b.start)}–${fmtTime(b.end)}</div>`;
-        if (b.type === 'drive') return `<div class="note-line">🚗 ${b.minutes != null ? Math.round(b.minutes) + ' min' : 'Drive'}${b.km != null ? ' (' + b.km.toFixed(1) + ' km)' : ''} to ${escHtml(b.to)}</div>`;
-        const stop = b.stop;
-        const isReal = stop.type === 'lead' || stop.type === 'centre';
-        const stopId = stop.type === 'lead' ? stop.id : (stop.type === 'centre' ? stop.id : null);
-        const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ');
-        return `
-          <div class="card" style="cursor:default">
-            <div class="name">${fmtTime(b.start)}–${fmtTime(b.end)} · ${escHtml(stop.centre_name)}</div>
-            ${address ? `<div class="sub">${escHtml(address)}</div>` : ''}
-            <div class="quick-actions">
-              <a class="qa-btn" href="${directionsUrl(stop.latitude, stop.longitude, address)}" target="_blank" rel="noopener">🧭 Directions</a>
-              ${isReal ? `<button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stopId}')">📝 Log</button>` : ''}
-            </div>
-          </div>`;
-      }).join('');
+      // No per-stop Directions here — "that whole route should be seen on
+      // their Maps app" (Joy, 2026-09-04): one "View on Maps" link for the
+      // entire plotted route instead, same as the Route Preview screen.
+      const mapsUrl = routeMapsUrl(plannedRoute.startAddress, plannedRoute.stops);
       return `
         <div class="section-title">🗺️ Your Route Today</div>
-        ${rows}
+        ${mapsUrl ? `<a class="btn btn-secondary" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">📍 View on Maps</a>` : ''}
+        ${itineraryBlocksHtml(plannedRoute.itinerary?.blocks, { showLogButton: true })}
         <div class="action-row">
           <button class="btn btn-secondary" onclick="openPlanRoute()">Rebuild Route</button>
         </div>`;

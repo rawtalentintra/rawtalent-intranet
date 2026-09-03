@@ -239,6 +239,23 @@ function resolveTargetWfpLabel(req) {
   return req.user.wfp_label || null;
 }
 
+// Shared by /mobile-plan and /preview below — resolves a raw stop list
+// (id-typed lead/centre stops plus manually-typed addresses, possibly
+// interleaved) into full stop objects, id-typed stops keeping
+// resolveStopsFromIds's own order guarantee and manual stops spliced back
+// in at their original position rather than appended.
+async function resolveRawStops(rawStops) {
+  const idStops = Array.isArray(rawStops) ? rawStops.filter(s => s && s.type !== 'manual' && s.id) : [];
+  const manualStops = Array.isArray(rawStops) ? rawStops.filter(s => s && s.type === 'manual') : [];
+  const [resolvedIdStops, resolvedManualStops] = await Promise.all([
+    resolveStopsFromIds(idStops.map(s => s.id)),
+    resolveManualStops(manualStops)
+  ]);
+  const idStopsById = new Map(resolvedIdStops.map(s => [s.id, s]));
+  let manualCursor = 0;
+  return (rawStops || []).map(s => s.type === 'manual' ? resolvedManualStops[manualCursor++] : idStopsById.get(s.id)).filter(Boolean);
+}
+
 // Saves (or overwrites) one day's planned route for a Workforce Partner —
 // the "Plan a Route" screen in /wfp. Reuses the exact same
 // resolve-then-optimize pipeline /optimize uses, just over a stop list that
@@ -256,21 +273,7 @@ router.post('/mobile-plan', async (req, res) => {
     if (!totalCount) return res.status(400).json({ error: 'Add at least one stop' });
     if (totalCount > MAX_STOPS) return res.status(400).json({ error: `Smart Routing supports up to ${MAX_STOPS} stops per run` });
 
-    const [resolvedIdStops, resolvedManualStops] = await Promise.all([
-      resolveStopsFromIds(idStops.map(s => s.id)),
-      resolveManualStops(manualStops)
-    ]);
-    // Preserve the order the caller built the list in — id-typed stops keep
-    // resolveStopsFromIds's own id-order guarantee; manual stops are
-    // spliced back in at their original position rather than appended,
-    // since the mobile builder lets stops of either kind be interleaved.
-    const idStopsById = new Map(resolvedIdStops.map(s => [s.id, s]));
-    let manualCursor = 0;
-    const stops = rawStops.map(s => {
-      if (s.type === 'manual') return resolvedManualStops[manualCursor++];
-      return idStopsById.get(s.id);
-    }).filter(Boolean);
-
+    const stops = await resolveRawStops(rawStops);
     const result = await computeOptimizedItinerary({ stops, startAddress, departureTime });
 
     const db = getDb();
@@ -288,6 +291,29 @@ router.post('/mobile-plan', async (req, res) => {
     res.json({ ...result, wfpLabel, routeDate });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// "It should ideally be already building a rough draft of their route for
+// the day even before being able to click Build My Route" — Joy,
+// 2026-09-04. Same resolve→optimize pipeline as /mobile-plan, minus the
+// persistence — a live, disposable preview /wfp's Plan a Route calls
+// after every stop add/remove once it has enough to work with. Never a
+// hard error: this is a background draft, not an explicit user action, so
+// anything that goes wrong (an address that hasn't resolved yet, a stop
+// mid-add) just comes back as "nothing to preview" rather than a toast.
+router.post('/preview', async (req, res) => {
+  try {
+    const { startAddress, departureTime, stops: rawStops } = req.body;
+    if (!startAddress?.trim() || !departureTime || !Array.isArray(rawStops) || !rawStops.length) {
+      return res.json({ itinerary: null, stops: [] });
+    }
+    const stops = await resolveRawStops(rawStops);
+    if (!stops.length) return res.json({ itinerary: null, stops: [] });
+    const result = await computeOptimizedItinerary({ stops, startAddress, departureTime });
+    res.json(result);
+  } catch (err) {
+    res.json({ itinerary: null, stops: [] });
   }
 });
 
