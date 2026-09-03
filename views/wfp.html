@@ -746,7 +746,7 @@
         const l = item.lead;
         return `
           <div class="card" onclick="openLead('${l.id}')">
-            <div class="name">${escHtml(item.label)}</div>
+            <div class="name">${escHtml(item.label)} <span class="badge neutral inline" style="margin-left:4px">Lead</span></div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
             ${quickActionsHtml('lead', l)}
           </div>`;
@@ -754,31 +754,72 @@
       const c = item.centre;
       return `
         <div class="card" onclick="openCentre('${c.centreKey}')">
-          <div class="name">${escHtml(item.label || c.name)}</div>
+          <div class="name">${escHtml(item.label || c.name)} <span class="badge neutral inline" style="margin-left:4px">Centre</span></div>
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
           ${item.reason ? `<div class="why">⚠️ ${escHtml(item.reason)}</div>` : ''}
           ${quickActionsHtml('centre', c)}
         </div>`;
     }
 
-    // Call/Directions/Log activity/Create follow-up — the 4 quick actions
-    // Joy asked for on every Today item. `stopPropagation` on each so
-    // tapping an action doesn't also trigger the card's own onclick (open
-    // detail). Call is omitted for a centre/lead with no phone on file.
+    // Call/Log/Follow-up/Add-to-route — the quick actions on every Today
+    // item (Needs Attention + Along Your Route). `stopPropagation` on each
+    // so tapping an action doesn't also trigger the card's own onclick
+    // (open detail). Call is omitted for a centre/lead with no phone on
+    // file. Directions dropped 2026-09-03 — Liam: "call and log and follow
+    // up, but I don't think we need directions" — still present on the
+    // Route section's own per-stop actions and on Centre/Lead Detail.
     function quickActionsHtml(type, obj) {
       const phone = type === 'lead' ? obj.centre_phone : obj.contactNo;
       const id = type === 'lead' ? obj.id : obj.centreKey;
-      // Directions dropped from Today's cards — Liam, 2026-09-03: "call and
-      // log and follow up, but I don't think we need directions" — still
-      // present on the Route section's own per-stop actions and on Centre/
-      // Lead Detail, just not repeated on every Needs-Attention/Along-Your-
-      // Route card here.
       return `
         <div class="quick-actions">
           ${phone ? `<a class="qa-btn" href="tel:${escHtml(phone)}" onclick="event.stopPropagation()">📞 Call</a>` : ''}
           <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}')">📝 Log</button>
           <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}',{followUpOnly:true})">⏭️ Follow-up</button>
+          <button class="qa-btn" onclick="event.stopPropagation();addStopToRoute('${type}','${id}')">➕ Add to Route</button>
         </div>`;
+    }
+
+    // "Allow to ADD... that Centre or Lead should be added to the Smart
+    // Routing, and... it should SMARTLY position it as to which stop it's
+    // supposed to be so as not to make mistakes or run-arounds" — Joy,
+    // 2026-09-04. If a route already exists for today, this re-runs the
+    // EXACT SAME resolve→optimize→persist pipeline Plan a Route's own
+    // Build button uses (POST /mobile-plan), just with this one stop
+    // appended to the existing list — the nearest-neighbour+2-opt
+    // optimizer already in routeOptimizerService.js re-sequences ALL
+    // stops (old + new) to minimise total drive time, so "smart
+    // positioning" falls out of machinery that already exists rather than
+    // needing new logic here. No route yet today → hands off to Plan a
+    // Route with this stop pre-added instead of guessing a starting
+    // address/departure time it doesn't have.
+    async function addStopToRoute(type, id) {
+      if (!plannedRoute) {
+        openPlanRoute();
+        const label = type === 'centre' ? (allCentres.find(c => c.centreKey === id)?.name || id) : (allLeads.find(l => l.id === id)?.centre_name || id);
+        routeBuilderStops.push({ type, id, label });
+        paintPlanRoute();
+        toast('Add a starting address to build your route');
+        return;
+      }
+      if (plannedRoute.stops.some(s => s.type === type && s.id === id)) { toast('Already on your route'); return; }
+      if (plannedRoute.stops.length >= 10) { toast('Smart Routing supports up to 10 stops per run', 'error'); return; }
+      const targetLabel = activeWfpLabelForPlanning();
+      if (!targetLabel) { toast('Pick a territory filter above first', 'error'); return; }
+      const existingStops = plannedRoute.stops.map(s => s.type === 'manual' ? { type: 'manual', label: s.centre_name, address: s.centre_name } : { type: s.type, id: s.id });
+      try {
+        toast('Adding to your route…');
+        const res = await api('/api/route-planner/mobile-plan', {
+          method: 'POST',
+          body: JSON.stringify({
+            routeDate: todayDateStr(), startAddress: plannedRoute.startAddress, departureTime: plannedRoute.departureTime,
+            stops: [...existingStops, { type, id }], wfpLabel: targetLabel
+          })
+        });
+        plannedRoute = { routeDate: res.routeDate, startAddress: plannedRoute.startAddress, departureTime: plannedRoute.departureTime, stops: res.stops, itinerary: res.itinerary };
+        toast('Added to your route!');
+        paintToday();
+      } catch (err) { toast(err.message, 'error'); }
     }
 
     // "Your Route Today" — the planned-route block at the top of Today
