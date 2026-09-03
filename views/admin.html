@@ -8349,7 +8349,7 @@
       const start = new Date(atVal);
       const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
       link.href = buildGoogleCalendarQuickAddUrl({
-        title: `${isCall ? 'Call' : 'Visit'}: ${lead.centre_name}`,
+        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${lead.centre_name}`,
         start, end,
         details: `HeartBeat lead: ${location.origin}/admin?lead=${lead.id}`,
         location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')
@@ -11223,7 +11223,7 @@
       const start = new Date(`${dateVal}T${timeVal}`);
       const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
       link.href = buildGoogleCalendarQuickAddUrl({
-        title: `${isCall ? 'Call' : 'Visit'}: ${currentCentreName || 'Centre'}`,
+        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${currentCentreName || 'Centre'}`,
         start, end,
         details: `HeartBeat centre: ${location.origin}/admin?centre=${encodeURIComponent(currentCentreKey || '')}`
       });
@@ -12326,7 +12326,7 @@
         // same buildGoogleCalendarQuickAddUrl() trick used for leads/centres.
         const detailPath = b.stop.type === 'centre' ? `/admin?centre=${encodeURIComponent(b.stop.id)}` : `/admin?lead=${encodeURIComponent(b.stop.id)}`;
         const addToCalUrl = buildGoogleCalendarQuickAddUrl({
-          title: `Visit: ${b.stop.centre_name}`,
+          title: `🚗 Visit: ${b.stop.centre_name}`,
           start: b.start, end: b.end,
           details: `HeartBeat: ${location.origin}${detailPath}`,
           location: fullAddress
@@ -14571,10 +14571,17 @@
       // belongs to) is separate and stays admin/super_admin only — see
       // canEditStatus/leadAssigneeSelect below.
       const readOnly = currentUserRole !== 'admin' && currentUserRole !== 'super_admin' && currentUserRole !== 'workforce_partner';
+      // Add-to-Calendar icon — Joy, 2026-09-03: only Lead Called/Centre
+      // Visited have a real calendar meaning (Profile Created doesn't).
+      // updateLeadStatusCalendarIcon() (below) fills in its href/visibility
+      // both on initial render (called once per field right after this
+      // modal opens) and again on every change (onLeadStatusChange).
+      const showsCalendarIcon = fieldKey === 'lead_called' || fieldKey === 'centre_visited';
       return `
         <div class="lead-status-row">
           <span class="lead-status-label">${escHtml(label)}</span>
           <div class="lead-status-controls">
+            ${showsCalendarIcon ? `<a id="lead_${fieldKey}_addcal" href="#" target="_blank" rel="noopener" title="Add to Google Calendar" style="display:none;text-decoration:none;font-size:15px;line-height:1">📅</a>` : ''}
             <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}" ${readOnly ? 'disabled' : ''}
               style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
             <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''} style="${leadStatusSelectStyle(statusOptions, currentStatus)}">
@@ -14582,6 +14589,31 @@
             </select>
           </div>
         </div>`;
+    }
+
+    // Fills in/hides the 📅 icon leadStatusEditorRow renders for lead_called/
+    // centre_visited — shown only once status is "Scheduled" with a real
+    // date/time picked (nothing to add for to_schedule/done/n_a). Looks the
+    // lead up by currentLeadDetailId rather than taking it as a parameter,
+    // so onLeadStatusChange (which only knows the fieldKey) can call this
+    // too without threading the lead object through every call site.
+    function updateLeadStatusCalendarIcon(fieldKey) {
+      const icon = document.getElementById(`lead_${fieldKey}_addcal`);
+      if (!icon) return; // 'signed' has no icon at all
+      const status = document.getElementById(`lead_${fieldKey}_status`).value;
+      const atVal = document.getElementById(`lead_${fieldKey}_at`).value;
+      const lead = allLeads.find(l => l.id === currentLeadDetailId);
+      if (status !== 'scheduled' || !atVal || !lead) { icon.style.display = 'none'; return; }
+      const isCall = fieldKey === 'lead_called';
+      const start = new Date(atVal);
+      const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
+      icon.href = buildGoogleCalendarQuickAddUrl({
+        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${lead.centre_name}`,
+        start, end,
+        details: `HeartBeat lead: ${location.origin}/admin?lead=${lead.id}`,
+        location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')
+      });
+      icon.style.display = 'inline-block';
     }
 
     // Date/time input is only meaningful for "done" (called/visited/signed)
@@ -14608,6 +14640,7 @@
           onLeadStatusChange('lead_called');
         }
       }
+      updateLeadStatusCalendarIcon(fieldKey);
     }
 
     // Shared by both the "already has a contact" and "just added one" render
@@ -14831,6 +14864,13 @@
           </div>
         `}`;
       document.getElementById('leadDetailModal').classList.add('open');
+      // leadStatusEditorRow's own showsDate check already renders the
+      // 📅 icon's initial display:none/block state statically — this
+      // fills in its href (and re-checks visibility) for whatever the
+      // saved status/date actually are, same computation onLeadStatusChange
+      // reruns on every subsequent edit.
+      updateLeadStatusCalendarIcon('lead_called');
+      updateLeadStatusCalendarIcon('centre_visited');
       loadLeadNotes(id);
       loadLeadRecordings(id);
       resetLeadVoiceRecorder();
