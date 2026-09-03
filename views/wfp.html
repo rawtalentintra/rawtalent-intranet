@@ -305,18 +305,18 @@
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
-    // A real Workforce Partner (wfpLabel set) is always auto-scoped to
-    // their own territory via ?mine=true — never a picker, per Joy's own
-    // original spec ("should not need to select between different
-    // Workforce Partners"). Only a caller with NO wfp_label (Joy herself,
-    // any admin/super_admin) gets the territory toggle below, mirroring
-    // ?partnerLabel= instead — same server-side filter, just an explicit
-    // label instead of the caller's own.
+    // wfpFilterLabel is always kept as "whichever territory is active right
+    // now" — defaulted to the caller's own wfpLabel at boot (init()), and
+    // only ever changed via setWfpFilterLabel — so a plain ?partnerLabel=
+    // covers every case (own territory, an admin/Liam's cross-territory
+    // pick, or one of Gwen's two) with no separate ?mine=true special case
+    // needed. Simplified 2026-09-03 while wiring up Gwen's second
+    // territory (SA + QLD) — ?mine=true and ?partnerLabel=<own label>
+    // were always equivalent server-side anyway (routes/leads.js|
+    // centres.js's own targetLabel resolution).
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
-      let q = '';
-      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) q = '?mine=true';
-      else if (wfpFilterLabel) q = '?partnerLabel=' + encodeURIComponent(wfpFilterLabel);
+      const q = wfpFilterLabel ? '?partnerLabel=' + encodeURIComponent(wfpFilterLabel) : '';
       try {
         const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
         allLeads = leads;
@@ -325,18 +325,40 @@
       } catch { toast('Could not load your leads/centres', 'error'); }
     }
 
-    // ── Territory filter (admin-facing only — see ensureDataLoaded's own
-    // comment) — same 3 partners + All, same look Desktop already uses. ──
+    // ── Territory filter ─────────────────────────────────────────────
+    // Two different bars, depending on the account:
+    //  - canViewAllTerritories (Liam/Joy-as-admin): the full admin-style
+    //    picker across every territory, same look Desktop already uses.
+    //  - A plain wfp_label'd account with additionalTerritories set
+    //    (Gwen: SA + QLD) gets a SMALL bar of just their own territories —
+    //    "she can see two buttons, SA and QLD" (Liam, 2026-09-03), not
+    //    everyone else's.
+    //  - Everyone else (a normal single-territory WFP) gets no bar at all.
     const WFP_FILTER_OPTIONS = [
       { key: '', label: 'All States', bg: '#0b1d3e' },
       { key: 'Liam Baxter (VIC)', label: 'Liam - VIC', bg: '#2563eb' },
       { key: 'Justine Hardware (VIC)', label: 'Justine - VIC', bg: '#0d9488' },
-      { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' }
+      { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' },
+      { key: 'Gwen Stocks (QLD)', label: 'Gwen - QLD', bg: '#f97316' }
     ];
+    function shortFilterLabel(fullLabel) {
+      const known = WFP_FILTER_OPTIONS.find(o => o.key === fullLabel);
+      return known ? known.label : fullLabel;
+    }
+    function wfpFilterOptionsForCurrentUser() {
+      if (currentUser.canViewAllTerritories) return WFP_FILTER_OPTIONS;
+      if (currentUser.wfpLabel && currentUser.additionalTerritories?.length) {
+        const own = WFP_FILTER_OPTIONS.find(o => o.key === currentUser.wfpLabel) || { key: currentUser.wfpLabel, label: shortFilterLabel(currentUser.wfpLabel), bg: '#0b1d3e' };
+        const extra = currentUser.additionalTerritories.map(label => WFP_FILTER_OPTIONS.find(o => o.key === label) || { key: label, label: shortFilterLabel(label), bg: '#6b7590' });
+        return [own, ...extra];
+      }
+      return null;
+    }
     function wfpFilterBarHtml() {
-      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return '';
+      const options = wfpFilterOptionsForCurrentUser();
+      if (!options) return '';
       return `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px">
-        ${WFP_FILTER_OPTIONS.map(o => `
+        ${options.map(o => `
           <button onclick="setWfpFilterLabel('${o.key.replace(/'/g, "\\'")}')" style="flex-shrink:0;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:${o.bg};color:white;opacity:${wfpFilterLabel === o.key ? '1' : '.55'}">${escHtml(o.label)}</button>
         `).join('')}
       </div>`;
@@ -346,12 +368,10 @@
       await ensureDataLoaded(true);
       render(viewStack[viewStack.length - 1]);
     }
-    // Which territory a save/read of a mobile route plan is for — mirrors
-    // ensureDataLoaded's own q logic. A real WFP (no cross-territory grant)
-    // always plans their own day; Joy/Liam plan whichever territory the
-    // filter bar has picked (defaulting to nothing until one is chosen).
+    // Which territory a save/read of a mobile route plan is for — always
+    // just the active filter (see ensureDataLoaded's own comment on why
+    // wfpFilterLabel alone is now the single source of truth).
     function activeWfpLabelForPlanning() {
-      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return currentUser.wfpLabel;
       return wfpFilterLabel || null;
     }
 

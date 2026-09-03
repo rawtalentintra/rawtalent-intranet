@@ -3738,6 +3738,10 @@
           <input type="checkbox" id="userCanViewAllWfpTerritories">
           <label for="userCanViewAllWfpTerritories">Full territory access on /wfp (sees the same all-territories filter Joy does, even with a Workforce Partner Territory set above — e.g. Liam)</label>
         </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Additional territories on /wfp <span class="optional">(a SECOND territory this person can also see, e.g. Gwen: SA + QLD — not the same as full access above)</span></label>
+          <div id="userAdditionalWfpTerritories"></div>
+        </div>
         <div class="checkbox-row">
           <input type="checkbox" id="userCanBuildTraining">
           <label for="userCanBuildTraining">Can build training courses (grants Build Training access to this person specifically, regardless of role)</label>
@@ -6573,6 +6577,17 @@
       const wfpSel = document.getElementById('userWfpLabel');
       wfpSel.innerHTML = '<option value="">— None —</option>' +
         WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join('');
+      // Own checkbox per territory rather than inlining the label into an
+      // onclick — a name/label with a quote character breaks an inlined
+      // handler (found live on /wfp's own route builder, 2026-09-03);
+      // reading .value off each checkbox at save time sidesteps that
+      // entirely, same fix applied there.
+      document.getElementById('userAdditionalWfpTerritories').innerHTML = WORKFORCE_PARTNER_OPTIONS.map((p, i) => `
+        <div class="checkbox-row" style="margin:4px 0 0">
+          <input type="checkbox" id="userAdditionalTerritory_${i}" value="${escHtml(p)}">
+          <label for="userAdditionalTerritory_${i}" style="font-weight:400">${escHtml(p)}</label>
+        </div>
+      `).join('');
 
       if (id) {
         const u = allUsers.find(x => x.id === id);
@@ -6586,6 +6601,8 @@
           document.getElementById('userCanCreateOutreachLists').checked = !!u.can_create_outreach_lists;
           document.getElementById('userCanViewAllWfpTerritories').checked = !!u.can_view_all_wfp_territories;
           wfpSel.value = u.wfp_label || '';
+          const additional = Array.isArray(u.additional_wfp_territories) ? u.additional_wfp_territories : [];
+          WORKFORCE_PARTNER_OPTIONS.forEach((p, i) => { document.getElementById(`userAdditionalTerritory_${i}`).checked = additional.includes(p); });
         }
       } else {
         document.getElementById('userName').value = '';
@@ -6597,6 +6614,7 @@
         document.getElementById('userCanCreateOutreachLists').checked = false;
         document.getElementById('userCanViewAllWfpTerritories').checked = false;
         wfpSel.value = '';
+        WORKFORCE_PARTNER_OPTIONS.forEach((p, i) => { document.getElementById(`userAdditionalTerritory_${i}`).checked = false; });
       }
       document.getElementById('userPassword').value = '';
       document.getElementById('userModal').classList.add('open');
@@ -6618,6 +6636,7 @@
       const canCreateOutreachLists = document.getElementById('userCanCreateOutreachLists').checked;
       const wfpLabel = document.getElementById('userWfpLabel').value;
       const canViewAllWfpTerritories = document.getElementById('userCanViewAllWfpTerritories').checked;
+      const additionalWfpTerritories = WORKFORCE_PARTNER_OPTIONS.filter((p, i) => document.getElementById(`userAdditionalTerritory_${i}`).checked);
 
       if (!name) { toast('Name is required', 'error'); return; }
       if (!id && !email) { toast('Email is required', 'error'); return; }
@@ -6627,8 +6646,8 @@
         const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
         const method = id ? 'PUT' : 'POST';
         const body = id
-          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, ...(password ? { password } : {}) }
-          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories };
+          ? { name, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, additionalWfpTerritories, ...(password ? { password } : {}) }
+          : { email, name, password, role, active, canBuildTraining, canCreateOutreachLists, wfpLabel, canViewAllWfpTerritories, additionalWfpTerritories };
 
         const res = await fetch(url, {
           method,
@@ -7589,7 +7608,7 @@
     // Shortened for the dense Leads table badge only — filters and the lead
     // detail modal keep the full LEAD_AGENCY_USAGE_LABELS wording.
     const LEAD_AGENCY_USAGE_SHORT = { target_temp: 'Target Temp', high_agency_user: 'High Usage' };
-    const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Justine Hardware (VIC)', 'Liam Baxter (VIC)'];
+    const WORKFORCE_PARTNER_OPTIONS = ['Gwen Stocks (SA)', 'Gwen Stocks (QLD)', 'Justine Hardware (VIC)', 'Liam Baxter (VIC)'];
     // First-name-only, for the dense Leads table column — full names stay
     // everywhere else (filters, lead detail modal) where space isn't tight.
     const WORKFORCE_PARTNER_SHORT = { 'Gwen Stocks (SA)': 'Gwen', 'Justine Hardware (VIC)': 'Justine', 'Liam Baxter (VIC)': 'Liam' };

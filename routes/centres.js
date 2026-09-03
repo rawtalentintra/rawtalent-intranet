@@ -305,7 +305,20 @@ async function getCentreStopsByKeys(centreKeys) {
 // zero centres for Gwen — leads never showed this bug since a lead's
 // assigned_workforce_partner is set explicitly at creation time
 // (autoAssignWorkforcePartner), so this fallback rarely even runs there.
-const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)' };
+const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)', QLD: 'Gwen Stocks (QLD)' }; // Gwen's second territory (Liam, 2026-09-03) — see db/schema.sql's additional_wfp_territories comment
+
+// `?partnerLabel=` was previously accepted from any authenticated caller
+// with no server-side check at all — only the frontend hiding the picker
+// for a plain workforce_partner login stopped them from hand-crafting a
+// request for someone else's territory. Found while wiring up Gwen's
+// second territory (2026-09-03) — same small duplicated-per-file helper
+// as routes/leads.js's own copy.
+function canUsePartnerLabel(user, label) {
+  if (!label) return true;
+  if (user.can_view_all_wfp_territories) return true;
+  if (user.wfp_label === label) return true;
+  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
+}
 
 // The full My Centres portfolio — matches the pattern of other full-
 // dataset list endpoints in this app (Leads, Reports): compute everything
@@ -340,6 +353,7 @@ router.get('/', async (req, res) => {
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates(visible);
     const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
+    if (targetLabel && !canUsePartnerLabel(req.user, targetLabel)) return res.status(403).json({ error: 'Not authorized for this territory' });
     if (targetLabel) {
       // c.state on the raw RT object is inconsistent — sometimes 'SA',
       // sometimes 'South Australia' (confirmed live 2026-09-03: 'Victoria'/

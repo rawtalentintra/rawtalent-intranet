@@ -195,10 +195,20 @@ router.post('/optimize', async (req, res) => {
 // a target wfpLabel explicitly, e.g. to plan/view someone else's day. Same
 // resolution shape as GET /api/leads|centres's own ?mine=true/?partnerLabel=
 // (routes/leads.js, routes/centres.js) — kept consistent on purpose.
+// Same guard as routes/leads.js|centres.js's own copy — `?partnerLabel=`/
+// `wfpLabel` was previously trusted from any authenticated caller with no
+// server-side check. Found while wiring up Gwen's second territory
+// (2026-09-03, SA + QLD — see db/schema.sql's additional_wfp_territories).
+function canUsePartnerLabel(user, label) {
+  if (!label) return true;
+  if (user.can_view_all_wfp_territories) return true;
+  if (user.wfp_label === label) return true;
+  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
+}
 function resolveTargetWfpLabel(req) {
-  if (req.user.wfp_label && !req.user.can_view_all_wfp_territories) return req.user.wfp_label;
-  const label = (req.body && req.body.wfpLabel) || req.query.wfpLabel || null;
-  return label || null;
+  const requested = (req.body && req.body.wfpLabel) || req.query.wfpLabel || null;
+  if (requested && canUsePartnerLabel(req.user, requested)) return requested;
+  return req.user.wfp_label || null;
 }
 
 // Saves (or overwrites) one day's planned route for a Workforce Partner —

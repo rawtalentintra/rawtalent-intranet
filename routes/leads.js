@@ -36,11 +36,26 @@ const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforc
 // east/south-east/bayside directive, 2026-08-22) via
 // melbourneTerritoryService — this map now only covers non-VIC states.
 const STATE_WORKFORCE_PARTNER = {
-  SA: 'Gwen Stocks (SA)'
+  SA: 'Gwen Stocks (SA)',
+  QLD: 'Gwen Stocks (QLD)' // Gwen's second territory (Liam, 2026-09-03) — see db/schema.sql's additional_wfp_territories comment
 };
 
 function autoAssignWorkforcePartner(suburb, state) {
   return partnerForSuburbState(suburb, state) || STATE_WORKFORCE_PARTNER[state] || null;
+}
+
+// `?partnerLabel=` was previously accepted from any authenticated caller
+// with no server-side check at all — only the frontend hiding the picker
+// for a plain workforce_partner login (views/wfp.html's wfpFilterBarHtml)
+// stopped them from hand-crafting a request for someone else's territory.
+// Found while wiring up Gwen's second territory (2026-09-03) — this is
+// the same duplicated-per-file small-helper pattern STATE_WORKFORCE_PARTNER
+// itself already uses (see routes/centres.js's own copy).
+function canUsePartnerLabel(user, label) {
+  if (!label) return true;
+  if (user.can_view_all_wfp_territories) return true;
+  if (user.wfp_label === label) return true;
+  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
 }
 
 // Strips label noise that's been landing in street_address — "Address: 39
@@ -164,6 +179,7 @@ router.get('/', leadsViewAccess, async (req, res) => {
     const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
     let rows = result.rows;
     const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
+    if (targetLabel && !canUsePartnerLabel(req.user, targetLabel)) return res.status(403).json({ error: 'Not authorized for this territory' });
     if (targetLabel) {
       rows = rows.filter(l => (l.assigned_workforce_partner || partnerForSuburbState(l.suburb, l.state)) === targetLabel);
     }
