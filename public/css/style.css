@@ -1666,6 +1666,17 @@ body:has(> .navbar) { padding-top: 64px; }
    desktop width stay pixel-identical to before this — nothing here touches
    the desktop layout. */
 @media (max-width: 900px) {
+  /* Joy, 2026-09-03: the period selector (This Month/Custom Range/…) was
+     squeezed onto the same row as the title+description, next to no room
+     of its own. Its wrapper only sets flex-direction/align-items/gap
+     inline (see the HTML) — no !important needed to add the direction
+     switch here. Own line, full width, left-aligned like everything else
+     on a phone instead of pinned flex-end against a title it's fighting
+     with. */
+  #section-sales-dashboard .admin-header { flex-direction: column; align-items: stretch; }
+  #section-sales-dashboard .admin-header > div:last-child { align-items: stretch; margin-top: 10px; }
+  #section-sales-dashboard .admin-header > div:last-child select { max-width: none; width: 100%; }
+
   /* The KPI row's hardcoded 3-column grid is an inline style (added for a
      real 1280px desktop squeeze bug — see its own HTML comment), so
      overriding it here needs !important: an external stylesheet rule
@@ -1721,20 +1732,32 @@ body:has(> .navbar) { padding-top: 64px; }
   #section-leads .admin-header { flex-direction: column; align-items: stretch; }
   #section-leads .admin-header > div:last-child { flex-direction: column; margin-top: 10px; }
   #section-leads .admin-header > div:last-child button { width: 100%; }
+  /* The period selector's own wrapper (Today/This Week/…/Custom Range,
+     mirroring the WFP Dashboard's) sets align-items:flex-end inline for
+     its desktop right-aligned position — full width instead once the
+     header above has already gone to one column. */
+  #section-leads .admin-header > div:last-child > div:first-child { align-items: stretch; width: 100%; }
+  #section-leads .admin-header > div:last-child select { max-width: none; width: 100%; }
 
-  /* Stats bar — Metro is redundant once the page defaults to metro-only
-     below (there's nothing else left to compare it against on a phone),
-     and dropping it left an uneven 4-item wrapping row; a 2x2 grid reads
-     cleaner than either. */
-  #leadsStatsBar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 16px; }
-  #leadsStatsBar .leads-stat:nth-child(2) { display: none; }
+  /* Joy, 2026-09-03: Calls Logged/Visits Logged share the first row,
+     Total Leads/Signed Rate the second — the 4-card row is a plain DOM-
+     order array (Total Leads, Calls, Visits, Signed — see
+     renderLeadsKpis), so a straight 2-column grid would pair 1+2 then
+     3+4; `order` reshuffles the visual position without touching that
+     array or the desktop 4-across layout above 900px. */
+  #leadsKpiRow { grid-template-columns: repeat(2, 1fr) !important; gap: 10px; }
+  #leadsKpiRow .kpi-card:nth-child(1) { order: 3; } /* Total Leads */
+  #leadsKpiRow .kpi-card:nth-child(2) { order: 1; } /* Calls Logged */
+  #leadsKpiRow .kpi-card:nth-child(3) { order: 2; } /* Visits Logged */
+  #leadsKpiRow .kpi-card:nth-child(4) { order: 4; } /* Signed Rate */
 
-  /* Metro/Regional/All + Run Regional Classification — Regional leads are
-     archived for now (Liam, see #leadsRegionalTabs' own comment), so this
-     toggle has nothing real to switch between on a phone today. The
+  /* Metro/Regional/All — Regional leads are archived for now (Liam), so
+     this toggle has nothing real to switch between on a phone today. The
      underlying filter still defaults to metro-only regardless (unchanged
      — see setLeadsRegionalFilter's default 'active' state); only the
-     control for it is hidden here. */
+     control for it is hidden here. #leadsRegionalTabs no longer exists
+     (folded into #leadsFilterRegional since) — this rule is a harmless
+     no-op kept as-is rather than expanding this pass's scope. */
   #leadsRegionalTabs { display: none; }
 
   /* Filter bar — 10 selects/inputs wrapping into a ragged multi-row mess
@@ -1767,7 +1790,12 @@ body:has(> .navbar) { padding-top: 64px; }
      from .data-table-compact's desktop-tuned 12.5px/10px — plenty of
      room now that it's the only column, and easier to read one-handed. */
   #leadsTable th:not(:nth-child(2)), #leadsTable td:not(:nth-child(2)) { display: none; }
-  #leadsTable td:nth-child(2) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; font-size: 14.5px; }
+  /* Joy, 2026-09-03: "add more space between each lead centre name so
+     that they are more easily clickable" — the whole row is one tap
+     target (openLeadDetail), so more vertical padding here both reads
+     as more breathing room between rows AND grows the actual tap area,
+     well past .data-table's desktop-tuned 7px. */
+  #leadsTable td:nth-child(2) { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; font-size: 14.5px; padding-top: 16px; padding-bottom: 16px; }
   #leadsTable th:nth-child(2) { font-size: 11.5px; }
 
   /* Lead Source Performance / Leads Received — one whole-width row each,

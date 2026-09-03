@@ -1041,7 +1041,29 @@
             <div class="admin-page-title">Leads</div>
             <div class="admin-page-sub" id="leadsPageSub">Submitted from educator vetting calls — click a row for full details. For pipeline performance, see the WFP Dashboard.</div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0">
+          <div style="display:flex;align-items:flex-start;gap:12px;flex-shrink:0;flex-wrap:wrap">
+            <!-- Joy, 2026-09-03: "add the 'All Time' filter outside here
+                 and just copy the same time filter that appears on the WFP
+                 Dashboard" — same select + Custom Range treatment as
+                 #salesDashRange, own ids since it drives this page's own
+                 KPI row/table independently (see onLeadsDashRangeChange/
+                 getCustomLeadsDashRange). Replaces the old #leadsFilterPeriod
+                 that was buried in the filter bar below (removed). -->
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+              <select id="leadsDashRange" class="form-control" style="max-width:170px" onchange="onLeadsDashRangeChange()">
+                <option value="today">Today</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="quarter">This Quarter</option>
+                <option value="all" selected>All Time</option>
+                <option value="custom">Custom Range…</option>
+              </select>
+              <div id="leadsDashCustomRange" style="display:none;gap:4px;align-items:center">
+                <input type="date" id="leadsDashRangeFrom" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="filterLeadsTable()">
+                <span style="color:var(--text-muted);font-size:11px">–</span>
+                <input type="date" id="leadsDashRangeTo" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="filterLeadsTable()">
+              </div>
+            </div>
             <button class="btn-add" id="addCentreBtn" onclick="openAddCentreModal()">➕ Add Centre</button>
           </div>
         </div>
@@ -1056,8 +1078,6 @@
              comparison, not a re-derived version, so the two can't drift
              apart ("make sure numbers are accurate across the board"). -->
         <div class="kpi-row" id="leadsKpiRow" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
-
-        <div class="leads-stats-bar" id="leadsStatsBar"></div>
 
         <div style="display:flex;gap:10px;margin-bottom:16px">
           <button type="button" class="wfp-state-filter-btn" data-state="all" onclick="setLeadsStateFilter('all')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:var(--navy);color:white;opacity:1;transition:opacity .15s"><span class="wfp-state-icon">🌏</span> All States</button>
@@ -1096,13 +1116,6 @@
               <option value="active" selected>🏙️ Metro Leads</option>
               <option value="regional">🗺️ Regional (Archived)</option>
               <option value="all">Metro + Regional</option>
-            </select>
-            <button type="button" id="leadsBackfillBtn" style="display:none;background:none;border:1px solid var(--gray-200);border-radius:var(--radius);padding:3px 8px;font-size:11px;font-weight:700;color:var(--text-muted);cursor:pointer;font-family:inherit" onclick="runLeadsRegionalBackfill()" title="Geocodes+classifies any lead that's never been checked yet — safe to run any time, only touches unclassified leads">🗺️ Run Regional Classification</button>
-            <select id="leadsFilterPeriod" onchange="filterLeadsTable()">
-              <option value="all" selected>All time</option>
-              <option value="week">This week</option>
-              <option value="month">This month</option>
-              <option value="quarter">This quarter</option>
             </select>
             <select id="leadsFilterPartner" onchange="filterLeadsTable()">
               <option value="">WF Partner: any</option>
@@ -7546,19 +7559,6 @@
       leadsRegionalFilter = value;
       filterLeadsTable();
     }
-    async function runLeadsRegionalBackfill() {
-      const btn = document.getElementById('leadsBackfillBtn');
-      btn.disabled = true;
-      btn.textContent = 'Classifying…';
-      try {
-        const res = await fetch('/api/leads/backfill-regions', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) { toast(data.error || 'Failed to classify leads', 'error'); return; }
-        toast(`Checked ${data.totalChecked} · archived ${data.archived} as regional · ${data.skipped} skipped (no address/coordinates yet)`, 'success');
-        loadLeadsTable();
-      } catch { toast('Network error', 'error'); }
-      finally { btn.disabled = false; btn.textContent = '🗺️ Run Regional Classification'; }
-    }
     const LEAD_AGENCY_USAGE_LABELS = { target_temp: 'Target Temp', high_agency_user: 'High Agency User' };
     const LEAD_AGENCY_USAGE_BADGE_CLASS = { target_temp: 'agency-badge-target', high_agency_user: 'agency-badge-high' };
     // Shortened for the dense Leads table badge only — filters and the lead
@@ -7848,14 +7848,6 @@
 
     async function loadLeadsTable() {
       const body = document.getElementById('leadsTableBody');
-      // Backfill button: makes real writes + costs real Mapbox geocoding
-      // calls (see POST /api/leads/backfill-regions), so admin/super_admin
-      // only — matches that route's own requireAdmin gate. No existing
-      // .admin-only CSS class to reuse (only .super-admin-only exists), so
-      // toggled directly here rather than inventing a new global class for
-      // one button.
-      document.getElementById('leadsBackfillBtn').style.display =
-        (currentUserRole === 'admin' || currentUserRole === 'super_admin') ? 'inline-block' : 'none';
       // Only flash the spinner on the very first load — allLeads is often
       // already populated by the time this runs (WFP Dashboard/Route
       // Planner load it too), so re-navigating to Leads was blanking an
@@ -7994,7 +7986,7 @@
 
     function filterLeadsTable() {
       const centreSearch = document.getElementById('leadsFilterCentre').value.trim().toLowerCase();
-      const periodKey = document.getElementById('leadsFilterPeriod').value;
+      const periodKey = document.getElementById('leadsDashRange').value;
       const partner = document.getElementById('leadsFilterPartner').value;
       const state = document.getElementById('leadsFilterState').value;
       const suburb = document.getElementById('leadsFilterSuburb').value;
@@ -8041,7 +8033,7 @@
 
       let filtered = nonPeriodFiltered.filter(l => !effectiveSuburb || l.suburb === effectiveSuburb);
       if (periodKey !== 'all') {
-        const { from, to } = salesDashRange(periodKey);
+        const { from, to } = periodKey === 'custom' ? getCustomLeadsDashRange() : salesDashRange(periodKey);
         filtered = filtered.filter(l => inDateRange(l.created_at, from, to));
       }
 
@@ -8070,22 +8062,14 @@
         btn.style.opacity = btn.dataset.state === activeBtnState ? '1' : '.55';
       });
 
-      // Metro count for the stats bar — captured BEFORE the regional tab
-      // filter below, off every other real filter (state/partner/period/
-      // search/etc.), so it stays a stable "how many of these are metro"
-      // reference no matter which of the Metro/Regional/All tabs is
-      // currently selected, instead of just echoing the table's own
-      // count back on the Metro tab and reading as 0 on the other two.
-      const metroCount = filtered.filter(l => !l.archived_at).length;
-
-      // Regional/archived leads are excluded before the stats bar too
+      // Regional/archived leads are excluded before the KPI row too
       // (unlike the closed filter below) — they aren't part of the
       // working pipeline at all, so they shouldn't inflate "how many
       // leads reached this stage" any more than they show in the table.
       if (leadsRegionalFilter === 'active') filtered = filtered.filter(l => !l.archived_at);
       else if (leadsRegionalFilter === 'regional') filtered = filtered.filter(l => !!l.archived_at);
 
-      // Called/Visited/Signed in the stats bar are achievement counts —
+      // Called/Visited/Signed in the KPI row are achievement counts —
       // "how many leads reached this stage", not "how many are still open"
       // — so they're computed before the closed filter, off every OTHER
       // filter. Closing a lead (most often because it succeeded and its
@@ -8093,7 +8077,6 @@
       // count, which undercounted real wins. The table itself still
       // applies the closed filter, since that one genuinely is about
       // which rows to show, not what happened historically.
-      renderLeadsStatsBar(filtered, metroCount);
       renderLeadsKpis(filtered, periodKey);
       if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
       else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
@@ -8111,30 +8094,43 @@
       if (periodKey === 'all') {
         document.getElementById('leadsRepBreakdown').innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">Pick a period above (not "All time") to compare against the period before it.</div>';
       } else {
-        const { from, to } = salesDashRange(periodKey);
+        const { from, to } = periodKey === 'custom' ? getCustomLeadsDashRange() : salesDashRange(periodKey);
         const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
         const previous = nonPeriodFiltered.filter(l => (!effectiveSuburb || l.suburb === effectiveSuburb) && inDateRange(l.created_at, prevFrom, prevTo));
         renderSalesRepBreakdown(filtered, previous, 'leadsRepBreakdown');
       }
     }
 
-    // Totals react to whatever's currently filtered, not the full dataset —
-    // e.g. filter down to SA + Target Temp and these numbers describe just
-    // that slice, since that's the question the filter was set up to ask.
-    function renderLeadsStatsBar(filtered, metroCount) {
-      const bar = document.getElementById('leadsStatsBar');
-      if (!allLeads.length) { bar.innerHTML = ''; return; }
-      const called = filtered.filter(l => l.lead_called_status === 'done').length;
-      const visited = filtered.filter(l => l.centre_visited_status === 'done').length;
-      const signed = filtered.filter(l => l.signed_status === 'signed').length;
-      const totalLabel = filtered.length === allLeads.length ? 'Leads' : `Leads (of ${allLeads.length})`;
-      bar.innerHTML = `
-        <div class="leads-stat"><span class="leads-stat-num">${filtered.length}</span><span class="leads-stat-label">${totalLabel}</span></div>
-        <div class="leads-stat" title="Not outside the Melbourne/Adelaide/Brisbane metro radius — see the Metro/Regional tabs below"><span class="leads-stat-num" style="color:#0d9488">${metroCount}</span><span class="leads-stat-label">Metro</span></div>
-        <div class="leads-stat"><span class="leads-stat-num" style="color:#15803d">${called}</span><span class="leads-stat-label">Called</span></div>
-        <div class="leads-stat"><span class="leads-stat-num" style="color:#2563eb">${visited}</span><span class="leads-stat-label">Visited</span></div>
-        <div class="leads-stat"><span class="leads-stat-num" style="color:#7c3aed">${signed}</span><span class="leads-stat-label">Signed</span></div>`;
+    // Leads page's own period selector — Joy, 2026-09-03: "add the 'All
+    // Time' filter outside here and just copy the same time filter that
+    // appears on the WFP Dashboard". Mirrors onSalesDashRangeChange/
+    // getCustomSalesDashRange exactly, just against #leadsDashRange*
+    // instead of #salesDashRange* — this page has its own KPI row/table
+    // to drive independently, not the WFP Dashboard's.
+    function onLeadsDashRangeChange() {
+      const isCustom = document.getElementById('leadsDashRange').value === 'custom';
+      const box = document.getElementById('leadsDashCustomRange');
+      box.style.display = isCustom ? 'flex' : 'none';
+      if (isCustom) {
+        const fromEl = document.getElementById('leadsDashRangeFrom');
+        const toEl = document.getElementById('leadsDashRangeTo');
+        if (!fromEl.value || !toEl.value) {
+          const now = new Date();
+          fromEl.value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+          toEl.value = ymd(now);
+        }
+      }
+      filterLeadsTable();
     }
+
+    function getCustomLeadsDashRange() {
+      const fromVal = document.getElementById('leadsDashRangeFrom').value;
+      const toVal = document.getElementById('leadsDashRangeTo').value;
+      const from = fromVal ? new Date(fromVal + 'T00:00:00') : new Date(2000, 0, 1);
+      const to = toVal ? new Date(new Date(toVal + 'T00:00:00').getTime() + 24 * 60 * 60 * 1000) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+      return { from, to };
+    }
+
 
     // Leads-only version of the WFP Dashboard's KPI row — Joy, 2026-09-02.
     // `filtered` here is exactly the set the table/stats bar above are
@@ -8156,7 +8152,7 @@
           { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', hint: `${c.signed} of ${c.visited} visited leads signed` }
         ];
       } else {
-        const { from, to } = salesDashRange(periodKey);
+        const { from, to } = periodKey === 'custom' ? getCustomLeadsDashRange() : salesDashRange(periodKey);
         const { from: prevFrom, to: prevTo } = salesPrevRange(from, to);
         const previous = allLeads.filter(l => leadMatchesWfpFilter(l) && inDateRange(l.created_at, prevFrom, prevTo));
         const p = salesFunnelCounts(previous);
