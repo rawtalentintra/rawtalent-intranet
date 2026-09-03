@@ -12,7 +12,6 @@ const { syncFromDrive } = require('./services/driveService');
 const PgSessionStore = require('./services/sessionStore');
 const webexService = require('./services/webexService');
 const dubberService = require('./services/dubberService');
-const calendarSync = require('./services/leadCalendarSyncService');
 const rtCandidatesSync = require('./services/rtCandidatesSyncService');
 const rtApiService = require('./services/rtApiReportService');
 const leadAutoSignService = require('./services/leadAutoSignService');
@@ -166,7 +165,6 @@ app.use('/api/centres', require('./routes/centres'));
 app.use('/api/educators', require('./routes/educators'));
 app.use('/api/micropods', require('./routes/micropods'));
 app.use('/api/reports', require('./routes/reports'));
-app.use('/api/calendar-sync', require('./routes/calendarSync'));
 app.use('/api/route-planner', require('./routes/routePlanner'));
 app.use('/api/document-checker', require('./routes/documentChecker'));
 app.use('/api/outreach-lists', require('./routes/outreachLists'));
@@ -373,17 +371,6 @@ async function start() {
   // 15-minute background auto-sync introduced glitches for evaluators
   // actively grading a call (a mid-session refetch landing under them).
   // Reverted; the manual button (routes/calls.js) is unaffected.
-  // Renews Google Calendar push-notification channels before their ~30-day
-  // expiry, and registers new ones for any partner missing a channel (e.g.
-  // right after a partner first connects). No-ops entirely until at least
-  // one partner is connected (delegation configured, or an oauth
-  // connection exists), so it's always safe to run.
-  if (Object.keys(await calendarSync.getPartnerCalendarMap()).length) {
-    calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
-    setInterval(() => {
-      calendarSync.renewWatchesNearingExpiry().catch(err => console.error('Calendar watch renewal error:', err.message));
-    }, 12 * 60 * 60 * 1000);
-  }
   if (rtApiService.isConfigured()) {
     // First-ever boot (or a wiped cache) would otherwise show an empty
     // Candidates list until the next 2am window — bootstrap it once

@@ -1043,7 +1043,6 @@
           </div>
           <div style="display:flex;gap:8px;flex-shrink:0">
             <button class="btn-add" id="addCentreBtn" onclick="openAddCentreModal()">➕ Add Centre</button>
-            <button class="btn-secondary" onclick="openCalendarSyncModal()">🗓️ Calendar Sync</button>
           </div>
         </div>
 
@@ -1325,20 +1324,25 @@
                 <select id="visitLogActivityType" class="form-control"></select>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Visit date</label>
-                <input type="date" id="visitLogDate" class="form-control">
+                <input type="date" id="visitLogDate" class="form-control" onchange="onVisitLogScheduleChange()">
+              </div>
+              <div class="form-group-modal">
+                <label class="form-label-modal">Time <span class="optional">(for calendar link)</span></label>
+                <input type="time" id="visitLogTime" class="form-control" onchange="onVisitLogScheduleChange()">
               </div>
               <div class="form-group-modal">
                 <label class="form-label-modal">Status</label>
-                <select id="visitLogStatus" class="form-control">
+                <select id="visitLogStatus" class="form-control" onchange="onVisitLogScheduleChange()">
                   <option value="planned">Planned</option>
                   <option value="completed">Called / Visited</option>
                   <option value="rescheduled">Rescheduled</option>
                 </select>
               </div>
             </div>
+            <a id="visitLogAddToCal" href="#" target="_blank" rel="noopener" class="btn-secondary" style="display:none;margin:-4px 0 12px;text-align:center;text-decoration:none;padding:5px 10px;font-size:12px">📅 Add to Google Calendar</a>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
               <div class="form-group-modal">
                 <label class="form-label-modal">Contact name <span class="optional">(optional)</span></label>
@@ -1400,80 +1404,6 @@
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeVisitLogModal()">Cancel</button>
             <button class="btn-add" id="visitLogSubmitBtn" onclick="submitVisitLog()">Save Visit</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Calendar Sync — not its own destination, just occasional admin
-           housekeeping for the sync engine (register channels, manual
-           catch-up, resolve ambiguous matches). Triggered from a button in
-           the Leads filter bar rather than a nav section, since scheduling
-           itself needs no UI at all — it happens automatically off the
-           Lead Called/Centre Visited status change. -->
-      <div class="modal-overlay" id="calendarSyncModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeCalendarSyncModal()">
-        <div class="modal" style="max-width:760px">
-          <div class="modal-header">
-            <div class="modal-title">Calendar Sync</div>
-            <button class="modal-close" onclick="closeCalendarSyncModal()">×</button>
-          </div>
-          <div class="modal-body" style="max-height:70vh;overflow-y:auto">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Scheduling a call/visit on a lead already creates the event on that partner's calendar automatically. This is just setup and cleanup: registering the push-notification channels, a manual catch-up sync, and linking anything it couldn't auto-match.</div>
-            <div id="calSyncModeInfo"></div>
-
-            <!-- Joy, 2026-09-03: "This is a lot of trouble just to connect a
-                 Google calendar" — after OAuth and service-account mode both
-                 hit walls needing Google admin access nobody could confirm
-                 holding, this is the actually-simple option: no Google Cloud
-                 setup at all, each partner subscribes to a private read-only
-                 URL from their own Google Calendar. One-way and not
-                 instant (Google polls a subscribed URL every so often, not
-                 live) — see db/schema.sql's calendar_feed_tokens comment. -->
-            <div style="font-size:13px;font-weight:700;margin-bottom:4px">📅 Calendar Feed — no Google Cloud setup needed</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner subscribes once, straight from their own Google Calendar — read-only, refreshes every hour or so. Nothing to configure on the Google side at all.</div>
-            <div id="calFeedLinks" style="margin-bottom:20px"><div class="loading-spinner"><div class="spinner"></div></div></div>
-
-            <div style="font-size:13px;font-weight:700;margin-bottom:4px">Connection</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Register once domain-wide delegation is authorized and CALENDAR_PARTNER_MAP is set — renews automatically every 12h after that. "Sync Now" is a manual catch-up and doubles as a per-partner connection test.</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn-add" id="calSyncRegisterBtn" onclick="registerCalendarWatches()" style="padding:6px 12px;font-size:12px">Register Watch Channels</button>
-              <button class="btn-add" id="calSyncNowBtn" onclick="syncCalendarNow()" style="padding:6px 12px;font-size:12px">Sync Now</button>
-            </div>
-            <div id="calSyncStatus" style="display:none;margin-top:12px"></div>
-
-            <!-- Only meaningful in CALENDAR_AUTH_MODE=oauth — "Connect" always
-                 tries to build a Google OAuth consent URL regardless of which
-                 auth mode is actually configured (it doesn't check authMode()
-                 at all), so it stays a 500 dead end in 'delegation'/
-                 'service-account' mode. Hidden there by loadCalendarSyncModeInfo()
-                 below rather than left visible to invite exactly that mistake. -->
-            <div id="calPartnerConnectionsSection">
-              <div style="font-size:13px;font-weight:700;margin-top:20px;margin-bottom:4px">Partner Connections</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Each partner connects their own Google Calendar with one click — no Workspace admin setup needed. They can also connect from their own login; this list is just visibility + a way to reconnect on their behalf.</div>
-              <div id="calPartnerConnections"><div class="loading-spinner"><div class="spinner"></div></div></div>
-            </div>
-
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
-              <div style="font-size:13px;font-weight:700">Needs Review</div>
-              <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="loadCalendarSyncSection()">🔄 Refresh</button>
-            </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Calendar events that couldn't be confidently matched to a lead — either no Call/Visit tag was found in the title, or two leads scored too close to guess safely.</div>
-            <div style="overflow-x:auto">
-              <table class="data-table data-table-compact">
-                <thead>
-                  <tr>
-                    <th>Event</th>
-                    <th>Type</th>
-                    <th>Calendar</th>
-                    <th>Reason</th>
-                    <th style="min-width:200px">Link to lead</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="calSyncReviewBody">
-                  <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       </div>
@@ -1727,9 +1657,7 @@
               <div id="routeTimeline"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
                 <button class="btn-secondary" onclick="openRouteInGoogleMaps()">📍 Open in Google Maps</button>
-                <button class="btn-add" id="routeSyncCalBtn" onclick="syncRouteToCalendarUI()">🗓️ Sync Route to Google Calendar</button>
               </div>
-              <div id="routeSyncStatus" style="display:none;margin-top:10px"></div>
             </div>
             <div class="admin-table-card" style="padding:0;overflow:hidden">
               <div id="routeMap" style="height:460px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px;text-align:center;padding:20px">
@@ -1755,7 +1683,8 @@
       <div id="leadStatusPopover" class="status-popover" style="display:none">
         <div class="status-popover-label" id="leadPopoverLabel"></div>
         <select id="leadPopoverStatus" class="form-control" onchange="onLeadPopoverStatusChange()"></select>
-        <input type="datetime-local" id="leadPopoverAt" class="form-control" style="margin-top:5px">
+        <input type="datetime-local" id="leadPopoverAt" class="form-control" style="margin-top:5px" oninput="onLeadPopoverStatusChange()">
+        <a id="leadPopoverAddToCal" href="#" target="_blank" rel="noopener" class="btn-secondary" style="display:none;margin-top:5px;text-align:center;text-decoration:none;padding:3px 9px;font-size:10.5px">📅 Add to Google Calendar</a>
         <div class="status-popover-actions">
           <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="closeLeadStatusPopover()">Cancel</button>
           <button class="btn-add" style="padding:3px 9px;font-size:10.5px" onclick="saveLeadStatusPopover()">Save</button>
@@ -6518,7 +6447,6 @@
       { area: 'Dashboard (site-wide stats)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Reports — Bookings/Timesheets', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Onboarding — Educators, Centres, Document Checker, Advertising Opportunities', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
-      { area: 'Leads — Calendar Sync (register channels, sync now, review queue)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Smart Routing — plan/optimize centre visit routes, export to Maps/Calendar', user: false, qa: false, wfp: true, admin: true, superAdmin: true },
       { area: 'Our Team (org chart, HR profiles)', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
       { area: 'Projects Dashboard', user: false, qa: false, wfp: false, admin: true, superAdmin: true },
@@ -7640,20 +7568,6 @@
     // First-name-only, for the dense Leads table column — full names stay
     // everywhere else (filters, lead detail modal) where space isn't tight.
     const WORKFORCE_PARTNER_SHORT = { 'Gwen Stocks (SA)': 'Gwen', 'Justine Hardware (VIC)': 'Justine', 'Liam Baxter (VIC)': 'Liam' };
-    // Calendar Sync's own "Partner Connections" list (loadPartnerConnections
-    // below) — deliberately a SEPARATE list from WORKFORCE_PARTNER_OPTIONS
-    // above, not that one with Joy appended, since WORKFORCE_PARTNER_OPTIONS
-    // is also every lead/centre assignment dropdown in the app (adding Joy
-    // there would offer her as an assignable Workforce Partner everywhere,
-    // which isn't what she asked for — she just wants to test her own
-    // calendar connection). This label is only a free-text key stored in
-    // calendar_oauth_connections.partner_label (see googleCalendarClient.js)
-    // — it doesn't need to match CALENDAR_PARTNER_MAP's value for her email,
-    // though "Joy — Administrator" mirrors her existing name elsewhere in
-    // this app for consistency. Since no lead is ever assigned to her as a
-    // workforce partner, connecting tests the OAuth connection itself, not
-    // real lead-event auto-sync the way it works for the three real partners.
-    const CALENDAR_SYNC_PARTNER_OPTIONS = [...WORKFORCE_PARTNER_OPTIONS, 'Joy — Administrator'];
     // Former reps with no active account — their historical leads stay put,
     // just excluded from the "Submitted by" filter's option list.
     const LEADS_SUBMITTER_HIDDEN = new Set(['allyssa@rawtalent.com.au', 'jane@rawtalent.com.au']);
@@ -8424,6 +8338,27 @@
       const status = document.getElementById('leadPopoverStatus').value;
       const needsDate = status === 'done' || status === 'scheduled' || status === 'signed';
       document.getElementById('leadPopoverAt').style.display = needsDate ? '' : 'none';
+
+      // "Add to Calendar" only makes sense for a genuinely upcoming,
+      // dated call/visit — not Profile Created (no calendar meaning) and
+      // not once it's already 'done' (nothing left to schedule).
+      const link = document.getElementById('leadPopoverAddToCal');
+      const atVal = document.getElementById('leadPopoverAt').value;
+      const lead = allLeads.find(l => l.id === leadPopoverLeadId);
+      if (status !== 'scheduled' || !atVal || !lead || (leadPopoverField !== 'lead_called' && leadPopoverField !== 'centre_visited')) {
+        link.style.display = 'none';
+        return;
+      }
+      const isCall = leadPopoverField === 'lead_called';
+      const start = new Date(atVal);
+      const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
+      link.href = buildGoogleCalendarQuickAddUrl({
+        title: `${isCall ? 'Call' : 'Visit'}: ${lead.centre_name}`,
+        start, end,
+        details: `HeartBeat lead: ${location.origin}/admin?lead=${lead.id}`,
+        location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')
+      });
+      link.style.display = 'block';
     }
 
     function closeLeadStatusPopover() {
@@ -11274,6 +11209,29 @@
       const current = sel.value;
       sel.innerHTML = '<option value="">—</option>' + types.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
       if (types.includes(current)) sel.value = current;
+      onVisitLogScheduleChange();
+    }
+
+    // "Add to Calendar" only makes sense for a not-yet-happened entry —
+    // Called/Visited already happened, nothing left to schedule. The Time
+    // field is calendar-link-only (see its label) — visitLogDate/the
+    // actual saved visit_date are untouched by it, so this never risks
+    // the existing save/edit date math (addDaysToDateInputValue etc.).
+    function onVisitLogScheduleChange() {
+      const link = document.getElementById('visitLogAddToCal');
+      const status = document.getElementById('visitLogStatus').value;
+      const dateVal = document.getElementById('visitLogDate').value;
+      if (status === 'completed' || !dateVal) { link.style.display = 'none'; return; }
+      const timeVal = document.getElementById('visitLogTime').value || '09:00';
+      const isCall = document.getElementById('visitLogChannel').value === 'call';
+      const start = new Date(`${dateVal}T${timeVal}`);
+      const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
+      link.href = buildGoogleCalendarQuickAddUrl({
+        title: `${isCall ? 'Call' : 'Visit'}: ${currentCentreName || 'Centre'}`,
+        start, end,
+        details: `HeartBeat centre: ${location.origin}/admin?centre=${encodeURIComponent(currentCentreKey || '')}`
+      });
+      link.style.display = 'block';
     }
 
     // Reads LOCAL date components rather than round-tripping through
@@ -11314,6 +11272,7 @@
       document.getElementById('visitLogNextStep').value = '';
       document.getElementById('visitLogNextStepDue').value = '';
       document.getElementById('visitLogDate').value = toDateInputValue(new Date());
+      document.getElementById('visitLogTime').value = '09:00';
       document.getElementById('visitLogRecordingsList').innerHTML = '';
       document.getElementById('visitLogLastBookingDate').textContent = '…';
       document.getElementById('visitLogChannel').value = 'visit';
@@ -11342,6 +11301,11 @@
           const v = visits.find(x => x.id === visitId);
           if (v) {
             document.getElementById('visitLogDate').value = toDateInputValue(v.visit_date);
+            // visit_date carries a real time-of-day (TIMESTAMPTZ) even
+            // though the Time field above is calendar-link-only — reusing
+            // it here just means re-editing an existing visit shows a
+            // sensible starting time instead of always resetting to 9am.
+            document.getElementById('visitLogTime').value = new Date(v.visit_date).toTimeString().slice(0, 5);
             document.getElementById('visitLogStatus').value = v.status;
             document.getElementById('visitLogBrief').value = v.pre_visit_brief || '';
             document.getElementById('visitLogOutcome').value = v.outcome || '';
@@ -11446,263 +11410,31 @@
     }
 
     // ══════════════════════════════════════════════════════════════
-    // Calendar Sync (Workforce Partner Google Calendar two-way sync)
+    // Calendar Sync (the whole OAuth/service-account/delegation/.ics-feed
+    // subsystem, and its modal) removed — Joy, 2026-09-03: "This is a lot
+    // of trouble just to connect a Google calendar honestly." Replaced
+    // with buildGoogleCalendarQuickAddUrl() (below) — a plain, no-backend
+    // "Add to Calendar" link on each individual scheduled call/visit,
+    // wired in at three places: openLeadStatusPopover's Lead Called/
+    // Centre Visited popover, the Centre "Log a Call/Visit" modal, and
+    // Smart Routing's per-stop timeline.
     // ══════════════════════════════════════════════════════════════
-    function openCalendarSyncModal() {
-      document.getElementById('calendarSyncModal').classList.add('open');
-      loadCalendarSyncSection();
-      loadCalendarSyncModeInfo();
-      loadCalendarFeedLinks();
-    }
 
-    // Joy, 2026-09-03: "This is a lot of trouble just to connect a Google
-    // calendar" — the .ics subscription feed alternative (routes/
-    // calendarSync.js's /feed-link, /feed/:token). Fetches each partner's
-    // link individually rather than one bulk endpoint — canManageCalendarConnection
-    // on the server naturally narrows this to "just your own row" for a
-    // non-admin WFP user (their request for anyone else's label 403s and
-    // is just skipped here, no separate role check needed client-side).
-    async function loadCalendarFeedLinks() {
-      const el = document.getElementById('calFeedLinks');
-      try {
-        const rows = (await Promise.all(CALENDAR_SYNC_PARTNER_OPTIONS.map(async label => {
-          const res = await fetch(`/api/calendar-sync/feed-link/${encodeURIComponent(label)}`);
-          if (!res.ok) return null;
-          return { label, ...(await res.json()) };
-        }))).filter(Boolean);
-        if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No feed links available for your account.</div>'; return; }
-        el.innerHTML = rows.map(r => `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100);flex-wrap:wrap">
-            <div style="font-size:13px;font-weight:600">${escHtml(r.label)}</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <a href="${r.googleAddUrl}" target="_blank" rel="noopener" class="btn-add" style="padding:4px 10px;font-size:11.5px;text-decoration:none;display:inline-block">📅 Add to Google Calendar</a>
-              <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="copyCalendarFeedLink('${r.icsUrl.replace(/'/g, "\\'")}')">Copy link</button>
-              <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="resetCalendarFeedLink('${escHtml(r.label).replace(/'/g, "\\'")}')">Reset</button>
-            </div>
-          </div>`).join('');
-      } catch {
-        el.innerHTML = '<div style="font-size:12px;color:#c0392b">Could not load feed links.</div>';
-      }
-    }
-    function copyCalendarFeedLink(url) {
-      navigator.clipboard.writeText(url)
-        .then(() => toast('Link copied — paste into Google Calendar → Settings → Add calendar → From URL'))
-        .catch(() => toast('Could not copy automatically — select and copy the link manually', 'error'));
-    }
-    async function resetCalendarFeedLink(label) {
-      if (!confirm(`Reset ${label}'s calendar feed link? The old URL stops working immediately — they'll need to re-subscribe with the new one.`)) return;
-      try {
-        const res = await fetch(`/api/calendar-sync/feed-link/${encodeURIComponent(label)}/regenerate`, { method: 'POST' });
-        if (!res.ok) { toast('Failed to reset', 'error'); return; }
-        toast('Link reset');
-        loadCalendarFeedLinks();
-      } catch { toast('Network error', 'error'); }
-    }
-
-    // Joy, 2026-09-03: the OAuth Connect flow (CALENDAR_AUTH_MODE=oauth)
-    // started returning a generic Google 500 with no reachable config
-    // issue found on our end — CALENDAR_AUTH_MODE=service-account routes
-    // around that entirely (see googleCalendarClient.js). This drives two
-    // things off one status fetch: the mode-explainer banner, AND whether
-    // the "Partner Connections" section (Connect/Reconnect buttons) shows
-    // at all — "Connect" always tries to build a Google OAuth consent URL
-    // no matter which mode is configured (routes/calendarSync.js's
-    // /connect route doesn't check authMode() first), so leaving it
-    // visible outside 'oauth' mode is a guaranteed-500 trap, not a real
-    // option — better to hide it than let it get clicked by habit.
-    async function loadCalendarSyncModeInfo() {
-      const infoEl = document.getElementById('calSyncModeInfo');
-      const connectionsSection = document.getElementById('calPartnerConnectionsSection');
-      try {
-        const status = await fetch('/api/calendar-sync/status').then(r => r.json());
-        connectionsSection.style.display = status.authMode === 'oauth' ? '' : 'none';
-        if (status.authMode === 'oauth') { loadPartnerConnections(); infoEl.innerHTML = ''; return; }
-        if (status.authMode === 'service-account' && status.serviceAccountEmail) {
-          infoEl.innerHTML = `
-            <div style="padding:10px 12px;border-radius:var(--radius);background:var(--orange-glow);font-size:12px;margin-bottom:14px">
-              <strong>Service-account mode is active.</strong> Each partner (including you) needs to manually share
-              their own Google Calendar with this address, granting <strong>"Make changes to events"</strong>:
-              <div style="font-family:monospace;background:#fff;border-radius:6px;padding:5px 8px;margin:6px 0;word-break:break-all">${escHtml(status.serviceAccountEmail)}</div>
-              In Google Calendar: their calendar's <strong>⋮ → Settings and sharing → Share with specific people or groups → + Add people</strong>.
-              There's no "Connect" step in this mode — once sharing is done, hit Sync Now below.
-            </div>`;
-          return;
-        }
-        // CALENDAR_AUTH_MODE=service-account is correctly set, but
-        // GOOGLE_SERVICE_ACCOUNT_KEY isn't (missing, empty, or fails to
-        // decode) — a real, distinct problem from 'delegation' actually
-        // being active, and worth saying so plainly rather than falling
-        // into the generic message below, which would wrongly claim
-        // delegation mode when the mode itself is set correctly.
-        if (status.authMode === 'service-account') {
-          infoEl.innerHTML = `
-            <div style="padding:10px 12px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12px;margin-bottom:14px">
-              <strong>Service-account mode is set, but no usable key found.</strong> <code>GOOGLE_SERVICE_ACCOUNT_KEY</code> is missing, empty,
-              or not valid base64-encoded JSON in Railway — nothing will sync until that's set.
-            </div>`;
-          return;
-        }
-        // Falls through here for 'delegation' — either genuinely configured
-        // (Workspace admin authorized it), or CALENDAR_AUTH_MODE has an
-        // unrecognized value and silently defaulted to this (see
-        // googleCalendarClient.js's authMode() — anything that isn't
-        // exactly 'oauth' or 'service-account' lands here). Worth a nudge
-        // rather than staying silent, since that specific mistake is easy
-        // to make (e.g. pasting an email into CALENDAR_AUTH_MODE itself).
-        infoEl.innerHTML = `
-          <div style="padding:10px 12px;border-radius:var(--radius);background:var(--gray-100);font-size:12px;margin-bottom:14px;color:var(--text-muted)">
-            Running in <strong>delegation</strong> mode (domain-wide delegation, needs Workspace admin authorization). If that
-            wasn't the intent, check <code>CALENDAR_AUTH_MODE</code> in Railway is set to exactly <code>service-account</code> or <code>oauth</code> — any other value lands here by default.
-          </div>`;
-      } catch { infoEl.innerHTML = ''; connectionsSection.style.display = ''; }
-    }
-
-    // Per-partner OAuth connect/disconnect (services/googleCalendarClient.js
-    // CALENDAR_AUTH_MODE=oauth) — the workaround for not wanting to do the
-    // Google Workspace Admin domain-wide-delegation dance.
-    // CALENDAR_SYNC_PARTNER_OPTIONS (not the shared WORKFORCE_PARTNER_OPTIONS
-    // every lead/centre assignment dropdown uses) — see its own comment for
-    // why this list needs to be separate.
-    async function loadPartnerConnections() {
-      const el = document.getElementById('calPartnerConnections');
-      try {
-        const connections = await fetch('/api/calendar-sync/connections').then(r => r.json());
-        const byLabel = {};
-        for (const c of connections) byLabel[c.partner_label] = c;
-        el.innerHTML = CALENDAR_SYNC_PARTNER_OPTIONS.map(label => {
-          const c = byLabel[label];
-          return `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100)">
-              <div>
-                <div style="font-size:13px;font-weight:600">${escHtml(label)}</div>
-                <div style="font-size:11.5px;color:${c ? '#1a8a4a' : 'var(--text-muted)'}">${c ? `✓ Connected — ${escHtml(c.google_email)}` : 'Not connected'}</div>
-              </div>
-              <div style="display:flex;gap:6px">
-                <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px" onclick="connectPartnerCalendar('${escHtml(label).replace(/'/g, "\\'")}')">${c ? 'Reconnect' : 'Connect'}</button>
-                ${c ? `<button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;color:#c0392b" onclick="disconnectPartnerCalendar('${escHtml(label).replace(/'/g, "\\'")}')">Disconnect</button>` : ''}
-              </div>
-            </div>`;
-        }).join('');
-      } catch {
-        el.innerHTML = '<div style="font-size:12px;color:#c0392b">Could not load connection status.</div>';
-      }
-    }
-    function connectPartnerCalendar(label) {
-      // A full Google consent redirect doesn't belong inside this modal's
-      // iframe-less page — opens in a new tab so the admin panel (and this
-      // modal) stays exactly as it was; the new tab shows a plain
-      // confirmation page when it's done (routes/calendarSync.js).
-      window.open(`/api/calendar-sync/connect/${encodeURIComponent(label)}`, '_blank');
-      toast('Complete the Google sign-in in the new tab, then come back and refresh.', 'success');
-    }
-    async function disconnectPartnerCalendar(label) {
-      if (!confirm(`Disconnect ${label}'s Google Calendar? Their scheduled call/visit reminders will stop syncing until reconnected.`)) return;
-      try {
-        const res = await fetch(`/api/calendar-sync/connect/${encodeURIComponent(label)}`, { method: 'DELETE' });
-        if (!res.ok) { toast('Failed to disconnect', 'error'); return; }
-        toast('Disconnected');
-        loadPartnerConnections();
-      } catch { toast('Network error', 'error'); }
-    }
-    function closeCalendarSyncModal() {
-      document.getElementById('calendarSyncModal').classList.remove('open');
-    }
-
-    function renderCalSyncResults(results) {
-      const rows = Object.entries(results).map(([email, status]) => {
-        const ok = status === 'ok';
-        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12px">
-          <span>${escHtml(email)}</span>
-          <span style="color:${ok ? '#1a8a4a' : '#c0392b'};font-weight:600">${ok ? '✓ OK' : escHtml(status)}</span>
-        </div>`;
-      }).join('');
-      return `<div style="padding:12px 14px;border-radius:var(--radius);background:var(--gray-100)">${rows || 'No partners configured in CALENDAR_PARTNER_MAP.'}</div>`;
-    }
-
-    async function registerCalendarWatches() {
-      const btn = document.getElementById('calSyncRegisterBtn');
-      const statusEl = document.getElementById('calSyncStatus');
-      btn.disabled = true; btn.textContent = 'Registering…';
-      statusEl.style.display = 'block';
-      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Registering watch channels…';
-      try {
-        const res = await fetch('/api/calendar-sync/watch/register', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) { statusEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Failed to register')}</div>`; return; }
-        statusEl.innerHTML = renderCalSyncResults(data.results);
-      } catch { statusEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Request failed.</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'Register Watch Channels'; }
-    }
-
-    async function syncCalendarNow() {
-      const btn = document.getElementById('calSyncNowBtn');
-      const statusEl = document.getElementById('calSyncStatus');
-      btn.disabled = true; btn.textContent = 'Syncing…';
-      statusEl.style.display = 'block';
-      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Fetching calendar changes…';
-      try {
-        const res = await fetch('/api/calendar-sync/sync-now', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) { statusEl.innerHTML = `<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
-        statusEl.innerHTML = renderCalSyncResults(data.results);
-        loadCalendarSyncSection();
-      } catch { statusEl.innerHTML = '<div style="padding:12px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:13px">Request failed.</div>'; }
-      finally { btn.disabled = false; btn.textContent = 'Sync Now'; }
-    }
-
-    async function loadCalendarSyncSection() {
-      const tbody = document.getElementById('calSyncReviewBody');
-      try {
-        if (!allLeads.length) allLeads = await fetch('/api/leads').then(r => r.json());
-        const items = await fetch('/api/calendar-sync/review-queue').then(r => r.json());
-        if (!items.length) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Nothing needs review right now.</td></tr>`; return; }
-
-        const leadOptions = allLeads
-          .slice()
-          .sort((a, b) => (a.centre_name || '').localeCompare(b.centre_name || ''))
-          .map(l => `<option value="${l.id}">${escHtml(l.centre_name)}${l.suburb ? ' — ' + escHtml(l.suburb) : ''}</option>`).join('');
-
-        tbody.innerHTML = items.map(item => `
-          <tr>
-            <td class="td-truncate" style="max-width:180px">${escHtml(item.event_title || '(untitled)')}</td>
-            <td>${item.event_type ? escHtml(item.event_type) : '<span style="color:var(--text-muted)">unknown</span>'}</td>
-            <td class="td-truncate" style="max-width:140px">${escHtml(item.calendar_owner_email)}</td>
-            <td class="td-truncate" style="max-width:220px" title="${escHtml(item.reason || '')}">${escHtml(item.reason || '')}</td>
-            <td>
-              <select id="calSyncLead_${item.id}" class="form-control" style="font-size:11px;padding:3px 6px">
-                <option value="">Select lead…</option>
-                ${leadOptions}
-              </select>
-            </td>
-            <td style="white-space:nowrap">
-              <button class="btn-add" style="padding:3px 9px;font-size:10.5px" onclick="resolveCalSyncItem('${item.id}', '${item.event_type || 'call'}')">Link</button>
-              <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="resolveCalSyncItem('${item.id}', '${item.event_type || 'call'}', true)">Dismiss</button>
-            </td>
-          </tr>`).join('');
-
-        items.forEach(item => {
-          if (!item.candidate_lead_id) return;
-          const sel = document.getElementById(`calSyncLead_${item.id}`);
-          if (sel) sel.value = item.candidate_lead_id;
-        });
-      } catch {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c0392b;padding:20px">Failed to load review queue.</td></tr>`;
-      }
-    }
-
-    async function resolveCalSyncItem(id, eventType, dismiss = false) {
-      const leadId = dismiss ? null : document.getElementById(`calSyncLead_${id}`)?.value;
-      if (!dismiss && !leadId) { toast('Pick a lead to link first', 'error'); return; }
-      try {
-        const res = await fetch(`/api/calendar-sync/review-queue/${id}/resolve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ leadId: leadId || null, eventType })
-        });
-        if (!res.ok) { toast('Failed to resolve', 'error'); return; }
-        toast(dismiss ? 'Dismissed' : 'Linked to lead');
-        loadCalendarSyncSection();
-      } catch { toast('Request failed', 'error'); }
+    // Google's public "quick add" URL — opens Google Calendar (in
+    // whichever account the browser is already signed into) with a
+    // pre-filled single-event form, no API/OAuth/backend involved at all.
+    // `dates` wants UTC basic format (YYYYMMDDTHHMMSSZ); Google fills in
+    // the viewer's own timezone display automatically.
+    function buildGoogleCalendarQuickAddUrl({ title, start, end, details, location }) {
+      const toUtcBasic = d => new Date(d).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const params = new URLSearchParams({
+        action: 'TEMPLATE',
+        text: title || '',
+        dates: `${toUtcBasic(start)}/${toUtcBasic(end)}`
+      });
+      if (details) params.set('details', details);
+      if (location) params.set('location', location);
+      return `https://calendar.google.com/calendar/render?${params.toString()}`;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -12592,6 +12324,17 @@
           </div>`;
         }
         const fullAddress = formatLeadAddress(b.stop);
+        // No-backend "Add to Calendar" per stop — Joy, 2026-09-03: replaced
+        // the old bulk "Sync Route to Google Calendar" button (which pushed
+        // every stop via the now-removed Calendar Sync API) with this,
+        // same buildGoogleCalendarQuickAddUrl() trick used for leads/centres.
+        const detailPath = b.stop.type === 'centre' ? `/admin?centre=${encodeURIComponent(b.stop.id)}` : `/admin?lead=${encodeURIComponent(b.stop.id)}`;
+        const addToCalUrl = buildGoogleCalendarQuickAddUrl({
+          title: `Visit: ${b.stop.centre_name}`,
+          start: b.start, end: b.end,
+          details: `HeartBeat: ${location.origin}${detailPath}`,
+          location: fullAddress
+        });
         return `<div class="route-visit-row" draggable="true" data-stop-id="${b.stop.id}"
             ondragstart="onRouteStopDragStart(event, '${b.stop.id}')"
             ondragover="onRouteStopDragOver(event)"
@@ -12600,15 +12343,17 @@
             style="display:flex;gap:10px;padding:8px 0;font-size:13px;border-left:3px solid var(--orange);padding-left:8px;margin:4px 0;cursor:grab;border-radius:0 var(--radius) var(--radius) 0;transition:background .12s">
           <span style="color:var(--gray-400);letter-spacing:-1px" title="Drag to reorder">⠿⠿</span>
           <span>${iconFor.visit}</span>
-          <div>
-            <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong>${b.waitMinutes > 1 ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400">(rounded to a clean start — ${b.waitMinutes} min wait)</span>` : ''}</div>
+          <div style="flex:1">
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+              <div>${fmtTime(b.start)}–${fmtTime(b.end)}: <strong style="color:var(--navy)">${escHtml(b.stop.centre_name)}</strong>${b.waitMinutes > 1 ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400">(rounded to a clean start — ${b.waitMinutes} min wait)</span>` : ''}</div>
+              <a href="${addToCalUrl}" target="_blank" rel="noopener" style="flex-shrink:0;font-size:11px;color:var(--orange);text-decoration:none;white-space:nowrap">📅 Add to Calendar</a>
+            </div>
             ${fullAddress ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escHtml(fullAddress)}</div>` : ''}
             ${routeStopStatusLine(b.stop)}
           </div>
         </div>`;
       }).join('');
 
-      document.getElementById('routeSyncStatus').style.display = 'none';
       renderRouteMap(data);
     }
 
@@ -12707,27 +12452,6 @@
       let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
       if (waypoints) url += `&waypoints=${waypoints}`;
       window.open(url, '_blank');
-    }
-
-    async function syncRouteToCalendarUI() {
-      if (!currentRouteResult) return;
-      const btn = document.getElementById('routeSyncCalBtn');
-      const statusEl = document.getElementById('routeSyncStatus');
-      btn.disabled = true; btn.textContent = 'Syncing…';
-      statusEl.style.display = 'block';
-      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Creating calendar events…';
-      try {
-        const res = await fetch('/api/route-planner/sync-calendar', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ blocks: currentRouteResult.itinerary.blocks })
-        });
-        const data = await res.json();
-        if (!res.ok) { statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">${escHtml(data.error || 'Sync failed')}</div>`; return; }
-        statusEl.innerHTML = `<div style="padding:10px 14px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:12.5px">✓ Synced ${data.created.length} event${data.created.length === 1 ? '' : 's'} to ${escHtml(data.partnerEmail)}'s calendar</div>`;
-        routePlannerLeads = []; // force a refresh — visited statuses just changed
-        routePlannerCentres = []; // force a refresh — a synced centre may no longer be due
-      } catch { statusEl.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:12.5px">Network error.</div>'; }
-      finally { btn.disabled = false; btn.textContent = '🗓️ Sync Route to Google Calendar'; }
     }
 
     let mapboxGlLoadPromise = null;
