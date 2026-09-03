@@ -22,6 +22,17 @@ router.get('/map-token', (req, res) => {
   res.json({ configured: mapboxService.isConfigured(), token: process.env.MAPBOX_ACCESS_TOKEN || null });
 });
 
+// Live-as-you-type address suggestions for the mobile route builder's
+// starting-address/manual-stop fields — see mapboxService.suggestAddresses.
+router.get('/suggest-address', async (req, res) => {
+  try {
+    const suggestions = await mapboxService.suggestAddresses(req.query.q || '');
+    res.json({ suggestions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Resolves a flat id list (lead UUIDs and/or centreKeys, order preserved)
 // into full stop objects. Shared by /optimize (desktop) and /mobile-plan
 // (the /wfp route builder) — pulled out of what used to be one big

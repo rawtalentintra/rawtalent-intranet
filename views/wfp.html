@@ -154,6 +154,16 @@
     }
     textarea { min-height: 70px; resize: vertical; }
     .field-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+    /* Address autocomplete dropdown (Plan a Route's starting-address/
+       manual-stop fields) — absolutely positioned so it overlays whatever
+       comes next in the form instead of pushing it down. */
+    .autocomplete-dropdown {
+      position: absolute; left: 0; right: 0; top: 100%; z-index: 5;
+      background: var(--card); border: 1px solid var(--border); border-radius: 9px;
+      margin-top: 2px; overflow: hidden; contain: paint; transform-style: flat;
+    }
+    .autocomplete-item { padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .autocomplete-item:last-child { border-bottom: none; }
     label .optional { font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--text-muted); }
 
     .toast {
@@ -445,12 +455,25 @@
         ...allLeads.filter(l => !l.closed_at && !routeBuilderStops.some(s => s.type === 'lead' && s.id === l.id) && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(l => ({ type: 'lead', id: l.id, label: l.centre_name + (l.suburb ? ' — ' + l.suburb : '') })),
         ...allCentres.filter(c => !routeBuilderStops.some(s => s.type === 'centre' && s.id === c.centreKey) && ((c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(c => ({ type: 'centre', id: c.centreKey, label: c.name + (c.suburb ? ' — ' + c.suburb : '') }))
       ] : [];
+      // "Why do they have to manually add stops when the goal is to build
+      // the route" — Joy, 2026-09-03. The obvious candidates (Today's own
+      // Needs Attention centres) now show as one-tap suggestions here too,
+      // so typing a search is only needed for anything else — same
+      // underlying list Today itself uses (todayBuckets), just re-filtered
+      // to what isn't already on the stop list.
+      const suggested = todayBuckets().attention
+        .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey))
+        .slice(0, 8);
 
       main.innerHTML = `
+        ${wfpFilterBarHtml()}
         <label>Route date</label>
         <input type="date" id="routeDateInput" value="${escHtml(routeBuilderDate)}" onchange="routeBuilderDate=this.value">
         <label>Starting address</label>
-        <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" onchange="routeBuilderStart=this.value">
+        <div style="position:relative">
+          <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>document.getElementById('routeStartSuggestions').innerHTML='',150)">
+          <div id="routeStartSuggestions" class="autocomplete-dropdown"></div>
+        </div>
         <label>Departure time</label>
         <input type="time" id="routeDepartureInput" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
 
@@ -462,25 +485,80 @@
             <button class="icon-btn" onclick="removeRouteStop(${i})">🗑️</button>
           </div>`).join('') : `<div class="note-line">No stops added yet.</div>`}
 
+        ${suggested.length ? `
+        <div class="section-title">Suggested Stops</div>
+        ${suggested.map(item => `
+          <div class="card" onclick="addRouteStop('centre','${item.centre.centreKey}')">
+            <div class="name">${escHtml(item.centre.name)}</div>
+            <div class="sub">${escHtml(item.centre.suburb || '')}${item.centre.state ? ', ' + escHtml(item.centre.state) : ''}</div>
+            <div class="why">⚠️ ${escHtml(item.reason)}</div>
+          </div>`).join('')}
+        ` : ''}
+
         <label>Add a stop — search leads/centres</label>
         <input type="text" class="search-box" id="routeStopSearch" placeholder="Search by name or suburb…" oninput="paintPlanRoute()">
         ${matches.length ? matches.map(m => `
-          <div class="card" onclick="addRouteStop('${m.type}','${m.id}',${JSON.stringify(m.label)})">
+          <div class="card" onclick="addRouteStop('${m.type}','${m.id}')">
             <div class="name">${escHtml(m.label)}</div>
             <div class="sub">${m.type === 'lead' ? 'Lead' : 'Centre'}</div>
           </div>`).join('') : ''}
 
         <label>Or enter an address/suburb manually <span class="optional">(optional)</span></label>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="routeManualInput" placeholder="e.g. 42 Smith St, Preston VIC">
+        <div style="display:flex;gap:8px;position:relative">
+          <input type="text" id="routeManualInput" placeholder="e.g. 42 Smith St, Preston VIC" oninput="onAddressAutocompleteInput('routeManualInput','routeManualSuggestions')" onblur="setTimeout(()=>document.getElementById('routeManualSuggestions').innerHTML='',150)">
           <button class="btn btn-secondary" style="flex:0 0 auto" onclick="addManualRouteStop()">Add</button>
+          <div id="routeManualSuggestions" class="autocomplete-dropdown"></div>
         </div>
 
         <button class="btn btn-primary" style="width:100%;margin-top:18px" onclick="buildMobileRoute()" ${routeBuilderStops.length ? '' : 'disabled'}>🗺️ Build My Route</button>
       `;
     }
-    function addRouteStop(type, id, label) {
+    // Address autocomplete ("is there no auto-complete here... like
+    // Google" — Joy, 2026-09-03) for the starting-address and manual-stop
+    // fields, backed by services/mapboxService.js's suggestAddresses. Only
+    // touches the small dropdown div directly (never re-runs
+    // paintPlanRoute, which would wipe the input's focus/cursor mid-type).
+    let addressAutocompleteTimer = null;
+    let currentAddressSuggestions = [];
+    function onAddressAutocompleteInput(inputId, dropdownId) {
+      if (inputId === 'routeStartInput') routeBuilderStart = document.getElementById(inputId).value;
+      clearTimeout(addressAutocompleteTimer);
+      const val = document.getElementById(inputId).value.trim();
+      const dropdown = document.getElementById(dropdownId);
+      if (val.length < 3) { dropdown.innerHTML = ''; return; }
+      addressAutocompleteTimer = setTimeout(async () => {
+        try {
+          const res = await api('/api/route-planner/suggest-address?q=' + encodeURIComponent(val));
+          currentAddressSuggestions = res.suggestions || [];
+          dropdown.innerHTML = currentAddressSuggestions.length ? currentAddressSuggestions.map((s, i) => `
+            <div class="autocomplete-item" onmousedown="selectAddressSuggestion('${inputId}','${dropdownId}',${i})">${escHtml(s.label)}</div>
+          `).join('') : '';
+        } catch { dropdown.innerHTML = ''; }
+      }, 300);
+    }
+    // onmousedown (not onclick) above — fires before the input's onblur
+    // hides the dropdown, so a tap actually registers instead of the
+    // dropdown disappearing out from under it.
+    function selectAddressSuggestion(inputId, dropdownId, i) {
+      const label = currentAddressSuggestions[i]?.label;
+      if (!label) return;
+      document.getElementById(inputId).value = label;
+      if (inputId === 'routeStartInput') routeBuilderStart = label;
+      document.getElementById(dropdownId).innerHTML = '';
+    }
+    // Looks the label up internally by id rather than taking it as a
+    // caller-supplied argument — found live 2026-09-03: a caller passing
+    // a name straight into the onclick attribute (via JSON.stringify, or
+    // any other inlining) breaks the instant that name contains a quote
+    // character the attribute's own delimiter collides with, which is not
+    // a rare edge case — real centre names ("Angle Vale Road - Edge Early
+    // Learning") broke it on the very first live test. type/id are safe
+    // to inline (backend-generated identifiers, never free text).
+    function addRouteStop(type, id) {
       if (routeBuilderStops.length >= 10) return toast('Smart Routing supports up to 10 stops per run', 'error');
+      const label = type === 'centre'
+        ? (allCentres.find(c => c.centreKey === id)?.name || id)
+        : (allLeads.find(l => l.id === id)?.centre_name || id);
       routeBuilderStops.push({ type, id, label });
       paintPlanRoute();
     }

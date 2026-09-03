@@ -32,6 +32,27 @@ async function geocodeAddress(addressText) {
   return { lat, lng };
 }
 
+// Address autocomplete for the /wfp mobile route builder ("is there no
+// auto-complete here... like Google" — Joy, 2026-09-03). Same geocoding
+// endpoint geocodeAddress uses, just with autocomplete=true and multiple
+// results instead of a single best match — Mapbox's own answer to
+// Google Places Autocomplete, no separate API/key needed. Deliberately
+// forgiving on input (returns [] rather than throwing) since this drives
+// a live-as-you-type dropdown — a bad keystroke or a momentary network
+// blip should just show no suggestions, not surface an error toast.
+async function suggestAddresses(query) {
+  if (!isConfigured() || !query || query.trim().length < 3) return [];
+  const q = encodeURIComponent(query.trim());
+  try {
+    const res = await fetch(`${GEOCODE_URL}/${q}.json?country=au&types=address,poi&autocomplete=true&limit=5&access_token=${process.env.MAPBOX_ACCESS_TOKEN}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.features || []).map(f => ({ label: f.place_name, lat: f.center[1], lng: f.center[0] }));
+  } catch {
+    return [];
+  }
+}
+
 // Mapbox's Matrix API takes coordinates as a single semicolon-separated
 // "lng,lat;lng,lat;..." path segment, capped at 25 points on the free/pay-
 // as-you-go tier — comfortably above the 8-10 stop cap this feature uses.
@@ -93,4 +114,4 @@ function distanceToSegmentKm(point, start, end) {
   return Math.hypot(p.x - cx, p.y - cy);
 }
 
-module.exports = { isConfigured, geocodeAddress, getDistanceMatrix, getDirections, haversineKm, distanceToSegmentKm };
+module.exports = { isConfigured, geocodeAddress, suggestAddresses, getDistanceMatrix, getDirections, haversineKm, distanceToSegmentKm };
