@@ -58,7 +58,6 @@
       padding: 4px 8px 4px 0; cursor: pointer; line-height: 1;
     }
     header h1 { font-size: 17px; font-weight: 700; margin: 0; flex: 1; }
-    header .wfp-tag { font-size: 12px; color: #a8b6e8; }
 
     main { padding: 14px 14px 24px; max-width: 560px; margin: 0 auto; }
 
@@ -69,12 +68,10 @@
       contain: paint; transform-style: flat;
     }
     nav.bottom-nav button {
-      flex: 1; background: none; border: none; padding: 9px 4px 8px;
-      font-size: 11px; color: var(--text-muted); cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      flex: 1; background: none; border: none; padding: 13px 4px;
+      font-size: 14px; color: var(--text-muted); cursor: pointer;
     }
     nav.bottom-nav button.active { color: var(--blue); font-weight: 700; }
-    nav.bottom-nav button .icon { font-size: 20px; }
 
     .search-box {
       width: 100%; padding: 11px 14px; border: 1px solid var(--border);
@@ -187,16 +184,15 @@
     <button class="back-btn" id="backBtn" style="display:none" onclick="goBack()">←</button>
     <div style="flex:1">
       <h1 id="headerTitle">Today</h1>
-      <div class="wfp-tag" id="wfpTag"></div>
     </div>
   </header>
 
   <main id="mainContent"><div class="spinner-wrap"><div class="spinner"></div></div></main>
 
   <nav class="bottom-nav">
-    <button id="navToday" class="active" onclick="setView('today')"><span class="icon">🏠</span>Today</button>
-    <button id="navLeads" onclick="setView('leads')"><span class="icon">📋</span>Leads</button>
-    <button id="navCentres" onclick="setView('centres')"><span class="icon">🏢</span>Centres</button>
+    <button id="navToday" class="active" onclick="setTab('today')">Today</button>
+    <button id="navLeads" onclick="setTab('leads')">Leads</button>
+    <button id="navCentres" onclick="setTab('centres')">Centres</button>
   </nav>
 
   <div class="toast" id="toast"></div>
@@ -282,6 +278,17 @@
       if (viewStack.length > 1) viewStack.pop();
       setView(viewStack[viewStack.length - 1], false);
     }
+    // Bottom-nav taps — a real bug Liam spotted live (2026-09-03): tapping
+    // Today/Leads/Centres called setView(view) with its default push=true,
+    // so switching tabs kept growing viewStack instead of resetting it —
+    // after a bit of normal use, viewStack.length was almost always > 1,
+    // showing a back arrow on top-level tabs that should never have one
+    // ("they know if they're on Centres, Leads, or Today because it'll be
+    // lit up down the bottom"). Resets the stack to just this tab instead.
+    function setTab(view) {
+      viewStack = [view];
+      setView(view, false);
+    }
 
     function render(view) {
       const main = document.getElementById('mainContent');
@@ -339,10 +346,6 @@
       await ensureDataLoaded(true);
       render(viewStack[viewStack.length - 1]);
     }
-    function wfpTagText() {
-      if (currentUser.wfpLabel && !currentUser.canViewAllTerritories) return `📍 ${currentUser.wfpLabel}`;
-      return wfpFilterLabel ? `📍 ${wfpFilterLabel}` : '';
-    }
     // Which territory a save/read of a mobile route plan is for — mirrors
     // ensureDataLoaded's own q logic. A real WFP (no cross-territory grant)
     // always plans their own day; Joy/Liam plan whichever territory the
@@ -389,7 +392,6 @@
     }
     async function renderToday() {
       document.getElementById('headerTitle').textContent = 'Today';
-      document.getElementById('wfpTag').textContent = wfpTagText();
       await ensureDataLoaded();
       plannedRoute = null;
       const targetLabel = activeWfpLabelForPlanning();
@@ -443,8 +445,7 @@
       setView('plan-route');
     }
     async function renderPlanRoute() {
-      document.getElementById('headerTitle').textContent = 'Plan a Route';
-      document.getElementById('wfpTag').textContent = wfpTagText();
+      document.getElementById('headerTitle').textContent = 'Plan Route';
       await ensureDataLoaded();
       paintPlanRoute();
     }
@@ -655,12 +656,14 @@
     function quickActionsHtml(type, obj) {
       const phone = type === 'lead' ? obj.centre_phone : obj.contactNo;
       const id = type === 'lead' ? obj.id : obj.centreKey;
-      const lat = obj.latitude, lng = obj.longitude;
-      const address = [obj.street_address || obj.streetAddress, obj.suburb, obj.state].filter(Boolean).join(', ');
+      // Directions dropped from Today's cards — Liam, 2026-09-03: "call and
+      // log and follow up, but I don't think we need directions" — still
+      // present on the Route section's own per-stop actions and on Centre/
+      // Lead Detail, just not repeated on every Needs-Attention/Along-Your-
+      // Route card here.
       return `
         <div class="quick-actions">
           ${phone ? `<a class="qa-btn" href="tel:${escHtml(phone)}" onclick="event.stopPropagation()">📞 Call</a>` : ''}
-          <a class="qa-btn" href="${directionsUrl(lat, lng, address)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 Directions</a>
           <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}')">📝 Log</button>
           <button class="qa-btn" onclick="event.stopPropagation();openLogActivityFor('${type}','${id}',{followUpOnly:true})">⏭️ Follow-up</button>
         </div>`;
@@ -677,7 +680,7 @@
           <div class="card" style="cursor:default">
             <div class="name">No route planned for today</div>
             <div class="sub">Build a quick route and it'll show here every morning.</div>
-            <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute()">🗺️ Plan a Route</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute()">Plan Route</button>
           </div>`;
       }
       const blocks = plannedRoute.itinerary?.blocks || [];
@@ -702,7 +705,7 @@
         <div class="section-title">🗺️ Your Route Today</div>
         ${rows}
         <div class="action-row">
-          <button class="btn btn-secondary" onclick="openPlanRoute()">✏️ Rebuild Route</button>
+          <button class="btn btn-secondary" onclick="openPlanRoute()">Rebuild Route</button>
         </div>`;
     }
 
@@ -740,7 +743,6 @@
     // ── Leads ──────────────────────────────────────────────────────────
     async function renderLeadsList() {
       document.getElementById('headerTitle').textContent = 'Leads';
-      document.getElementById('wfpTag').textContent = wfpTagText();
       await ensureDataLoaded();
       paintLeadsList();
     }
@@ -752,7 +754,7 @@
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="leadSearchInput" placeholder="Search leads or suburb…" value="${escHtml(searchVal)}" oninput="paintLeadsList()">
-        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">➕ Create Lead</button>
+        <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">Create Lead</button>
         ${filtered.length ? filtered.map(l => {
           const stage = LEAD_STAGE_META[deriveLeadStage(l)];
           return `
@@ -772,7 +774,6 @@
       const lead = allLeads.find(l => l.id === currentLeadId);
       if (!lead) { toast('Lead not found', 'error'); return goBack(); }
       document.getElementById('headerTitle').textContent = lead.centre_name;
-      document.getElementById('wfpTag').textContent = '';
       try {
         const [activities, notes] = await Promise.all([
           api(`/api/leads/${currentLeadId}/activities`),
@@ -881,7 +882,6 @@
     function renderLeadForm(id) {
       const l = id ? allLeads.find(x => x.id === id) : null;
       document.getElementById('headerTitle').textContent = id ? 'Edit Lead' : 'Create Lead';
-      document.getElementById('wfpTag').textContent = '';
       const main = document.getElementById('mainContent');
       main.innerHTML = `
         ${!id ? `
@@ -961,7 +961,6 @@
     }
     async function renderCentresList() {
       document.getElementById('headerTitle').textContent = 'My Centres';
-      document.getElementById('wfpTag').textContent = wfpTagText();
       await loadCentresIfNeeded();
       paintCentresList();
     }
@@ -997,7 +996,6 @@
     }
     async function renderCentreDetail() {
       document.getElementById('headerTitle').textContent = 'Centre';
-      document.getElementById('wfpTag').textContent = '';
       try {
         currentSnapshot = await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/snapshot`);
       } catch { toast('Could not load this centre', 'error'); currentSnapshot = null; }
@@ -1178,7 +1176,6 @@
     }
     async function renderLogActivity() {
       document.getElementById('headerTitle').textContent = logTarget.followUpOnly ? 'Create Follow-up' : 'Log Activity';
-      document.getElementById('wfpTag').textContent = '';
       if (logTarget.type === 'centre' && !activityTypes.callTypes.length) {
         try { activityTypes = await api('/api/centres/activity-types'); } catch {}
       }
