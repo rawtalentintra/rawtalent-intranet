@@ -236,6 +236,33 @@
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
+    // Every live-search box on this app (Today/Leads/Centres/Plan Route's
+    // stop search) re-filters by calling its screen's paint function on
+    // every keystroke, and that paint function does a full
+    // `main.innerHTML = ...` — which destroys and recreates the search
+    // input itself each time. A brand-new DOM node has no memory of focus
+    // or cursor position, so every single keystroke silently dropped focus
+    // (glitchy/impossible-to-type-in behaviour, found live 2026-09-04).
+    // This wraps a paint call to snapshot the currently-focused input's id
+    // + cursor position beforehand and restore both on the freshly
+    // rebuilt element afterward — same input value, same effective typing
+    // experience, just without losing your place after each character.
+    function repaintKeepingFocus(paintFn) {
+      const active = document.activeElement;
+      const id = active && active.id;
+      const selStart = active?.selectionStart;
+      const selEnd = active?.selectionEnd;
+      paintFn();
+      if (!id) return;
+      const el = document.getElementById(id);
+      if (el && typeof el.focus === 'function') {
+        el.focus();
+        if (typeof selStart === 'number' && el.setSelectionRange) {
+          try { el.setSelectionRange(selStart, selEnd); } catch {}
+        }
+      }
+    }
+
     async function api(path, opts) {
       const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
       const data = await res.json().catch(() => ({}));
@@ -492,7 +519,13 @@
     }
     function paintPlanRoute() {
       const main = document.getElementById('mainContent');
-      const q = (document.getElementById('routeStopSearch')?.value || '').toLowerCase().trim();
+      // Raw (original-cased) text kept for the input's own value — this
+      // field had NO value= attribute at all until 2026-09-04, so every
+      // repaint (i.e. every keystroke) silently wiped whatever had been
+      // typed, on top of the separate focus-loss bug repaintKeepingFocus
+      // above fixes.
+      const rawStopSearch = document.getElementById('routeStopSearch')?.value || '';
+      const q = rawStopSearch.toLowerCase().trim();
       const matches = q ? [
         ...allLeads.filter(l => !l.closed_at && !routeBuilderStops.some(s => s.type === 'lead' && s.id === l.id) && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(l => ({ type: 'lead', id: l.id, label: l.centre_name + (l.suburb ? ' — ' + l.suburb : '') })),
         ...allCentres.filter(c => !routeBuilderStops.some(s => s.type === 'centre' && s.id === c.centreKey) && ((c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q))).slice(0, 6).map(c => ({ type: 'centre', id: c.centreKey, label: c.name + (c.suburb ? ' — ' + c.suburb : '') }))
@@ -553,7 +586,7 @@
         `}
 
         <label>Add a stop — search leads/centres</label>
-        <input type="text" class="search-box" id="routeStopSearch" placeholder="Search by name or suburb…" oninput="paintPlanRoute()">
+        <input type="text" class="search-box" id="routeStopSearch" placeholder="Search by name or suburb…" value="${escHtml(rawStopSearch)}" oninput="repaintKeepingFocus(paintPlanRoute)">
         ${matches.length ? matches.map(m => `
           <div class="card" onclick="addRouteStop('${m.type}','${m.id}')">
             <div class="name">${escHtml(m.label)}</div>
@@ -790,15 +823,22 @@
 
     function paintToday() {
       const main = document.getElementById('mainContent');
-      const q = (document.getElementById('todaySearchInput')?.value || todaySearchVal).toLowerCase();
-      todaySearchVal = q;
+      // Keep the ORIGINAL typed casing for the input's own value — only
+      // lowercase for the actual comparison. This used to feed the
+      // lowercased q straight back into value="...", so typing anything
+      // with a capital letter got silently forced to lowercase out from
+      // under you on the very next keystroke (found live 2026-09-04,
+      // alongside the focus-loss bug repaintKeepingFocus above fixes).
+      const raw = document.getElementById('todaySearchInput')?.value ?? todaySearchVal;
+      todaySearchVal = raw;
+      const q = raw.toLowerCase();
 
       if (q) {
         const matchedLeads = allLeads.filter(l => !l.closed_at && ((l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)));
         const matchedCentres = allCentres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q));
         main.innerHTML = `
           ${wfpFilterBarHtml()}
-          <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="${escHtml(q)}" oninput="paintToday()" autofocus>
+          <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="${escHtml(raw)}" oninput="repaintKeepingFocus(paintToday)" autofocus>
           <div class="section-title">Leads</div>
           ${matchedLeads.length ? matchedLeads.map(l => todayItemRow({ kind: 'lead', lead: l, label: l.centre_name })).join('') : `<div class="note-line">No matching leads.</div>`}
           <div class="section-title">Centres</div>
@@ -811,7 +851,7 @@
       const alongRoute = plannedRoute ? itemsAlongPlannedRoute() : [];
       main.innerHTML = `
         ${wfpFilterBarHtml()}
-        <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="paintToday()">
+        <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="repaintKeepingFocus(paintToday)">
         ${routeTodayHtml()}
         ${b.attention.length ? `<div class="section-title">⚠️ Needs Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
         ${alongRoute.length ? `<div class="section-title">Along Your Route</div>${alongRoute.map(todayItemRow).join('')}` : ''}
@@ -832,7 +872,7 @@
       const filtered = open.filter(l => !searchVal || (l.centre_name || '').toLowerCase().includes(searchVal.toLowerCase()) || (l.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
         ${wfpFilterBarHtml()}
-        <input type="text" class="search-box" id="leadSearchInput" placeholder="Search leads or suburb…" value="${escHtml(searchVal)}" oninput="paintLeadsList()">
+        <input type="text" class="search-box" id="leadSearchInput" placeholder="Search leads or suburb…" value="${escHtml(searchVal)}" oninput="repaintKeepingFocus(paintLeadsList)">
         <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">Create Lead</button>
         ${filtered.length ? filtered.map(l => {
           const stage = LEAD_STAGE_META[deriveLeadStage(l)];
@@ -1054,7 +1094,7 @@
       const filtered = allCentres.filter(c => !searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
         ${wfpFilterBarHtml()}
-        <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="paintCentresList()">
+        <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="repaintKeepingFocus(paintCentresList)">
         ${filtered.length ? filtered.map(c => `
           <div class="card" onclick="openCentre('${c.centreKey}')">
             <div class="name">${escHtml(c.name)}</div>
