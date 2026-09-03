@@ -565,6 +565,30 @@
             .slice(0, 8)
         : [];
 
+      // Always visible regardless of whether Starting Address currently
+      // holds anything — "show that home button to everyone else too,
+      // including myself" (Joy, 2026-09-04): the button only ever showing
+      // once text was typed meant an admin/Joy landing on a blank field
+      // (nobody auto-fills them — they have no personal territory to
+      // default from) never saw it at all. Every account gets some
+      // Home-Address affordance here now, in whichever of these 4 states
+      // actually applies.
+      const typedVal = routeBuilderStart.trim();
+      const savedHome = (currentUser.homeAddress || '').trim();
+      let homeUiHtml;
+      if (typedVal && typedVal === savedHome) {
+        homeUiHtml = `<div class="field-hint">🏠 This is your Home Address</div>`;
+      } else if (typedVal) {
+        homeUiHtml = `<div class="action-row" style="margin-top:2px">
+          <button class="qa-btn" onclick="saveHomeAddress()">🏠 Save as Home Address</button>
+          ${savedHome ? `<button class="qa-btn" onclick="useHomeAddress()">🏠 Use Home Address</button>` : ''}
+        </div>`;
+      } else if (savedHome) {
+        homeUiHtml = `<button class="qa-btn" style="margin-top:2px" onclick="useHomeAddress()">🏠 Use Home Address (${escHtml(savedHome)})</button>`;
+      } else {
+        homeUiHtml = `<div class="field-hint">🏠 No Home Address saved yet — enter one above, then tap Save.</div>`;
+      }
+
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         <label>Route date</label>
@@ -574,9 +598,7 @@
           <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
           <div id="routeStartSuggestions" class="autocomplete-dropdown"></div>
         </div>
-        ${!routeBuilderStart.trim() ? '' : routeBuilderStart.trim() === (currentUser.homeAddress || '').trim()
-          ? `<div class="field-hint">🏠 This is your Home Address</div>`
-          : `<button class="qa-btn" style="margin-top:2px" onclick="saveHomeAddress()">🏠 Save as Home Address</button>`}
+        ${homeUiHtml}
         <label>Departure time</label>
         <input type="time" id="routeDepartureInput" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
 
@@ -696,6 +718,17 @@
         toast('Saved as your Home Address');
         paintPlanRoute();
       } catch (e) { toast(e.message, 'error'); }
+    }
+    // Fills Starting Address back in from the saved Home Address — for
+    // when the field is blank (an admin/Joy, who has no auto-fill of
+    // their own) or currently holds something else (they typed over it
+    // for a one-off start point and want to revert).
+    function useHomeAddress() {
+      if (!currentUser.homeAddress) return;
+      routeBuilderStart = currentUser.homeAddress;
+      routeBuilderStartCoord = (currentUser.homeLat != null && currentUser.homeLng != null) ? { lat: currentUser.homeLat, lng: currentUser.homeLng } : null;
+      paintPlanRoute();
+      if (!routeBuilderStartCoord) resolveStartCoordIfNeeded();
     }
     // Looks the label up internally by id rather than taking it as a
     // caller-supplied argument — found live 2026-09-03: a caller passing
