@@ -53,6 +53,13 @@
       contain: paint; transform-style: flat;
       display: flex; align-items: center; gap: 10px;
     }
+    /* Today/Leads/Centres (Joy, 2026-09-03: "remove the Today section at
+       the top... not needed") — the bottom nav already names the screen,
+       so on those 3 top-level tabs the header collapses to just the
+       safe-area strip instead of an empty navy bar with a redundant
+       title. Sub-views (Lead/Centre Detail, Plan Route, Log Activity,
+       etc.) still get their real title + back arrow at full height. */
+    header.compact { padding-top: env(safe-area-inset-top); padding-bottom: 2px; }
     header .back-btn {
       background: none; border: none; color: white; font-size: 20px;
       padding: 4px 8px 4px 0; cursor: pointer; line-height: 1;
@@ -69,9 +76,8 @@
     }
     nav.bottom-nav button {
       flex: 1; background: none; border: none; padding: 13px 4px;
-      font-size: 14px; color: var(--text-muted); cursor: pointer;
+      font-size: 14px; color: var(--blue); font-weight: 700; cursor: pointer;
     }
-    nav.bottom-nav button.active { color: var(--blue); font-weight: 700; }
 
     .search-box {
       width: 100%; padding: 11px 14px; border: 1px solid var(--border);
@@ -218,6 +224,7 @@
     let routeBuilderStart = '';
     let routeBuilderDeparture = '';
     let routeBuilderStops = []; // [{type:'lead'|'centre', id, label} | {type:'manual', label, address}]
+    let routeBuilderStartCoord = null; // {lat,lng} once the starting address resolves — gates + ranks Suggested Stops (see paintPlanRoute)
 
     function toast(msg, kind) {
       const el = document.getElementById('toast');
@@ -266,12 +273,14 @@
     }
 
     // ── Navigation ─────────────────────────────────────────────────────
+    const TOP_LEVEL_TABS = ['today', 'leads', 'centres'];
     function setView(view, push = true) {
       if (push) viewStack.push(view);
       document.getElementById('backBtn').style.display = viewStack.length > 1 ? 'block' : 'none';
       document.getElementById('navToday').classList.toggle('active', view === 'today');
       document.getElementById('navLeads').classList.toggle('active', view === 'leads' || view === 'lead-detail' || view === 'create-lead' || view === 'edit-lead');
       document.getElementById('navCentres').classList.toggle('active', view === 'centres' || view === 'centre-detail');
+      document.querySelector('header').classList.toggle('compact', TOP_LEVEL_TABS.includes(view));
       render(view);
     }
     function goBack() {
@@ -411,7 +420,7 @@
       return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
     }
     async function renderToday() {
-      document.getElementById('headerTitle').textContent = 'Today';
+      document.getElementById('headerTitle').textContent = '';
       await ensureDataLoaded();
       plannedRoute = null;
       const targetLabel = activeWfpLabelForPlanning();
@@ -458,11 +467,18 @@
       routeBuilderDate = todayDateStr();
       routeBuilderStart = '';
       routeBuilderDeparture = '09:00';
+      routeBuilderStartCoord = null;
       routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
         type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
       }));
       routeBuilderStart = plannedRoute?.startAddress || '';
       setView('plan-route');
+      // Rebuilding an existing route means the start address is already
+      // known text but not yet a resolved coordinate (plannedRoute only
+      // stores the label) — resolve it in the background so Suggested
+      // Stops can rank by proximity right away instead of waiting for the
+      // WFP to retype/reselect an address they already entered once.
+      if (routeBuilderStart) resolveStartCoordIfNeeded();
     }
     async function renderPlanRoute() {
       document.getElementById('headerTitle').textContent = 'Plan Route';
@@ -482,9 +498,21 @@
       // so typing a search is only needed for anything else — same
       // underlying list Today itself uses (todayBuckets), just re-filtered
       // to what isn't already on the stop list.
-      const suggested = todayBuckets().attention
-        .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey))
-        .slice(0, 8);
+      // Gated on a resolved starting address, and ranked by ROUTING (how
+      // close it is to that start) as well as PRIORITISATION (the same
+      // tier order Needs Attention already uses) — Joy, 2026-09-04:
+      // suggestions "should make sense in terms of routing and
+      // prioritisation", not just be the flat tier list regardless of
+      // where the day's drive actually starts. Tier stays the primary
+      // sort (an urgent tier-1 centre isn't buried under a nearby tier-3
+      // one); distance only breaks ties within a tier.
+      const suggested = routeBuilderStartCoord
+        ? todayBuckets().attention
+            .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey) && Number.isFinite(item.centre.latitude))
+            .map(item => ({ ...item, _distanceKm: haversineKm(routeBuilderStartCoord.lat, routeBuilderStartCoord.lng, item.centre.latitude, item.centre.longitude) }))
+            .sort((a, b) => (a._tier - b._tier) || (a._distanceKm - b._distanceKm))
+            .slice(0, 8)
+        : [];
 
       main.innerHTML = `
         ${wfpFilterBarHtml()}
@@ -492,7 +520,7 @@
         <input type="date" id="routeDateInput" value="${escHtml(routeBuilderDate)}" onchange="routeBuilderDate=this.value">
         <label>Starting address</label>
         <div style="position:relative">
-          <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>document.getElementById('routeStartSuggestions').innerHTML='',150)">
+          <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
           <div id="routeStartSuggestions" class="autocomplete-dropdown"></div>
         </div>
         <label>Departure time</label>
@@ -506,15 +534,18 @@
             <button class="icon-btn" onclick="removeRouteStop(${i})">🗑️</button>
           </div>`).join('') : `<div class="note-line">No stops added yet.</div>`}
 
-        ${suggested.length ? `
+        ${routeBuilderStartCoord ? (suggested.length ? `
         <div class="section-title">Suggested Stops</div>
         ${suggested.map(item => `
           <div class="card" onclick="addRouteStop('centre','${item.centre.centreKey}')">
             <div class="name">${escHtml(item.centre.name)}</div>
-            <div class="sub">${escHtml(item.centre.suburb || '')}${item.centre.state ? ', ' + escHtml(item.centre.state) : ''}</div>
+            <div class="sub">${escHtml(item.centre.suburb || '')}${item.centre.state ? ', ' + escHtml(item.centre.state) : ''} · ${item._distanceKm.toFixed(1)} km away</div>
             <div class="why">⚠️ ${escHtml(item.reason)}</div>
           </div>`).join('')}
-        ` : ''}
+        ` : '') : `
+        <div class="section-title">Suggested Stops</div>
+        <div class="note-line">Enter your starting address above to see suggested stops near your route.</div>
+        `}
 
         <label>Add a stop — search leads/centres</label>
         <input type="text" class="search-box" id="routeStopSearch" placeholder="Search by name or suburb…" oninput="paintPlanRoute()">
@@ -542,7 +573,10 @@
     let addressAutocompleteTimer = null;
     let currentAddressSuggestions = [];
     function onAddressAutocompleteInput(inputId, dropdownId) {
-      if (inputId === 'routeStartInput') routeBuilderStart = document.getElementById(inputId).value;
+      if (inputId === 'routeStartInput') {
+        routeBuilderStart = document.getElementById(inputId).value;
+        routeBuilderStartCoord = null; // typing again invalidates whatever was previously resolved
+      }
       clearTimeout(addressAutocompleteTimer);
       const val = document.getElementById(inputId).value.trim();
       const dropdown = document.getElementById(dropdownId);
@@ -561,11 +595,31 @@
     // hides the dropdown, so a tap actually registers instead of the
     // dropdown disappearing out from under it.
     function selectAddressSuggestion(inputId, dropdownId, i) {
-      const label = currentAddressSuggestions[i]?.label;
-      if (!label) return;
-      document.getElementById(inputId).value = label;
-      if (inputId === 'routeStartInput') routeBuilderStart = label;
+      const s = currentAddressSuggestions[i];
+      if (!s) return;
+      document.getElementById(inputId).value = s.label;
       document.getElementById(dropdownId).innerHTML = '';
+      if (inputId === 'routeStartInput') {
+        routeBuilderStart = s.label;
+        routeBuilderStartCoord = { lat: s.lat, lng: s.lng };
+        paintPlanRoute(); // refresh Suggested Stops now that we know where the day starts
+      }
+    }
+    // Covers typing a full address and tabbing/tapping away without ever
+    // picking a dropdown suggestion — Suggested Stops still needs a
+    // coordinate to rank by, so resolve one silently in the background
+    // rather than leaving the section stuck on "enter your starting
+    // address" even though they just did.
+    async function resolveStartCoordIfNeeded() {
+      if (routeBuilderStartCoord || !routeBuilderStart.trim()) return;
+      try {
+        const res = await api('/api/route-planner/suggest-address?q=' + encodeURIComponent(routeBuilderStart));
+        const best = res.suggestions?.[0];
+        if (best && routeBuilderStart.trim()) { // still the same address, not superseded by further typing
+          routeBuilderStartCoord = { lat: best.lat, lng: best.lng };
+          if (viewStack[viewStack.length - 1] === 'plan-route') paintPlanRoute();
+        }
+      } catch { /* best-effort — Suggested Stops just stays gated */ }
     }
     // Looks the label up internally by id rather than taking it as a
     // caller-supplied argument — found live 2026-09-03: a caller passing
@@ -762,7 +816,7 @@
 
     // ── Leads ──────────────────────────────────────────────────────────
     async function renderLeadsList() {
-      document.getElementById('headerTitle').textContent = 'Leads';
+      document.getElementById('headerTitle').textContent = '';
       await ensureDataLoaded();
       paintLeadsList();
     }
@@ -980,7 +1034,7 @@
       await ensureDataLoaded();
     }
     async function renderCentresList() {
-      document.getElementById('headerTitle').textContent = 'My Centres';
+      document.getElementById('headerTitle').textContent = '';
       await loadCentresIfNeeded();
       paintCentresList();
     }
