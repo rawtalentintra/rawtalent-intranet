@@ -94,6 +94,19 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_all_wfp_territories BOOLEAN 
 -- (not full admin-style) filter bar.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS additional_wfp_territories JSONB DEFAULT '[]'::jsonb;
 
+-- Self-service, not an admin grant — "that's always going to be the
+-- starting point 90% of the time" (Joy, 2026-09-04). A Workforce Partner
+-- sets their own home address once (from /wfp's Plan a Route screen,
+-- "Save as Home Address"); routes/routePlanner.js's home-address
+-- endpoint lets any authenticated user set only their OWN row (no
+-- separate permission needed beyond already being logged in). Lat/lng
+-- cached alongside the text so opening Plan a Route doesn't need to
+-- re-geocode the same address every single time — see
+-- views/wfp.html's openPlanRoute().
+ALTER TABLE users ADD COLUMN IF NOT EXISTS home_address TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS home_lat DOUBLE PRECISION;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS home_lng DOUBLE PRECISION;
+
 -- A Workforce Partner's Monday-planned Tue/Wed/Thu route, so /wfp's Today
 -- screen can show "Your Route Today" instead of just a live-attention feed.
 -- One row per (partner, day) — rebuilding a day's route overwrites it

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { requireRole } = require('../middleware/authMiddleware');
+const { invalidateUserCache } = require('../config/passport');
 const { getDb } = require('../db/database');
 const mapboxService = require('../services/mapboxService');
 const { optimizeRoute, buildItinerary } = require('../services/routeOptimizerService');
@@ -28,6 +29,28 @@ router.get('/suggest-address', async (req, res) => {
   try {
     const suggestions = await mapboxService.suggestAddresses(req.query.q || '');
     res.json({ suggestions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Self-service home address — "that's always going to be the starting
+// point 90% of the time" (Joy, 2026-09-04). Always the CALLER's own row
+// (req.user.id), never someone else's — no admin gate needed beyond the
+// role check this whole router already applies. Lat/lng are optional
+// (a WFP could type-and-save before the address finishes resolving) —
+// views/wfp.html's Plan a Route re-geocodes on the fly if they're ever
+// missing when actually building a route.
+router.put('/home-address', async (req, res) => {
+  try {
+    const { address, lat, lng } = req.body;
+    if (!address || !address.trim()) return res.status(400).json({ error: 'An address is required' });
+    await getDb().execute({
+      sql: 'UPDATE users SET home_address = ?, home_lat = ?, home_lng = ? WHERE id = ?',
+      args: [address.trim(), Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null, req.user.id]
+    });
+    invalidateUserCache(Number(req.user.id));
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -497,20 +497,33 @@
     // address/suburb manually. Don't make it complicated." — Joy, verbatim.
     function openPlanRoute() {
       routeBuilderDate = todayDateStr();
-      routeBuilderStart = '';
       routeBuilderDeparture = '09:00';
       routeBuilderStartCoord = null;
       routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
         type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
       }));
-      routeBuilderStart = plannedRoute?.startAddress || '';
+      if (plannedRoute?.startAddress) {
+        // Rebuilding an existing route — its own start address wins over
+        // Home (they already told us where this particular day starts).
+        routeBuilderStart = plannedRoute.startAddress;
+      } else if (currentUser.homeAddress) {
+        // "That's always going to be the starting point 90% of the time...
+        // make it smart" — Joy, 2026-09-04. Pre-fills from the saved Home
+        // Address (see saveHomeAddress()) on a genuinely fresh route —
+        // still just a default, not locked: they can type over it same as
+        // any other starting address.
+        routeBuilderStart = currentUser.homeAddress;
+        if (currentUser.homeLat != null && currentUser.homeLng != null) routeBuilderStartCoord = { lat: currentUser.homeLat, lng: currentUser.homeLng };
+      } else {
+        routeBuilderStart = '';
+      }
       setView('plan-route');
-      // Rebuilding an existing route means the start address is already
-      // known text but not yet a resolved coordinate (plannedRoute only
-      // stores the label) — resolve it in the background so Suggested
-      // Stops can rank by proximity right away instead of waiting for the
-      // WFP to retype/reselect an address they already entered once.
-      if (routeBuilderStart) resolveStartCoordIfNeeded();
+      // Resolve a coordinate in the background whenever we have address
+      // TEXT but no cached coordinate yet (a rebuild's own start address,
+      // or a Home Address saved before its lat/lng ever resolved) — lets
+      // Suggested Stops rank by proximity right away instead of waiting
+      // for the WFP to retype/reselect an address already on file.
+      if (routeBuilderStart && !routeBuilderStartCoord) resolveStartCoordIfNeeded();
     }
     async function renderPlanRoute() {
       document.getElementById('headerTitle').textContent = 'Plan Route';
@@ -561,6 +574,9 @@
           <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
           <div id="routeStartSuggestions" class="autocomplete-dropdown"></div>
         </div>
+        ${!routeBuilderStart.trim() ? '' : routeBuilderStart.trim() === (currentUser.homeAddress || '').trim()
+          ? `<div class="field-hint">🏠 This is your Home Address</div>`
+          : `<button class="qa-btn" style="margin-top:2px" onclick="saveHomeAddress()">🏠 Save as Home Address</button>`}
         <label>Departure time</label>
         <input type="time" id="routeDepartureInput" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
 
@@ -658,6 +674,28 @@
           if (viewStack[viewStack.length - 1] === 'plan-route') paintPlanRoute();
         }
       } catch { /* best-effort — Suggested Stops just stays gated */ }
+    }
+    // "Allow the user to set a Home Address... always populated when they
+    // enter it" — Joy, 2026-09-04. Saves whatever's currently in Starting
+    // Address (resolving its coordinate first if that hasn't happened
+    // yet) as this WFP's own Home Address — self-service, no admin
+    // action needed. Every future fresh "Plan a Route" then defaults to
+    // it (see openPlanRoute()).
+    async function saveHomeAddress() {
+      const addr = routeBuilderStart.trim();
+      if (!addr) return toast('Enter a starting address first', 'error');
+      if (!routeBuilderStartCoord) await resolveStartCoordIfNeeded();
+      try {
+        await api('/api/route-planner/home-address', {
+          method: 'PUT',
+          body: JSON.stringify({ address: addr, lat: routeBuilderStartCoord?.lat ?? null, lng: routeBuilderStartCoord?.lng ?? null })
+        });
+        currentUser.homeAddress = addr;
+        currentUser.homeLat = routeBuilderStartCoord?.lat ?? null;
+        currentUser.homeLng = routeBuilderStartCoord?.lng ?? null;
+        toast('Saved as your Home Address');
+        paintPlanRoute();
+      } catch (e) { toast(e.message, 'error'); }
     }
     // Looks the label up internally by id rather than taking it as a
     // caller-supplied argument — found live 2026-09-03: a caller passing
