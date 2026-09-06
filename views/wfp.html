@@ -237,7 +237,17 @@
     let wfpFilterLabel = null; // admin-only territory toggle — null = All States (see ensureDataLoaded)
     let logTarget = null; // { type: 'lead'|'centre', id, channel, prefillOutcome }
     let editingLeadId = null;
-    let plannedRoute = null; // today's saved wfp_planned_routes row (or null), fetched fresh each Today load
+    let plannedRoute = null; // TODAY's saved wfp_planned_routes row (or null) — always today specifically, never whatever date is being browsed below. Still what "Along Your Route"/Rebuild-defaults/Add-to-Route-from-detail-pages read, since those are all genuinely about today.
+    // "Your Route" section's own date-strip (Joy, 2026-09-06: "add the
+    // dates bar there as well so that can select the specific date and
+    // look at that route saved for that date") — separate from Plan
+    // Route's identically-shaped state (routeBuilderDate/planRouteWeekStart)
+    // on purpose: browsing a date here is just LOOKING, it shouldn't
+    // change what Plan Route itself defaults to next time it's opened.
+    let todayViewDate = null;
+    let todayViewWeekStart = null;
+    let todayViewedRoute = null; // the route being displayed for todayViewDate — plannedRoute itself when that's today, separately fetched otherwise
+    let todayViewLoading = false;
     let routeBuilderDate = null;
     let planRouteWeekStart = null; // Monday of the week currently shown on the week-strip (see weekStripHtml)
     let planRouteLoadingDate = false; // true while selectRouteDate() is fetching a saved plan for the tapped date
@@ -522,7 +532,35 @@
           plannedRoute = res.plan;
         } catch { plannedRoute = null; }
       }
+      // Always resets back to today's own week whenever Today is (re)opened
+      // — browsing to a different date on a previous visit shouldn't leave
+      // you stranded there next time you land on this tab.
+      todayViewDate = todayDateStr();
+      todayViewWeekStart = mondayOf(todayViewDate);
+      todayViewedRoute = plannedRoute;
       paintToday();
+    }
+    function shiftTodayViewWeek(days) {
+      todayViewWeekStart = dateStrAdd(todayViewWeekStart, days);
+      paintToday();
+    }
+    // Tapping a date on Today's own strip — pure viewing, never touches
+    // Plan Route's state. Today's real data (plannedRoute) is reused with
+    // no extra fetch when the date IS today; any other date does the same
+    // GET /mobile-plan lookup Plan Route's selectRouteDate already does.
+    async function selectTodayViewDate(dateStr) {
+      todayViewDate = dateStr;
+      if (dateStr < todayViewWeekStart || dateStr > dateStrAdd(todayViewWeekStart, 6)) todayViewWeekStart = mondayOf(dateStr);
+      if (dateStr === todayDateStr()) { todayViewedRoute = plannedRoute; paintToday(); return; }
+      const targetLabel = activeWfpLabelForPlanning();
+      if (!targetLabel) { todayViewedRoute = null; paintToday(); return; }
+      todayViewLoading = true;
+      paintToday();
+      try {
+        const res = await api(`/api/route-planner/mobile-plan?date=${dateStr}&wfpLabel=${encodeURIComponent(targetLabel)}`);
+        todayViewedRoute = res.plan;
+      } catch { todayViewedRoute = null; }
+      finally { todayViewLoading = false; paintToday(); }
     }
 
     // Leads/centres within ~5km of any stop in today's planned route — the
@@ -554,12 +592,31 @@
     // "They should just be able to enter a starting address and either
     // select a centre for their destination, select a lead, or enter an
     // address/suburb manually. Don't make it complicated." — Joy, verbatim.
-    function openPlanRoute() {
-      routeBuilderDate = todayDateStr();
-      planRouteWeekStart = mondayOf(routeBuilderDate);
+    // `dateStr` lets a caller open Plan Route already pointed at a
+    // specific day (Today's own date-strip's "Plan Route"/"Build Route
+    // around it"/"Rebuild Route" buttons for a non-today date) — defaults
+    // to today, unchanged, for every other existing call site.
+    function openPlanRoute(dateStr) {
+      const targetDate = dateStr || todayDateStr();
+      routeBuilderDate = targetDate;
+      planRouteWeekStart = mondayOf(targetDate);
       routeBuilderDeparture = '09:00';
       routeBuilderTargetStops = 5;
       routeBuilderStartCoord = null;
+      if (targetDate !== todayDateStr()) {
+        // Not today — hand off entirely to selectRouteDate, the exact
+        // same lookup tapping this date on the strip itself would do
+        // (fetches whatever's really saved for it, or blanks out with the
+        // same Home Address fallback, rather than duplicating that logic
+        // here against the wrong day's data). Returns its promise so a
+        // caller that needs to add a stop AFTER this resolves (e.g.
+        // buildRouteAroundScheduledVisit) can await it instead of racing
+        // the fetch.
+        routeBuilderStops = [];
+        routeBuilderStart = '';
+        setView('plan-route');
+        return selectRouteDate(targetDate);
+      }
       routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
         type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
       }));
@@ -647,20 +704,25 @@
     // <input type=date>. The arrows only move planRouteWeekStart (which
     // week is on screen) — they never change routeBuilderDate on their
     // own, only tapping a day box does that (via selectRouteDate).
-    function weekStripHtml() {
-      const days = Array.from({ length: 7 }, (_, i) => dateStrAdd(planRouteWeekStart, i));
-      const monthLabel = MONTH_NAMES[dateStrToDate(planRouteWeekStart).getMonth()] + ' ' + dateStrToDate(planRouteWeekStart).getFullYear();
+    // Generalized so both Plan Route and Today's own "Your Route" section
+    // can use the identical strip against their own independent state
+    // (selectedDate/weekStart/onSelect-fn-name/onShift-fn-name) — Joy,
+    // 2026-09-06, adding the same strip to Today: "select the specific
+    // date and look at that route saved for that date."
+    function weekStripHtml(selectedDate, weekStart, selectFn, shiftFn) {
+      const days = Array.from({ length: 7 }, (_, i) => dateStrAdd(weekStart, i));
+      const monthLabel = MONTH_NAMES[dateStrToDate(weekStart).getMonth()] + ' ' + dateStrToDate(weekStart).getFullYear();
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <button class="qa-btn" onclick="shiftPlanRouteWeek(-7)">&larr;</button>
+          <button class="qa-btn" onclick="${shiftFn}(-7)">&larr;</button>
           <div style="font-weight:700;font-size:13.5px">${escHtml(monthLabel)}</div>
-          <button class="qa-btn" onclick="shiftPlanRouteWeek(7)">&rarr;</button>
+          <button class="qa-btn" onclick="${shiftFn}(7)">&rarr;</button>
         </div>
         <div style="display:flex;gap:5px;margin-bottom:14px">
           ${days.map(d => {
             const dt = dateStrToDate(d);
-            const isSelected = d === routeBuilderDate;
-            return `<button onclick="selectRouteDate('${d}')" style="flex:1;border:none;border-radius:10px;padding:8px 2px;cursor:pointer;background:${isSelected ? 'var(--blue)' : 'var(--card)'};color:${isSelected ? 'white' : 'var(--text)'};border:1px solid ${isSelected ? 'var(--blue)' : 'var(--border)'}">
+            const isSelected = d === selectedDate;
+            return `<button onclick="${selectFn}('${d}')" style="flex:1;border:none;border-radius:10px;padding:8px 2px;cursor:pointer;background:${isSelected ? 'var(--blue)' : 'var(--card)'};color:${isSelected ? 'white' : 'var(--text)'};border:1px solid ${isSelected ? 'var(--blue)' : 'var(--border)'}">
               <div style="font-size:10.5px;font-weight:700;opacity:.8">${WEEKDAY_ABBR[dt.getDay()]}</div>
               <div style="font-size:15px;font-weight:800;margin-top:2px">${dt.getDate()}</div>
             </button>`;
@@ -923,7 +985,7 @@
 
       main.innerHTML = `
         ${wfpFilterBarHtml()}
-        ${weekStripHtml()}
+        ${weekStripHtml(routeBuilderDate, planRouteWeekStart, 'selectRouteDate', 'shiftPlanRouteWeek')}
         ${planRouteLoadingDate ? `<div class="field-hint" style="margin-bottom:10px">Loading…</div>` : ''}
         ${scheduledForThisDay.length ? `
         <div class="section-title">Confirmed for This Day</div>
@@ -1323,8 +1385,12 @@
     // their centres and leads" (Joy, 2026-09-06). Everything after that is
     // the existing Plan Route flow (stop-count goal, Suggested Stops,
     // Build) — no separate wizard needed, this just seeds it.
-    function buildRouteAroundScheduledVisit(kind, id) {
-      openPlanRoute();
+    // Awaits openPlanRoute so a non-today date's existing plan (if any)
+    // finishes loading BEFORE this pushes the confirmed stop on top —
+    // otherwise selectRouteDate's own fetch resolving afterward would
+    // overwrite routeBuilderStops and silently drop it.
+    async function buildRouteAroundScheduledVisit(kind, id, dateStr) {
+      await openPlanRoute(dateStr);
       const type = kind === 'lead' ? 'lead' : 'centre';
       const label = type === 'centre' ? (allCentres.find(c => c.centreKey === id)?.name || id) : (allLeads.find(l => l.id === id)?.centre_name || id);
       if (!routeBuilderStops.some(s => s.type === type && s.id === id)) routeBuilderStops.push({ type, id, label });
@@ -1399,41 +1465,53 @@
       } catch (err) { toast(err.message, 'error'); }
     }
 
-    // "Your Route Today" — the planned-route block at the top of Today
-    // when one exists for the day, built from the exact itinerary shape
-    // routes/routePlanner.js's computeOptimizedItinerary returns
-    // (blocks: drive/lunch/visit). Falls through to a "Plan a Route"
-    // prompt when nothing's been built for today yet.
+    // "Your Route" — the planned-route block at the top of Today, now
+    // with its own date-strip (Joy, 2026-09-06: "add the dates bar there
+    // as well so that can select the specific date and look at that
+    // route saved for that date"). Browsing here is pure viewing —
+    // todayViewDate/todayViewWeekStart/todayViewedRoute are independent
+    // of Plan Route's own identically-shaped state (see their
+    // declarations) so looking at a different day never changes what
+    // Plan Route itself defaults to next time it's opened. Falls through
+    // to a "Plan a Route" prompt (and any already-confirmed visit for
+    // whichever date is on screen) when nothing's been built for it yet.
     function routeTodayHtml() {
-      if (!plannedRoute) {
-        const scheduledToday = scheduledVisitItemsForDate(todayDateStr());
+      const strip = `<div class="section-title">Your Route</div>` + weekStripHtml(todayViewDate, todayViewWeekStart, 'selectTodayViewDate', 'shiftTodayViewWeek');
+      const isToday = todayViewDate === todayDateStr();
+      const dateLabel = isToday ? 'today' : fmtDate(todayViewDate);
+      if (todayViewLoading) {
+        return `${strip}<div class="field-hint">Loading…</div>`;
+      }
+      if (!todayViewedRoute) {
+        const scheduledForView = scheduledVisitItemsForDate(todayViewDate);
         return `
-          ${scheduledToday.map(item => {
+          ${strip}
+          ${scheduledForView.map(item => {
             const name = item.kind === 'lead' ? item.lead.centre_name : item.centre.name;
             const id = item.kind === 'lead' ? item.lead.id : item.centre.centreKey;
             return `
             <div class="card" style="cursor:default">
               <div class="name">${escHtml(name)}</div>
-              <div class="sub">This ${item.kind === 'lead' ? 'lead' : 'centre'} is confirmed to be visited today. Want to build a route around it?</div>
-              <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="buildRouteAroundScheduledVisit('${item.kind}','${id}')">Build Route</button>
+              <div class="sub">This ${item.kind === 'lead' ? 'lead' : 'centre'} is confirmed to be visited ${dateLabel}. Want to build a route around it?</div>
+              <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="buildRouteAroundScheduledVisit('${item.kind}','${id}','${todayViewDate}')">Build Route</button>
             </div>`;
           }).join('')}
           <div class="card" style="cursor:default">
-            <div class="name">No route planned for today</div>
-            <div class="sub">Build a quick route and it'll show here every morning.</div>
-            <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute()">Plan Route</button>
+            <div class="name">No route planned for ${dateLabel}</div>
+            <div class="sub">${isToday ? "Build a quick route and it'll show here every morning." : 'Build a route for this day and it\'ll show here.'}</div>
+            <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openPlanRoute('${todayViewDate}')">Plan Route</button>
           </div>`;
       }
       // No per-stop Directions here — "that whole route should be seen on
       // their Maps app" (Joy, 2026-09-04): one "View on Maps" link for the
       // entire plotted route instead, same as the Route Preview screen.
-      const mapsUrl = routeMapsUrl(plannedRoute.startAddress, plannedRoute.stops);
+      const mapsUrl = routeMapsUrl(todayViewedRoute.startAddress, todayViewedRoute.stops);
       return `
-        <div class="section-title">Your Route Today</div>
+        ${strip}
         ${mapsUrl ? `<a class="btn btn-secondary" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
-        ${itineraryBlocksHtml(plannedRoute.itinerary?.blocks, { showLogButton: true })}
+        ${itineraryBlocksHtml(todayViewedRoute.itinerary?.blocks, { showLogButton: isToday })}
         <div class="action-row">
-          <button class="btn btn-secondary" onclick="openPlanRoute()">Rebuild Route</button>
+          <button class="btn btn-secondary" onclick="openPlanRoute('${todayViewDate}')">Rebuild Route</button>
         </div>`;
     }
 
@@ -1973,6 +2051,7 @@
         <label>Due date</label>
         <input type="date" id="laNextStepDue">
         <div class="action-row">
+          <button class="btn btn-secondary" onclick="goBack()">Cancel</button>
           <button class="btn btn-primary" id="laSaveBtn" onclick="saveActivity()">Save</button>
         </div>
       `;
