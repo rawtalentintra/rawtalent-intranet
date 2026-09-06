@@ -368,7 +368,17 @@
     // centres.js's own targetLabel resolution).
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
-      const q = wfpFilterLabel ? '?partnerLabel=' + encodeURIComponent(wfpFilterLabel) : '';
+      // "For Test filter just put all territories please" (Joy,
+      // 2026-09-06) — the You - Test sandbox label is a made-up string
+      // that deliberately matches no real centre/lead assignment (see
+      // testTerritoryLabel), so filtering the LIST by it always returned
+      // zero results, defeating the point of using it to try out Plan
+      // Route/Browse Centres & Leads. It still stays the real label used
+      // for SAVING a test route (activeWfpLabelForPlanning, unchanged) —
+      // only reading the full leads/centres list is treated as unfiltered
+      // here, same as "All States".
+      const isTestSandbox = currentUser && !currentUser.wfpLabel && wfpFilterLabel === testTerritoryLabel();
+      const q = (wfpFilterLabel && !isTestSandbox) ? '?partnerLabel=' + encodeURIComponent(wfpFilterLabel) : '';
       try {
         const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
         allLeads = leads;
