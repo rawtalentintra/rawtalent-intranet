@@ -31,9 +31,13 @@ const CALL_ACTIVITY_TYPES = [
 const VISIT_ACTIVITY_TYPES = [
   'Prospect',
   'Centre setup',
-  'First-booking welcome/merch',
+  // "Get rid of the slash merch, just First-booking welcome" (Liam,
+  // 2026-09-04) — was 'First-booking welcome/merch'.
+  'First-booking welcome',
   'Growth',
-  'Relationship maintenance',
+  // Was 'Relationship maintenance' — renamed same call: "it should be
+  // relationship management, not maintenance."
+  'Relationship management',
   'Decline investigation',
   'Service recovery',
   'Dormant reactivation'
