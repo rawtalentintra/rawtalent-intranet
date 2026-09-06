@@ -766,29 +766,37 @@ router.delete('/:centreKey/educator-relationships/:id', async (req, res) => {
   }
 });
 
-// Task-bridge for "request/rebook an educator" (Workforce Partner PWA) —
-// RT has no booking-write API for this to call yet (confirmed — see the
-// PWA plan), so this raises a real HeartBeat Task in the Bookings
-// department instead of either faking a write RT can't accept or doing
-// nothing. Retire this in favour of a real RT write once Raj/Yuvraj's API
-// exists.
-router.post('/:centreKey/request-booking', async (req, res) => {
-  const { note, candidateUserId, candidateName } = req.body;
+// "Message Team" (Workforce Partner PWA) — was "Request Booking"/
+// request-booking (raised a Bookings-department task, since RT has no
+// booking-write API for this to call — see the PWA plan; still true,
+// nothing here changed on that front). Renamed and repointed 2026-09-06
+// (Joy): a general-purpose way for a WFP to flag anything to Management,
+// not booking-specific — goes to the Management department instead, and
+// assignedToEmails is the same fixed Joy/Sophia pool this app already
+// uses for other Joy-and-Sophia-only actions (routes/leaveRequests.js,
+// routes/timesheets.js, routes/payslips.js), which is also what scopes
+// the notification bell's taskAlerts to just the two of them (see
+// routes/notifications.js's assigned_to_emails check) — no separate
+// notify step needed, assignment IS the notification here.
+const MESSAGE_TEAM_RECIPIENTS = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'];
+router.post('/:centreKey/message-team', async (req, res) => {
+  const { note } = req.body;
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
+  if (!note?.trim()) return res.status(400).json({ error: 'A message is required' });
   try {
     const { centres } = await getCentresAndBookings();
     const centre = centres.find(c => c.centreKey === req.params.centreKey);
     if (!centre) return res.status(404).json({ error: 'Centre not found' });
-    const title = candidateName ? `Book ${candidateName} at ${centre.name}` : `New booking request — ${centre.name}`;
+    const title = `Message from ${req.user.name || req.user.email} — ${centre.name}`;
     const description = [
-      `Requested from the Workforce Partner app by ${req.user.name || req.user.email}.`,
+      `Sent from the Workforce Partner app by ${req.user.name || req.user.email}.`,
       `Centre: ${centre.name}${centre.suburb ? ` (${centre.suburb})` : ''}`,
-      note ? `Note: ${note}` : null
-    ].filter(Boolean).join('\n');
+      `Message: ${note.trim()}`
+    ].join('\n');
     const id = await createTask({
-      departmentId: 'bookings', title, description,
-      linkedCandidates: candidateUserId ? [{ userId: candidateUserId, name: candidateName || null, phone: null }] : [],
+      departmentId: 'management', title, description,
+      assignedToEmails: MESSAGE_TEAM_RECIPIENTS,
       createdByEmail: req.user.email, createdByName: req.user.name
     });
     res.json({ success: true, taskId: id });

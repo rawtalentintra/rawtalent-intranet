@@ -1488,7 +1488,7 @@
         </div>
 
         <div class="action-row">
-          <button class="btn btn-secondary" style="flex:none;width:100%" onclick="requestCentreBooking(this)">Request Booking</button>
+          <button class="btn btn-secondary" style="flex:none;width:100%" onclick="messageTeam(this)">Message Team</button>
         </div>
         <div class="action-row">
           <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">Log Call</button>
@@ -1524,26 +1524,28 @@
       upcomingExpanded = !upcomingExpanded;
       paintCentreDetail();
     }
-    // Two real bugs found live (Joy, 2026-09-03 — tapped once, saw no
-    // in-flight feedback, tapped again, got two identical Bookings tasks):
+    // Renamed from "Request Booking" (Joy, 2026-09-06) — same task-bridge
+    // mechanism, now general-purpose: goes to Management, assigned to
+    // (and so visible to) only Joy and Sophia, not the whole Bookings
+    // queue. Two real bugs already fixed here (2026-09-03) carried over:
     // 1. `prompt() || ''` treated Cancel (null) exactly like OK-with-no-
-    //    text (''), so hitting Cancel still filed a request.
+    //    text (''), so hitting Cancel still filed a message.
     // 2. Nothing stopped a second tap while the first request was still in
     //    flight (prompt() itself gave no visual "this is submitting" cue).
-    let requestingBooking = false;
-    async function requestCentreBooking(btn) {
-      if (requestingBooking) return;
-      const note = prompt('What do you need booked? (optional note)');
-      if (note === null) return; // Cancel — do NOT file a request
-      requestingBooking = true;
+    let messagingTeam = false;
+    async function messageTeam(btn) {
+      if (messagingTeam) return;
+      const note = prompt('What would you like to tell the team?');
+      if (note === null || !note.trim()) return; // Cancel, or nothing typed — do NOT send
+      messagingTeam = true;
       const originalLabel = btn ? btn.textContent : null;
       if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
       try {
-        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/request-booking`, { method: 'POST', body: JSON.stringify({ note }) });
-        toast('Request sent to the team');
+        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/message-team`, { method: 'POST', body: JSON.stringify({ note }) });
+        toast('Message sent to the team');
       } catch (e) { toast(e.message, 'error'); }
       finally {
-        requestingBooking = false;
+        messagingTeam = false;
         if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
       }
     }
