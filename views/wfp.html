@@ -850,11 +850,19 @@
         const stop = b.stop;
         const isReal = stop.type === 'lead' || stop.type === 'centre';
         const address = [stop.street_address, stop.suburb, stop.state].filter(Boolean).join(', ');
+        const showLog = showLogButton && isReal;
+        // "Once you build the route don't remove the centre or lead label
+        // so that we'd know if it was a centre or a lead" — Joy,
+        // 2026-09-06. Same corner-badge treatment as Today's own cards.
         return `
           <div class="card" style="cursor:default">
             <div class="name">${fmtTime(b.start)}–${fmtTime(b.end)} · ${escHtml(stop.centre_name)}</div>
             ${address ? `<div class="sub">${escHtml(address)}</div>` : ''}
-            ${showLogButton && isReal ? `<div class="quick-actions"><button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stop.id}')">Log</button></div>` : ''}
+            ${isReal ? `
+            <div class="card-corner-badge" style="justify-content:${showLog ? 'space-between' : 'flex-end'}">
+              ${showLog ? `<button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stop.id}')">Log</button>` : ''}
+              <span class="badge neutral corner">${stop.type === 'lead' ? 'Lead' : 'Centre'}</span>
+            </div>` : ''}
           </div>`;
       }).join('');
     }
