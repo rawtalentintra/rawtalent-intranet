@@ -239,6 +239,8 @@
     let editingLeadId = null;
     let plannedRoute = null; // today's saved wfp_planned_routes row (or null), fetched fresh each Today load
     let routeBuilderDate = null;
+    let planRouteWeekStart = null; // Monday of the week currently shown on the week-strip (see weekStripHtml)
+    let planRouteLoadingDate = false; // true while selectRouteDate() is fetching a saved plan for the tapped date
     let routeBuilderStart = '';
     let routeBuilderDeparture = '';
     let routeBuilderStops = []; // [{type:'lead'|'centre', id, label} | {type:'manual', label, address}]
@@ -350,6 +352,7 @@
       if (view === 'log-activity') return renderLogActivity();
       if (view === 'plan-route') return renderPlanRoute();
       if (view === 'route-review') return renderRouteReview();
+      if (view === 'route-stop-picker') return renderRouteStopPicker();
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
@@ -476,6 +479,26 @@
       const dt = d || new Date();
       return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
     }
+    // Small date-string helpers for the Plan Route week-strip — everything
+    // here works in LOCAL calendar days (no timezone math), same as
+    // todayDateStr above, since a route date is a calendar day, not an
+    // instant.
+    function dateStrToDate(dateStr) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    function dateStrAdd(dateStr, days) {
+      const dt = dateStrToDate(dateStr);
+      dt.setDate(dt.getDate() + days);
+      return todayDateStr(dt);
+    }
+    // Monday on/before dateStr — getDay() is 0=Sunday..6=Saturday, so the
+    // offset back to Monday is 0 for Monday itself and 6 for Sunday.
+    function mondayOf(dateStr) {
+      const dt = dateStrToDate(dateStr);
+      const offset = (dt.getDay() + 6) % 7;
+      return dateStrAdd(dateStr, -offset);
+    }
     async function renderToday() {
       document.getElementById('headerTitle').textContent = '';
       await ensureDataLoaded();
@@ -522,6 +545,7 @@
     // address/suburb manually. Don't make it complicated." — Joy, verbatim.
     function openPlanRoute() {
       routeBuilderDate = todayDateStr();
+      planRouteWeekStart = mondayOf(routeBuilderDate);
       routeBuilderDeparture = '09:00';
       routeBuilderStartCoord = null;
       routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
@@ -555,6 +579,85 @@
       // the WFP to add/remove something before ever seeing one.
       else if (routeBuilderStops.length) refreshRouteDraftPreview();
     }
+    function hhmmFromIso(iso) {
+      try { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+      catch { return '09:00'; }
+    }
+    const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    // "It just doesn't show the date today, but the dates for the whole
+    // week clickable in one row of boxes... if it's selected, highlight it
+    // blue... a month view when they tap on the month which will be a
+    // separate row at the top... forward and back simple arrows to go to
+    // the following week" — Joy, 2026-09-06. Replaces the old plain
+    // <input type=date>. The arrows only move planRouteWeekStart (which
+    // week is on screen) — they never change routeBuilderDate on their
+    // own, only tapping a day box does that (via selectRouteDate).
+    function weekStripHtml() {
+      const days = Array.from({ length: 7 }, (_, i) => dateStrAdd(planRouteWeekStart, i));
+      const monthLabel = MONTH_NAMES[dateStrToDate(planRouteWeekStart).getMonth()] + ' ' + dateStrToDate(planRouteWeekStart).getFullYear();
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <button class="qa-btn" onclick="shiftPlanRouteWeek(-7)">&larr;</button>
+          <div style="font-weight:700;font-size:13.5px">${escHtml(monthLabel)}</div>
+          <button class="qa-btn" onclick="shiftPlanRouteWeek(7)">&rarr;</button>
+        </div>
+        <div style="display:flex;gap:5px;margin-bottom:14px">
+          ${days.map(d => {
+            const dt = dateStrToDate(d);
+            const isSelected = d === routeBuilderDate;
+            return `<button onclick="selectRouteDate('${d}')" style="flex:1;border:none;border-radius:10px;padding:8px 2px;cursor:pointer;background:${isSelected ? 'var(--blue)' : 'var(--card)'};color:${isSelected ? 'white' : 'var(--text)'};border:1px solid ${isSelected ? 'var(--blue)' : 'var(--border)'}">
+              <div style="font-size:10.5px;font-weight:700;opacity:.8">${WEEKDAY_ABBR[dt.getDay()]}</div>
+              <div style="font-size:15px;font-weight:800;margin-top:2px">${dt.getDate()}</div>
+            </button>`;
+          }).join('')}
+        </div>
+      `;
+    }
+    function shiftPlanRouteWeek(days) {
+      planRouteWeekStart = dateStrAdd(planRouteWeekStart, days);
+      paintPlanRoute();
+    }
+    // Tapping a day on the strip — loads whatever's already saved for that
+    // date (see routes/routePlanner.js's GET /mobile-plan, already
+    // date-parameterized; the gap was always the frontend never calling it
+    // for anything but "today"), or resets to a blank slate if nothing's
+    // been built yet for that day. Either way the existing Rebuild/Build/
+    // Accept flow just works from here on — Build My Route always saves to
+    // whatever routeBuilderDate currently is.
+    async function selectRouteDate(dateStr) {
+      routeBuilderDate = dateStr;
+      if (dateStr < planRouteWeekStart || dateStr > dateStrAdd(planRouteWeekStart, 6)) planRouteWeekStart = mondayOf(dateStr);
+      const targetLabel = activeWfpLabelForPlanning();
+      if (!targetLabel) { paintPlanRoute(); return; }
+      planRouteLoadingDate = true;
+      paintPlanRoute();
+      try {
+        const res = await api(`/api/route-planner/mobile-plan?date=${dateStr}&wfpLabel=${encodeURIComponent(targetLabel)}`);
+        const plan = res.plan;
+        if (plan) {
+          routeBuilderStart = plan.startAddress || '';
+          routeBuilderStartCoord = null;
+          routeBuilderDeparture = hhmmFromIso(plan.departureTime);
+          routeBuilderStops = (plan.stops || []).map(s => ({
+            type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
+          }));
+          routeDraftPreview = { itinerary: plan.itinerary, stops: plan.stops };
+          if (routeBuilderStart) resolveStartCoordIfNeeded();
+        } else {
+          routeBuilderStops = [];
+          routeDraftPreview = null;
+          // Only fall back to Home Address on a genuinely blank field —
+          // don't clobber a start address they're already using for
+          // another date in this same session.
+          if (!routeBuilderStart.trim() && currentUser.homeAddress) {
+            routeBuilderStart = currentUser.homeAddress;
+            routeBuilderStartCoord = (currentUser.homeLat != null && currentUser.homeLng != null) ? { lat: currentUser.homeLat, lng: currentUser.homeLng } : null;
+          }
+        }
+      } catch { /* best-effort — leave whatever was already on screen */ }
+      finally { planRouteLoadingDate = false; paintPlanRoute(); }
+    }
     async function renderPlanRoute() {
       document.getElementById('headerTitle').textContent = 'Plan Route';
       await ensureDataLoaded();
@@ -566,9 +669,13 @@
     // coordinate is only ever resolved server-side, at Build/Preview
     // time) — a small, acceptable gap since most days lean on real
     // leads/centres, not typed addresses.
-    function routeReferenceCoords() {
+    // Real (resolvable) added stops only — no start address. Split out
+    // from routeReferenceCoords below so the "exactly one destination"
+    // detour-cost ranking (paintPlanRoute's Suggested Stops) can tell "no
+    // stops yet" apart from "exactly one" apart from "several", not just
+    // get one flat combined list.
+    function addedStopCoords() {
       const points = [];
-      if (routeBuilderStartCoord) points.push(routeBuilderStartCoord);
       for (const s of routeBuilderStops) {
         if (s.type === 'centre') {
           const c = allCentres.find(x => x.centreKey === s.id);
@@ -579,6 +686,11 @@
         }
       }
       return points;
+    }
+    function routeReferenceCoords() {
+      const points = [];
+      if (routeBuilderStartCoord) points.push(routeBuilderStartCoord);
+      return points.concat(addedStopCoords());
     }
 
     // Shared block-rendering for any computed itinerary — Your Route
@@ -681,11 +793,34 @@
       // routeReferenceCoords(). Tier stays the primary sort (an urgent
       // tier-1 centre isn't buried under a merely-nearby tier-3 one);
       // distance only breaks ties within a tier.
+      //
+      // "It looks like it's best to just select the starting address and
+      // ONE destination and then there should be suggestions... in between
+      // or close" — Joy, 2026-09-06. With exactly one real stop added
+      // (their one destination), ranking switches from "nearest to start"
+      // to a detour-cost metric: dist(start→C) + dist(C→destination) −
+      // dist(start→destination) — the standard "how much extra driving
+      // does inserting C between these two points actually cost" measure,
+      // so a centre genuinely ON THE WAY ranks above one that's merely
+      // close to the start but off to one side. Falls back to the simpler
+      // nearest-any-reference-point measure once 0 or 2+ stops are added —
+      // a real "between all of them" corridor isn't well-defined once the
+      // route has more than one destination and isn't worth the added
+      // complexity here.
       const refCoords = routeReferenceCoords();
+      const addedCoords = addedStopCoords();
+      const isDetourMode = refCoords.length === 2 && addedCoords.length === 1;
+      const distanceForCandidate = isDetourMode
+        ? (lat, lng) => {
+            const start = routeBuilderStartCoord, dest = addedCoords[0];
+            const direct = haversineKm(start.lat, start.lng, dest.lat, dest.lng);
+            return haversineKm(start.lat, start.lng, lat, lng) + haversineKm(lat, lng, dest.lat, dest.lng) - direct;
+          }
+        : (lat, lng) => Math.min(...refCoords.map(p => haversineKm(p.lat, p.lng, lat, lng)));
       const suggested = refCoords.length
         ? todayBuckets().attention
             .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey) && Number.isFinite(item.centre.latitude))
-            .map(item => ({ ...item, _distanceKm: Math.min(...refCoords.map(p => haversineKm(p.lat, p.lng, item.centre.latitude, item.centre.longitude))) }))
+            .map(item => ({ ...item, _distanceKm: distanceForCandidate(item.centre.latitude, item.centre.longitude) }))
             .sort((a, b) => (a._tier - b._tier) || (a._distanceKm - b._distanceKm))
             .slice(0, 8)
         : [];
@@ -716,8 +851,8 @@
 
       main.innerHTML = `
         ${wfpFilterBarHtml()}
-        <label>Route date</label>
-        <input type="date" id="routeDateInput" value="${escHtml(routeBuilderDate)}" onchange="routeBuilderDate=this.value">
+        ${weekStripHtml()}
+        ${planRouteLoadingDate ? `<div class="field-hint" style="margin-bottom:10px">Loading…</div>` : ''}
         <label>Starting address</label>
         <div style="position:relative">
           <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
@@ -725,7 +860,7 @@
         </div>
         ${homeUiHtml}
         <label>Departure time</label>
-        <input type="time" id="routeDepartureInput" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
+        <input type="time" id="routeDepartureInput" step="600" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
 
         <div class="section-title">Stops (${routeBuilderStops.length}/${10})</div>
         <div class="field-hint" style="margin-bottom:8px">Aim for around 5 quality stops — a guideline, not a rule.</div>
@@ -746,7 +881,7 @@
         ${suggested.map(item => `
           <div class="card" onclick="addRouteStop('centre','${item.centre.centreKey}')">
             <div class="name">${escHtml(item.centre.name)}</div>
-            <div class="sub">${escHtml(item.centre.suburb || '')}${item.centre.state ? ', ' + escHtml(item.centre.state) : ''} · ${item._distanceKm.toFixed(1)} km away</div>
+            <div class="sub">${escHtml(item.centre.suburb || '')}${item.centre.state ? ', ' + escHtml(item.centre.state) : ''} · ${isDetourMode ? `adds ~${Math.max(0, item._distanceKm).toFixed(1)} km` : `${item._distanceKm.toFixed(1)} km away`}</div>
             <div class="why">${escHtml(item.reason)}</div>
           </div>`).join('')}
         ` : '') : `
@@ -761,6 +896,7 @@
             <div class="name">${escHtml(m.label)}</div>
             <div class="sub">${m.type === 'lead' ? 'Lead' : 'Centre'}</div>
           </div>`).join('') : ''}
+        <button class="btn btn-secondary" style="width:100%;margin-top:8px" onclick="setView('route-stop-picker')">Browse Centres &amp; Leads</button>
 
         <label>Or enter an address/suburb manually <span class="optional">(optional)</span></label>
         <div style="display:flex;gap:8px;position:relative">
@@ -770,6 +906,48 @@
         </div>
 
         <button class="btn btn-primary" style="width:100%;margin-top:18px" onclick="buildMobileRoute()" ${routeBuilderStops.length ? '' : 'disabled'}>Build My Route</button>
+      `;
+    }
+
+    // Full browse-and-pick list for adding stops — "add a button on there
+    // to View which centres and leads they want to add" (Joy, 2026-09-06),
+    // since the search box only ever shows anything once you've typed a
+    // query. Styled like the plain Leads/Centres tabs on purpose. Reached
+    // only via the "Browse Centres & Leads" button (not the bottom nav),
+    // and — since the header back arrow was removed 2026-09-06 — needs its
+    // own explicit way out: tapping a card both adds the stop AND returns
+    // to Plan Route in one tap, and a plain "Done" button covers leaving
+    // without picking anything.
+    let routeStopPickerSearch = '';
+    async function renderRouteStopPicker() {
+      document.getElementById('headerTitle').textContent = 'Add a Stop';
+      await ensureDataLoaded();
+      routeStopPickerSearch = '';
+      paintRouteStopPicker();
+    }
+    function paintRouteStopPicker() {
+      const main = document.getElementById('mainContent');
+      const rawSearch = document.getElementById('routeStopPickerSearch')?.value ?? routeStopPickerSearch;
+      routeStopPickerSearch = rawSearch;
+      const q = rawSearch.toLowerCase().trim();
+      const alreadyAdded = { lead: new Set(routeBuilderStops.filter(s => s.type === 'lead').map(s => s.id)), centre: new Set(routeBuilderStops.filter(s => s.type === 'centre').map(s => s.id)) };
+      const leads = allLeads.filter(l => !l.closed_at && !alreadyAdded.lead.has(l.id) && (!q || (l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)));
+      const centres = allCentres.filter(c => !alreadyAdded.centre.has(c.centreKey) && (!q || (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)));
+      main.innerHTML = `
+        <button class="btn btn-secondary" style="width:100%;margin-bottom:12px" onclick="goBack()">Done</button>
+        <input type="text" class="search-box" id="routeStopPickerSearch" placeholder="Search by name or suburb…" value="${escHtml(rawSearch)}" oninput="repaintKeepingFocus(paintRouteStopPicker)">
+        <div class="section-title">Leads (${leads.length})</div>
+        ${leads.length ? leads.map(l => `
+          <div class="card" onclick="addRouteStop('lead','${l.id}');goBack()">
+            <div class="name">${escHtml(l.centre_name)}</div>
+            <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
+          </div>`).join('') : `<div class="note-line">No matching leads.</div>`}
+        <div class="section-title">Centres (${centres.length})</div>
+        ${centres.length ? centres.map(c => `
+          <div class="card" onclick="addRouteStop('centre','${c.centreKey}');goBack()">
+            <div class="name">${escHtml(c.name)}</div>
+            ${healthSquareHtml(c.health)}
+          </div>`).join('') : `<div class="note-line">No matching centres.</div>`}
       `;
     }
     // Address autocomplete ("is there no auto-complete here... like
