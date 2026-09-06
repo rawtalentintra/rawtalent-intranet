@@ -838,20 +838,33 @@
     // A single Google Maps multi-stop directions link — "the whole route
     // should be seen on their Maps app... have the route plotted there
     // already" (Joy, 2026-09-04). Same URL shape Desktop's Smart Routing
-    // already uses (openRouteInGoogleMaps in views/admin.html) — one
-    // origin, one destination (the last stop), everything in between as
-    // `waypoints`, so the entire day opens as one plotted route instead of
-    // a separate point-to-point link per stop. Needs every stop to have a
-    // real coordinate (won't have one locally without Mapbox configured,
-    // or for a manual stop whose geocode failed) — returns null rather
-    // than a half-built link when that's not the case.
+    // uses (openRouteInGoogleMaps in views/admin.html) — one origin, one
+    // destination (the last stop), everything in between as `waypoints`,
+    // so the entire day opens as one plotted route instead of a separate
+    // point-to-point link per stop.
+    //
+    // Each point is the actual NAME + ADDRESS text, not a raw "lat,lng"
+    // pair — Joy, 2026-09-06: "it just says Dropped pin... is there no way
+    // to actually map the actual location name, address." Google Maps
+    // geocodes a real address/name string into the real place (shown with
+    // its actual name); a bare coordinate pair only ever drops an
+    // anonymous pin, even though the coordinate is technically accurate.
+    // Falls back to the raw coordinate only when a stop genuinely has no
+    // address/name text to give it (shouldn't happen in practice — every
+    // resolved stop shape carries at least centre_name).
+    function stopMapsQuery(s) {
+      const address = [s.street_address, s.suburb, s.state].filter(Boolean).join(', ');
+      const text = [s.centre_name, address].filter(Boolean).join(', ');
+      if (text) return encodeURIComponent(text);
+      if (Number.isFinite(s.latitude) && Number.isFinite(s.longitude)) return `${s.latitude},${s.longitude}`;
+      return null;
+    }
     function routeMapsUrl(startAddress, stops) {
-      const real = (stops || []).filter(s => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
-      if (!real.length) return null;
-      const point = s => `${s.latitude},${s.longitude}`;
+      const withQuery = (stops || []).map(s => stopMapsQuery(s)).filter(Boolean);
+      if (!withQuery.length) return null;
       const origin = encodeURIComponent(startAddress || '');
-      const destination = point(real[real.length - 1]);
-      const waypoints = real.slice(0, -1).map(point).join('|');
+      const destination = withQuery[withQuery.length - 1];
+      const waypoints = withQuery.slice(0, -1).join('|');
       let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
       if (waypoints) url += `&waypoints=${waypoints}`;
       return url;
