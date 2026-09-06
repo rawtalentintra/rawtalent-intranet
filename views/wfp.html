@@ -758,8 +758,14 @@
       planRouteWeekStart = dateStrAdd(planRouteWeekStart, days);
       paintPlanRoute();
     }
+    // Free-text entry now (Joy, 2026-09-06: "they should be able to enter
+    // the number... no need for the buttons") — clamped to 1-10 (10 is
+    // Smart Routing's own real technical cap, see addRouteStop/
+    // addManualRouteStop) so a stray "50" or "0" typed in can't set an
+    // unreachable or meaningless goal.
     function setTargetStops(n) {
-      routeBuilderTargetStops = n;
+      const parsed = Math.round(Number(n));
+      routeBuilderTargetStops = Number.isFinite(parsed) ? Math.min(10, Math.max(1, parsed)) : 5;
       paintPlanRoute();
     }
     // Tapping a day on the strip — loads whatever's already saved for that
@@ -1054,11 +1060,9 @@
         ${departureTimePickerHtml()}
 
         <label>How many stops would you like to do today?</label>
-        <div style="display:flex;gap:6px;margin-bottom:4px">
-          ${[3, 5, 8, 10].map(n => `<button onclick="setTargetStops(${n})" style="flex:1;border:none;border-radius:10px;padding:9px 4px;font-weight:700;cursor:pointer;background:${routeBuilderTargetStops === n ? 'var(--blue)' : 'var(--card)'};color:${routeBuilderTargetStops === n ? 'white' : 'var(--text)'};border:1px solid ${routeBuilderTargetStops === n ? 'var(--blue)' : 'var(--border)'}">${n}</button>`).join('')}
-        </div>
+        <input type="number" id="routeTargetStopsInput" min="1" max="10" value="${routeBuilderTargetStops}" onchange="setTargetStops(this.value)">
 
-        <div class="section-title">Stops (${routeBuilderStops.length}/${10})</div>
+        <div class="section-title">Stops (${routeBuilderStops.length}/${routeBuilderTargetStops})</div>
         <div class="field-hint" style="margin-bottom:8px">${routeBuilderStops.length >= routeBuilderTargetStops ? `You've reached your ${routeBuilderTargetStops}-stop goal for today.` : `Aiming for ${routeBuilderTargetStops} stops today — ${routeBuilderTargetStops - routeBuilderStops.length} to go.`}</div>
         ${routeBuilderStops.length ? routeBuilderStops.map((s, i) => `
           <div class="card" style="cursor:default;display:flex;justify-content:space-between;align-items:center;gap:8px">
