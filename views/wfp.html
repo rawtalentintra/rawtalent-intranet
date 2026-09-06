@@ -1528,10 +1528,20 @@
       const strip = `<div class="section-title">Your Route</div>` + weekStripHtml(todayViewDate, todayViewWeekStart, 'selectTodayViewDate', 'shiftTodayViewWeek');
       const isToday = todayViewDate === todayDateStr();
       const dateLabel = isToday ? 'today' : fmtDate(todayViewDate);
+      // Reads the LIVE plannedRoute when viewing today, rather than the
+      // separately-fetched todayViewedRoute — addStopToRoute/
+      // buildMobileRoute update plannedRoute directly (they have no idea
+      // Today's own date-strip even exists), so relying on the cached
+      // todayViewedRoute here showed "Added to your route!" while the
+      // route on screen stayed stale until the next full reload (Joy,
+      // 2026-09-06). todayViewedRoute is still what a NON-today date uses
+      // — there's no "live" always-current source for a day you're just
+      // browsing.
+      const viewedRoute = isToday ? plannedRoute : todayViewedRoute;
       if (todayViewLoading) {
         return `${strip}<div class="field-hint">Loading…</div>`;
       }
-      if (!todayViewedRoute) {
+      if (!viewedRoute) {
         const scheduledForView = scheduledVisitItemsForDate(todayViewDate);
         return `
           ${strip}
@@ -1554,11 +1564,11 @@
       // No per-stop Directions here — "that whole route should be seen on
       // their Maps app" (Joy, 2026-09-04): one "View on Maps" link for the
       // entire plotted route instead, same as the Route Preview screen.
-      const mapsUrl = routeMapsUrl(todayViewedRoute.startAddress, todayViewedRoute.stops);
+      const mapsUrl = routeMapsUrl(viewedRoute.startAddress, viewedRoute.stops);
       return `
         ${strip}
         ${mapsUrl ? `<a class="btn btn-lightblue" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
-        ${itineraryBlocksHtml(todayViewedRoute.itinerary?.blocks, { showLogButton: isToday })}
+        ${itineraryBlocksHtml(viewedRoute.itinerary?.blocks, { showLogButton: isToday })}
         <div class="action-row">
           <button class="btn btn-lightblue" onclick="openPlanRoute('${todayViewDate}')">Rebuild Route</button>
         </div>`;
