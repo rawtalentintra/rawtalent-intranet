@@ -105,7 +105,12 @@
     /* Bottom-right corner badge (Today's Centre/Lead type tag, Leads
        list's stage tag) — Joy, 2026-09-06: smaller, tucked in the
        corner rather than sitting inline next to the title. */
-    .card-corner-badge { display: flex; justify-content: flex-end; margin-top: 6px; }
+    /* align-items:center — without it, a flex row mixing a button and a
+       badge stretches the badge to match the button's height (flex's own
+       default cross-axis stretch), leaving its text sitting at the top of
+       that taller box instead of centred (Joy, 2026-09-06: "font too
+       close to the top"). */
+    .card-corner-badge { display: flex; align-items: center; justify-content: flex-end; margin-top: 6px; }
     .badge.corner { margin-top: 0; font-size: 9.5px; padding: 1px 7px; }
     /* Single-colour health status square (Centre Detail + Centres List) —
        replaces a white card + badge + explanation text: "the fact that
@@ -159,6 +164,7 @@
       padding: 6px 9px; font-size: 11.5px; font-weight: 700; cursor: pointer;
       text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
     }
+    .qa-btn.lightblue { background: var(--blue-bg); color: var(--blue); }
 
     .educator-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
     .educator-row:last-child { border-bottom: none; }
@@ -1448,7 +1454,7 @@
             <div class="name">${escHtml(item.label)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
             <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
-              ${showAddToRoute ? `<button class="qa-btn" onclick="event.stopPropagation();addStopToRoute('lead','${l.id}')">Add to Route</button>` : ''}
+              ${showAddToRoute ? `<button class="qa-btn lightblue" onclick="event.stopPropagation();addStopToRoute('lead','${l.id}')">Add to Route</button>` : ''}
               <span class="badge neutral corner">Lead</span>
             </div>
           </div>`;
@@ -1460,7 +1466,7 @@
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
           ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}
           <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
-            ${showAddToRoute ? `<button class="qa-btn" onclick="event.stopPropagation();addStopToRoute('centre','${c.centreKey}')">Add to Route</button>` : ''}
+            ${showAddToRoute ? `<button class="qa-btn lightblue" onclick="event.stopPropagation();addStopToRoute('centre','${c.centreKey}')">Add to Route</button>` : ''}
             <span class="badge neutral corner">Centre</span>
           </div>
         </div>`;
