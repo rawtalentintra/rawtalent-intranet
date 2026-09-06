@@ -20,6 +20,7 @@
       --navy: #0b1d3e;
       --navy-light: #132248;
       --blue: #3d6fff;
+      --blue-bg: #eef2ff;
       --bg: #f4f6fb;
       --card: #ffffff;
       --text: #16213e;
@@ -101,6 +102,11 @@
     .badge.neutral { background: #eef1f8; color: var(--text-muted); }
     .badge.purple { background: var(--purple-bg); color: var(--purple); }
     .badge.inline { margin-top: 0; flex-shrink: 0; }
+    /* Bottom-right corner badge (Today's Centre/Lead type tag, Leads
+       list's stage tag) — Joy, 2026-09-06: smaller, tucked in the
+       corner rather than sitting inline next to the title. */
+    .card-corner-badge { display: flex; justify-content: flex-end; margin-top: 6px; }
+    .badge.corner { margin-top: 0; font-size: 9.5px; padding: 1px 7px; }
     /* Single-colour health status square (Centre Detail + Centres List) —
        replaces a white card + badge + explanation text: "the fact that
        it's healthy describes it... we don't need it" (Liam, 2026-09-04). */
@@ -983,16 +989,18 @@
         const l = item.lead;
         return `
           <div class="card" onclick="openLead('${l.id}')">
-            <div class="name">${escHtml(item.label)} <span class="badge neutral inline" style="margin-left:4px">Lead</span></div>
+            <div class="name">${escHtml(item.label)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
+            <div class="card-corner-badge"><span class="badge neutral corner">Lead</span></div>
           </div>`;
       }
       const c = item.centre;
       return `
         <div class="card" onclick="openCentre('${c.centreKey}')">
-          <div class="name">${escHtml(item.label || c.name)} <span class="badge neutral inline" style="margin-left:4px">Centre</span></div>
+          <div class="name">${escHtml(item.label || c.name)}</div>
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
           ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}
+          <div class="card-corner-badge"><span class="badge neutral corner">Centre</span></div>
         </div>`;
     }
 
@@ -1124,7 +1132,7 @@
           <div class="card" onclick="openLead('${l.id}')">
             <div class="name">${escHtml(l.centre_name)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
-            <span class="badge ${stage.cls}">${escHtml(stage.label)}</span>
+            <div class="card-corner-badge"><span class="badge ${stage.cls} corner">${escHtml(stage.label)}</span></div>
           </div>`;
         }).join('') : `<div class="empty-state">No leads found.</div>`}
       `;
@@ -1158,12 +1166,15 @@
       const nextFollowUp = currentLeadActivities.find(a => a.next_step && a.next_step_due_date);
 
       main.innerHTML = `
-        <span class="badge ${stage.cls}">${escHtml(stage.label)}</span>
-        <div class="sub" style="margin-top:8px">${escHtml(l.street_address || '')}${l.street_address ? ', ' : ''}${escHtml(l.suburb || '')} ${escHtml(l.state || '')}</div>
-        <div class="sub" style="margin-top:6px">${phoneLink(l.centre_phone)}${l.centre_phone && l.contact_email ? ' · ' : ''}${mailtoLink(l.contact_email)}</div>
-        ${contactName || l.position ? `<div class="sub" style="margin-top:6px">${escHtml(contactName || '')}${contactName && l.position ? ' · ' : ''}${escHtml(l.position || '')}</div>` : ''}
-        ${l.educator_name ? `<div class="sub" style="margin-top:6px">Educator: ${escHtml(l.educator_name)}</div>` : ''}
-        <div class="sub" style="margin-top:6px">${l.agency_usage ? escHtml((LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)) : ''}${l.agency_usage && l.entry_type ? ' · ' : ''}${l.entry_type === 'centre' ? 'Added directly' : 'From vetting call'}</div>
+        <div class="card" style="cursor:default">
+          <div class="sub">${escHtml(l.street_address || '')}${l.street_address ? ', ' : ''}${escHtml(l.suburb || '')} ${escHtml(l.state || '')}</div>
+          <div class="sub" style="margin-top:6px">${phoneLink(l.centre_phone)}${l.centre_phone && l.contact_email ? ' · ' : ''}${mailtoLink(l.contact_email)}</div>
+          ${contactName || l.position ? `<div class="sub" style="margin-top:6px">${escHtml(contactName || '')}${contactName && l.position ? ' · ' : ''}${escHtml(l.position || '')}</div>` : ''}
+          ${l.educator_name ? `<div class="sub" style="margin-top:6px">Educator: ${escHtml(l.educator_name)}</div>` : ''}
+          <div class="sub" style="margin-top:6px">${l.agency_usage ? escHtml((LEAD_AGENCY_USAGE_LABELS[l.agency_usage] || l.agency_usage)) : ''}${l.agency_usage && l.entry_type ? ' · ' : ''}${l.entry_type === 'centre' ? 'Added directly' : 'From vetting call'}</div>
+          ${lastNote ? `<div class="note-line" style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">${escHtml(lastNote.note)}</div>` : ''}
+          <div class="card-corner-badge"><span class="badge ${stage.cls} corner">${escHtml(stage.label)}</span></div>
+        </div>
 
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="openEditLead('${l.id}')">Edit Contact</button>
@@ -1190,9 +1201,6 @@
           </div>` : `<div class="note-line">Nothing logged yet.</div>`}
 
         ${nextFollowUp ? `<div class="section-title">Next Follow-up</div><div class="note-line">${escHtml(nextFollowUp.next_step)} — ${fmtDate(nextFollowUp.next_step_due_date)}</div>` : ''}
-
-        <div class="section-title">Most Recent Note</div>
-        <div class="note-line">${lastNote ? escHtml(lastNote.note) : 'No notes yet.'}</div>
 
         ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
       `;
@@ -1460,18 +1468,19 @@
         return aFav === bFav ? 0 : aFav ? -1 : 1;
       });
       main.innerHTML = `
-        <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
-
-        ${c ? `
-        ${healthSquareHtml(c.health)}
-        ${c.isEscalated ? `<span class="badge bad" style="margin-left:6px">Outstanding Issue</span>` : ''}
-        ${c.nurture ? `
-        <div style="background:var(--amber-bg);border:1px solid #fde68a;border-left:4px solid var(--amber);border-radius:10px;padding:10px 12px;margin:8px 0 0">
-          <div style="font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.3px">Next Action</div>
-          <div class="sub" style="margin-top:2px;color:var(--text)">${escHtml(NURTURE_STATUS_LABELS[c.nurture.status] || c.nurture.status)}${c.nurture.dueDate ? ' — ' + fmtDate(c.nurture.dueDate) : ''}</div>
+        <div class="card" style="cursor:default">
+          <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
+          ${c ? `
+          ${healthSquareHtml(c.health)}
+          ${c.isEscalated ? `<span class="badge bad" style="margin-left:6px">Outstanding Issue</span>` : ''}
+          ${c.nurture ? `
+          <div style="background:var(--blue-bg);border-radius:10px;padding:10px 12px;margin-top:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.3px">Next Action</div>
+            <div class="sub" style="margin-top:2px;color:var(--text)">${escHtml(NURTURE_STATUS_LABELS[c.nurture.status] || c.nurture.status)}${c.nurture.dueDate ? ' — ' + fmtDate(c.nurture.dueDate) : ''}</div>
+          </div>
+          ` : ''}
+          ` : ''}
         </div>
-        ` : ''}
-        ` : ''}
 
         <div class="stat-row" style="margin-top:12px">
           <div class="stat" style="text-align:left"><div class="num" style="font-size:26px">${todayOpen.length}</div><div class="label">Bookings Today</div></div>
