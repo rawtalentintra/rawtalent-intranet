@@ -243,6 +243,7 @@
     let planRouteLoadingDate = false; // true while selectRouteDate() is fetching a saved plan for the tapped date
     let routeBuilderStart = '';
     let routeBuilderDeparture = '';
+    let routeBuilderTargetStops = 5; // "how many stops today?" (Joy, 2026-09-06) — a personal goal, not a hard cap (10 stays the real technical max)
     let routeBuilderStops = []; // [{type:'lead'|'centre', id, label} | {type:'manual', label, address}]
     let routeBuilderStartCoord = null; // {lat,lng} once the starting address resolves — gates + ranks Suggested Stops (see paintPlanRoute)
     let routeDraftPreview = null; // background, non-persisted preview of the optimized route so far (see refreshRouteDraftPreview)
@@ -547,6 +548,7 @@
       routeBuilderDate = todayDateStr();
       planRouteWeekStart = mondayOf(routeBuilderDate);
       routeBuilderDeparture = '09:00';
+      routeBuilderTargetStops = 5;
       routeBuilderStartCoord = null;
       routeBuilderStops = (plannedRoute?.stops || []).map(s => ({
         type: s.type, id: s.type !== 'manual' ? s.id : undefined, label: s.centre_name, address: s.type === 'manual' ? s.centre_name : undefined
@@ -583,6 +585,48 @@
       try { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
       catch { return '09:00'; }
     }
+    // Custom Hour / Minute(10s) / AM-PM dropdowns for Departure time —
+    // replaces the native <input type=time> (Joy, 2026-09-06: "very
+    // difficult to select the minutes... let's do it per ten minutes and
+    // make it easy to select"). A `step` attribute on the native input
+    // only ever hints at a minute increment — how (or whether) a given
+    // browser's own wheel picker actually honours it isn't guaranteed, so
+    // three plain <select>s guarantee exactly 6 minute options everywhere,
+    // no native picker quirks to work around.
+    const MINUTE_OPTIONS = ['00', '10', '20', '30', '40', '50'];
+    function timePartsFromHHMM(hhmm) {
+      const [h, m] = (hhmm || '09:00').split(':').map(Number);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      let hour12 = h % 12; if (hour12 === 0) hour12 = 12;
+      const roundedMin = MINUTE_OPTIONS[Math.round(m / 10) % 6];
+      return { hour12, minute: roundedMin, ampm };
+    }
+    function setDepartureFromParts() {
+      const hour12 = Number(document.getElementById('routeDepHour').value);
+      const minute = document.getElementById('routeDepMinute').value;
+      const ampm = document.getElementById('routeDepAmPm').value;
+      let hour24 = hour12 % 12; if (ampm === 'PM') hour24 += 12;
+      routeBuilderDeparture = String(hour24).padStart(2, '0') + ':' + minute;
+      refreshRouteDraftPreview();
+    }
+    function departureTimePickerHtml() {
+      const { hour12, minute, ampm } = timePartsFromHHMM(routeBuilderDeparture);
+      const hourOpts = Array.from({ length: 12 }, (_, i) => i + 1);
+      return `
+        <div style="display:flex;gap:8px">
+          <select id="routeDepHour" style="flex:1" onchange="setDepartureFromParts()">
+            ${hourOpts.map(h => `<option value="${h}" ${h === hour12 ? 'selected' : ''}>${h}</option>`).join('')}
+          </select>
+          <select id="routeDepMinute" style="flex:1" onchange="setDepartureFromParts()">
+            ${MINUTE_OPTIONS.map(m => `<option value="${m}" ${m === minute ? 'selected' : ''}>${m}</option>`).join('')}
+          </select>
+          <select id="routeDepAmPm" style="flex:1" onchange="setDepartureFromParts()">
+            <option value="AM" ${ampm === 'AM' ? 'selected' : ''}>AM</option>
+            <option value="PM" ${ampm === 'PM' ? 'selected' : ''}>PM</option>
+          </select>
+        </div>
+      `;
+    }
     const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     // "It just doesn't show the date today, but the dates for the whole
@@ -616,6 +660,10 @@
     }
     function shiftPlanRouteWeek(days) {
       planRouteWeekStart = dateStrAdd(planRouteWeekStart, days);
+      paintPlanRoute();
+    }
+    function setTargetStops(n) {
+      routeBuilderTargetStops = n;
       paintPlanRoute();
     }
     // Tapping a day on the strip — loads whatever's already saved for that
@@ -817,12 +865,17 @@
             return haversineKm(start.lat, start.lng, lat, lng) + haversineKm(lat, lng, dest.lat, dest.lng) - direct;
           }
         : (lat, lng) => Math.min(...refCoords.map(p => haversineKm(p.lat, p.lng, lat, lng)));
+      // Capped to however many more stops are needed to hit today's target
+      // (min 3, so there's always a real choice even right at the goal) —
+      // no point suggesting 8 more once they've already said "just 3
+      // today".
+      const suggestedCap = Math.max(3, routeBuilderTargetStops - routeBuilderStops.length);
       const suggested = refCoords.length
         ? todayBuckets().attention
             .filter(item => !routeBuilderStops.some(s => s.type === 'centre' && s.id === item.centre.centreKey) && Number.isFinite(item.centre.latitude))
             .map(item => ({ ...item, _distanceKm: distanceForCandidate(item.centre.latitude, item.centre.longitude) }))
             .sort((a, b) => (a._tier - b._tier) || (a._distanceKm - b._distanceKm))
-            .slice(0, 8)
+            .slice(0, suggestedCap)
         : [];
 
       // Always visible regardless of whether Starting Address currently
@@ -860,10 +913,15 @@
         </div>
         ${homeUiHtml}
         <label>Departure time</label>
-        <input type="time" id="routeDepartureInput" step="600" value="${escHtml(routeBuilderDeparture)}" onchange="routeBuilderDeparture=this.value">
+        ${departureTimePickerHtml()}
+
+        <label>How many stops would you like to do today?</label>
+        <div style="display:flex;gap:6px;margin-bottom:4px">
+          ${[3, 5, 8, 10].map(n => `<button onclick="setTargetStops(${n})" style="flex:1;border:none;border-radius:10px;padding:9px 4px;font-weight:700;cursor:pointer;background:${routeBuilderTargetStops === n ? 'var(--blue)' : 'var(--card)'};color:${routeBuilderTargetStops === n ? 'white' : 'var(--text)'};border:1px solid ${routeBuilderTargetStops === n ? 'var(--blue)' : 'var(--border)'}">${n}</button>`).join('')}
+        </div>
 
         <div class="section-title">Stops (${routeBuilderStops.length}/${10})</div>
-        <div class="field-hint" style="margin-bottom:8px">Aim for around 5 quality stops — a guideline, not a rule.</div>
+        <div class="field-hint" style="margin-bottom:8px">${routeBuilderStops.length >= routeBuilderTargetStops ? `You've reached your ${routeBuilderTargetStops}-stop goal for today.` : `Aiming for ${routeBuilderTargetStops} stops today — ${routeBuilderTargetStops - routeBuilderStops.length} to go.`}</div>
         ${routeBuilderStops.length ? routeBuilderStops.map((s, i) => `
           <div class="card" style="cursor:default;display:flex;justify-content:space-between;align-items:center;gap:8px">
             <div><div class="name">${escHtml(s.label)}</div><div class="sub">${s.type === 'manual' ? 'Manual address' : (s.type === 'lead' ? 'Lead' : 'Centre')}</div></div>
@@ -918,11 +976,36 @@
     // own explicit way out: tapping a card both adds the stop AND returns
     // to Plan Route in one tap, and a plain "Done" button covers leaving
     // without picking anything.
+    // Same priority hierarchy Suggested Stops/Today's Needs Attention
+    // already use for centres (tier 1/2/3 from todayBuckets), falling
+    // back to health severity when a centre isn't in that list at all —
+    // "if there are no needs attention for the day continue to follow the
+    // initial hierarchy we have for suggested centres" (Joy, 2026-09-06).
+    // Leads get the equivalent: earlier-stage leads (New/Contacted) need
+    // action soonest, so they sort first.
+    const CENTRE_HEALTH_PRIORITY = { needs_attention: 1, declining: 1, dormant: 1, opportunity: 2, new_activating: 2, healthy: 3, growing: 3 };
+    const LEAD_STAGE_PRIORITY = { new: 1, contacted: 2, visit_scheduled: 3, visited: 4, signed: 5 };
     let routeStopPickerSearch = '';
+    // Two independent bits of state per section: whether the <details> is
+    // collapsed at all (Joy, 2026-09-06: "is there any way that leads and
+    // centres can be collapsible"), and whether it's showing the full list
+    // instead of the initial-5 ("should display around an initial list of
+    // 5"). Sections start OPEN (visible) — collapsible means the WFP can
+    // shrink one out of the way if they only care about the other, not
+    // that everything starts hidden.
+    let routeStopPickerLeadsCollapsed = false;
+    let routeStopPickerCentresCollapsed = false;
+    let routeStopPickerLeadsShowAll = false;
+    let routeStopPickerCentresShowAll = false;
+    const ROUTE_STOP_PICKER_INITIAL_COUNT = 5;
     async function renderRouteStopPicker() {
       document.getElementById('headerTitle').textContent = 'Add a Stop';
       await ensureDataLoaded();
       routeStopPickerSearch = '';
+      routeStopPickerLeadsCollapsed = false;
+      routeStopPickerCentresCollapsed = false;
+      routeStopPickerLeadsShowAll = false;
+      routeStopPickerCentresShowAll = false;
       paintRouteStopPicker();
     }
     function paintRouteStopPicker() {
@@ -931,23 +1014,47 @@
       routeStopPickerSearch = rawSearch;
       const q = rawSearch.toLowerCase().trim();
       const alreadyAdded = { lead: new Set(routeBuilderStops.filter(s => s.type === 'lead').map(s => s.id)), centre: new Set(routeBuilderStops.filter(s => s.type === 'centre').map(s => s.id)) };
-      const leads = allLeads.filter(l => !l.closed_at && !alreadyAdded.lead.has(l.id) && (!q || (l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)));
-      const centres = allCentres.filter(c => !alreadyAdded.centre.has(c.centreKey) && (!q || (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)));
+      const attentionTier = new Map(todayBuckets().attention.map(item => [item.centre.centreKey, item._tier]));
+
+      const leads = allLeads
+        .filter(l => !l.closed_at && !alreadyAdded.lead.has(l.id) && (!q || (l.centre_name || '').toLowerCase().includes(q) || (l.suburb || '').toLowerCase().includes(q)))
+        .sort((a, b) => (LEAD_STAGE_PRIORITY[deriveLeadStage(a)] || 9) - (LEAD_STAGE_PRIORITY[deriveLeadStage(b)] || 9));
+      const centres = allCentres
+        .filter(c => !alreadyAdded.centre.has(c.centreKey) && (!q || (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)))
+        .sort((a, b) => (attentionTier.get(a.centreKey) ?? (3 + (CENTRE_HEALTH_PRIORITY[a.health] || 4))) - (attentionTier.get(b.centreKey) ?? (3 + (CENTRE_HEALTH_PRIORITY[b.health] || 4))));
+
+      // The initial-5 truncation only makes sense browsing the full list —
+      // once they've typed a search they clearly know what they're after,
+      // so show every match instead of hiding results behind Show More.
+      const leadsShown = (q || routeStopPickerLeadsShowAll) ? leads : leads.slice(0, ROUTE_STOP_PICKER_INITIAL_COUNT);
+      const centresShown = (q || routeStopPickerCentresShowAll) ? centres : centres.slice(0, ROUTE_STOP_PICKER_INITIAL_COUNT);
+
+      const leadRow = l => `
+        <div class="card" onclick="addRouteStop('lead','${l.id}');goBack()">
+          <div class="name">${escHtml(l.centre_name)}</div>
+          <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
+        </div>`;
+      const centreRow = c => `
+        <div class="card" onclick="addRouteStop('centre','${c.centreKey}');goBack()">
+          <div class="name">${escHtml(c.name)}</div>
+          ${healthSquareHtml(c.health)}
+        </div>`;
+
       main.innerHTML = `
         <button class="btn btn-secondary" style="width:100%;margin-bottom:12px" onclick="goBack()">Done</button>
         <input type="text" class="search-box" id="routeStopPickerSearch" placeholder="Search by name or suburb…" value="${escHtml(rawSearch)}" oninput="repaintKeepingFocus(paintRouteStopPicker)">
-        <div class="section-title">Leads (${leads.length})</div>
-        ${leads.length ? leads.map(l => `
-          <div class="card" onclick="addRouteStop('lead','${l.id}');goBack()">
-            <div class="name">${escHtml(l.centre_name)}</div>
-            <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
-          </div>`).join('') : `<div class="note-line">No matching leads.</div>`}
-        <div class="section-title">Centres (${centres.length})</div>
-        ${centres.length ? centres.map(c => `
-          <div class="card" onclick="addRouteStop('centre','${c.centreKey}');goBack()">
-            <div class="name">${escHtml(c.name)}</div>
-            ${healthSquareHtml(c.health)}
-          </div>`).join('') : `<div class="note-line">No matching centres.</div>`}
+
+        <details ${routeStopPickerLeadsCollapsed && !q ? '' : 'open'} ontoggle="routeStopPickerLeadsCollapsed=!this.open">
+          <summary class="section-title" style="display:list-item;cursor:pointer">Leads (${leads.length})</summary>
+          ${leadsShown.length ? leadsShown.map(leadRow).join('') : `<div class="note-line">No matching leads.</div>`}
+          ${!q && !routeStopPickerLeadsShowAll && leads.length > ROUTE_STOP_PICKER_INITIAL_COUNT ? `<button class="show-more-btn" onclick="routeStopPickerLeadsShowAll=true;paintRouteStopPicker()">Show ${leads.length - ROUTE_STOP_PICKER_INITIAL_COUNT} more</button>` : ''}
+        </details>
+
+        <details ${routeStopPickerCentresCollapsed && !q ? '' : 'open'} ontoggle="routeStopPickerCentresCollapsed=!this.open">
+          <summary class="section-title" style="display:list-item;cursor:pointer">Centres (${centres.length})</summary>
+          ${centresShown.length ? centresShown.map(centreRow).join('') : `<div class="note-line">No matching centres.</div>`}
+          ${!q && !routeStopPickerCentresShowAll && centres.length > ROUTE_STOP_PICKER_INITIAL_COUNT ? `<button class="show-more-btn" onclick="routeStopPickerCentresShowAll=true;paintRouteStopPicker()">Show ${centres.length - ROUTE_STOP_PICKER_INITIAL_COUNT} more</button>` : ''}
+        </details>
       `;
     }
     // Address autocomplete ("is there no auto-complete here... like
