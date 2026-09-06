@@ -188,11 +188,31 @@ async function visitsByCentreKey(centreKeys) {
   return byKey;
 }
 
+// YYYY-MM-DD in the SERVER's local calendar day — matches how the
+// frontend's own todayDateStr()/routeBuilderDate work (a scheduled visit
+// is a calendar day, not an instant), so a straight string comparison on
+// either side lines up correctly.
+function dateOnlyStr(d) {
+  const dt = new Date(d);
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+
 function healthForCentre(centre, bookings, visits, lastBookingDate = null) {
   const now = new Date();
   const buckets = bucketBookingsForCentre(bookings, { rtLocationId: centre.rtLocationId, rtClientId: centre.rtClientId });
   const health = computeCentreHealth(centre, { visits, ...buckets, lastBookingDate }, now);
   const nurture = computeCentreNurture(centre, visits, health.category, now, { isStrategic: health.isStrategic, isEscalated: health.isEscalated });
+  // A confirmed-in-advance visit — logged (Desktop or mobile) as a Visit
+  // with Status = Planned, whether or not it's ever been actually built
+  // into a Smart Routing route. Joy, 2026-09-06: "there are also times
+  // when the lead or centre was called in advance and a scheduled visit
+  // is already confirmed... these should be notified when planning
+  // routes, and on Today if there's no planned route yet." Every such
+  // upcoming date, not just the soonest — Plan Route can be browsing any
+  // day on the week-strip, not only today.
+  const scheduledVisitDates = visits
+    .filter(v => v.channel === 'visit' && v.status === 'planned')
+    .map(v => dateOnlyStr(v.visit_date));
   return {
     ...centre,
     health: health.category,
@@ -201,6 +221,7 @@ function healthForCentre(centre, bookings, visits, lastBookingDate = null) {
     isEscalated: health.isEscalated,
     escalationNote: health.escalationNote,
     nurture,
+    scheduledVisitDates,
     bookings30dCount: buckets.bookings30d.length,
     bookingsPrev30dCount: buckets.bookingsPrev30d.length,
     bookings90dCount: buckets.bookings90d.length

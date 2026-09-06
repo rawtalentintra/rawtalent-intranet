@@ -912,10 +912,31 @@
         homeUiHtml = `<div class="field-hint">No Home Address saved yet — enter one above, then tap Save.</div>`;
       }
 
+      // "Notified when planning routes" (Joy, 2026-09-06) — a confirmed
+      // visit for whichever day is on screen, not yet on this route.
+      // Reuses addRouteStop, same as Suggested Stops' own one-tap add.
+      const scheduledForThisDay = scheduledVisitItemsForDate(
+        routeBuilderDate,
+        routeBuilderStops.filter(s => s.type === 'centre').map(s => s.id),
+        routeBuilderStops.filter(s => s.type === 'lead').map(s => s.id)
+      );
+
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         ${weekStripHtml()}
         ${planRouteLoadingDate ? `<div class="field-hint" style="margin-bottom:10px">Loading…</div>` : ''}
+        ${scheduledForThisDay.length ? `
+        <div class="section-title">Confirmed for This Day</div>
+        ${scheduledForThisDay.map(item => {
+          const name = item.kind === 'lead' ? item.lead.centre_name : item.centre.name;
+          const id = item.kind === 'lead' ? item.lead.id : item.centre.centreKey;
+          return `
+          <div class="card" onclick="addRouteStop('${item.kind}','${id}')">
+            <div class="name">${escHtml(name)}</div>
+            <div class="sub">Visit already confirmed — tap to add to this route</div>
+          </div>`;
+        }).join('')}
+        ` : ''}
         <label>Starting address</label>
         <div style="position:relative">
           <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
@@ -1274,6 +1295,43 @@
       return { attention };
     }
 
+    // A visit "called in advance and already confirmed" (Joy, 2026-09-06)
+    // — logged (Desktop or mobile) as a Visit with Status = Planned
+    // (centres.scheduledVisitDates, from routes/centres.js's
+    // healthForCentre), or a lead whose own Visit Scheduled stage
+    // (centre_visited_status/at) lands on this date. Independent of
+    // whether it's ever been added to a built route — this is about a
+    // real-world commitment someone already made, not Smart Routing's own
+    // state. Used both by Today (no route built yet) and Plan Route
+    // (any date on the week-strip), so it takes the target date and an
+    // "already on this route" exclusion set as parameters rather than
+    // assuming either screen's own state.
+    function scheduledVisitItemsForDate(dateStr, excludeCentreKeys, excludeLeadIds) {
+      const items = [];
+      for (const c of allCentres) {
+        if ((excludeCentreKeys || []).includes(c.centreKey)) continue;
+        if ((c.scheduledVisitDates || []).includes(dateStr)) items.push({ kind: 'centre', centre: c });
+      }
+      for (const l of allLeads) {
+        if ((excludeLeadIds || []).includes(l.id)) continue;
+        if (!l.closed_at && l.centre_visited_status === 'scheduled' && l.centre_visited_at && todayDateStr(new Date(l.centre_visited_at)) === dateStr) items.push({ kind: 'lead', lead: l });
+      }
+      return items;
+    }
+    // Drops them straight into Plan Route with the confirmed stop already
+    // added — "add how many stops? Then build a smart route based on
+    // their centres and leads" (Joy, 2026-09-06). Everything after that is
+    // the existing Plan Route flow (stop-count goal, Suggested Stops,
+    // Build) — no separate wizard needed, this just seeds it.
+    function buildRouteAroundScheduledVisit(kind, id) {
+      openPlanRoute();
+      const type = kind === 'lead' ? 'lead' : 'centre';
+      const label = type === 'centre' ? (allCentres.find(c => c.centreKey === id)?.name || id) : (allLeads.find(l => l.id === id)?.centre_name || id);
+      if (!routeBuilderStops.some(s => s.type === type && s.id === id)) routeBuilderStops.push({ type, id, label });
+      paintPlanRoute();
+      refreshRouteDraftPreview();
+    }
+
     // Quick-action buttons (Call/Log/Follow-up/Add to Route) were removed
     // from these cards 2026-09-04 — Liam: "it all happens in here [the
     // detail page]... we'll keep the functionality, but it's all in here."
@@ -1348,7 +1406,18 @@
     // prompt when nothing's been built for today yet.
     function routeTodayHtml() {
       if (!plannedRoute) {
+        const scheduledToday = scheduledVisitItemsForDate(todayDateStr());
         return `
+          ${scheduledToday.map(item => {
+            const name = item.kind === 'lead' ? item.lead.centre_name : item.centre.name;
+            const id = item.kind === 'lead' ? item.lead.id : item.centre.centreKey;
+            return `
+            <div class="card" style="cursor:default">
+              <div class="name">${escHtml(name)}</div>
+              <div class="sub">This ${item.kind === 'lead' ? 'lead' : 'centre'} is confirmed to be visited today. Want to build a route around it?</div>
+              <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="buildRouteAroundScheduledVisit('${item.kind}','${id}')">Build Route</button>
+            </div>`;
+          }).join('')}
           <div class="card" style="cursor:default">
             <div class="name">No route planned for today</div>
             <div class="sub">Build a quick route and it'll show here every morning.</div>
