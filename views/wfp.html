@@ -2273,9 +2273,56 @@
     // often, and reloading on every tab-switch-back there would be
     // needlessly disruptive (lost scroll position, an in-progress form).
     const isStandaloneApp = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    // The forced reload above is exactly what was dropping the WFP back to
+    // Today whenever they left the app and came back — Joy, 2026-09-06:
+    // "if View on Maps was tapped and Maps opens and we go back to the
+    // app... it keeps going back to home screen/Today" instead of
+    // wherever they actually were, in-progress route (stops, starting
+    // address, departure time) included. The reload itself has to stay
+    // (still the only way an already-installed icon ever picks up a new
+    // deploy) — this carries the exact screen and any route being built
+    // across it via sessionStorage instead, read back and cleared
+    // (one-time use) the moment the app boots again, so it never
+    // resurfaces on some unrelated later reload.
+    const NAV_STATE_KEY = 'wfpNavState';
+    function saveNavStateForReload() {
+      try {
+        sessionStorage.setItem(NAV_STATE_KEY, JSON.stringify({
+          viewStack, wfpFilterLabel, currentCentreKey, currentLeadId, editingLeadId, logTarget,
+          routeBuilderDate, planRouteWeekStart, routeBuilderStart, routeBuilderStartCoord,
+          routeBuilderDeparture, routeBuilderTargetStops, routeBuilderStops, routeReviewResult,
+          todayViewDate, todayViewWeekStart
+        }));
+      } catch { /* sessionStorage unavailable — worst case, same as before: lands on Today */ }
+    }
+    function restoreNavStateIfAny() {
+      let saved = null;
+      try {
+        const raw = sessionStorage.getItem(NAV_STATE_KEY);
+        if (raw) { saved = JSON.parse(raw); sessionStorage.removeItem(NAV_STATE_KEY); }
+      } catch { /* ignore — falls through to the normal Today boot */ }
+      if (!saved) return false;
+      viewStack = Array.isArray(saved.viewStack) && saved.viewStack.length ? saved.viewStack : ['today'];
+      if (saved.wfpFilterLabel !== undefined) wfpFilterLabel = saved.wfpFilterLabel;
+      currentCentreKey = saved.currentCentreKey ?? null;
+      currentLeadId = saved.currentLeadId ?? null;
+      editingLeadId = saved.editingLeadId ?? null;
+      logTarget = saved.logTarget ?? null;
+      if (saved.routeBuilderDate) routeBuilderDate = saved.routeBuilderDate;
+      if (saved.planRouteWeekStart) planRouteWeekStart = saved.planRouteWeekStart;
+      if (saved.routeBuilderStart !== undefined) routeBuilderStart = saved.routeBuilderStart;
+      if (saved.routeBuilderStartCoord !== undefined) routeBuilderStartCoord = saved.routeBuilderStartCoord;
+      if (saved.routeBuilderDeparture) routeBuilderDeparture = saved.routeBuilderDeparture;
+      if (saved.routeBuilderTargetStops) routeBuilderTargetStops = saved.routeBuilderTargetStops;
+      if (Array.isArray(saved.routeBuilderStops)) routeBuilderStops = saved.routeBuilderStops;
+      if (saved.routeReviewResult !== undefined) routeReviewResult = saved.routeReviewResult;
+      if (saved.todayViewDate) todayViewDate = saved.todayViewDate;
+      if (saved.todayViewWeekStart) todayViewWeekStart = saved.todayViewWeekStart;
+      return true;
+    }
     if (isStandaloneApp) {
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') location.reload();
+        if (document.visibilityState === 'visible') { saveNavStateForReload(); location.reload(); }
       });
     }
 
@@ -2299,7 +2346,19 @@
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
       }
-      render('today');
+      // Restoring after the visibility-triggered reload above (see
+      // saveNavStateForReload) overrides the wfpFilterLabel default just
+      // set — their actual last-selected filter wins over re-deriving it
+      // from scratch. setView (not a bare render) so the bottom-nav
+      // highlight/header-compact state comes back correct too; push:false
+      // since viewStack is already the full restored stack, not one more
+      // level to add to it.
+      if (restoreNavStateIfAny()) {
+        setView(viewStack[viewStack.length - 1], false);
+        if (viewStack[viewStack.length - 1] === 'plan-route' && routeBuilderStart && routeBuilderStops.length) refreshRouteDraftPreview();
+      } else {
+        render('today');
+      }
     })();
   </script>
 </body>
