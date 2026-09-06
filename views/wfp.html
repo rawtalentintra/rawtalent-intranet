@@ -146,6 +146,7 @@
     }
     .btn-primary { background: var(--blue); color: white; }
     .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn-lightblue { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-bg); }
     .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid #fecaca; }
     .btn:disabled { opacity: 0.55; }
 
@@ -709,9 +710,26 @@
     // (selectedDate/weekStart/onSelect-fn-name/onShift-fn-name) — Joy,
     // 2026-09-06, adding the same strip to Today: "select the specific
     // date and look at that route saved for that date."
+    // A week starting Monday can genuinely span two months (e.g. Mon 31
+    // Aug – Sun 6 Sep) — showing just the week-start's month labelled the
+    // whole strip "August" even while the actually-selected/highlighted
+    // day (Sun 6) was in September (Joy, 2026-09-06: "why does it say
+    // August when the selected date was September"). Shows both months
+    // whenever the visible week crosses a boundary, the single month
+    // otherwise.
+    function weekStripMonthLabel(weekStart) {
+      const start = dateStrToDate(weekStart);
+      const end = dateStrToDate(dateStrAdd(weekStart, 6));
+      if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+        return MONTH_NAMES[end.getMonth()] + ' ' + end.getFullYear();
+      }
+      const startLabel = MONTH_NAMES[start.getMonth()] + (start.getFullYear() !== end.getFullYear() ? ' ' + start.getFullYear() : '');
+      const endLabel = MONTH_NAMES[end.getMonth()] + ' ' + end.getFullYear();
+      return `${startLabel} – ${endLabel}`;
+    }
     function weekStripHtml(selectedDate, weekStart, selectFn, shiftFn) {
       const days = Array.from({ length: 7 }, (_, i) => dateStrAdd(weekStart, i));
-      const monthLabel = MONTH_NAMES[dateStrToDate(weekStart).getMonth()] + ' ' + dateStrToDate(weekStart).getFullYear();
+      const monthLabel = weekStripMonthLabel(weekStart);
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <button class="qa-btn" onclick="${shiftFn}(-7)">&larr;</button>
@@ -1324,7 +1342,7 @@
       const mapsUrl = routeMapsUrl(r.startAddress, r.stops);
       main.innerHTML = `
         <div class="section-title">Route Built</div>
-        ${mapsUrl ? `<a class="btn btn-secondary" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
+        ${mapsUrl ? `<a class="btn btn-lightblue" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
         ${itineraryBlocksHtml(r.itinerary?.blocks)}
         <div class="action-row" style="margin-top:14px">
           <button class="btn btn-secondary" onclick="goBack()">Rebuild</button>
@@ -1411,19 +1429,28 @@
       refreshRouteDraftPreview();
     }
 
-    // Quick-action buttons (Call/Log/Follow-up/Add to Route) were removed
-    // from these cards 2026-09-04 — Liam: "it all happens in here [the
-    // detail page]... we'll keep the functionality, but it's all in here."
-    // Cards are tap-to-open only now; every action still lives on Lead/
-    // Centre Detail.
+    // Quick-action buttons (Call/Log/Follow-up) were removed from these
+    // cards 2026-09-04 — Liam: "it all happens in here [the detail
+    // page]... we'll keep the functionality, but it's all in here." Add
+    // to Route came back 2026-09-06 (Joy) specifically once a route's
+    // already been accepted for today — bolting on one more Needs
+    // Attention/Along Your Route stop shouldn't need a trip through the
+    // detail page when the whole point is doing it quickly. Hidden
+    // entirely when there's no route yet (addStopToRoute would just hand
+    // off to Plan a Route anyway, which is what tapping the card into the
+    // detail page's own Add to Route already does).
     function todayItemRow(item) {
+      const showAddToRoute = !!plannedRoute;
       if (item.kind === 'lead') {
         const l = item.lead;
         return `
           <div class="card" onclick="openLead('${l.id}')">
             <div class="name">${escHtml(item.label)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
-            <div class="card-corner-badge"><span class="badge neutral corner">Lead</span></div>
+            <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
+              ${showAddToRoute ? `<button class="qa-btn" onclick="event.stopPropagation();addStopToRoute('lead','${l.id}')">Add to Route</button>` : ''}
+              <span class="badge neutral corner">Lead</span>
+            </div>
           </div>`;
       }
       const c = item.centre;
@@ -1432,7 +1459,10 @@
           <div class="name">${escHtml(item.label || c.name)}</div>
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
           ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}
-          <div class="card-corner-badge"><span class="badge neutral corner">Centre</span></div>
+          <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
+            ${showAddToRoute ? `<button class="qa-btn" onclick="event.stopPropagation();addStopToRoute('centre','${c.centreKey}')">Add to Route</button>` : ''}
+            <span class="badge neutral corner">Centre</span>
+          </div>
         </div>`;
     }
 
@@ -1521,10 +1551,10 @@
       const mapsUrl = routeMapsUrl(todayViewedRoute.startAddress, todayViewedRoute.stops);
       return `
         ${strip}
-        ${mapsUrl ? `<a class="btn btn-secondary" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
+        ${mapsUrl ? `<a class="btn btn-lightblue" style="width:100%;margin-bottom:10px" href="${mapsUrl}" target="_blank" rel="noopener">View on Maps</a>` : ''}
         ${itineraryBlocksHtml(todayViewedRoute.itinerary?.blocks, { showLogButton: isToday })}
         <div class="action-row">
-          <button class="btn btn-secondary" onclick="openPlanRoute('${todayViewDate}')">Rebuild Route</button>
+          <button class="btn btn-lightblue" onclick="openPlanRoute('${todayViewDate}')">Rebuild Route</button>
         </div>`;
     }
 
