@@ -392,8 +392,21 @@
       const known = WFP_FILTER_OPTIONS.find(o => o.key === fullLabel);
       return known ? known.label : fullLabel;
     }
+    // A no-wfp_label account (Joy, or any other admin — but NOT Liam,
+    // Justine or Gwen, who are each locked to their own real territory
+    // with no picker at all, 2026-09-06) gets the full real-territory
+    // list PLUS a synthetic "You - Test" option. It resolves to a made-up
+    // label unique to the logged-in admin (never matches any real
+    // suburb/state assignment), so tapping it is a safe, isolated
+    // sandbox — no real centre, lead or route ever lands there, and two
+    // different admins testing at once don't collide with each other.
+    function testTerritoryLabel() {
+      return `Test — ${currentUser.name || currentUser.email}`;
+    }
     function wfpFilterOptionsForCurrentUser() {
-      if (!currentUser.wfpLabel) return WFP_FILTER_OPTIONS;
+      if (!currentUser.wfpLabel) {
+        return [...WFP_FILTER_OPTIONS, { key: testTerritoryLabel(), label: 'You - Test', bg: '#6b7280' }];
+      }
       if (currentUser.additionalTerritories?.length) {
         const own = WFP_FILTER_OPTIONS.find(o => o.key === currentUser.wfpLabel) || { key: currentUser.wfpLabel, label: shortFilterLabel(currentUser.wfpLabel), bg: '#0b1d3e' };
         const extra = currentUser.additionalTerritories.map(label => WFP_FILTER_OPTIONS.find(o => o.key === label) || { key: label, label: shortFilterLabel(label), bg: '#6b7590' });
