@@ -843,6 +843,7 @@
             <button type="button" class="wfp-state-filter-btn" data-state="LIAM" onclick="setMyCentresStateFilter('LIAM')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🔷</span> Liam - VIC</button>
             <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setMyCentresStateFilter('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🟢</span> Justine - VIC</button>
             <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setMyCentresStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#db2777;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">💗</span> Gwen - SA</button>
+            <button type="button" class="wfp-state-filter-btn" data-state="QLD" onclick="setMyCentresStateFilter('QLD')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#f97316;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🟠</span> Gwen - QLD</button>
           </div>
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div class="leads-filter-bar" style="padding:0;border-bottom:none">
@@ -1084,6 +1085,7 @@
           <button type="button" class="wfp-state-filter-btn" data-state="LIAM" onclick="setLeadsStateFilter('LIAM')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#2563eb;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🔷</span> Liam - VIC</button>
           <button type="button" class="wfp-state-filter-btn" data-state="VIC" onclick="setLeadsStateFilter('VIC')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#0d9488;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🟢</span> Justine - VIC</button>
           <button type="button" class="wfp-state-filter-btn" data-state="SA" onclick="setLeadsStateFilter('SA')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#db2777;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">💗</span> Gwen - SA</button>
+          <button type="button" class="wfp-state-filter-btn" data-state="QLD" onclick="setLeadsStateFilter('QLD')" style="border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;background:#f97316;color:white;opacity:.55;transition:opacity .15s"><span class="wfp-state-icon">🟠</span> Gwen - QLD</button>
         </div>
 
         <!-- Open vs Closed as tabs, not a dropdown buried in the filter bar
@@ -8573,6 +8575,11 @@
       const s = (rawState || '').trim().toLowerCase();
       if (s === 'victoria' || s === 'vic') return 'VIC';
       if (s === 'south australia' || s === 'sa') return 'SA';
+      // Gwen's second territory (Joy, 2026-09-06: "let Gwen view her leads
+      // and centres for QLD") — same geography-based, unsplit pattern as
+      // SA (she's QLD's sole partner too, no per-centre assignment row
+      // needed the way Liam/Justine's VIC split required).
+      if (s === 'queensland' || s === 'qld') return 'QLD';
       return null;
     }
 
