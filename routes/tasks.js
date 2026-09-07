@@ -213,7 +213,7 @@ function normalizeLinkedCandidates(list) {
     if (!c || typeof c !== 'object' || c.userId == null) continue;
     if (seen.has(c.userId)) continue;
     seen.add(c.userId);
-    out.push({ userId: c.userId, name: typeof c.name === 'string' ? c.name : null, phone: typeof c.phone === 'string' ? c.phone : null });
+    out.push({ userId: c.userId, name: typeof c.name === 'string' ? c.name : null, phone: typeof c.phone === 'string' ? c.phone : null, email: typeof c.email === 'string' ? c.email : null });
   }
   return out;
 }

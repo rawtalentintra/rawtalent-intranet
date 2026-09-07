@@ -36,13 +36,23 @@ function extractPhone(text) {
   return match ? match[0] : null;
 }
 
-// Whatever's left after removing the phone number and cutting at the
+// Pulls the first email-shaped substring out of free text — same "the
+// user pasted the actual identifier" reasoning as phone, and just as
+// reliable a signal since email is effectively unique per RT candidate.
+const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+function extractEmail(text) {
+  const match = (text || '').match(EMAIL_PATTERN);
+  return match ? match[0] : null;
+}
+
+// Whatever's left after removing the phone/email and cutting at the
 // first separator that usually starts the rest of a title ("Name | note",
 // "Name - WWCC check", "Name: ...") — a best-effort name guess, not a
 // strict parse.
-function extractNameGuess(text, phoneMatch) {
+function extractNameGuess(text, phoneMatch, emailMatch) {
   let rest = text || '';
   if (phoneMatch) rest = rest.replace(phoneMatch, ' ');
+  if (emailMatch) rest = rest.replace(emailMatch, ' ');
   rest = rest.split(/[|\-–—:]/)[0];
   return rest.replace(/[^A-Za-z' ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -56,6 +66,18 @@ function candidateResult(row, confidence) {
     confidence,
     portalUrl: `https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${row.userId}`
   };
+}
+
+async function matchCandidatesByEmail(email) {
+  if (!email) return [];
+  const res = await getDb().execute({
+    sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", contact_no AS "contactNo", email
+          FROM rt_candidates_cache
+          WHERE LOWER(email) = LOWER(?)
+          LIMIT 10`,
+    args: [email]
+  });
+  return res.rows.map(r => candidateResult(r, 'email'));
 }
 
 async function matchCandidatesByPhone(phoneDigits) {
@@ -146,28 +168,34 @@ async function matchClientsByName(nameGuess) {
   return matches.slice(0, 5);
 }
 
-// Single entry point — tries phone first (confident, can auto-select),
-// falls back to fuzzy name matching (a "did you mean" list) only when no
-// phone match was found, for both candidates and clients independently.
+// Single entry point — tries email first (candidates only; RT clients have
+// no email field to match against), then phone (both confident, can
+// auto-select), falls back to fuzzy name matching (a "did you mean" list)
+// only when neither found a match, for both candidates and clients
+// independently.
 async function matchPersonOrCentre(text) {
+  const emailMatch = extractEmail(text);
   const phoneMatch = extractPhone(text);
   const phoneDigits = phoneMatch ? normalizePhoneDigits(phoneMatch) : null;
-  const nameGuess = extractNameGuess(text, phoneMatch);
+  const nameGuess = extractNameGuess(text, phoneMatch, emailMatch);
 
-  let candidates = phoneDigits ? await matchCandidatesByPhone(phoneDigits) : [];
+  let candidates = emailMatch ? await matchCandidatesByEmail(emailMatch) : [];
+  if (!candidates.length && phoneDigits) candidates = await matchCandidatesByPhone(phoneDigits);
   if (!candidates.length) candidates = await matchCandidatesByName(nameGuess);
 
   let clients = phoneDigits ? await matchClientsByPhone(phoneDigits) : [];
   if (!clients.length) clients = await matchClientsByName(nameGuess);
 
+  const isConfident = c => c.confidence === 'phone' || c.confidence === 'email';
   return {
     phoneDigits,
+    emailMatch,
     nameGuess,
     candidates,
-    candidateDuplicates: candidates.filter(c => c.confidence === 'phone').length > 1,
+    candidateDuplicates: candidates.filter(isConfident).length > 1,
     clients,
     clientDuplicates: clients.filter(c => c.confidence === 'phone').length > 1
   };
 }
 
-module.exports = { matchPersonOrCentre, normalizePhoneDigits, extractPhone, extractNameGuess };
+module.exports = { matchPersonOrCentre, normalizePhoneDigits, extractPhone, extractEmail, extractNameGuess };

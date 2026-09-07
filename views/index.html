@@ -1157,7 +1157,7 @@
           <div id="taskLinkedCandidateChips"></div>
           <span id="taskAddCandidateToggle" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--orange);display:inline-block" onclick="showAddCandidateInput()">+ Add Linked Educator</span>
           <div id="taskAddCandidateInputWrap" style="display:none;position:relative;margin-top:6px">
-            <input type="text" id="taskAddCandidateInput" class="form-control" placeholder="Name or phone" autocomplete="off" oninput="handleAddCandidateInput(this.value)" onblur="hideAddCandidateInputIfEmpty()">
+            <input type="text" id="taskAddCandidateInput" class="form-control" placeholder="Name, phone, or email" autocomplete="off" oninput="handleAddCandidateInput(this.value)" onblur="hideAddCandidateInputIfEmpty()">
             <div id="taskAddCandidateDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20;padding:6px"></div>
           </div>
         </div>
@@ -3121,7 +3121,7 @@
       const wrap = document.getElementById('taskLinkedCandidateChips');
       if (!wrap) return;
       wrap.innerHTML = taskLinkedCandidates.map(c => taskPersonChipHtml('candidate', c.name,
-        c.phone ? `📞 ${c.phone}` : '',
+        c.phone ? `📞 ${c.phone}` : (c.email ? `✉️ ${c.email}` : ''),
         `openCandidatePortal('${candidatePortalUrl(c.userId)}')`,
         `removeTaskLinkedCandidate(${JSON.stringify(String(c.userId))})`
       )).join('');
@@ -3131,7 +3131,7 @@
     }
     function addTaskLinkedCandidate(c) {
       if (isCandidateLinked(c.userId)) return;
-      taskLinkedCandidates.push({ userId: c.userId, name: c.name, phone: c.phone });
+      taskLinkedCandidates.push({ userId: c.userId, name: c.name, phone: c.phone, email: c.email });
       taskDismissedCandidateIds.delete(String(c.userId));
       renderTaskLinkedCandidateChips();
     }
@@ -3142,7 +3142,8 @@
     }
 
     // Free-text search for adding an educator beyond the one the title
-    // auto-matched — same live-lookup endpoint as the title field, just a
+    // auto-matched — same live-lookup endpoint as the title field (matches
+    // on name, phone, or email — see taskPersonMatchService.js), just a
     // second independent debounce/staleness guard so the two searches
     // can't race each other's results into the wrong place.
     function handleAddCandidateInput(value) {
@@ -3160,7 +3161,7 @@
           window.__taskAddCandidateResults = results;
           dropdown.style.display = 'block';
           dropdown.innerHTML = results.map((c, i) => `
-            <button type="button" class="task-person-suggestion" style="display:block;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCandidateResult(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+            <button type="button" class="task-person-suggestion" style="display:block;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCandidateResult(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</button>
           `).join('');
         } catch { /* best-effort */ }
       }, 400);
@@ -3181,13 +3182,13 @@
       const sections = [];
 
       if (data?.candidates?.length) {
-        // A single confident phone match auto-adds — UNLESS the user
-        // already explicitly removed (✕) this exact suggestion earlier in
-        // this same modal session, in which case it's offered as a pick
-        // again rather than silently re-linking itself the next time they
-        // type. Without this, removing a wrong auto-match and then typing
-        // one more character would just bring it right back.
-        const singleConfidentPhone = !data.candidateDuplicates && data.candidates[0].confidence === 'phone';
+        // A single confident phone OR email match auto-adds — UNLESS the
+        // user already explicitly removed (✕) this exact suggestion
+        // earlier in this same modal session, in which case it's offered
+        // as a pick again rather than silently re-linking itself the next
+        // time they type. Without this, removing a wrong auto-match and
+        // then typing one more character would just bring it right back.
+        const singleConfidentPhone = !data.candidateDuplicates && (data.candidates[0].confidence === 'phone' || data.candidates[0].confidence === 'email');
         const alreadyLinked = isCandidateLinked(data.candidates[0].userId);
         if (singleConfidentPhone && !alreadyLinked && !taskDismissedCandidateIds.has(String(data.candidates[0].userId))) {
           addTaskLinkedCandidate(data.candidates[0]);
@@ -3206,7 +3207,7 @@
             // right before committing to a pick.
             sections.push(`<div class="task-person-suggestions">${pickable.map((c, i) => `
               <span class="task-person-suggestion-row">
-                <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+                <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</button>
                 <button type="button" class="task-person-suggestion-view" onclick="event.stopPropagation();openCandidatePortal('${c.portalUrl}')" title="View profile">↗</button>
               </span>
             `).join('')}</div>`);
