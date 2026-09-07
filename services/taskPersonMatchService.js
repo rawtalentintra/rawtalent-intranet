@@ -68,12 +68,27 @@ function candidateResult(row, confidence) {
   };
 }
 
+// RT's own historical migration marks a superseded/dead candidate profile
+// two ways: is_deleted=true, AND (confirmed live, 2026-09-07) suffixing
+// "_migration_delete" onto that dead row's email column — so the ghost row
+// for "Navkiran Kaur" reads "gaganjhajj000@gmail.com_migration_delete"
+// while the real, current profile keeps the clean address. Every candidate
+// query below excludes is_deleted rows so this junk can never surface as a
+// "possible duplicate profile" (or worse, get silently auto-linked)
+// alongside the one real person it's a dead leftover of — the exact same
+// "stale RT migration data, not a real second record" situation already
+// handled for clients via the "Migration delete" nickname (isTestCentreName
+// in admin.html deliberately leaves that alone; here the equivalent junk is
+// excluded outright since a candidate query has no legitimate reason to
+// return a row RT itself marked deleted).
+const NOT_DELETED = 'is_deleted IS NOT TRUE';
+
 async function matchCandidatesByEmail(email) {
   if (!email) return [];
   const res = await getDb().execute({
     sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", contact_no AS "contactNo", email
           FROM rt_candidates_cache
-          WHERE LOWER(email) = LOWER(?)
+          WHERE LOWER(email) = LOWER(?) AND ${NOT_DELETED}
           LIMIT 10`,
     args: [email]
   });
@@ -85,7 +100,7 @@ async function matchCandidatesByPhone(phoneDigits) {
   const res = await getDb().execute({
     sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", contact_no AS "contactNo", email
           FROM rt_candidates_cache
-          WHERE RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) = ? AND LENGTH(?) = 9
+          WHERE RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) = ? AND LENGTH(?) = 9 AND ${NOT_DELETED}
           LIMIT 10`,
     args: [phoneDigits, phoneDigits]
   });
@@ -98,7 +113,7 @@ async function matchCandidatesByName(nameGuess) {
     sql: `SELECT user_id AS "userId", first_name AS "firstName", last_name AS "lastName", contact_no AS "contactNo", email,
                  similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) AS sim
           FROM rt_candidates_cache
-          WHERE similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) > 0.35
+          WHERE similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ?) > 0.35 AND ${NOT_DELETED}
           ORDER BY sim DESC LIMIT 5`,
     args: [nameGuess, nameGuess]
   });

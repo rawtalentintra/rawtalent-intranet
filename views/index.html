@@ -3123,7 +3123,7 @@
       wrap.innerHTML = taskLinkedCandidates.map(c => taskPersonChipHtml('candidate', c.name,
         c.phone ? `📞 ${c.phone}` : (c.email ? `✉️ ${c.email}` : ''),
         `openCandidatePortal('${candidatePortalUrl(c.userId)}')`,
-        `removeTaskLinkedCandidate(${JSON.stringify(String(c.userId))})`
+        `removeTaskLinkedCandidate('${String(c.userId)}')`
       )).join('');
     }
     function isCandidateLinked(userId) {
