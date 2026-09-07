@@ -345,6 +345,63 @@ async function syncRecordingsInner(direction = 'recent') {
   return { totalSeen, totalNew, contentFetched, transcriptFetched, contentPending: pending.rows.length - contentFetched, contentErrors: contentErrors.slice(0, 3), reachedEnd };
 }
 
+// Reconciliation sync: walks backward from the most recent call using the
+// confirmed before_id cursor (unlike 'recent' mode's unconfirmed offset), and
+// does NOT stop early on a page with zero new inserts — a page can be
+// entirely "already known" while an even older page still holds calls the
+// offset-based 'recent' sync silently skipped (this is the actual mechanism
+// behind real missed-call reports, e.g. 6 of 7 real Dubber calls for one
+// number in Aug 2026 never reaching call_recordings). Only stops once a
+// page's oldest call is older than startDateIso, a page comes back empty
+// (genuine end of history), or maxPages is hit (safety cap for a very wide
+// accidental date range). Waits for any in-flight regular sync first, then
+// holds the same mutex for its own duration, so it never runs concurrently
+// with 'recent'/'older' syncs either (same throttle-limit concern as those).
+async function reconcileDateRange(startDateIso, { maxPages = 200 } = {}) {
+  if (syncInFlight) { try { await syncInFlight; } catch {} }
+  syncInFlight = reconcileDateRangeInner(startDateIso, maxPages).finally(() => { syncInFlight = null; });
+  return syncInFlight;
+}
+
+async function reconcileDateRangeInner(startDateIso, maxPages) {
+  const db = getDb();
+  const startMs = new Date(startDateIso).getTime();
+  if (Number.isNaN(startMs)) throw new Error(`Invalid startDate: ${startDateIso}`);
+
+  let beforeId = null;
+  let totalSeen = 0, totalNew = 0, pagesWalked = 0, reachedStart = false, reachedEnd = false;
+
+  for (let page = 0; page < maxPages; page++) {
+    if (page > 0) await sleepMs(LIST_PAGE_PACE_MS);
+    const params = { count: SYNC_PAGE_SIZE };
+    if (beforeId) params.before_id = beforeId;
+    const data = await listRecordings(params);
+    const recordings = data.recordings || data.items || [];
+    if (!recordings.length) { reachedEnd = true; break; }
+    pagesWalked++;
+    totalSeen += recordings.length;
+
+    for (const r of recordings) {
+      if (await insertRecordingIfNew(db, r)) totalNew++;
+    }
+
+    const oldestInPage = recordings[recordings.length - 1];
+    beforeId = oldestInPage.id;
+
+    const oldestMs = oldestInPage.start_time ? new Date(oldestInPage.start_time).getTime() : NaN;
+    if (!Number.isNaN(oldestMs) && oldestMs < startMs) { reachedStart = true; break; }
+    if (recordings.length < SYNC_PAGE_SIZE) { reachedEnd = true; break; }
+  }
+
+  await db.execute({
+    sql: `INSERT INTO dubber_sync_state (id, last_synced_at, total_synced, updated_at) VALUES (1, now(), ?, now())
+          ON CONFLICT(id) DO UPDATE SET last_synced_at = now(), total_synced = dubber_sync_state.total_synced + excluded.total_synced, updated_at = now()`,
+    args: [totalNew]
+  });
+
+  return { totalSeen, totalNew, pagesWalked, reachedStart, reachedEnd };
+}
+
 // Diagnostic only — pulls a very small sample so a super_admin can inspect the
 // real response shape (especially where transcript data lives) before we build
 // any grading logic against it.
@@ -359,4 +416,4 @@ async function testConnection() {
   return { accountId: getAccountId(), listResponse: list, sampleRecordingDetail: sampleDetail };
 }
 
-module.exports = { isConfigured, listRecordings, getRecording, getAiInfo, downloadRecordingAudio, testConnection, syncRecordings, fetchContentForRecording };
+module.exports = { isConfigured, listRecordings, getRecording, getAiInfo, downloadRecordingAudio, testConnection, syncRecordings, reconcileDateRange, fetchContentForRecording };

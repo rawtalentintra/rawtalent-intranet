@@ -88,6 +88,24 @@ router.post('/sync', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Reconciliation pass for a specific window: walks backward from the newest
+// call using the confirmed before_id cursor and keeps going (no early-stop
+// on an already-known page) until it passes startDate. Use this when calls
+// confirmed to exist in Dubber itself are missing locally — the regular
+// 'recent' sync's offset-based paging and early stop can silently miss
+// individual calls even on an ordinary day, not just during an outage.
+router.post('/sync-date-range', requireSuperAdmin, async (req, res) => {
+  const { startDate } = req.body || {};
+  if (!startDate) return res.status(400).json({ error: 'startDate is required (YYYY-MM-DD)' });
+  try {
+    const result = await dubberService.reconcileDateRange(startDate);
+    res.json(result);
+  } catch (err) {
+    console.error('Dubber reconcile error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/sync-status', requireSuperAdmin, async (req, res) => {
   try {
     const [state, count] = await Promise.all([

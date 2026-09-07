@@ -3183,6 +3183,15 @@
               <div id="callsSyncStatus" style="display:none;margin-top:6px"></div>
             </div>
           </div>
+          <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);margin-bottom:14px;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="min-width:200px">
+              <div style="font-weight:700;font-size:11px;margin-bottom:1px;color:var(--navy)">🔁 Sync Date Range</div>
+              <div style="font-size:10px;color:var(--text-muted)">Fixes calls confirmed to exist in Dubber but missing here — pages backward from now, checking every call, without stopping early.</div>
+            </div>
+            <input type="date" id="callsReconcileFrom" class="form-control" style="width:150px;padding:3px 9px;font-size:10.5px">
+            <button class="btn-add" id="callsReconcileBtn" onclick="syncCallsDateRange()" style="padding:3px 9px;font-size:10.5px">Sync From Date</button>
+            <div id="callsReconcileStatus" style="display:none;margin-top:2px;flex-basis:100%"></div>
+          </div>
         </div>
 
         <div class="calls-tab-bar">
@@ -18792,6 +18801,39 @@
         loadCallsList();
       } catch { statusEl.innerHTML = '<div style="padding:6px 10px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:11px">Sync failed.</div>'; }
       finally { btn.disabled = false; otherBtn.disabled = false; btn.textContent = originalLabel; }
+    }
+
+    // Reconciliation pass for a specific window — separate from syncCalls()
+    // because it walks backward checking every call with no early stop, so it
+    // can take noticeably longer than a regular sync click. Use this when a
+    // call confirmed to exist in Dubber's own portal isn't showing up here.
+    async function syncCallsDateRange() {
+      const startDate = document.getElementById('callsReconcileFrom').value;
+      if (!startDate) { alert('Pick a start date first.'); return; }
+      const btn = document.getElementById('callsReconcileBtn');
+      const statusEl = document.getElementById('callsReconcileStatus');
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reconciling…';
+      statusEl.style.display = 'block';
+      statusEl.style.fontSize = '11px';
+      statusEl.style.color = 'var(--text-muted)';
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;margin-right:5px;width:10px;height:10px"></span> Walking back through Dubber's call history from today to ${escHtml(startDate)}… this can take a minute or two.`;
+      try {
+        const res = await fetch('/api/calls/sync-date-range', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate })
+        });
+        const data = await res.json();
+        if (!res.ok) { statusEl.innerHTML = `<div style="padding:6px 10px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:11px">${escHtml(data.error || 'Reconcile failed')}</div>`; return; }
+        const coverageNote = data.reachedStart ? ` · reached ${escHtml(startDate)}` : (data.reachedEnd ? ' · reached the earliest call Dubber has' : ' · hit the page limit before reaching that date — click Sync From Date again to keep going');
+        statusEl.innerHTML = `<div style="padding:6px 10px;border-radius:var(--radius);background:#f0fdf4;color:#1a8a4a;font-size:11px">
+          ✓ ${data.totalNew} previously-missing call${data.totalNew !== 1 ? 's' : ''} found and stored (${data.totalSeen} checked across ${data.pagesWalked} page${data.pagesWalked !== 1 ? 's' : ''})${coverageNote}
+        </div>`;
+        loadSyncStatus();
+        loadCallsList();
+      } catch { statusEl.innerHTML = '<div style="padding:6px 10px;border-radius:var(--radius);background:#fef2f2;color:#c0392b;font-size:11px">Reconcile failed.</div>'; }
+      finally { btn.disabled = false; btn.textContent = originalLabel; }
     }
 
     let callsFilterTimer, callsCurrentPage = 1;
