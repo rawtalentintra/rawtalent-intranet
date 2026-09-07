@@ -201,6 +201,31 @@ function normalizeAssignees(list) {
   return [...seen];
 }
 
+// Real usage found live 2026-09-07 while investigating a "task assignment
+// disappeared" report: staff routinely hand a task off with an @mention in
+// a note ("@Marsha Cleopas FYI, please help monitor this profile") rather
+// than using the Assigned To picker — reads exactly like an assignment, but
+// never touched assigned_to_emails, so the task legitimately stayed
+// "Unassigned" the whole time. It was never actually assigned and then
+// wiped; the field the person expected an @mention to set just isn't wired
+// to it. Called from POST /:id/notes below whenever a note @mentions
+// someone not already on the task — merges them in (never removes anyone)
+// and logs it in task_assignee_history same as an explicit picker change,
+// so it's visible on the task and traceable either way.
+async function addAssigneesFromMention(db, taskId, mentionedEmails, changedBy) {
+  if (!mentionedEmails.length) return;
+  const existing = await db.execute({ sql: 'SELECT assigned_to_emails FROM tasks WHERE id = ?', args: [taskId] });
+  const previous = Array.isArray(existing.rows[0]?.assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
+  const merged = normalizeAssignees([...previous, ...mentionedEmails]);
+  if (merged.length === previous.length) return; // everyone mentioned was already assigned
+  await db.execute({ sql: 'UPDATE tasks SET assigned_to_emails = ?, updated_at = now() WHERE id = ?', args: [JSON.stringify(merged), taskId] });
+  await db.execute({
+    sql: `INSERT INTO task_assignee_history (id, task_id, previous_assignees, new_assignees, changed_by)
+          VALUES (?, ?, ?, ?, ?)`,
+    args: [uuidv4(), taskId, JSON.stringify(previous), JSON.stringify(merged), changedBy]
+  });
+}
+
 // Same dedupe-and-drop-junk discipline as normalizeAssignees, keyed by
 // userId (a candidate's RT id) instead of email. Silently drops anything
 // malformed rather than erroring, since this only ever comes from the
@@ -456,6 +481,7 @@ router.post('/:id/notes', async (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?)`,
       args: [id, req.params.id, body.trim(), req.user.email, req.user.name || req.user.email, JSON.stringify(mentioned)]
     });
+    await addAssigneesFromMention(db, req.params.id, mentioned, req.user.email);
     const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [id] });
     res.json({ success: true, note: row.rows[0] });
   } catch (err) {
@@ -487,6 +513,7 @@ router.put('/:id/notes/:noteId', async (req, res) => {
       sql: `UPDATE task_notes SET body = ?, mentioned_emails = ?, edited_at = now(), edited_by = ?, edited_by_name = ? WHERE id = ?`,
       args: [body.trim(), JSON.stringify(mentioned), req.user.email, req.user.name || req.user.email, req.params.noteId]
     });
+    await addAssigneesFromMention(db, req.params.id, mentioned, req.user.email);
     const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [req.params.noteId] });
     res.json({ success: true, note: row.rows[0] });
   } catch (err) {
