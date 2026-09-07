@@ -1805,6 +1805,27 @@ CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
 -- otherwise just vanish from the board. Idempotent — a no-op once run.
 UPDATE tasks SET status = 'to_do' WHERE status = 'blocked';
 
+-- Audit trail for assignee changes (2026-09-07) — Joy reported tasks
+-- appearing "Unassigned" that she believed had someone on them, and there
+-- was no way to check what actually happened or recover a prior value
+-- (routes/tasks.js's PUT /:id is a full-column overwrite of assigned_to_
+-- emails, same as every other field on this table). This doesn't change
+-- that overwrite behaviour — the picker in the Edit Task modal is still
+-- the source of truth for what a save writes — it just means every actual
+-- change is now logged with who made it and what it was before/after, so a
+-- real wipe (accidental empty-save, a future bug, etc.) is traceable and
+-- reversible going forward, instead of silently unrecoverable like the
+-- ones already lost before this table existed.
+CREATE TABLE IF NOT EXISTS task_assignee_history (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  previous_assignees JSONB NOT NULL DEFAULT '[]',
+  new_assignees JSONB NOT NULL DEFAULT '[]',
+  changed_by CITEXT NOT NULL,
+  changed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_assignee_history_task ON task_assignee_history(task_id, changed_at DESC);
+
 -- Free-form notes on a task, ClickUp-style — a task can have many. Records
 -- who wrote it and when (created_at is UTC; the frontend renders it in
 -- Melbourne time, same convention as everywhere else in this codebase —

@@ -1195,9 +1195,12 @@
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:160px">
-            <label class="form-label-modal">Assigned to</label>
+            <label class="form-label-modal">Assigned to
+              <span id="taskAssigneeHistoryToggle" style="display:none;cursor:pointer;font-weight:700;color:var(--text-muted);font-size:11px;margin-left:6px" onclick="toggleTaskAssigneeHistory()">History</span>
+            </label>
             <div id="taskAssigneeChips" class="task-assignee-chips"></div>
             <select id="taskAssigneeAddSelect" class="form-control" onchange="addTaskAssignee(this.value)"></select>
+            <div id="taskAssigneeHistoryPanel" style="display:none;margin-top:6px;font-size:11px;color:var(--text-muted)"></div>
           </div>
           <div class="form-group-modal" style="flex:1;min-width:140px">
             <label class="form-label-modal">Due date <span class="optional">(optional)</span></label>
@@ -2728,6 +2731,32 @@
       renderTaskAssigneeChips();
     }
 
+    // Audit trail (2026-09-07) for exactly the scenario Joy reported —
+    // a task's assignees looking wrong with no way to check what actually
+    // happened. Every real change going forward is logged server-side
+    // (routes/tasks.js PUT /:id); this just surfaces it on demand rather
+    // than always-visible clutter on a form most saves don't touch.
+    let taskAssigneeHistoryLoaded = false;
+    async function toggleTaskAssigneeHistory() {
+      const panel = document.getElementById('taskAssigneeHistoryPanel');
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      panel.style.display = 'block';
+      if (taskAssigneeHistoryLoaded) return;
+      panel.innerHTML = 'Loading…';
+      try {
+        const history = await fetch(`/api/tasks/${editingTaskId}/assignee-history`).then(r => r.json());
+        taskAssigneeHistoryLoaded = true;
+        if (!Array.isArray(history) || !history.length) { panel.innerHTML = 'No assignment changes logged yet.'; return; }
+        const fmtList = list => (Array.isArray(list) && list.length) ? list.map(e => escHtml(taskUserLabel(e))).join(', ') : '— none —';
+        panel.innerHTML = history.map(h => `
+          <div style="padding:4px 0;border-bottom:1px solid var(--gray-100)">
+            <strong>${escHtml(taskUserLabel(h.changed_by))}</strong> · ${fmtMelbourne(h.changed_at)}<br>
+            ${fmtList(h.previous_assignees)} → ${fmtList(h.new_assignees)}
+          </div>
+        `).join('');
+      } catch { panel.innerHTML = 'Failed to load history.'; }
+    }
+
     // Separate from populateTaskSelects() above because the Status options
     // depend on which department is selected (Requested Bookings only for
     // Bookings) — needs to be re-run every time Department changes, not
@@ -3011,6 +3040,11 @@
       const deleteBtn = document.getElementById('taskDeleteBtn');
       const notesSection = document.getElementById('taskNotesSection');
       const copyLinkBtn = document.getElementById('taskCopyLinkBtn');
+      document.getElementById('taskAssigneeHistoryToggle').style.display = taskId ? 'inline' : 'none';
+      const historyPanel = document.getElementById('taskAssigneeHistoryPanel');
+      historyPanel.style.display = 'none';
+      historyPanel.innerHTML = '';
+      taskAssigneeHistoryLoaded = false;
       if (taskId) {
         const t = allTasks.find(x => x.id === taskId);
         if (!t) return;

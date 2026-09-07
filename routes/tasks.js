@@ -292,7 +292,7 @@ router.put('/:id', async (req, res) => {
   if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
     const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id FROM tasks WHERE id = ?', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails FROM tasks WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Task not found' });
     if (!canAccessDepartment(req.user, existing.rows[0].department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
     const finalStatus = status || existing.rows[0].status;
@@ -302,6 +302,8 @@ router.put('/:id', async (req, res) => {
     if (finalStatus === 'done' && existing.rows[0].status !== 'done') completedAt = new Date().toISOString();
     else if (finalStatus !== 'done') completedAt = null;
     const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
+    const previousAssignees = Array.isArray(existing.rows[0].assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
+    const newAssignees = normalizeAssignees(assigned_to_emails);
 
     await db.execute({
       sql: `UPDATE tasks SET
@@ -312,13 +314,45 @@ router.put('/:id', async (req, res) => {
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
-        priority || 'normal', JSON.stringify(normalizeAssignees(assigned_to_emails)), due_date || null, completedAt, JSON.stringify(mentioned),
+        priority || 'normal', JSON.stringify(newAssignees), due_date || null, completedAt, JSON.stringify(mentioned),
         JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
         linked_client_name || null, linked_client_phone || null,
         req.params.id
       ]
     });
+
+    // Traceable-and-recoverable-going-forward audit trail (2026-09-07, Joy
+    // reported tasks showing Unassigned that she believed had someone on
+    // them, with no way to check or restore) — only written when the
+    // assignee list actually changes, so routine saves that leave it alone
+    // don't spam this table. Compared as sorted JSON, not array equality,
+    // since order shouldn't count as a "change".
+    if (JSON.stringify([...previousAssignees].sort()) !== JSON.stringify([...newAssignees].sort())) {
+      await db.execute({
+        sql: `INSERT INTO task_assignee_history (id, task_id, previous_assignees, new_assignees, changed_by)
+              VALUES (?, ?, ?, ?, ?)`,
+        args: [uuidv4(), req.params.id, JSON.stringify(previousAssignees), JSON.stringify(newAssignees), req.user.email]
+      });
+    }
+
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// See task_assignee_history in db/schema.sql — logged from PUT /:id above
+// whenever a save actually changes who's assigned. No department-visibility
+// gate here beyond requireAuth (matches the rest of this file's stance:
+// a task id is a UUID, not realistically guessable, and this is diagnostic
+// history for the task's own assignees, not new information about it).
+router.get('/:id/assignee-history', async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: 'SELECT previous_assignees, new_assignees, changed_by, changed_at FROM task_assignee_history WHERE task_id = ? ORDER BY changed_at DESC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
