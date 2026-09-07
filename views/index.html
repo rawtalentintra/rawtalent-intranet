@@ -1674,8 +1674,27 @@
       setTimeout(() => openTaskDetail(taskId), 300);
     }
 
+    // See views/admin.html's identical copy of this function for the full
+    // reasoning — "Mark all read" was never actually broken, it just never
+    // explained that training assignments/leave approvals/task alerts/
+    // timesheet reminders are real to-dos it deliberately leaves alone,
+    // which looked exactly like a broken button when the badge didn't
+    // drop to zero.
     function markAllNotificationsRead() {
-      fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+      fetch('/api/notifications/read-all', { method: 'POST' })
+        .then(() => loadNotifications())
+        .then(() => {
+          const stillPending = (notifData.trainingAssignments?.length || 0)
+            + (notifData.leaveApprovals?.length || 0)
+            + (notifData.taskAlerts?.length || 0)
+            + (notifData.hoursAlerts?.length || 0)
+            + (notifData.upcomingEvents || []).filter(e => !e.alreadySent).length;
+          if (stillPending > 0) {
+            toast(`Marked as read — ${stillPending} item${stillPending === 1 ? '' : 's'} still need${stillPending === 1 ? 's' : ''} your action (tasks, leave approvals, training, timesheets, or a greeting to send), so ${stillPending === 1 ? "it stays" : "those stay"} until done.`);
+          } else {
+            toast('All caught up!');
+          }
+        });
     }
 
     // ── Notifications history — see admin.html's identical feature for

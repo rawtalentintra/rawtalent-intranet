@@ -5045,8 +5045,33 @@
       spawnConfetti(document.getElementById('confettiLayer'));
     }
 
+    // "Mark all read" was never actually broken — it correctly dismisses
+    // every genuinely informational item (greetings, announcements, leave
+    // decisions, feedback decisions, task mentions — see the read-all
+    // route's own comment on why). What people were reporting as "doesn't
+    // work" is that the bell badge often didn't drop to zero afterward:
+    // routes/notifications.js's unreadCount deliberately ALSO counts
+    // training assignments, leave approvals awaiting YOUR action, task
+    // alerts, and timesheet reminders — real to-dos, not dismissible
+    // notices, so read-all never touches them on purpose (silently
+    // clearing "you have a task due" would just mean it gets forgotten).
+    // With no explanation anywhere, that looked like a broken button
+    // rather than working exactly as designed. This just says so.
     function markAllNotificationsRead() {
-      fetch('/api/notifications/read-all', { method: 'POST' }).then(() => loadNotifications());
+      fetch('/api/notifications/read-all', { method: 'POST' })
+        .then(() => loadNotifications())
+        .then(() => {
+          const stillPending = (notifData.trainingAssignments?.length || 0)
+            + (notifData.leaveApprovals?.length || 0)
+            + (notifData.taskAlerts?.length || 0)
+            + (notifData.hoursAlerts?.length || 0)
+            + (notifData.upcomingEvents || []).filter(e => !e.alreadySent).length;
+          if (stillPending > 0) {
+            toast(`Marked as read — ${stillPending} item${stillPending === 1 ? '' : 's'} still need${stillPending === 1 ? 's' : ''} your action (tasks, leave approvals, training, timesheets, or a greeting to send), so ${stillPending === 1 ? "it stays" : "those stay"} until done.`);
+          } else {
+            toast('All caught up!');
+          }
+        });
     }
 
     // ── Notifications history (2026-08-27) ─────────────────────────
