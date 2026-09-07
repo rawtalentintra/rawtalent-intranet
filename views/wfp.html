@@ -234,6 +234,7 @@
     let viewStack = ['today'];
     let allCentres = [];
     let allLeads = [];
+    let existingCentreMatches = {}; // leadId -> {rtClientId, rtLocationId, clientName, locationLabel, reasons, confident} — see GET /api/leads/existing-centre-matches
     let dataLoadedAt = 0; // re-fetch leads/centres if it's been a while (someone else's edit, a new visit logged elsewhere)
     let currentCentreKey = null;
     let currentSnapshot = null;
@@ -397,9 +398,21 @@
       const isTestSandbox = currentUser && !currentUser.wfpLabel && wfpFilterLabel === testTerritoryLabel();
       const q = (wfpFilterLabel && !isTestSandbox) ? '?partnerLabel=' + encodeURIComponent(wfpFilterLabel) : '';
       try {
-        const [leads, centres] = await Promise.all([api('/api/leads' + q), api('/api/centres' + q)]);
+        const [leads, centres, matches] = await Promise.all([
+          api('/api/leads' + q), api('/api/centres' + q),
+          // "Existing Centre?" match — Desktop's leads list already shows
+          // this (phone/email match against a real RT client), but mobile
+          // never surfaced it at all, so a lead that's actually a
+          // duplicate of a centre already on file just looked like an
+          // unexplained stray entry (Joy/Gwen, 2026-09-06). Not
+          // partnerLabel-scoped (computed across every lead) — harmless to
+          // fetch the whole map and only look up whichever leads are in
+          // allLeads after filtering.
+          api('/api/leads/existing-centre-matches').catch(() => ({}))
+        ]);
         allLeads = leads;
         allCentres = centres;
+        existingCentreMatches = matches || {};
         dataLoadedAt = Date.now();
       } catch { toast('Could not load your leads/centres', 'error'); }
     }
@@ -1641,10 +1654,12 @@
         <button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="setView('create-lead')">Create Lead</button>
         ${filtered.length ? filtered.map(l => {
           const stage = LEAD_STAGE_META[deriveLeadStage(l)];
+          const match = existingCentreMatches[l.id];
           return `
           <div class="card" onclick="openLead('${l.id}')">
             <div class="name">${escHtml(l.centre_name)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}</div>
+            ${match ? `<div class="why">May already exist as a centre — ${escHtml(match.clientName)}</div>` : ''}
             <div class="card-corner-badge"><span class="badge ${stage.cls} corner">${escHtml(stage.label)}</span></div>
           </div>`;
         }).join('') : `<div class="empty-state">No leads found.</div>`}
@@ -1677,8 +1692,22 @@
       const lastActivity = currentLeadActivities[0];
       const lastNote = currentLeadNotes[currentLeadNotes.length - 1]; // lead_notes is oldest-first
       const nextFollowUp = currentLeadActivities.find(a => a.next_step && a.next_step_due_date);
+      // "Existing Centre?" match — Desktop's own leads list already shows
+      // this (phone/email match against a real RT client); mobile never
+      // surfaced it, so a lead that's genuinely a duplicate of a centre
+      // already on file just looked like an unexplained stray entry
+      // (Joy/Gwen, 2026-09-06). Confident matches only (phone or email —
+      // see centreMatchService.js), same bar Desktop uses.
+      const match = existingCentreMatches[l.id];
+      const matchCentreKey = match ? (match.rtLocationId ? `loc:${match.rtLocationId}` : `client:${match.rtClientId}`) : null;
 
       main.innerHTML = `
+        ${match ? `
+        <div style="background:var(--amber-bg);border-radius:10px;padding:10px 12px;margin-bottom:10px" onclick="openCentre('${matchCentreKey}')">
+          <div style="font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.3px">May Already Exist</div>
+          <div class="sub" style="margin-top:2px;color:var(--text)">Matches an existing centre: ${escHtml(match.clientName)}${match.locationLabel ? ' — ' + escHtml(match.locationLabel) : ''} (${escHtml(match.reasons.join(', '))}). Tap to view it.</div>
+        </div>
+        ` : ''}
         <div class="card" style="cursor:default">
           <div class="sub">${escHtml(l.street_address || '')}${l.street_address ? ', ' : ''}${escHtml(l.suburb || '')} ${escHtml(l.state || '')}</div>
           <div class="sub" style="margin-top:6px">${phoneLink(l.centre_phone)}${l.centre_phone && l.contact_email ? ' · ' : ''}${mailtoLink(l.contact_email)}</div>
