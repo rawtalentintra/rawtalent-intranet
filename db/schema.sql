@@ -306,6 +306,17 @@ CREATE TABLE IF NOT EXISTS call_evaluations (
 ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS reviewer_feedback_categories JSONB;
 
+-- "OMs Only" (2026-09-07, Joy) — lets Joy/Sophia restrict a single
+-- evaluation to just the two of them (e.g. a sensitive escalation not meant
+-- for wider QA visibility), without deleting it. Named for what it does in
+-- the UI, not "hide" — see routes/calls.js's OMS_EMAILS/isOms and the
+-- exclusion added to GET /evaluations, GET /evaluations/:id, and
+-- fetchFilteredEvaluations (report/Ask AI) so a restricted call is
+-- invisible end-to-end to everyone else, not just absent from the list.
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS oms_only BOOLEAN DEFAULT false;
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS oms_only_by CITEXT;
+ALTER TABLE call_evaluations ADD COLUMN IF NOT EXISTS oms_only_at TIMESTAMPTZ;
+
 -- Every piece of feedback ever given on an evaluation via "Give Feedback &
 -- Re-grade" — an append-only conversation thread. Re-grading updates the
 -- evaluation's scores/notes in place (never inserts a new call_evaluations

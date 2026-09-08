@@ -19697,7 +19697,7 @@
           return `
           <tr style="cursor:pointer" onclick="openEvalDetail('${e.id}')">
             <td style="white-space:nowrap;color:var(--text-muted)">${escHtml(fmtDate(e.created_at))}</td>
-            <td style="font-weight:600;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')}</td>
+            <td style="font-weight:600;color:var(--navy)">${escHtml(e.rep_name || 'Unknown rep')}${e.oms_only ? ' <span class="badge" style="background:#fef2f2;color:#c0392b" title="Restricted to Joy and Sophia">🔒 OMs Only</span>' : ''}</td>
             <td>${e.rubric_type === 'educator' ? 'Educator' : 'Centre'}</td>
             <td>${e.source === 'human' ? '🧑 Manual' : '🤖 AI'}</td>
             <td style="color:var(--text-muted)">${escHtml(e.evaluated_by || '—')}</td>
@@ -19843,11 +19843,18 @@
           <td style="width:50px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy)">${c.score}/5</td>
         </tr>`;
       }).join('');
+      const isOmsUser = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'].includes((currentUserEmail || '').toLowerCase());
       document.getElementById('evalDetailBody').innerHTML = `
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
           <span class="badge badge-user">${sourceLabel}</span>
           <span style="font-size:12px;color:var(--text-muted)">${fmtDate(e.created_at)} · evaluated by ${escHtml(e.evaluated_by || '—')}</span>
+          ${isOmsUser ? `
+            <button class="btn-secondary" style="margin-left:auto;padding:4px 10px;font-size:11.5px${e.oms_only ? ';border-color:#c0392b;color:#c0392b' : ''}" onclick="toggleEvalOmsOnly('${e.id}', ${!e.oms_only})">${e.oms_only ? '✕ Remove OMs Only' : 'OMs Only'}</button>
+          ` : ''}
         </div>
+        ${e.oms_only ? `
+          <div style="margin-bottom:14px;font-size:12px;color:#c0392b;background:#fef2f2;border-radius:var(--radius);padding:10px 14px">🔒 <strong>OMs Only</strong> — restricted to Joy and Sophia by ${escHtml(e.oms_only_by || 'an OM')} on ${fmtDate(e.oms_only_at)}. Invisible to everyone else in the evaluation list, reports, and Ask AI.</div>
+        ` : ''}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
           <label style="font-size:11.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Recommendation</label>
           <select id="evalOutcomeSelect" class="form-control" style="width:auto;font-size:12.5px;padding:5px 10px" onchange="document.getElementById('evalOutcomeSaveBtn').style.display='inline-block'">
@@ -19923,6 +19930,22 @@
         loadEvaluationHistory();
       } catch { toast('Failed to save', 'error'); }
       finally { btn.disabled = false; btn.textContent = 'Save'; }
+    }
+
+    // Server-side gated to Joy/Sophia regardless (routes/calls.js's isOms) —
+    // the button itself is only ever rendered for them too (renderEvalDetail).
+    async function toggleEvalOmsOnly(evalId, omsOnly) {
+      try {
+        const res = await fetch(`/api/calls/evaluations/${evalId}/oms-only`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ omsOnly })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        toast(omsOnly ? 'Restricted to OMs only' : 'OMs Only removed', 'success');
+        openEvalDetail(evalId);
+        loadEvaluationHistory();
+      } catch { toast('Failed to save', 'error'); }
     }
 
     function toggleEvalFeedbackNote() {

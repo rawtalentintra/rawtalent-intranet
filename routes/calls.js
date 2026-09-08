@@ -44,6 +44,15 @@ function firstNameOnly(name) {
   return name.trim().split(/\s+/)[0] || name;
 }
 
+// "OMs Only" (2026-09-07, Joy) — same hardcoded-pool pattern already used
+// for other Joy-and-Sophia-only actions in this codebase (routes/centres.js's
+// MESSAGE_TEAM_RECIPIENTS, services/leaveService.js's FINAL_APPROVERS), kept
+// local to this file rather than shared since none of those share one either.
+const OMS_EMAILS = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'];
+function isOms(user) {
+  return !!user?.email && OMS_EMAILS.includes(user.email.toLowerCase());
+}
+
 // Connection status, test connection, and sync are infrastructure-level
 // actions (credentials, pulling from Dubber) — restricted to super_admin
 // only, unlike the rest of this router which any admin can use.
@@ -504,7 +513,7 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
     const db = getDb();
     const evalRes = await db.execute({ sql: 'SELECT * FROM call_evaluations WHERE id = ?', args: [req.params.id] });
     const evaluation = evalRes.rows[0];
-    if (!evaluation) return res.status(404).json({ error: 'Evaluation not found' });
+    if (!evaluation || (evaluation.oms_only && !isOms(req.user))) return res.status(404).json({ error: 'Evaluation not found' });
 
     // This route is reused as-is for calibration submissions (same "Give
     // Feedback & Re-grade" UI, same conversation-about-one-call model) —
@@ -635,6 +644,10 @@ router.get('/evaluations', async (req, res) => {
     // as always — this only excludes rows the new workflow itself created.
     const conditions = ['calibration_id IS NULL'];
     const args = [];
+    // OMs Only rows are invisible to everyone except Joy/Sophia, full stop —
+    // not just filtered out of this list by default, so there's no filter
+    // combination that surfaces one to anyone else.
+    if (!isOms(req.user)) conditions.push('oms_only IS NOT TRUE');
     if (dateFrom) { conditions.push(`(created_at AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
     if (dateTo) { conditions.push(`(created_at AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
     if (evaluatedBy) { conditions.push('evaluated_by = ?'); args.push(evaluatedBy); }
@@ -974,7 +987,7 @@ router.get('/rep-names', async (req, res) => {
 // Shared by /report and /ask — both need the same filtered, period-bounded
 // set of evaluations (joined to call_recordings for a reliable ISO date to
 // filter on) as their evidence base.
-async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType }) {
+async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType, includeOms }) {
   // "calibration_only"/"calibration_done" evaluations are deliberately
   // excluded from every quality-score/aggregate view (Dashboard report,
   // Q&A, and any future rep-facing dashboard that reuses this) — they
@@ -983,6 +996,10 @@ async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType 
   // the same calibration-only status, not a real quality outcome.
   const conditions = ["e.outcome NOT IN ('calibration_only', 'calibration_done')"];
   const args = [];
+  // Same "invisible to everyone but Joy/Sophia" rule as the list/detail
+  // endpoints — otherwise an OMs Only call's summary/scores could still
+  // leak into the Dashboard's AI narrative or an Ask AI answer for anyone.
+  if (!includeOms) conditions.push('e.oms_only IS NOT TRUE');
   // Melbourne calendar date, not the raw UTC instant — see MELBOURNE_TZ.
   if (dateFrom) { conditions.push(`(r.start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date >= ?::date`); args.push(dateFrom); }
   if (dateTo) { conditions.push(`(r.start_time_iso::timestamptz AT TIME ZONE '${MELBOURNE_TZ}')::date <= ?::date`); args.push(dateTo); }
@@ -1004,7 +1021,7 @@ async function fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType 
 router.get('/report', async (req, res) => {
   const { dateFrom, dateTo, repName, rubricType, category } = req.query;
   try {
-    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType });
+    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType, includeOms: isOms(req.user) });
     const report = await generateReport(evaluations, { rubricType, category });
     res.json(report);
   } catch (err) {
@@ -1019,7 +1036,7 @@ router.post('/ask', async (req, res) => {
   const { dateFrom, dateTo, repName, rubricType, category, question } = req.body;
   if (!question?.trim()) return res.status(400).json({ error: 'A question is required' });
   try {
-    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType });
+    const evaluations = await fetchFilteredEvaluations({ dateFrom, dateTo, repName, rubricType, includeOms: isOms(req.user) });
     const answer = await answerQuestion(evaluations, { rubricType, category }, question.trim());
     res.json({ answer });
   } catch (err) {
@@ -1138,7 +1155,7 @@ router.get('/evaluations/:id', async (req, res) => {
       args: [req.params.id]
     });
     const row = result.rows[0];
-    if (!row) return res.status(404).json({ error: 'Evaluation not found' });
+    if (!row || (row.oms_only && !isOms(req.user))) return res.status(404).json({ error: 'Evaluation not found' });
     // Full re-grade conversation thread — every round of feedback ever given
     // on this evaluation, oldest first, regardless of how many times it's
     // been re-graded.
@@ -1162,9 +1179,32 @@ router.put('/evaluations/:id/outcome', async (req, res) => {
     return res.status(400).json({ error: `outcome must be one of: ${RECOMMENDATION_OUTCOMES.join(', ')}` });
   }
   try {
-    const result = await getDb().execute({ sql: 'UPDATE call_evaluations SET outcome = ? WHERE id = ?', args: [outcome, req.params.id] });
-    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Evaluation not found' });
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT oms_only FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0] || (existing.rows[0].oms_only && !isOms(req.user))) return res.status(404).json({ error: 'Evaluation not found' });
+    await db.execute({ sql: 'UPDATE call_evaluations SET outcome = ? WHERE id = ?', args: [outcome, req.params.id] });
     res.json({ success: true, outcome });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// "OMs Only" toggle — only Joy/Sophia may set OR clear it on any evaluation
+// (not gated by role/who evaluated the call: this is specifically their
+// call to make, same spirit as MESSAGE_TEAM_RECIPIENTS/FINAL_APPROVERS
+// elsewhere). Once set, GET /evaluations, GET /evaluations/:id,
+// PUT .../outcome, PUT .../regrade, and fetchFilteredEvaluations (report/
+// Ask AI) all treat the row as if it doesn't exist for anyone else.
+router.put('/evaluations/:id/oms-only', async (req, res) => {
+  if (!isOms(req.user)) return res.status(403).json({ error: 'Only Joy and Sophia can change this' });
+  const omsOnly = !!req.body?.omsOnly;
+  try {
+    const result = await getDb().execute({
+      sql: 'UPDATE call_evaluations SET oms_only = ?, oms_only_by = ?, oms_only_at = ? WHERE id = ?',
+      args: [omsOnly, omsOnly ? req.user.email : null, omsOnly ? new Date().toISOString() : null, req.params.id]
+    });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Evaluation not found' });
+    res.json({ success: true, omsOnly });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1172,8 +1212,10 @@ router.put('/evaluations/:id/outcome', async (req, res) => {
 
 router.delete('/evaluations/:id', async (req, res) => {
   try {
-    const result = await getDb().execute({ sql: 'DELETE FROM call_evaluations WHERE id = ?', args: [req.params.id] });
-    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Evaluation not found' });
+    const db = getDb();
+    const existing = await db.execute({ sql: 'SELECT oms_only FROM call_evaluations WHERE id = ?', args: [req.params.id] });
+    if (!existing.rows[0] || (existing.rows[0].oms_only && !isOms(req.user))) return res.status(404).json({ error: 'Evaluation not found' });
+    await db.execute({ sql: 'DELETE FROM call_evaluations WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
