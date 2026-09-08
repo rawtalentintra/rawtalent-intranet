@@ -5063,6 +5063,15 @@
       await loadHoursWeek(weekStart);
       renderMyHours();
     }
+    // Joy, 2026-09-09: "highly confusing when filling it out" — Prev/Next
+    // paged one week at a time with no fast way back once you'd wandered
+    // off to check a past week, and the only cue for which day was
+    // actually today was a tiny " • Today" suffix buried in one of 7
+    // equally colourful pills. This is the one-click way back; the day
+    // card itself also gets a real highlight now (see myHoursHtml).
+    function goToCurrentHoursWeek() {
+      jumpToHoursWeek(hoursPolicy.currentWeekStart);
+    }
 
     // Simplified 2026-08-26 — one "total hours for the day" number instead
     // of a start/end time pair, per Joy's ask to make logging simpler.
@@ -5153,9 +5162,15 @@
         const accent = LEAVE_PERSON_COLORS[i];
         const bg = week.status === 'approved' ? '#f0fdf4' : (week.status !== 'draft' ? '#fff7ed' : (e ? '#eff6ff' : 'white'));
         const border = week.status === 'approved' ? '#bbf7d0' : (week.status !== 'draft' ? '#fed7aa' : (e ? '#bfdbfe' : 'var(--gray-100)'));
+        // isToday gets a real highlight — an outer ring plus a solid
+        // "TODAY" chip of its own, not just a small suffix tucked inside
+        // the weekday pill's text where it was easy to miss (Joy,
+        // 2026-09-09: "highly confusing... to be honest"). Independent of
+        // the weekday accent colour and status tint, which stay unchanged.
         return `
-          <div style="background:${bg};border:1px solid ${border};border-top:4px solid ${accent.text};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1;min-width:140px">
-            <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:4px;background:${accent.bg};color:${accent.text};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:3px 10px;border-radius:20px">${label} ${dateObj.getDate()}${isToday ? ' • Today' : ''}</div>
+          <div style="background:${bg};border:1px solid ${border};border-top:4px solid ${accent.text};border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1;min-width:140px${isToday ? ';box-shadow:0 0 0 2px #4338ca,0 4px 14px rgba(67,56,202,.2);position:relative' : ''}">
+            ${isToday ? '<div style="position:absolute;top:-9px;right:10px;background:#4338ca;color:white;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:20px">Today</div>' : ''}
+            <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:4px;background:${accent.bg};color:${accent.text};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:3px 10px;border-radius:20px">${label} ${dateObj.getDate()}</div>
             <div>
               <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Total Hours</div>
               <input type="number" min="0" max="24" step="0.25" placeholder="e.g. 8" value="${e ? Number(e.hours) : ''}" ${editable ? '' : 'disabled'} data-date="${d}" data-field="hours" onchange="onHoursValueChange(this)" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--gray-200);border-radius:6px;width:100%">
@@ -5178,6 +5193,7 @@
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn-secondary" ${isCurrentWeek ? 'disabled style="padding:6px 14px;opacity:.45;cursor:default"' : 'style="padding:6px 14px;font-weight:700;color:#4338ca;border-color:#c7d2fe;background:#eef2ff"'} onclick="goToCurrentHoursWeek()" title="Jump to this week">Today</button>
             <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursWeek(-1)">← Prev</button>
             <div style="font-weight:700;color:var(--navy);font-size:14px">${fmtDate(hoursCurrentWeekStart)} – ${fmtDate(week.week_end_date)}${isCurrentWeek ? ' (This week)' : ''}</div>
             <button class="btn-secondary" style="padding:6px 12px" onclick="changeHoursWeek(1)">Next →</button>
