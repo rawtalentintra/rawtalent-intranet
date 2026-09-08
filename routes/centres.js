@@ -95,20 +95,48 @@ async function resolveBookingsForDisplay(bookings) {
 router.use(requireAuth, requirePwaAccess);
 
 const BOOKING_WINDOW_DAYS = 100; // covers the 90-day health window with a few days' slack
+const DORMANCY_LOOKBACK_DAYS = 366; // covers the 12-month dormancy window — see getLastBookingDates below
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Bulk-fetching every RT client + 100 days of bookings costs one pair of
-// API calls regardless of portfolio size (RT has no per-client booking
-// filter — see rtApiReportService's parseFilters). At ~360 active centres
-// this is cheap enough not to need a real sync table (contrast with
+// Bulk-fetching every RT client + a year of bookings costs one pair of API
+// calls regardless of portfolio size (RT has no per-client booking filter
+// — see rtApiReportService's parseFilters). At ~360 active centres this is
+// cheap enough not to need a real sync table (contrast with
 // rt_candidates_cache, justified by ~25k rows hit on every list load) — a
 // short in-memory cache just avoids re-pulling on every page load within
 // a few minutes of each other.
+//
+// Fetches DORMANCY_LOOKBACK_DAYS (366), not just the 100-day window
+// healthForCentre's 30/90-day buckets actually need — until 2026-09-08
+// this fetched 100 days here and a SEPARATE, independent 366-day set in
+// getLastBookingDates below, on the reasoning that the much-more-frequently-
+// hit 100-day fetch shouldn't get slower for a signal only dormancy
+// classification needs (same "different time window = separate cache"
+// convention educatorEngagementService.js uses for its own 6-month fetch).
+// That reasoning didn't hold up against a real measurement: a cold
+// GET /api/centres was taking ~18s in practice (confirmed live 2026-09-08,
+// Liam/Gwen both hit a stuck spinner on Today on the Sept 7 call), and the
+// 366-day fetch alone accounts for ~15s of that — a second, fully
+// redundant paginated RT pull covering data the 100-day fetch had already
+// asked for a subset of. bucketBookingsForCentre (centreHealthService.js)
+// filters its 30/90-day buckets by each booking's real elapsed age, not by
+// assuming the input array is pre-truncated, so feeding it this wider
+// array changes nothing about its output — same for Territory Strategy and
+// advertisingOpportunityService, the only other two consumers of `bookings`
+// from this cache. Combined with indexBookingsByCentre below (the other
+// real cost this surfaced — see its own comment), took the measured cold
+// load from ~18s to ~13s; the rest is the RT fetch itself plus real
+// per-centre DB/geocode work, which is what the stale-while-revalidate
+// wrapper right below actually solves — see its own comment for why
+// shaving the fetch further wasn't the more valuable fix.
 let cache = { centres: null, bookings: null, rawClients: null, expiresAt: 0 };
+// A refresh already running (background or foreground) — reused by any
+// request that lands while it's in flight so a burst of requests during a
+// cold/stale moment triggers exactly one RT pull, not one per request.
+let refreshInFlight = null;
 
-async function getCentresAndBookings() {
-  if (cache.centres && Date.now() < cache.expiresAt) return cache;
-  const startDate = new Date(Date.now() - BOOKING_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+async function fetchCentresAndBookings() {
+  const startDate = new Date(Date.now() - DORMANCY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const [clients, bookings] = await Promise.all([
     rtApi.fetchAllPages('clients', {}),
     rtApi.fetchAllPages('bookings', { startDate })
@@ -127,30 +155,81 @@ async function getCentresAndBookings() {
   return cache;
 }
 
+// Stale-while-revalidate — the actual fix for the spinner Liam/Gwen both
+// hit live on the Sept 7 call (confirmed 2026-09-08: a genuinely cold
+// GET /api/centres took ~18s even before the fetch/indexing fixes above,
+// ~13s after). Shaving the fetch itself only ever helps the one unlucky
+// request that lands right after the 5-minute cache expires or right
+// after a deploy restart — every request after that first one still paid
+// the full cost too, since the plain cache-or-fetch check above blocks
+// the whole response on a fresh RT pull. Once there's ANY previously-
+// fetched data sitting in `cache` (even expired), serve it immediately and
+// kick off the refresh in the background instead — the requester who
+// happens to trigger the refresh never waits on it, only the very next
+// request benefits from what they started. Only a true cold start (server
+// just booted, cache genuinely empty) has nothing to serve yet and still
+// blocks, same as before.
+async function getCentresAndBookings() {
+  if (cache.centres && Date.now() < cache.expiresAt) return cache;
+  if (cache.centres) {
+    if (!refreshInFlight) {
+      refreshInFlight = fetchCentresAndBookings()
+        .catch(err => { console.error('Background centres/bookings refresh failed, keeping stale cache:', err.message); })
+        .finally(() => { refreshInFlight = null; });
+    }
+    return cache;
+  }
+  if (!refreshInFlight) refreshInFlight = fetchCentresAndBookings().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
 // Dormancy (Decision Area 3, 2026-08-22: 12 months with no meaningful
 // booking — see centreHealthService.js's DORMANCY_DAYS) needs a real last-
-// booking date, which the 100-day window above can't answer — a centre
-// with zero bookings in 100 days might have booked plenty 4-11 months ago,
-// or not at all. This is a SEPARATE, wider (366-day) fetch and its own
-// longer-lived cache, not a widened version of the shared 100-day one
-// above — the same "different time window gets its own cache" convention
-// services/educatorEngagementService.js already uses for its own 6-month
-// bookings fetch, so Micropods/Territory Strategy/Smart Routing's much
-// more frequently-hit 100-day fetch doesn't get slower for a signal only
-// dormancy classification needs. 30-minute TTL (vs. the 5-minute one
-// above) since a year-old booking history doesn't meaningfully change
-// minute to minute the way "what's due today" does.
-const DORMANCY_LOOKBACK_DAYS = 366;
+// booking date across the full DORMANCY_LOOKBACK_DAYS window — a centre
+// with zero bookings in 90 days might have booked plenty 4-11 months ago,
+// or not at all. `bookings` is now that same wider array getCentresAndBookings
+// already fetched (see its comment) — this is a pure local computation, no
+// RT call of its own any more, kept behind its own longer-lived cache
+// purely so the O(centres × bookings) scan itself doesn't re-run on every
+// request even when the underlying fetch is warm.
 const DORMANCY_CACHE_TTL_MS = 30 * 60 * 1000;
 let dormancyCache = { lastBookingByCentreKey: null, expiresAt: 0 };
 
-async function getLastBookingDates(centres) {
+// One O(bookings) pass building locationId/clientId -> that centre's own
+// bookings, instead of every centre independently scanning the FULL
+// bookings array (bucketBookingsForCentre/lastMeaningfulBookingDate's own
+// per-call filter step). At ~360 active centres this is the difference
+// between ~360 full scans of the array and one — confirmed live
+// 2026-09-08: after widening `bookings` to the 366-day window (see
+// getCentresAndBookings' comment) but BEFORE this indexing, a cold
+// GET /api/centres only dropped from ~18s to ~14s, not the ~3x the raw
+// RT-fetch numbers implied — this O(centres × bookings) scan, now over a
+// 3.66x bigger array, was most of what ate the difference. Safe to reuse
+// bucketBookingsForCentre/lastMeaningfulBookingDate completely unchanged:
+// handing them an already-filtered-to-one-centre array just means their
+// own internal locationId/clientId check has nothing left to filter out.
+function indexBookingsByCentre(bookings) {
+  const byKey = new Map();
+  for (const b of bookings) {
+    const key = b.locationId != null ? `loc:${b.locationId}` : (b.clientId != null ? `client:${b.clientId}` : null);
+    if (!key) continue;
+    let list = byKey.get(key);
+    if (!list) { list = []; byKey.set(key, list); }
+    list.push(b);
+  }
+  return byKey;
+}
+function bookingsForCentre(index, centre) {
+  const key = centre.rtLocationId != null ? `loc:${centre.rtLocationId}` : `client:${centre.rtClientId}`;
+  return index.get(key) || [];
+}
+
+async function getLastBookingDates(centres, bookings) {
   if (dormancyCache.lastBookingByCentreKey && Date.now() < dormancyCache.expiresAt) return dormancyCache.lastBookingByCentreKey;
-  const startDate = new Date(Date.now() - DORMANCY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const bookings = await rtApi.fetchAllPages('bookings', { startDate });
+  const index = indexBookingsByCentre(bookings);
   const byKey = {};
   for (const c of centres) {
-    byKey[c.centreKey] = lastMeaningfulBookingDate(bookings, { rtLocationId: c.rtLocationId, rtClientId: c.rtClientId });
+    byKey[c.centreKey] = lastMeaningfulBookingDate(bookingsForCentre(index, c), { rtLocationId: c.rtLocationId, rtClientId: c.rtClientId });
   }
   dormancyCache = { lastBookingByCentreKey: byKey, expiresAt: Date.now() + DORMANCY_CACHE_TTL_MS };
   return byKey;
@@ -243,8 +322,9 @@ async function centresWithNurture(filterKeys) {
     visible = visible.filter(c => keySet.has(c.centreKey));
   }
   const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
-  const lastBookingByCentreKey = await getLastBookingDates(visible);
-  return visible.map(c => healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null));
+  const lastBookingByCentreKey = await getLastBookingDates(visible, bookings);
+  const bookingsIndex = indexBookingsByCentre(bookings);
+  return visible.map(c => healthForCentre(c, bookingsForCentre(bookingsIndex, c), visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null));
 }
 
 // Normalizes a healthForCentre(...) result into the exact "stop" field
@@ -375,11 +455,16 @@ function canUsePartnerLabel(user, label) {
 router.get('/', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();
-    const hidden = await getHiddenCentreKeys();
+    // getCentrePartnerAssignments doesn't depend on hidden/visible at all,
+    // and neither visitsByCentreKey nor getLastBookingDates depend on each
+    // other — only on `visible`, which only needs `hidden`. Two small,
+    // independent round-trips each, no reason they were ever sequential.
+    const [hidden, assignments] = await Promise.all([getHiddenCentreKeys(), getCentrePartnerAssignments()]);
     let visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
-    const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
-    const assignments = await getCentrePartnerAssignments();
-    const lastBookingByCentreKey = await getLastBookingDates(visible);
+    const [visits, lastBookingByCentreKey] = await Promise.all([
+      visitsByCentreKey(visible.map(c => c.centreKey)),
+      getLastBookingDates(visible, bookings)
+    ]);
     const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
     if (targetLabel && !canUsePartnerLabel(req.user, targetLabel)) return res.status(403).json({ error: 'Not authorized for this territory' });
     if (targetLabel) {
@@ -399,8 +484,13 @@ router.get('/', async (req, res) => {
     // a centre with neither an RT coordinate nor a cache hit, same "just
     // omit it" contract those endpoints already follow.
     const geocodes = await getCachedGeocodesOnly(visible);
+    // See indexBookingsByCentre's comment — the same O(centres × bookings)
+    // cost getLastBookingDates had, this time in healthForCentre's own
+    // bucketBookingsForCentre call, run fresh on every request (not behind
+    // a cache the way the fetch/dormancy computation are).
+    const bookingsIndex = indexBookingsByCentre(bookings);
     const withHealth = visible.map(c => ({
-      ...healthForCentre(c, bookings, visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
+      ...healthForCentre(c, bookingsForCentre(bookingsIndex, c), visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
       assignedWorkforcePartner: assignments[c.centreKey] || null,
       latitude: geocodes[c.centreKey]?.lat ?? null,
       longitude: geocodes[c.centreKey]?.lng ?? null
@@ -504,7 +594,7 @@ router.get('/:centreKey', async (req, res) => {
     const { bookings } = await getCentresAndBookings();
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
     const assignments = await getCentrePartnerAssignments();
-    const lastBookingByCentreKey = await getLastBookingDates([centre]);
+    const lastBookingByCentreKey = await getLastBookingDates([centre], bookings);
     res.json({
       ...healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null),
       assignedWorkforcePartner: assignments[centre.centreKey] || null
@@ -577,7 +667,12 @@ router.get('/:centreKey/bookings', async (req, res) => {
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
   try {
     const { bookings } = await getCentresAndBookings();
-    const forCentre = bookings.filter(b =>
+    // Re-scoped to the original ~100-day window this endpoint (and its
+    // fillRate) was always meant to show — see the snapshot route's own
+    // comment on why, now that `bookings` itself is wider (366 days).
+    const bookingWindowCutoff = new Date(Date.now() - BOOKING_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const recentBookings = bookings.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) >= bookingWindowCutoff);
+    const forCentre = recentBookings.filter(b =>
       parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id
     );
     const filled = forCentre.filter(b => isRealAssignment(b.assignedUserId)).length;
@@ -652,6 +747,12 @@ router.get('/:centreKey/educators', async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
   try {
+    // Unlike the snapshot route's own call to topEducatorsForCentre (which
+    // deliberately re-scopes to ~100 days — a "who's working here lately"
+    // phone-screen view), this one's own doc comment says "who's actually
+    // worked this centre" with no "recently" — a full-history ranking, so
+    // getCentresAndBookings' now-wider (366-day) `bookings` is a fine,
+    // arguably more complete, input here as-is.
     const { bookings } = await getCentresAndBookings();
     res.json(await topEducatorsForCentre(parsed, bookings));
   } catch (err) {
@@ -685,10 +786,22 @@ router.get('/:centreKey/snapshot', async (req, res) => {
     const { bookings } = await getCentresAndBookings();
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
     const assignments = await getCentrePartnerAssignments();
-    const lastBookingByCentreKey = await getLastBookingDates([centre]);
+    const lastBookingByCentreKey = await getLastBookingDates([centre], bookings);
     const withHealth = healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null);
 
-    const forCentre = bookings.filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id));
+    // `bookings` is now the wider DORMANCY_LOOKBACK_DAYS (366-day) array
+    // (see getCentresAndBookings' comment) — fillRate and topEducatorsForCentre
+    // below were both written expecting the original ~100-day window
+    // (Fill Rate as "recently", top educators as "who's actually working
+    // here lately", not a full year's history), so this re-derives that
+    // same shape locally instead of a second RT fetch. bookingWindowCutoff
+    // mirrors the exact `startDate` filter the old dedicated 100-day fetch
+    // used — same lower bound, no upper bound, so future bookings still
+    // count same as before.
+    const bookingWindowCutoff = new Date(Date.now() - BOOKING_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const recentBookings = bookings.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) >= bookingWindowCutoff);
+
+    const forCentre = recentBookings.filter(b => (parsed.type === 'loc' ? b.locationId === parsed.id : b.clientId === parsed.id));
     const filled = forCentre.filter(b => isRealAssignment(b.assignedUserId)).length;
     const todayStr = new Date().toISOString().slice(0, 10);
     const todayRaw = forCentre.filter(b => b.bookingDate && b.bookingDate.slice(0, 10) === todayStr);
@@ -704,7 +817,7 @@ router.get('/:centreKey/snapshot', async (req, res) => {
       resolveBookingsForDisplay(upcomingRaw)
     ]);
 
-    const educators = await topEducatorsForCentre(parsed, bookings, 5);
+    const educators = await topEducatorsForCentre(parsed, recentBookings, 5);
     const relationships = (await getDb().execute({
       sql: 'SELECT candidate_user_id, relationship_type, note FROM centre_educator_relationships WHERE centre_key = ?',
       args: [centre.centreKey]

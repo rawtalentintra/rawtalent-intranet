@@ -542,16 +542,19 @@
     }
     async function renderToday() {
       document.getElementById('headerTitle').textContent = '';
-      await ensureDataLoaded();
+      // The mobile-plan fetch only needs targetLabel (already known from
+      // the current territory filter, not from leads/centres data), so it
+      // used to run AFTER ensureDataLoaded() finished for no reason —
+      // pure wasted sequential latency on top of an already-slow cold
+      // load (routes/centres.js, ~5s cold; was ~18s before that fix).
+      // Fire both in parallel instead.
       plannedRoute = null;
       const targetLabel = activeWfpLabelForPlanning();
-      if (targetLabel) {
-        try {
-          const q = '?date=' + todayDateStr() + '&wfpLabel=' + encodeURIComponent(targetLabel);
-          const res = await api('/api/route-planner/mobile-plan' + q);
-          plannedRoute = res.plan;
-        } catch { plannedRoute = null; }
-      }
+      const planPromise = targetLabel
+        ? api('/api/route-planner/mobile-plan?date=' + todayDateStr() + '&wfpLabel=' + encodeURIComponent(targetLabel)).catch(() => null)
+        : Promise.resolve(null);
+      const [, planRes] = await Promise.all([ensureDataLoaded(), planPromise]);
+      plannedRoute = planRes?.plan || null;
       // Always resets back to today's own week whenever Today is (re)opened
       // — browsing to a different date on a previous visit shouldn't leave
       // you stranded there next time you land on this tab.
