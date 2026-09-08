@@ -1883,18 +1883,58 @@
     // underneath just read as a repeated name. The healthReasons "why"
     // text is dropped everywhere health shows up (see healthSquareHtml) —
     // "the fact that it's healthy describes it... we don't need it."
+    // Health filter bar (Liam/Joy, 2026-09-07 call): "healthy, growing,
+    // dormant, needs attention, and all" — those 4 named buckets plus All,
+    // reusing CENTRE_HEALTH_LABELS' real values rather than a separate
+    // list. The 3 real health values Joy didn't name on the call
+    // (declining/opportunity/new_activating) still show their own true,
+    // specific label on the card itself (unchanged) — they're just folded
+    // into the nearest of the 4 named buckets for FILTERING purposes only,
+    // by the same good/warn/bad grouping HEALTH_SQUARE_CLASS already uses:
+    // declining -> Needs Attention (both "at risk"), opportunity &
+    // new_activating -> Growing (both upward-trending).
+    const CENTRE_HEALTH_FILTER_BUCKETS = {
+      healthy: ['healthy'],
+      growing: ['growing', 'opportunity', 'new_activating'],
+      dormant: ['dormant'],
+      needs_attention: ['needs_attention', 'declining']
+    };
+    const CENTRE_HEALTH_FILTER_ORDER = ['needs_attention', 'dormant', 'growing', 'healthy'];
+    let centreHealthFilter = null; // null = All
+    function centreHealthFilterBarHtml() {
+      const pill = (key, label) => `
+        <button onclick="setCentreHealthFilter(${key ? `'${key}'` : 'null'})" style="flex-shrink:0;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:${key ? 'var(--navy)' : '#6b7590'};color:white;opacity:${centreHealthFilter === key ? '1' : '.55'}">${escHtml(label)}</button>
+      `;
+      return `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px">
+        ${pill(null, 'All')}
+        ${CENTRE_HEALTH_FILTER_ORDER.map(key => pill(key, CENTRE_HEALTH_LABELS[key])).join('')}
+      </div>`;
+    }
+    function setCentreHealthFilter(key) {
+      centreHealthFilter = key;
+      paintCentresList();
+    }
+    function matchesCentreHealthFilter(health) {
+      if (!centreHealthFilter) return true;
+      return (CENTRE_HEALTH_FILTER_BUCKETS[centreHealthFilter] || [centreHealthFilter]).includes(health);
+    }
+
     function paintCentresList() {
       const main = document.getElementById('mainContent');
       const searchVal = document.getElementById('centreSearchInput')?.value || '';
-      const filtered = allCentres.filter(c => !searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
+      const filtered = allCentres.filter(c =>
+        (!searchVal || (c.name || '').toLowerCase().includes(searchVal.toLowerCase()) || (c.suburb || '').toLowerCase().includes(searchVal.toLowerCase()))
+        && matchesCentreHealthFilter(c.health)
+      );
       main.innerHTML = `
         ${wfpFilterBarHtml()}
+        ${centreHealthFilterBarHtml()}
         <input type="text" class="search-box" id="centreSearchInput" placeholder="Search centres or suburb…" value="${escHtml(searchVal)}" oninput="repaintKeepingFocus(paintCentresList)">
         ${filtered.length ? filtered.map(c => `
           <div class="card" onclick="openCentre('${c.centreKey}')">
             <div class="name">${escHtml(c.name)}</div>
-            ${healthSquareHtml(c.health)}
             ${c.isEscalated ? `<span class="badge bad" style="margin-left:6px">Escalated</span>` : ''}
+            <div class="card-corner-badge">${c.health ? `<span class="badge neutral corner">${escHtml(CENTRE_HEALTH_LABELS[c.health] || c.health)}</span>` : ''}</div>
           </div>
         `).join('') : `<div class="empty-state">No centres found.</div>`}
       `;
