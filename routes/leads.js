@@ -90,6 +90,34 @@ function sanitizeStreetAddress(raw) {
   return s || null;
 }
 
+// Known subsidiaries of large multi-brand childcare groups (Liam,
+// 2026-09-07 call): "Kids Academy... is a part of Affinity... Penguin
+// Childcare... is a part of G8." These groups already have (or don't need)
+// their own account relationship — a lead created under the subsidiary's
+// own operating name is a duplicate of a centre we'd approach at the group
+// level, not a genuine independent prospect, and was cluttering the main
+// Leads view (Liam: "as I scroll through, I can see there's probably a
+// dozen comfortably that are centres that are already active"). Leads
+// arrive under the SUBSIDIARY's name, not the parent group's, so matching
+// has to be against the actual brand name on the lead.
+//
+// Deliberately a short, explicitly-maintained allowlist rather than a
+// guess at every subsidiary of every group — only add a name here once
+// it's confirmed, the same "must be confirmed, not inferred" bar
+// centreMatchService.js's own match logic holds itself to. A false match
+// here silently archives (hides) a real independent lead, so getting this
+// list right matters more than covering every possible brand on day one.
+const KNOWN_BIG_GROUP_BRANDS = [
+  { pattern: /\bkids academy\b/i, group: 'Affinity' },
+  { pattern: /\bpenguin childcare\b/i, group: 'G8' }
+];
+
+function matchBigGroup(centreName) {
+  if (!centreName) return null;
+  const hit = KNOWN_BIG_GROUP_BRANDS.find(b => b.pattern.test(centreName));
+  return hit ? hit.group : null;
+}
+
 // Best-effort geocode + metro/regional classification for one address —
 // used both at lead-creation time and by the backfill endpoint below.
 // Never throws: a bad/unresolvable address (or Mapbox not configured,
@@ -132,6 +160,12 @@ router.post('/', async (req, res) => {
     const resolvedEntryType = entryType === 'centre' ? 'centre' : 'lead';
     const cleanStreetAddress = sanitizeStreetAddress(streetAddress);
     const { lat, lng, isRegional } = await geocodeAndClassify(cleanStreetAddress, suburb, state);
+    // Checked ahead of is_regional — a known big-group subsidiary is
+    // archived for that reason even if it also happens to be regional;
+    // either alone is sufficient to archive, this just picks which single
+    // reason gets recorded when both would apply.
+    const bigGroup = matchBigGroup(centreName.trim());
+    const archivedReason = bigGroup ? `big_group:${bigGroup}` : (isRegional ? 'regional' : null);
     await getDb().execute({
       sql: `INSERT INTO leads (
               id, centre_name, street_address, suburb, state, centre_phone,
@@ -145,7 +179,7 @@ router.post('/', async (req, res) => {
         educatorName?.trim() || null, agencyName?.trim() || null, numberOfShifts?.trim() || null, agencyUsage || null, position || null,
         contactFirstName?.trim() || null, contactLastName?.trim() || null, contactEmail?.trim() || null,
         req.user.email, req.user.name || req.user.email, assignedWorkforcePartner, resolvedEntryType,
-        lat, lng, isRegional, isRegional ? new Date().toISOString() : null, isRegional ? 'regional' : null
+        lat, lng, isRegional, archivedReason ? new Date().toISOString() : null, archivedReason
       ]
     });
     res.json({ success: true, id });
@@ -235,6 +269,36 @@ router.post('/backfill-regions', requireAdmin, async (req, res) => {
       });
     }
     res.json({ totalChecked: rows.length, classified, archived, skipped });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One-time (and safety-net) classification pass for leads that predate
+// KNOWN_BIG_GROUP_BRANDS, or were created before a name was added to it
+// (Liam, 2026-09-07: Kids Academy/Affinity, Penguin Childcare/G8 already
+// sitting in the main Leads view as apparent independent prospects). Only
+// touches leads not already archived for some other reason (e.g. a human
+// restored a regional one deliberately) — same non-destructive stance as
+// backfill-regions. Admin-only, matching that same endpoint's gating.
+router.post('/backfill-big-groups', requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const rows = (await db.execute({
+      sql: `SELECT id, centre_name FROM leads WHERE archived_at IS NULL`,
+      args: []
+    })).rows;
+    let archived = 0;
+    for (const row of rows) {
+      const group = matchBigGroup(row.centre_name);
+      if (!group) continue;
+      archived++;
+      await db.execute({
+        sql: `UPDATE leads SET archived_at = ?, archived_reason = ? WHERE id = ?`,
+        args: [new Date().toISOString(), `big_group:${group}`, row.id]
+      });
+    }
+    res.json({ totalChecked: rows.length, archived });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

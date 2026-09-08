@@ -1646,7 +1646,11 @@
     function paintLeadsList() {
       const main = document.getElementById('mainContent');
       const searchVal = document.getElementById('leadSearchInput')?.value || '';
-      const open = allLeads.filter(l => !l.closed_at);
+      // Archived leads (regional, or a known big-group subsidiary like
+      // Affinity/G8 — routes/leads.js's archived_reason) were never
+      // excluded here, unlike Desktop's default "Metro Leads" filter —
+      // mobile just showed everything closed_at didn't already hide.
+      const open = allLeads.filter(l => !l.closed_at && !l.archived_at);
       const filtered = open.filter(l => !searchVal || (l.centre_name || '').toLowerCase().includes(searchVal.toLowerCase()) || (l.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
         ${wfpFilterBarHtml()}
