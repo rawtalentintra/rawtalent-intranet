@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
-const { normalizeStateToShort, buildMicropods } = require('../services/micropodService');
+const { normalizeStateToShort, buildMicropods, DEFAULT_CORE_MIN_PER_CELL } = require('../services/micropodService');
 const engagement = require('../services/educatorEngagementService');
 const centreGeoService = require('../services/centreGeoService');
 const { computeTerritoryStrategy } = require('../services/territoryStrategyService');
@@ -257,23 +257,29 @@ async function getPodsForParams(req) {
   if (segmentFilter.length) statePoints = statePoints.filter(p => segmentFilter.includes(p.segment));
 
   // buildMicropods' coreMinPerCell (how many people a 2km cell needs to
-  // seed a pod) defaults to a fixed 20 — deliberately NOT tied to
-  // minPodSize (see micropodService.js), but that constant was tuned
-  // against the full ~9k-candidate VIC pool. Filtering to a segment (or a
-  // partner territory) can shrink the pool far more than the old binary
-  // engaged/not-engaged split ever did, and 20-per-cell never happens in a
-  // pool that sparse — every Micropod call silently returned zero pods
-  // regardless of minPodSize until this was caught live (see the original
-  // engaged-only fix this comment is inherited from). Scaling the
-  // threshold down by how much THIS filter thinned the state's pool keeps
-  // the same "requires real local density" guard at whatever scale the
-  // filtered pool actually is. Floor of 3 so it never drops low enough to
-  // just merge every occupied cell again. Unfiltered calls (ratio 1) pass
-  // undefined and fall through to buildMicropods' own default, so normal
-  // behaviour is untouched.
-  const coreMinPerCell = segmentFilter.length && fullStatePoints.length
-    ? Math.max(3, Math.round(20 * (statePoints.length / fullStatePoints.length)))
+  // seed a pod) defaults to a fixed DEFAULT_CORE_MIN_PER_CELL — deliberately
+  // NOT tied to minPodSize (see micropodService.js) — tuned against the
+  // full, unfiltered, VIC-dominated national pool. Two independent things
+  // can thin the pool actually fed to a given call far below that: picking
+  // a smaller state (VIC's ~3.4k active geocoded candidates vs SA's ~300,
+  // confirmed live 2026-09-07 — SA never once reached a 20-per-2km-cell
+  // core at any zoom, so Micropods rendered fully blank for SA regardless
+  // of minPodSize, independent of the segment-filter case below) and
+  // picking a segment filter. Both scale the same threshold down
+  // proportionally to how much they thinned the pool, applied in sequence
+  // so they compound correctly when both are in play — keeping the same
+  // "requires real local density" guard at whatever scale the actually-
+  // clustered pool ends up being. Floor of 3 so it never drops low enough
+  // to just merge every occupied cell again. An unfiltered "All States, no
+  // segment" call thins nothing (both ratios are 1) and falls through to
+  // buildMicropods' own default, so that behaviour is untouched.
+  let coreMinPerCell = state && points.length
+    ? Math.max(3, Math.round(DEFAULT_CORE_MIN_PER_CELL * (fullStatePoints.length / points.length)))
     : undefined;
+  if (segmentFilter.length && fullStatePoints.length) {
+    const base = coreMinPerCell ?? DEFAULT_CORE_MIN_PER_CELL;
+    coreMinPerCell = Math.max(3, Math.round(base * (statePoints.length / fullStatePoints.length)));
+  }
   const { pods, unclusteredCount, unclusteredMemberIds } = buildMicropods(statePoints, { gridKm, minPodSize, ...(coreMinPerCell ? { coreMinPerCell } : {}) });
 
   // Deterministic centroid-based id — stays stable across recomputation/

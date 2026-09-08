@@ -207,4 +207,4 @@ function buildMicropods(points, { gridKm = 2, minPodSize = 15, coreMinPerCell = 
   return { pods, unclusteredCount: unclusteredMemberIds.length, unclusteredMemberIds };
 }
 
-module.exports = { normalizeStateToShort, buildMicropods };
+module.exports = { normalizeStateToShort, buildMicropods, DEFAULT_CORE_MIN_PER_CELL };
