@@ -21,22 +21,18 @@ const DEFAULT_RADIUS_KM = 15;
 const QUADRANTS = {
   grow: {
     label: 'Grow',
-    icon: '🌱',
     action: 'Strong on both sides — keep growing together; look for adjacent expansion centres.'
   },
   recruit: {
     label: 'Recruit',
-    icon: '🎯',
     action: 'Client demand here outpaces educator supply — prioritise recruiting/reactivating educators in this area.'
   },
   develop_business: {
     label: 'Develop Business',
-    icon: '📈',
     action: 'Educator supply here outpaces current bookings — prioritise new centre acquisition/lead generation in this area.'
   },
   monitor: {
     label: 'Monitor',
-    icon: '👀',
     action: 'Low activity on both sides relative to other areas — no urgent action, keep monitoring.'
   }
 };

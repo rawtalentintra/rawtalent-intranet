@@ -155,8 +155,24 @@ function normalizeOwnerEmails(list) {
   return [...seen];
 }
 
+// Liam, 2026-09-08: "does not like emojis or additional noise on the
+// visuals" — the New/Edit Project modal no longer has Icon or Color
+// fields at all (icon dropped entirely; "this colour should just be auto
+// assigned, we have no colour coding anyway" — the dot was always purely
+// a visual differentiator between projects, never meaningful by which
+// specific colour, so any deterministic pick is fine). A fixed, plain
+// palette (no emoji-adjacent brights), picked by hashing the new
+// project's own id so it's stable and collision-resistant without a
+// COUNT query or extra write.
+const PROJECT_COLOR_PALETTE = ['#3d6fff', '#0d9488', '#db2777', '#f97316', '#7c3aed', '#059669', '#0891b2', '#b45309'];
+function autoAssignProjectColor(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return PROJECT_COLOR_PALETTE[hash % PROJECT_COLOR_PALETTE.length];
+}
+
 router.post('/', async (req, res) => {
-  const { name, icon, color, description, status, ownerEmails, startDate, targetDate, successCriteria } = req.body;
+  const { name, description, status, ownerEmails, startDate, targetDate, successCriteria } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Project name is required' });
   if (status && !STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status' });
   try {
@@ -166,7 +182,7 @@ router.post('/', async (req, res) => {
             (id, name, icon, color, description, status, owner_emails, start_date, target_date, success_criteria, created_by_email)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        id, name.trim(), icon || '🚀', color || '#3d6fff', description || null, status || 'planning',
+        id, name.trim(), null, autoAssignProjectColor(id), description || null, status || 'planning',
         JSON.stringify(normalizeOwnerEmails(ownerEmails)), startDate || null, targetDate || null, successCriteria || null,
         req.user.email
       ]

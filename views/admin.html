@@ -531,7 +531,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Projects</div>
-            <div class="admin-page-sub">What we're running, who owns it, and what success looks like. Sorted by soonest target date — 🔥/🟠 badges flag what's most urgent to prioritise.</div>
+            <div class="admin-page-sub">What we're running, who owns it, and what success looks like. Sorted by soonest target date — Top/High Priority badges flag what's most urgent to prioritise.</div>
           </div>
           <button class="btn-add" onclick="openProjectFormModal()">+ New Project</button>
         </div>
@@ -720,7 +720,7 @@
       <div class="admin-section" id="section-sales-dashboard">
         <div class="admin-header">
           <div>
-            <div class="admin-page-title">📈 WFP Dashboard</div>
+            <div class="admin-page-title">WFP Dashboard</div>
             <div class="admin-page-sub">New-business pipeline (leads → called → visited → signed) and what needs attention today. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
@@ -809,7 +809,7 @@
       <div class="admin-section" id="section-my-centres">
         <div class="admin-header">
           <div>
-            <div class="admin-page-title">🏢 My Centres</div>
+            <div class="admin-page-title">My Centres</div>
             <div class="admin-page-sub">
               <!-- Two versions, one shown at a time via mobile CSS (style.css)
                    — Joy, 2026-09-02: "shorten the description" on mobile only,
@@ -895,7 +895,7 @@
         <div id="centre360Screen" style="display:none">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
             <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="backToMyCentres()">← Back to My Centres</button>
-            <button id="deleteCentreBtn" class="action-btn delete" style="display:none;font-size:11.5px;padding:4px 10px" onclick="deleteCurrentCentre()">🗑️ Delete Centre</button>
+            <button id="deleteCentreBtn" class="action-btn delete" style="display:none;font-size:11.5px;padding:4px 10px" onclick="deleteCurrentCentre()">Delete Centre</button>
           </div>
           <div id="centre360Body"></div>
         </div>
@@ -907,7 +907,7 @@
       <div class="admin-section" id="section-micropods">
         <div class="admin-header">
           <div>
-            <div class="admin-page-title">🗺️ Micropods</div>
+            <div class="admin-page-title">Micropods</div>
             <div class="admin-page-sub">Where your candidate pool actually clusters geographically — dense pockets worth building a local staffing hub around. Pick a pod to see who's in it.</div>
           </div>
         </div>
@@ -933,22 +933,22 @@
                   <input type="number" id="micropodsMinSize" class="form-control" style="width:70px" min="5" max="100" value="15" onchange="loadMicropods()">
                 </div>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--navy);font-weight:600;cursor:pointer">
-                  <input type="checkbox" id="micropodsTerritoryToggle" onchange="onMicropodsTerritoryToggleChange()"> 🧭 Territory Strategy
+                  <input type="checkbox" id="micropodsTerritoryToggle" onchange="onMicropodsTerritoryToggleChange()"> Territory Strategy
                 </label>
                 <div id="micropodsTerritoryFilterWrap" style="display:none;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
                   <label for="micropodsTerritoryFilter">Strategy</label>
                   <select id="micropodsTerritoryFilter" class="form-control" style="width:180px" onchange="renderMicropodsTable(micropodsLastData, true)">
                     <option value="">All strategies</option>
-                    <option value="recruit">🎯 Recruit</option>
-                    <option value="develop_business">📈 Develop Business</option>
-                    <option value="grow">🌱 Grow</option>
-                    <option value="monitor">👀 Monitor</option>
+                    <option value="recruit">Recruit</option>
+                    <option value="develop_business">Develop Business</option>
+                    <option value="grow">Grow</option>
+                    <option value="monitor">Monitor</option>
                   </select>
                 </div>
               </div>
             </div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)"><strong>Currently Working</strong>: worked shift in the last 28 days. <strong>Newly Activated</strong>: created in the last 28 days, no shift history yet. <strong>Available &amp; Engaged</strong>: has upcoming availability set in RT, no recent shift. <strong>Warm Reactivation</strong>: last shift was 29–90 days ago. <strong>Dormant / Lapsed</strong>: no shift in over 90 days (or never). <strong>Onboarding Supply</strong>: still in a pre-active RT status, or has a lapsed/unreviewed mandatory document.</div>
-            <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)">🧭 <strong>Territory Strategy</strong> compares each pod's Active Supply (Currently Working + Newly Activated + Available &amp; Engaged) against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
+            <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)"><strong>Territory Strategy</strong> compares each pod's Active Supply (Currently Working + Newly Activated + Available &amp; Engaged) against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
           </div>
 
           <div class="admin-table-card" style="padding:0;margin-bottom:16px;overflow:hidden">
@@ -1066,7 +1066,7 @@
                 <input type="date" id="leadsDashRangeTo" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="filterLeadsTable()">
               </div>
             </div>
-            <button class="btn-add" id="addCentreBtn" onclick="openAddCentreModal()">➕ Add Centre</button>
+            <button class="btn-add" id="addCentreBtn" onclick="openAddCentreModal()">Add Centre</button>
           </div>
         </div>
 
@@ -1095,8 +1095,8 @@
              focused on what's still actionable, and needs to be obvious,
              not a small select easy to miss. -->
         <div class="leads-closed-tabs" id="leadsClosedTabs">
-          <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsClosedFilter('active')">📂 Open Leads</button>
-          <button type="button" class="leads-closed-tab" data-value="closed" onclick="setLeadsClosedFilter('closed')">✅ Closed Leads</button>
+          <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsClosedFilter('active')">Open Leads</button>
+          <button type="button" class="leads-closed-tab" data-value="closed" onclick="setLeadsClosedFilter('closed')">Closed Leads</button>
           <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
         </div>
 
@@ -1119,8 +1119,8 @@
                  is a rare "review the archived pool" toggle — it doesn't
                  need tab-level visual weight. -->
             <select id="leadsFilterRegional" onchange="setLeadsRegionalFilter(this.value)">
-              <option value="active" selected>🏙️ Metro Leads</option>
-              <option value="regional">🗄️ Archived (Regional/Group)</option>
+              <option value="active" selected>Metro Leads</option>
+              <option value="regional">Archived (Regional/Group)</option>
               <option value="all">Metro + Archived</option>
             </select>
             <select id="leadsFilterPartner" onchange="filterLeadsTable()">
@@ -1287,10 +1287,10 @@
             <div class="form-group-modal">
               <label class="form-label-modal">Status</label>
               <select id="centreLeadStatus" class="form-control">
-                <option value="to_schedule">📞 To Schedule</option>
-                <option value="called">📞 Called</option>
-                <option value="visited">🚗 Visited</option>
-                <option value="signed" selected>🎉 Profile Created</option>
+                <option value="to_schedule">To Schedule</option>
+                <option value="called">Called</option>
+                <option value="visited">Visited</option>
+                <option value="signed" selected>Profile Created</option>
               </select>
               <div class="form-hint">Adding a centre here usually means it's already a real client — defaults to Profile Created (Called/Visited marked N/A) rather than starting it back at the top of the pipeline. Change this if you're adding an earlier-stage prospect instead.</div>
             </div>
@@ -1320,8 +1320,8 @@
               <div class="lead-group-label" style="margin-top:14px;margin-bottom:0">Upload Recording/Transcript</div>
               <div style="background:white;padding:14px 16px;text-align:center">
                 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                  <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">📎 Upload Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadVisitLogRecordingFiles(this.files);this.value=''"></label>
-                  <button type="button" class="btn-secondary" id="visitLogRecordBtn" style="padding:6px 14px;font-size:12.5px" onclick="startVisitLogVoiceRecording()">🎙️ Start Recording Notes</button>
+                  <label class="btn-secondary" style="cursor:pointer;display:inline-block;padding:6px 14px;font-size:12.5px">Upload Recording/Transcript<input type="file" multiple style="display:none" onchange="uploadVisitLogRecordingFiles(this.files);this.value=''"></label>
+                  <button type="button" class="btn-secondary" id="visitLogRecordBtn" style="padding:6px 14px;font-size:12.5px" onclick="startVisitLogVoiceRecording()">Start Recording Notes</button>
                 </div>
                 <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">Attach/drag your call recording or transcript here, or record straight from your phone.</div>
                 <div id="visitLogVoiceRecorderBox" style="margin-top:8px"></div>
@@ -1334,8 +1334,8 @@
               <div class="form-group-modal">
                 <label class="form-label-modal">Channel</label>
                 <select id="visitLogChannel" class="form-control" onchange="onVisitLogChannelChange()">
-                  <option value="call">📞 Call</option>
-                  <option value="visit">🚗 Visit</option>
+                  <option value="call">Call</option>
+                  <option value="visit">Visit</option>
                 </select>
               </div>
               <div class="form-group-modal">
@@ -1540,7 +1540,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:16px 18px;margin-bottom:16px">
-          <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:8px">🎯 Find Centres Along a Route</div>
+          <div style="font-weight:700;font-size:13.5px;color:var(--navy);margin-bottom:8px">Find Centres Along a Route</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
             <div>
               <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">I'm starting at</label>
@@ -1564,12 +1564,12 @@
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
             <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Route Mode</label>
             <select id="routeModeFilter" class="form-control" style="width:220px;font-weight:700;color:var(--navy)" onchange="onRouteModeChange()">
-              <option value="">⚖️ Balanced Day</option>
-              <option value="protect_recover">🛟 Protect and Recover</option>
-              <option value="activate">🌱 Activate</option>
-              <option value="grow">📈 Grow</option>
-              <option value="new_business">🎯 New Business</option>
-              <option value="supply_led_growth">🗺️ Supply-led Growth</option>
+              <option value="">Balanced Day</option>
+              <option value="protect_recover">Protect and Recover</option>
+              <option value="activate">Activate</option>
+              <option value="grow">Grow</option>
+              <option value="new_business">New Business</option>
+              <option value="supply_led_growth">Supply-led Growth</option>
             </select>
             <span id="routeModeNote" style="font-size:11.5px;color:var(--text-muted)">A recommended mix of everything below — pick a mode to focus on one kind of day.</span>
           </div>
@@ -1616,19 +1616,19 @@
               <input type="checkbox" id="routeIncludeDueCentres" checked onchange="filterRoutePlannerLeads()"> Include due centres
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--navy);font-weight:600;cursor:pointer;align-self:center">
-              <input type="checkbox" id="routeTerritoryToggle" onchange="onRouteTerritoryToggleChange()"> 🧭 Territory Strategy
+              <input type="checkbox" id="routeTerritoryToggle" onchange="onRouteTerritoryToggleChange()"> Territory Strategy
             </label>
             <select id="routeTerritoryFilter" style="display:none" onchange="filterRoutePlannerLeads()">
               <option value="">Strategy: any</option>
-              <option value="recruit">🎯 Recruit</option>
-              <option value="develop_business">📈 Develop Business</option>
-              <option value="grow">🌱 Grow</option>
-              <option value="monitor">👀 Monitor</option>
+              <option value="recruit">Recruit</option>
+              <option value="develop_business">Develop Business</option>
+              <option value="grow">Grow</option>
+              <option value="monitor">Monitor</option>
             </select>
             <span id="routeSelectedCount" style="font-size:12px;color:var(--text-muted);align-self:center">0 / 10 selected</span>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);padding:0 0 6px">🎯 Aim for around 5 quality stops for a typical day — that's a guideline, not a hard rule; a couple of long, valuable conversations beats a rushed ten.</div>
-          <div id="routeTerritoryNote" style="display:none;font-size:11px;color:var(--text-muted);padding:0 0 10px">🧭 Matches each due centre against Micropods' Territory Strategy (nearest pod within 20km, all states, min pod size 15) — see the Micropods section for the full picture. Leads have no saved location yet, so they show as unmatched.</div>
+          <div style="font-size:11px;color:var(--text-muted);padding:0 0 6px">Aim for around 5 quality stops for a typical day — that's a guideline, not a hard rule; a couple of long, valuable conversations beats a rushed ten.</div>
+          <div id="routeTerritoryNote" style="display:none;font-size:11px;color:var(--text-muted);padding:0 0 10px">Matches each due centre against Micropods' Territory Strategy (nearest pod within 20km, all states, min pod size 15) — see the Micropods section for the full picture. Leads have no saved location yet, so they show as unmatched.</div>
           <div style="overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
             <table class="data-table data-table-compact" id="routeCentresTable">
               <thead>
@@ -1664,7 +1664,7 @@
                 </select>
               </div>
             </div>
-            <button class="btn-add" id="routeGenerateBtn" onclick="generateRoute()">🧭 Generate Route</button>
+            <button class="btn-add" id="routeGenerateBtn" onclick="generateRoute()">Generate Route</button>
           </div>
         </div>
 
@@ -1675,7 +1675,7 @@
               <div id="routeDepartureSuggestion" style="display:none;font-size:12px;color:#9a3412;background:#fff7ed;border-radius:var(--radius);padding:8px 10px;margin-bottom:12px"></div>
               <div id="routeTimeline"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-                <button class="btn-secondary" onclick="openRouteInGoogleMaps()">📍 Open in Google Maps</button>
+                <button class="btn-secondary" onclick="openRouteInGoogleMaps()">Open in Google Maps</button>
               </div>
             </div>
             <div class="admin-table-card" style="padding:0;overflow:hidden">
@@ -1717,10 +1717,10 @@
         <div class="status-popover-label">Priority</div>
         <select id="projectPriorityPopoverSelect" class="form-control">
           <option value="">Auto (by deadline)</option>
-          <option value="top">🔥 Top Priority</option>
-          <option value="high">🟠 High Priority</option>
+          <option value="top">Top Priority</option>
+          <option value="high">High Priority</option>
           <option value="normal">Normal</option>
-          <option value="low">🔽 Low Priority</option>
+          <option value="low">Low Priority</option>
         </select>
         <div class="status-popover-actions">
           <button class="btn-secondary" style="padding:3px 9px;font-size:10.5px" onclick="closeProjectPriorityPopover()">Cancel</button>
@@ -1758,7 +1758,7 @@
       <div class="modal-overlay" id="nurtureCadenceModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeNurtureCadenceModal()">
         <div class="modal" style="max-width:520px">
           <div class="modal-header">
-            <div class="modal-title">🌱 Nurture Cadence</div>
+            <div class="modal-title">Nurture Cadence</div>
             <button class="modal-close" onclick="closeNurtureCadenceModal()">×</button>
           </div>
           <div class="modal-body" id="nurtureCadenceBody" style="max-height:70vh;overflow-y:auto"></div>
@@ -3561,19 +3561,9 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="editProjectId">
-        <div style="display:flex;gap:12px">
-          <div class="form-group-modal" style="width:70px;flex-shrink:0">
-            <label class="form-label-modal">Icon</label>
-            <input type="text" id="projectIcon" class="form-control" style="text-align:center;font-size:18px" maxlength="4" value="🚀">
-          </div>
-          <div class="form-group-modal" style="width:56px;flex-shrink:0">
-            <label class="form-label-modal">Color</label>
-            <input type="color" id="projectColor" class="form-control" style="padding:3px;height:40px" value="#3d6fff">
-          </div>
-          <div class="form-group-modal" style="flex:1">
-            <label class="form-label-modal">Project Name <span style="color:#ef4444">*</span></label>
-            <input type="text" id="projectName" class="form-control" placeholder="e.g. Client Relationship Management">
-          </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Project Name <span style="color:#ef4444">*</span></label>
+          <input type="text" id="projectName" class="form-control" placeholder="e.g. Client Relationship Management">
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal">Description</label>
@@ -3595,10 +3585,10 @@
             <label class="form-label-modal">Priority</label>
             <select id="projectPriority" class="form-control">
               <option value="">Auto (by deadline)</option>
-              <option value="top">🔥 Top Priority</option>
-              <option value="high">🟠 High Priority</option>
+              <option value="top">Top Priority</option>
+              <option value="high">High Priority</option>
               <option value="normal">Normal</option>
-              <option value="low">🔽 Low Priority</option>
+              <option value="low">Low Priority</option>
             </select>
             <div class="form-hint">Overrides the dashboard's deadline-based badge — leave on Auto unless this needs to jump (or drop) the queue.</div>
           </div>
@@ -3626,7 +3616,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="closeProjectFormModal()">Cancel</button>
-        <button class="btn-add" onclick="saveProject()">💾 Save Project</button>
+        <button class="btn-add" onclick="saveProject()">Save Project</button>
       </div>
     </div>
   </div>
@@ -7741,7 +7731,7 @@
         : top.signed_status === 'not_interested' ? ' — marked not interested' : '';
       box.className = `lead-dup-warning${strongMatch ? ' lead-dup-strong' : ''}`;
       box.innerHTML = `
-        <div style="font-weight:700;margin-bottom:3px">${strongMatch ? '⚠️ This centre may already be a lead' : `🔎 Did you mean “${escHtml(top.centre_name)}”?`}</div>
+        <div style="font-weight:700;margin-bottom:3px">${strongMatch ? 'This centre may already be a lead' : `Did you mean “${escHtml(top.centre_name)}”?`}</div>
         <div>${escHtml(top.centre_name)}${where ? `, ${escHtml(where)}` : ''}${alreadyNote} — submitted by ${escHtml(top.submitted_by_name || 'a teammate')} ${fmtDate(top.created_at)}</div>
         <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:11px;margin-top:6px" onclick="hideCentreLeadDupWarning('${kind}')">Dismiss</button>
       `;
@@ -7893,18 +7883,18 @@
     // LEAD_CALLED_META above), so a lead marked N/A through a step should
     // fall straight to whichever step comes next, same as if it were done.
     function leadStageInfo(lead) {
-      if (lead.signed_status === 'signed') return { icon: '🎉', label: 'Profile Created', cls: 'lead-badge-done', field: 'signed' };
-      if (lead.signed_status === 'not_interested') return { icon: '🚫', label: 'Not Interested', cls: 'lead-badge-not', field: 'signed' };
+      if (lead.signed_status === 'signed') return { label: 'Profile Created', cls: 'lead-badge-done', field: 'signed' };
+      if (lead.signed_status === 'not_interested') return { label: 'Not Interested', cls: 'lead-badge-not', field: 'signed' };
 
       const called = lead.lead_called_status || 'to_schedule';
-      if (called === 'to_schedule') return { icon: '📞', label: 'To Schedule', cls: 'lead-badge-todo', field: 'lead_called' };
-      if (called === 'scheduled') return { icon: '📞', label: 'Call Scheduled', cls: 'lead-badge-sched', field: 'lead_called' };
+      if (called === 'to_schedule') return { label: 'To Schedule', cls: 'lead-badge-todo', field: 'lead_called' };
+      if (called === 'scheduled') return { label: 'Call Scheduled', cls: 'lead-badge-sched', field: 'lead_called' };
 
       const visited = lead.centre_visited_status || 'to_schedule';
-      if (visited === 'to_schedule') return { icon: '🚗', label: 'Visit To Schedule', cls: 'lead-badge-todo', field: 'centre_visited' };
-      if (visited === 'scheduled') return { icon: '🚗', label: 'Visit Scheduled', cls: 'lead-badge-sched', field: 'centre_visited' };
+      if (visited === 'to_schedule') return { label: 'Visit To Schedule', cls: 'lead-badge-todo', field: 'centre_visited' };
+      if (visited === 'scheduled') return { label: 'Visit Scheduled', cls: 'lead-badge-sched', field: 'centre_visited' };
 
-      return { icon: '📋', label: 'Profile Pending', cls: 'lead-badge-sched', field: 'signed' };
+      return { label: 'Profile Pending', cls: 'lead-badge-sched', field: 'signed' };
     }
 
     // Full Called/Visited/Profile breakdown for the Stage badge's tooltip —
@@ -7920,7 +7910,7 @@
     function leadStageBadge(lead) {
       const info = leadStageInfo(lead);
       const editAttr = (currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner') ? `onclick="openLeadStatusPopover(event,'${lead.id}','${info.field}')"` : '';
-      return `<span class="lead-badge ${info.cls}" title="${escHtml(leadStageTooltip(lead))}" ${editAttr}>${info.icon} ${escHtml(info.label)}</span>`;
+      return `<span class="lead-badge ${info.cls}" title="${escHtml(leadStageTooltip(lead))}" ${editAttr}>${escHtml(info.label)}</span>`;
     }
 
     async function loadLeadsTable() {
@@ -8224,8 +8214,8 @@
       if (periodKey === 'all') {
         cards = [
           { label: 'Total Leads', value: c.total, hint: 'New leads logged (all time)' },
-          { label: '📞 Calls Logged', value: c.called, hint: `${c.called} of ${c.total} leads called` },
-          { label: '🚗 Visits Logged', value: c.visited, hint: `${c.visited} of ${c.total} leads visited` },
+          { label: 'Calls Logged', value: c.called, hint: `${c.called} of ${c.total} leads called` },
+          { label: 'Visits Logged', value: c.visited, hint: `${c.visited} of ${c.total} leads visited` },
           { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', hint: `${c.signed} of ${c.visited} visited leads signed` }
         ];
       } else {
@@ -8239,8 +8229,8 @@
         const prevLeadVisits = previous.filter(l => l.centre_visited_status === 'done' && inDateRange(l.centre_visited_at, prevFrom, prevTo)).length;
         cards = [
           { label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
-          { label: '📞 Calls Logged', value: leadCalls, trend: trendArrow(leadCalls, prevLeadCalls), hint: `${leadCalls} of ${c.total} leads` },
-          { label: '🚗 Visits Logged', value: leadVisits, trend: trendArrow(leadVisits, prevLeadVisits), hint: `${leadVisits} of ${c.total} leads` },
+          { label: 'Calls Logged', value: leadCalls, trend: trendArrow(leadCalls, prevLeadCalls), hint: `${leadCalls} of ${c.total} leads` },
+          { label: 'Visits Logged', value: leadVisits, trend: trendArrow(leadVisits, prevLeadVisits), hint: `${leadVisits} of ${c.total} leads` },
           { label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited leads signed` }
         ];
       }
@@ -8277,13 +8267,13 @@
         const retention = leadsRetentionByLeadId[lead.id];
         const bookings = retention?.matched ? retention.bookingsSinceSigned : 0;
         const badge = bookings > 0
-          ? { icon: '🎉', label: `with ${bookings} Booking${bookings === 1 ? '' : 's'}`, bg: '#dcfce7', color: '#15803d' }
-          : { icon: '📕', label: 'Pre-booking', bg: '#fef3c7', color: '#b45309' };
+          ? { label: `with ${bookings} Booking${bookings === 1 ? '' : 's'}`, bg: '#dcfce7', color: '#15803d' }
+          : { label: 'Pre-booking', bg: '#fef3c7', color: '#b45309' };
         const title = `${match.clientName} — ${match.locationLabel}\nThis is the RT centre created from this lead's own Profile Created conversion — not a pre-existing duplicate.${bookings ? `\n${bookings} booking${bookings === 1 ? '' : 's'} since signing.` : ''}`;
-        return `<span class="badge" style="cursor:pointer;background:${badge.bg};color:${badge.color}" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">${badge.icon} ${escHtml(badge.label)}</span>`;
+        return `<span class="badge" style="cursor:pointer;background:${badge.bg};color:${badge.color}" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">${escHtml(badge.label)}</span>`;
       }
       const title = `${match.clientName} — ${match.locationLabel}\n${match.reasons.join(', ')}`;
-      return `<span class="badge badge-published" style="cursor:pointer" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">✓ Likely exists</span>`;
+      return `<span class="badge badge-published" style="cursor:pointer" title="${escHtml(title)}" onclick="event.stopPropagation();goToCentre360('${centreKey}')">Likely exists</span>`;
     }
 
     // Client-side pagination, same pattern as My Centres
@@ -8320,8 +8310,8 @@
             ${escHtml(l.centre_name)}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
             ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
-            ${l.archived_at && l.archived_reason === 'regional' ? `<span title="Outside the metro radius — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#9a3412;background:#ffedd5;padding:1px 6px;border-radius:20px;vertical-align:middle">🗺️ REGIONAL</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
-            ${l.archived_at && l.archived_reason?.startsWith('big_group:') ? `<span title="Subsidiary of ${escHtml(l.archived_reason.slice(10))} — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#6d28d9;background:#ede9fe;padding:1px 6px;border-radius:20px;vertical-align:middle">🏢 ${escHtml(l.archived_reason.slice(10).toUpperCase())}</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
+            ${l.archived_at && l.archived_reason === 'regional' ? `<span title="Outside the metro radius — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#9a3412;background:#ffedd5;padding:1px 6px;border-radius:20px;vertical-align:middle">REGIONAL</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
+            ${l.archived_at && l.archived_reason?.startsWith('big_group:') ? `<span title="Subsidiary of ${escHtml(l.archived_reason.slice(10))} — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#6d28d9;background:#ede9fe;padding:1px 6px;border-radius:20px;vertical-align:middle">${escHtml(l.archived_reason.slice(10).toUpperCase())}</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
             ${l.auto_signed && !l.auto_signed_reviewed_at ? `<span title="HeartBeat automatically marked this Profile Created from RT data — open it to review and fill in Lead Called/Centre Visited/recording/notes" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#047857;background:#d1fae5;padding:1px 6px;border-radius:20px;vertical-align:middle">🤖 NEEDS REVIEW</span>` : ''}
           </td>
           <td>${renderLeadExistingCentreCell(l)}</td>
@@ -8427,7 +8417,7 @@
       const start = new Date(atVal);
       const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
       link.href = buildGoogleCalendarQuickAddUrl({
-        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${lead.centre_name}`,
+        title: `${isCall ? 'Call' : 'Visit'}: ${lead.centre_name}`,
         start, end,
         details: `HeartBeat lead: ${location.origin}/admin?lead=${lead.id}`,
         location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')
@@ -8850,7 +8840,7 @@
         // of health category — an escalated Healthy or Growing centre is
         // still more urgent right now than an ordinary Declining one.
         if (c.isEscalated) {
-          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Issue raised at last visit', urgency: 1000, cls: 'attn-overdue', outcome: '🚨 Escalated — an issue or allegation was raised. Call or visit today.' });
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Issue raised at last visit', urgency: 1000, cls: 'attn-overdue', outcome: 'Escalated — an issue or allegation was raised. Call or visit today.' });
         } else if (c.health === 'declining') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue', outcome: centreAttentionOutcome('declining') });
         } else if (c.health === 'needs_attention') {
@@ -9068,14 +9058,14 @@
       const actPrev = activityCountsFor(prevFrom, prevTo);
       const cards = [
         { kind: 'total-leads', label: 'Total Leads', value: c.total, trend: trendArrow(c.total, p.total), hint: 'New leads logged this period' },
-        { kind: 'calls-logged', label: '📞 Calls Logged', value: act.calls, trend: trendArrow(act.calls, actPrev.calls), hint: `${act.leadCalls} lead + ${act.centreCalls} centre` },
-        { kind: 'visits-logged', label: '🚗 Visits Logged', value: act.visits, trend: trendArrow(act.visits, actPrev.visits), hint: `${act.leadVisits} lead + ${act.centreVisits} centre` },
+        { kind: 'calls-logged', label: 'Calls Logged', value: act.calls, trend: trendArrow(act.calls, actPrev.calls), hint: `${act.leadCalls} lead + ${act.centreCalls} centre` },
+        { kind: 'visits-logged', label: 'Visits Logged', value: act.visits, trend: trendArrow(act.visits, actPrev.visits), hint: `${act.leadVisits} lead + ${act.centreVisits} centre` },
         { kind: 'signed-rate', label: 'Signed Rate', value: pct(c.signed, c.visited) + '%', trend: trendArrow(pct(c.signed, c.visited), pct(p.signed, p.visited)), hint: `${c.signed} of ${c.visited} visited centres signed` },
         // Not period-bound like the cards above — a centre signed months
         // ago that only just started booking is still worth surfacing
         // today (see signedCentreBookingCounts).
-        { kind: 'pre-booking-centres', label: '📕 Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
-        { kind: 'centres-with-bookings', label: '🎉 Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
+        { kind: 'pre-booking-centres', label: 'Pre-booking Centres', value: booking.preBooking, hint: `Signed, no bookings yet · ${booking.total} signed total` },
+        { kind: 'centres-with-bookings', label: 'Centres With Bookings', value: booking.withBookings, hint: `Signed and actively booking · ${booking.total} signed total` }
       ];
       // Joy, 2026-09-03: "when you tap on these boxes it should answer the
       // question who?" — every card now opens openKpiDrilldown(kind) with
@@ -9155,7 +9145,7 @@
             return { when, html: kpiDrilldownRow(centre ? centre.name : (a.centreKey || 'Unknown centre'), meta, centre ? `closeKpiDrilldownModal();goToCentre360('${a.centreKey}')` : '') };
           })
         ].sort((x, y) => new Date(y.when) - new Date(x.when));
-        openKpiDrilldownModal(isCalls ? '📞 Calls Logged' : '🚗 Visits Logged', `${entries.length} logged this period — leads + centres`, entries.map(e => e.html).join(''));
+        openKpiDrilldownModal(isCalls ? 'Calls Logged' : 'Visits Logged', `${entries.length} logged this period — leads + centres`, entries.map(e => e.html).join(''));
         return;
       }
 
@@ -9176,7 +9166,7 @@
           [r.suburb, r.state].filter(Boolean).join(', ') || '—',
           r.matched ? `closeKpiDrilldownModal();goToCentre360('${r.centreKey}')` : `closeKpiDrilldownModal();openLeadDetail('${r.leadId}')`
         )).join('');
-        openKpiDrilldownModal(wantBookings ? '🎉 Centres With Bookings' : '📕 Pre-booking Centres', `${rows.length} signed centre${rows.length === 1 ? '' : 's'}`, rowsHtml);
+        openKpiDrilldownModal(wantBookings ? 'Centres With Bookings' : 'Pre-booking Centres', `${rows.length} signed centre${rows.length === 1 ? '' : 's'}`, rowsHtml);
         return;
       }
 
@@ -9203,7 +9193,7 @@
       }
       if (kind === 'escalated') {
         const rows = centres.filter(c => c.isEscalated).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        openKpiDrilldownModal('🚨 Escalated', `${rows.length} centre${rows.length === 1 ? '' : 's'} with an unresolved issue raised at the last visit`, rows.map(c => centreRow(c)).join(''));
+        openKpiDrilldownModal('Escalated', `${rows.length} centre${rows.length === 1 ? '' : 's'} with an unresolved issue raised at the last visit`, rows.map(c => centreRow(c)).join(''));
       }
     }
 
@@ -9219,7 +9209,7 @@
       // (Melbourne territory split, 2026-08-22), not geography — VIC leads
       // split between them, so both are keyed by partner, only Gwen's SA
       // card stays state-keyed (unsplit, same distinction leadMatchesWfpFilter draws).
-      const allStates = [{ key: 'LIAM', label: '📍 Liam - VIC' }, { key: 'VIC', label: '📍 Justine - VIC' }, { key: 'SA', label: '📍 Gwen - SA' }];
+      const allStates = [{ key: 'LIAM', label: 'Liam - VIC' }, { key: 'VIC', label: 'Justine - VIC' }, { key: 'SA', label: 'Gwen - SA' }];
       const states = wfpStateFilter ? allStates.filter(s => s.key === wfpStateFilter) : allStates;
       document.getElementById('salesFunnelRow').innerHTML = states.map(s => {
         const stateLeads = s.key === 'LIAM' ? leads.filter(l => l.assigned_workforce_partner === 'Liam Baxter (VIC)')
@@ -9291,7 +9281,7 @@
     // booking/With Bookings cards.
 
     function renderSalesPartnerCards(leads) {
-      const allPartners = [{ key: 'LIAM', short: '📍 Liam - VIC' }, { key: 'VIC', short: '📍 Justine - VIC' }, { key: 'SA', short: '📍 Gwen - SA' }];
+      const allPartners = [{ key: 'LIAM', short: 'Liam - VIC' }, { key: 'VIC', short: 'Justine - VIC' }, { key: 'SA', short: 'Gwen - SA' }];
       const partners = wfpStateFilter ? allPartners.filter(p => p.key === wfpStateFilter) : allPartners;
       const attention = computeAttentionItems();
       document.getElementById('salesPartnerRow').innerHTML = partners.map(p => {
@@ -9434,8 +9424,8 @@
       const meta = CENTRE_HEALTH_META[category] || { label: category, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
       const title = reasons && reasons.length ? ` title="${escHtml(reasons.join(' '))}"` : '';
       let html = `<span class="badge" style="font-size:11px;background:${meta.bg};color:${meta.color};font-weight:700;white-space:nowrap"${title}>${meta.label}</span>`;
-      if (isEscalated) html += ` <span class="badge" style="font-size:10.5px;background:#fee2e2;color:#b91c1c;font-weight:700;white-space:nowrap" title="Latest visit outcome flagged as an issue — needs attention now">🚨 Escalated</span>`;
-      if (isStrategic) html += ` <span class="badge" style="font-size:10.5px;background:#ede9fe;color:#6d28d9;font-weight:700;white-space:nowrap" title="2+ bookings/week on average — Strategic/High Volume, faster intervention cadence applies">⭐ Strategic</span>`;
+      if (isEscalated) html += ` <span class="badge" style="font-size:10.5px;background:#fee2e2;color:#b91c1c;font-weight:700;white-space:nowrap" title="Latest visit outcome flagged as an issue — needs attention now">Escalated</span>`;
+      if (isStrategic) html += ` <span class="badge" style="font-size:10.5px;background:#ede9fe;color:#6d28d9;font-weight:700;white-space:nowrap" title="2+ bookings/week on average — Strategic/High Volume, faster intervention cadence applies">Strategic</span>`;
       return html;
     }
 
@@ -9648,8 +9638,8 @@
           ${row('Due', dueDateText)}
           ${row('Status', `<span class="attn-chip ${meta.cls}">${escHtml(meta.label)}</span>`)}
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
-            <button class="btn-add" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">📝 Log Call/Visit</button>
-            <button class="btn-secondary" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">📎 Upload Recording</button>
+            <button class="btn-add" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">Log Call/Visit</button>
+            <button class="btn-secondary" style="flex:1;justify-content:center;padding:9px 12px;font-size:13px" onclick="closeNurtureCadenceModal();openVisitLogModal('${currentCentreKey}')">Upload Recording</button>
           </div>`;
       }
       document.getElementById('nurtureCadenceBody').innerHTML = body;
@@ -9746,8 +9736,8 @@
       const prevCalls = activity.filter(a => a.channel === 'call' && inDateRange(a.visitDate || a.createdAt, prevFrom, prevTo)).length;
       const prevVisits = activity.filter(a => a.channel === 'visit' && inDateRange(a.visitDate || a.createdAt, prevFrom, prevTo)).length;
       const cards = [
-        { label: '📞 Calls Logged', value: calls, trend: trendArrow(calls, prevCalls), hint: 'This month, across these centres' },
-        { label: '🚗 Visits Logged', value: visits, trend: trendArrow(visits, prevVisits), hint: 'This month, across these centres' }
+        { label: 'Calls Logged', value: calls, trend: trendArrow(calls, prevCalls), hint: 'This month, across these centres' },
+        { label: 'Visits Logged', value: visits, trend: trendArrow(visits, prevVisits), hint: 'This month, across these centres' }
       ];
       el.innerHTML = cards.map(k => `
         <div class="kpi-card">
@@ -9993,7 +9983,7 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             ${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
-            <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;white-space:nowrap" onclick="openEscalateCentreModal('${c.centreKey}')" title="Raise a note that shows up as an escalation on this centre's Workforce Partner's Today">🚨 Escalate</button>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;white-space:nowrap" onclick="openEscalateCentreModal('${c.centreKey}')" title="Raise a note that shows up as an escalation on this centre's Workforce Partner's Today">Escalate</button>
           </div>
         </div>
 
@@ -10003,7 +9993,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title" style="color:var(--orange)">🗂️ Overview</div>
+          <div class="sd-card-title" style="color:var(--orange)">Overview</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px;overflow-wrap:break-word">
             <div><span style="color:var(--text-muted)">Contact:</span> ${escHtml(c.contactName || '—')}</div>
             <div><span style="color:var(--text-muted)">Phone:</span> ${escHtml(c.contactNo || '—')}</div>
@@ -10015,7 +10005,7 @@
             ${(currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `
               <div style="display:flex;align-items:center;gap:8px">
                 <span id="centreAssignedPartnerReadout" style="font-weight:600;color:var(--navy)">${escHtml(effectivePartner || 'Unassigned')}</span>
-                <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:14px" onclick="showCentrePartnerSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">✏️</span>
+                <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:11.5px;text-decoration:underline" onclick="showCentrePartnerSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">Change</span>
               </div>
               <select id="centreAssignedPartnerSelect" class="form-control" style="display:none;width:auto;font-size:12.5px;padding:3px 8px" onchange="assignCentreWorkforcePartner('${c.centreKey}', this.value)">
                 <option value="">Unassigned</option>
@@ -10035,7 +10025,7 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px;cursor:pointer" onclick="openNurtureCadenceModal()">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
-              <div class="sd-card-title" style="color:#059669">🌱 Nurture Cadence</div>
+              <div class="sd-card-title" style="color:#059669">Nurture Cadence</div>
               <div class="sd-card-sub">What's needed to keep this centre nurtured, and by when</div>
             </div>
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0">tap to view</span>
@@ -10043,7 +10033,7 @@
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
-          <div class="sd-card-title" style="color:#7c3aed">📊 Booking Performance</div>
+          <div class="sd-card-title" style="color:#7c3aed">Booking Performance</div>
           <div class="sd-card-sub">Last 100 days</div>
           <div style="display:flex;gap:28px;margin-top:12px">
             <div><div style="font-size:20px;font-weight:700;color:var(--navy)">${bookingsRes.bookings.length}</div><div style="font-size:11.5px;color:var(--text-muted)">Total bookings</div></div>
@@ -10055,7 +10045,7 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('educators')">
             <div>
-              <div class="sd-card-title" style="color:#b45309">👥 Educator Relationships</div>
+              <div class="sd-card-title" style="color:#b45309">Educator Relationships</div>
               <div class="sd-card-sub">Ranked by shifts worked, last 100 days${educators.length ? ` — ${educators.length} educator${educators.length === 1 ? '' : 's'}` : ''}</div>
             </div>
             <span id="centre360-educators-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
@@ -10070,7 +10060,7 @@
 
         <div class="admin-table-card" style="padding:20px 24px">
           <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCentre360Collapse('history')">
-            <div class="sd-card-title" style="color:#0891b2">🕒 Relationship History</div>
+            <div class="sd-card-title" style="color:#0891b2">Relationship History</div>
             <span id="centre360-history-caret" style="font-size:14px;color:var(--text-muted)">▸</span>
           </div>
           <div id="centre360-history-body" style="display:none;margin-top:10px">${renderCentreActivityTimeline(activity.events, activity.milestones)}</div>
@@ -10087,7 +10077,7 @@
       const milestoneStrip = (milestones && milestones.length) ? `
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-100)">
           ${milestones.map(m => `
-            <span class="attn-chip" style="background:rgba(21,128,61,.1);color:#15803d" title="${fmtDate(m.date)}">${m.icon} ${escHtml(m.label)} · ${fmtDate(m.date)}</span>
+            <span class="attn-chip" style="background:rgba(21,128,61,.1);color:#15803d" title="${fmtDate(m.date)}">${escHtml(m.label)} · ${fmtDate(m.date)}</span>
           `).join('')}
         </div>` : '';
       if (!events.length) return milestoneStrip || '<div style="font-size:12.5px;color:var(--text-muted)">No activity recorded yet.</div>';
@@ -10096,7 +10086,7 @@
           const v = ev.data;
           return `
             <div class="attn-row" style="cursor:pointer" onclick="openVisitLogModal('${v.centre_key}','${v.id}')">
-              <span class="attn-chip lead-badge-sched">${v.channel === 'call' ? '📞' : '🚗'} ${escHtml(v.status === 'planned' ? 'Planned' : v.status === 'rescheduled' ? 'Rescheduled' : 'Called / Visited')}</span>
+              <span class="attn-chip lead-badge-sched">${escHtml(v.channel === 'call' ? 'Call' : 'Visit')} · ${escHtml(v.status === 'planned' ? 'Planned' : v.status === 'rescheduled' ? 'Rescheduled' : 'Called / Visited')}</span>
               <span class="attn-centre">${v.outcome ? escHtml(v.outcome.replace('_', ' ')) : (v.notes ? escHtml(v.notes.slice(0, 60)) : 'Call/Visit')}</span>
               <span class="attn-meta">${fmtDate(v.visit_date)}</span>
             </div>`;
@@ -10104,7 +10094,7 @@
         const b = ev.data;
         return `
           <div class="attn-row" style="cursor:pointer" onclick="openCentreBookingDetail(${b.clientBookingId})">
-            <span class="attn-chip badge-workforce">📅 ${escHtml(bookingStatusLabel(b.statusId))}</span>
+            <span class="attn-chip badge-workforce">${escHtml(bookingStatusLabel(b.statusId))}</span>
             <span class="attn-centre">Booking</span>
             <span class="attn-meta">${fmtDate(b.bookingDate)}</span>
           </div>`;
@@ -10138,11 +10128,11 @@
       const canDelete = currentUserRole !== 'qa_view';
       return recordings.map(r => `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px">
-          <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/centres/recordings/${r.id}/download','_blank')">🎙️ ${escHtml(r.filename)} <span style="color:var(--gray-400)">(${formatFileSize(r.filesize)})</span></span>
+          <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/centres/recordings/${r.id}/download','_blank')">${escHtml(r.filename)} <span style="color:var(--gray-400)">(${formatFileSize(r.filesize)})</span></span>
           <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
             <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">
               ${escHtml(r.uploaded_by_name || r.uploaded_by_email || '')} · ${fmtDateShort(r.created_at)}
-              ${r.detected_at ? `<span style="color:#15803d" title="Date/time detected from this file's own content">· 🕐 ${fmtDateShort(r.detected_at)}</span>` : ''}
+              ${r.detected_at ? `<span style="color:#15803d" title="Date/time detected from this file's own content">· detected ${fmtDateShort(r.detected_at)}</span>` : ''}
             </span>
             ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteVisitLogRecording(${r.id})">Remove</button>` : ''}
           </div>
@@ -10517,7 +10507,7 @@
           <td>${escHtml(p.name)}</td>
           <td>${p.supply} <span style="color:var(--text-muted);font-size:11px">active supply / ${p.candidateCount} total</span></td>
           <td>${p.demandBookings30d} <span style="color:var(--text-muted);font-size:11px">across ${p.nearbyCentreCount} centres</span></td>
-          <td><span style="font-weight:700;color:${MICROPODS_QUADRANT_COLOR[p.quadrant] || 'var(--text-muted)'}">${p.icon} ${escHtml(p.label)}</span><div style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:280px">${escHtml(p.action)}</div></td>
+          <td><span style="font-weight:700;color:${MICROPODS_QUADRANT_COLOR[p.quadrant] || 'var(--text-muted)'}">${escHtml(p.label)}</span><div style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:280px">${escHtml(p.action)}</div></td>
         </tr>`).join('');
     }
 
@@ -11309,7 +11299,7 @@
       const start = new Date(`${dateVal}T${timeVal}`);
       const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
       link.href = buildGoogleCalendarQuickAddUrl({
-        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${currentCentreName || 'Centre'}`,
+        title: `${isCall ? 'Call' : 'Visit'}: ${currentCentreName || 'Centre'}`,
         start, end,
         details: `HeartBeat centre: ${location.origin}/admin?centre=${encodeURIComponent(currentCentreKey || '')}`
       });
@@ -11992,11 +11982,11 @@
       routeMode = document.getElementById('routeModeFilter').value;
       const notes = {
         '': 'A recommended mix of everything below — pick a mode to focus on one kind of day.',
-        protect_recover: '🛟 Declining, at-risk, and service-affected centres — Escalated/Declining/Needs Attention.',
-        activate: '🌱 Centres awaiting login, first booking, welcome visit, or second booking.',
-        grow: '📈 Healthy or growing centres with further opportunity.',
-        new_business: '🎯 High-Agency and Target Temp leads.',
-        supply_led_growth: '🗺️ Centres and leads near strong Micropods supply with room to grow (Territory Strategy\'s "Develop Business" areas).'
+        protect_recover: 'Declining, at-risk, and service-affected centres — Escalated/Declining/Needs Attention.',
+        activate: 'Centres awaiting login, first booking, welcome visit, or second booking.',
+        grow: 'Healthy or growing centres with further opportunity.',
+        new_business: 'High-Agency and Target Temp leads.',
+        supply_led_growth: 'Centres and leads near strong Micropods supply with room to grow (Territory Strategy\'s "Develop Business" areas).'
       };
       document.getElementById('routeModeNote').textContent = notes[routeMode] || '';
       if (routeMode === 'supply_led_growth' && !routeTerritoryPods) {
@@ -12225,7 +12215,7 @@
         if (row.type !== 'centre') return `<td style="color:var(--text-muted)">—</td>`;
         const pod = nearestRouteTerritoryPod(row.latitude, row.longitude);
         if (!pod) return `<td style="color:var(--text-muted)">—</td>`;
-        return `<td><span style="font-weight:700;font-size:11px;color:${MICROPODS_QUADRANT_COLOR[pod.quadrant] || 'var(--text-muted)'}">${pod.icon} ${escHtml(pod.label)}</span></td>`;
+        return `<td><span style="font-weight:700;font-size:11px;color:${MICROPODS_QUADRANT_COLOR[pod.quadrant] || 'var(--text-muted)'}">${escHtml(pod.label)}</span></td>`;
       }
 
       // Minimum recommendation card (Decision Area 4) — priority type/
@@ -12361,7 +12351,7 @@
         currentRouteResult = data;
         renderRouteResults(data);
       } catch { toast('Network error', 'error'); }
-      finally { btn.disabled = false; btn.textContent = '🧭 Generate Route'; }
+      finally { btn.disabled = false; btn.textContent = 'Generate Route'; }
     }
 
     // Gives each stop the "centre/lead status" context the Workforce
@@ -12432,7 +12422,7 @@
         // same buildGoogleCalendarQuickAddUrl() trick used for leads/centres.
         const detailPath = b.stop.type === 'centre' ? `/admin?centre=${encodeURIComponent(b.stop.id)}` : `/admin?lead=${encodeURIComponent(b.stop.id)}`;
         const addToCalUrl = buildGoogleCalendarQuickAddUrl({
-          title: `🚗 Visit: ${b.stop.centre_name}`,
+          title: `Visit: ${b.stop.centre_name}`,
           start: b.start, end: b.end,
           details: `HeartBeat: ${location.origin}${detailPath}`,
           location: fullAddress
@@ -14687,7 +14677,7 @@
         <div class="lead-status-row">
           <span class="lead-status-label">${escHtml(label)}</span>
           <div class="lead-status-controls">
-            ${showsCalendarIcon ? `<a id="lead_${fieldKey}_addcal" href="#" target="_blank" rel="noopener" title="Add to Google Calendar" style="display:none;text-decoration:none;font-size:15px;line-height:1">📅</a>` : ''}
+            ${showsCalendarIcon ? `<a id="lead_${fieldKey}_addcal" href="#" target="_blank" rel="noopener" title="Add to Google Calendar" style="display:none;text-decoration:underline;font-size:11px;font-weight:600;color:var(--orange)">Add to Calendar</a>` : ''}
             <input type="datetime-local" id="lead_${fieldKey}_at" value="${toDatetimeLocalValue(currentAt)}" ${readOnly ? 'disabled' : ''}
               style="${showsDate ? '' : 'display:none'}" onchange="document.getElementById('lead_${fieldKey}_status').dispatchEvent(new Event('change'))">
             <select id="lead_${fieldKey}_status" onchange="onLeadStatusChange('${fieldKey}')" ${readOnly ? 'disabled' : ''} style="${leadStatusSelectStyle(statusOptions, currentStatus)}">
@@ -14714,7 +14704,7 @@
       const start = new Date(atVal);
       const end = new Date(start.getTime() + (isCall ? 30 : 45) * 60 * 1000);
       icon.href = buildGoogleCalendarQuickAddUrl({
-        title: `${isCall ? '📞 Call' : '🚗 Visit'}: ${lead.centre_name}`,
+        title: `${isCall ? 'Call' : 'Visit'}: ${lead.centre_name}`,
         start, end,
         details: `HeartBeat lead: ${location.origin}/admin?lead=${lead.id}`,
         location: [lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')
@@ -14858,7 +14848,7 @@
       // the table.
       const goToCentreBanner = (lead.signed_status === 'signed' && existingMatch) ? `
         <button type="button" class="btn-add" style="width:100%;justify-content:center;padding:13px 16px;font-size:14.5px;margin-bottom:16px" onclick="closeLeadDetailModal();goToCentre360('${existingMatchCentreKey}')">
-          🏢 Click to go to Centre — ${escHtml(existingMatch.clientName)} →
+          Click to go to Centre — ${escHtml(existingMatch.clientName)} →
         </button>` : '';
       const existingMatchBanner = (existingMatch && lead.signed_status !== 'signed') ? `
         <div style="background:#fef9f0;border:1px solid #fde8c9;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#92600a">
@@ -14878,12 +14868,12 @@
       // toward looking at the lead.
       const autoSignedBanner = !lead.auto_signed ? '' : lead.auto_signed_reviewed_at ? `
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:#166534">
-          🤖 <strong>Auto-detected as signed</strong> ${lead.auto_signed_at ? 'on ' + escHtml(fmtDate(lead.auto_signed_at)) + ' ' : ''}— HeartBeat matched this centre's creation in RT. Reviewed by ${escHtml(lead.auto_signed_reviewed_by || 'a teammate')} on ${escHtml(fmtDate(lead.auto_signed_reviewed_at))}.
+          <strong>Auto-detected as signed</strong> ${lead.auto_signed_at ? 'on ' + escHtml(fmtDate(lead.auto_signed_at)) + ' ' : ''}— HeartBeat matched this centre's creation in RT. Reviewed by ${escHtml(lead.auto_signed_reviewed_by || 'a teammate')} on ${escHtml(fmtDate(lead.auto_signed_reviewed_at))}.
         </div>` : `
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#166534">
-          <div>🤖🎉 <strong>Auto-detected as signed — nice work!</strong> HeartBeat found a matching centre created in RT${lead.auto_signed_at ? ' on ' + escHtml(fmtDate(lead.auto_signed_at)) : ''} and marked Profile Created automatically. Nobody's logged this win by hand yet.</div>
+          <div><strong>Auto-detected as signed — nice work!</strong> HeartBeat found a matching centre created in RT${lead.auto_signed_at ? ' on ' + escHtml(fmtDate(lead.auto_signed_at)) : ''} and marked Profile Created automatically. Nobody's logged this win by hand yet.</div>
           <div style="margin-top:6px">Please still check and fill in: Lead Called, Centre Visited, a site visit recording, and notes — those were only auto-set to N/A as a placeholder, not because they actually happened.</div>
-          <button type="button" class="btn-secondary" style="margin-top:8px;padding:5px 12px;font-size:12px" onclick="acknowledgeAutoSignedLead()">✅ Mark as reviewed</button>
+          <button type="button" class="btn-secondary" style="margin-top:8px;padding:5px 12px;font-size:12px" onclick="acknowledgeAutoSignedLead()">Mark as reviewed</button>
         </div>`;
 
       document.getElementById('leadDetailBody').innerHTML = `
@@ -14917,7 +14907,7 @@
           ${row('Contact Email', lead.contact_email)}
         ` : !hasContact ? `
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Add a centre contact once you've called or visited the centre.</div>
-          <button type="button" class="btn-secondary" id="leadAddContactBtn" style="padding:6px 14px;font-size:12.5px" onclick="showLeadContactFields()">➕ Add Contact</button>
+          <button type="button" class="btn-secondary" id="leadAddContactBtn" style="padding:6px 14px;font-size:12.5px" onclick="showLeadContactFields()">Add Contact</button>
           <div id="leadContactFields" style="display:none;margin-top:10px">
             ${leadContactFieldsHtml(lead)}
           </div>
@@ -14937,7 +14927,7 @@
           ${canEditStatus && hasAssignment ? `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
               <span id="leadAssigneeReadout" style="font-weight:600;color:var(--navy);font-size:13.5px">${escHtml(lead.assigned_workforce_partner)}</span>
-              <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:15px" onclick="showWfpAssigneeSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">✏️</span>
+              <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:11.5px;text-decoration:underline" onclick="showWfpAssigneeSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">Change</span>
             </div>
           ` : ''}
           <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'} style="${canEditStatus && hasAssignment ? 'display:none;margin-top:8px' : ''}">
@@ -15264,15 +15254,15 @@
             <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:5px">Suggested note, from your recording</div>
             <div style="font-size:13px;white-space:pre-wrap;margin-bottom:10px">${escHtml(leadVoiceLastSummary)}</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn-add" style="padding:5px 14px;font-size:12px" onclick="acceptLeadVoiceSummaryAsNote(this)">✅ Add Note</button>
-              <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="redoLeadVoiceRecording()">🔁 Redo</button>
-              <button class="action-btn delete" style="padding:5px 14px;font-size:12px" onclick="deleteLeadVoiceSummary()">🗑️ Delete</button>
+              <button class="btn-add" style="padding:5px 14px;font-size:12px" onclick="acceptLeadVoiceSummaryAsNote(this)">Add Note</button>
+              <button class="btn-secondary" style="padding:5px 14px;font-size:12px" onclick="redoLeadVoiceRecording()">Redo</button>
+              <button class="action-btn delete" style="padding:5px 14px;font-size:12px" onclick="deleteLeadVoiceSummary()">Delete</button>
             </div>
           </div>`;
       } else {
         box.innerHTML = `
           <div class="file-dropzone" style="margin-bottom:0">
-            <button class="btn-secondary" style="padding:6px 14px;font-size:12.5px" onclick="startLeadVoiceRecording()">🎙️ Start Recording Notes</button>
+            <button class="btn-secondary" style="padding:6px 14px;font-size:12.5px" onclick="startLeadVoiceRecording()">Start Recording Notes</button>
             <div class="file-dropzone-hint">tap this to record straight from your phone</div>
           </div>`;
       }
@@ -15818,11 +15808,11 @@
     // what its deadline alone would suggest. NULL/'auto' keeps the old
     // behaviour exactly.
     const PROJECT_PRIORITY_META = {
-      top:    { label: '🔥 Top Priority',  bg: '#fef3c7', color: '#b45309' },
-      high:   { label: '🟠 High Priority', bg: 'rgba(245,158,11,.12)', color: '#b45309' },
-      low:    { label: '🔽 Low Priority',  bg: 'var(--gray-100)', color: 'var(--gray-500)' }
+      top:    { label: 'Top Priority',  bg: '#fef3c7', color: '#b45309' },
+      high:   { label: 'High Priority', bg: 'rgba(245,158,11,.12)', color: '#b45309' },
+      low:    { label: 'Low Priority',  bg: 'var(--gray-100)', color: 'var(--gray-500)' }
     };
-    const PROJECT_PRIORITY_OVERDUE_META = { label: '⚠️ Overdue', bg: '#fef2f2', color: '#c0392b' };
+    const PROJECT_PRIORITY_OVERDUE_META = { label: 'Overdue', bg: '#fef2f2', color: '#c0392b' };
 
     // Auto rank only considers projects still actually in flight (not
     // completed/on_hold) AND not already manually overridden — an
@@ -15901,7 +15891,6 @@
           <td>
             <div style="display:flex;align-items:center;gap:8px">
               <span style="width:7px;height:7px;border-radius:50%;background:${p.color || 'var(--orange)'};flex-shrink:0" title="Project colour"></span>
-              <span style="font-size:16px;line-height:1;flex-shrink:0">${p.icon || '🚀'}</span>
               <div style="min-width:0">
                 <div style="display:flex;align-items:center;gap:6px">
                   <div style="font-weight:700;color:var(--navy);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:${eff.meta ? 190 : 240}px" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
@@ -15946,13 +15935,13 @@
       const p = currentProjectDetail;
       if (!p) return;
       const meta = PROJECT_STATUS_META[p.status] || PROJECT_STATUS_META.planning;
-      document.getElementById('projectDetailTitle').innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.color || 'var(--orange)'};margin-right:4px" title="Project colour"></span>${p.icon || '🚀'} ${escHtml(p.name)}`;
+      document.getElementById('projectDetailTitle').innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.color || 'var(--orange)'};margin-right:4px" title="Project colour"></span>${escHtml(p.name)}`;
       const pct = projectTimelineProgress(p);
 
       const filesHtml = (p.files || []).length
         ? p.files.map(f => `
           <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);margin-bottom:6px">
-            <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/projects/files/${f.id}/download','_blank')">📎 ${escHtml(f.filename)} <span style="color:var(--gray-400)">(${formatFileSize(f.filesize)})</span></span>
+            <span style="font-size:12.5px;color:var(--text);cursor:pointer" onclick="window.open('/api/projects/files/${f.id}/download','_blank')">${escHtml(f.filename)} <span style="color:var(--gray-400)">(${formatFileSize(f.filesize)})</span></span>
             <button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteProjectFile(${f.id})">Remove</button>
           </div>`).join('')
         : `<div style="font-size:12.5px;color:var(--gray-400);margin-bottom:8px">No SOP files attached yet.</div>`;
@@ -16129,8 +16118,6 @@
       document.getElementById('editProjectId').value = id || '';
       document.getElementById('projectFormModalTitle').textContent = id ? 'Edit Project' : 'New Project';
       const p = id ? allProjects.find(x => x.id === id) : null;
-      document.getElementById('projectIcon').value = p?.icon || '🚀';
-      document.getElementById('projectColor').value = p?.color || '#3d6fff';
       document.getElementById('projectName').value = p?.name || '';
       document.getElementById('projectStatus').value = p?.status || 'planning';
       document.getElementById('projectPriority').value = p?.priority_override || '';
@@ -16186,8 +16173,6 @@
       if (!name) return toast('Project name is required', 'error');
       const payload = {
         name,
-        icon: document.getElementById('projectIcon').value.trim() || '🚀',
-        color: document.getElementById('projectColor').value,
         description: projectDescRTE ? projectDescRTE.value : '',
         status: document.getElementById('projectStatus').value,
         priorityOverride: document.getElementById('projectPriority').value || null,

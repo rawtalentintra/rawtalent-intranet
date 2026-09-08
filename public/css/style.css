@@ -862,7 +862,13 @@ body:has(> .navbar) { padding-top: 64px; }
 }
 .admin-nav-item:hover { background: rgba(255,255,255,.07); color: white; }
 .admin-nav-item.active { background: rgba(232,114,74,.15); color: var(--orange); }
-.admin-nav-icon { font-size: 16px; width: 20px; text-align: center; }
+/* Liam, 2026-09-08: "does not like emojis or additional noise on the
+   visuals" — the emoji markup in every <span class="admin-nav-icon"> is
+   untouched (still a real, harmless <span>EMOJI</span> in each nav item's
+   HTML), just hidden here so the sidebar reads as plain text labels. Its
+   fixed width isn't reserved either — the item is display:flex, so a
+   hidden flex child takes up no space and the label sits flush left. */
+.admin-nav-icon { display: none; }
 
 /* grid-column:2 is required, not cosmetic — .admin-sidebar is
    position:fixed (see its comment) so it no longer occupies a track in
@@ -1822,14 +1828,21 @@ body:has(> .navbar) { padding-top: 64px; }
 
   /* State-filter buttons (All States/Liam/Justine/Gwen) — same markup on
      five sections (WFP Dashboard, Leads, My Centres, Micropods, Smart
-     Routing; see each button's own <span class="wfp-state-icon">). Joy:
-     drop the icons and tighten the padding so all four fit more
-     comfortably across a phone width — one rule here covers every
-     section at once since they all share this class. Icon markup and
-     desktop sizing are both untouched above 900px. */
-  .wfp-state-icon { display: none; }
+     Routing; see each button's own <span class="wfp-state-icon">). Icons
+     are dropped everywhere now (see the unscoped .wfp-state-icon rule
+     below) — this just tightens the padding so all the buttons still fit
+     comfortably across a phone width once that space is gone. */
   .wfp-state-filter-btn { padding: 8px 12px !important; font-size: 12px !important; }
 }
+
+/* Liam, 2026-09-08: "does not like emojis or additional noise on the
+   visuals" — drops the emoji from every wfp-state-filter-btn (All States/
+   Liam/Justine/Gwen, on WFP Dashboard/Leads/My Centres/Micropods/Smart
+   Routing) while keeping each button's own solid colour fill, which is
+   still how these are told apart. Was mobile-only (<=900px) before this;
+   the emoji markup itself is untouched in every section's HTML, just
+   hidden everywhere now instead of only below 900px. */
+.wfp-state-icon { display: none; }
 
 /* /partners and /wfp sidebar, mobile — Joy, 2026-09-02: "since it's mobile
    view and we only have few options let's make the fonts and spacing
