@@ -679,8 +679,36 @@ const checkFirstAid = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PA
 // meaningful false-positive rate rather than catching genuine problems.
 const checkChildSafetyTraining = makeExpiringDocumentChecker('child_safety_training', CHILD_SAFETY_TYPE_PATTERN,
   'Could not find wording confirming this is a Child Safety Training certificate — may be the wrong document.');
-const checkProtectingChildrenTraining = makeExpiringDocumentChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
+// Real, distinct sector check (2026-09-10) — the real "Compliance Documents
+// – PCC" Article explicitly shows a "Not Acceptable" example captioned
+// "because it's for School Based, not Childcare": the same "Protecting
+// Children - Mandatory Reporting and Other Obligations" training exists in
+// a School-sector version too, via the same government training portal
+// (protectngstraining.education.vic.gov.au), and it is NOT the version Raw
+// Talent requires — only the Early Childhood Services course is. Both real
+// certificates already verified this session ("for the Early Childhood
+// Sector") confirm this exact phrase is what the correct course prints;
+// the wrong (School) variant's real wording isn't available to verify
+// directly (only shown as a screenshot in the Article, not extractable
+// text), so this only asserts the POSITIVE confirmation Raw Talent's own
+// real documents already prove true, rather than guessing at the wrong
+// variant's exact phrasing and risking a pattern that doesn't actually
+// match it.
+const EARLY_CHILDHOOD_SECTOR_PATTERN = /early\s+childhood/i;
+
+const _checkProtectingChildrenTrainingBase = makeExpiringDocumentChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
   'Could not find wording confirming this is a Protecting Children (Mandatory Reporting) training certificate — may be the wrong document.');
+
+async function checkProtectingChildrenTraining(text, options = {}) {
+  const result = await _checkProtectingChildrenTrainingBase(text, options);
+  if (result.extracted.documentTypeConfirmed && !EARLY_CHILDHOOD_SECTOR_PATTERN.test(text)) {
+    result.extracted.documentTypeConfirmed = false;
+    result.flags.push('wrong_document_type');
+    result.reasons.push('This looks like the "Protecting Children – Mandatory Reporting" training, but the Early Childhood Services sector wording isn\'t present — Raw Talent only accepts the Early Childhood Services version of this course, not the School-based one (per the real Compliance Documents – PCC Article). Check manually.');
+    result.outcome = 'invalid';
+  }
+  return result;
+}
 // expiry_source='printed_on_document' (see compliance_requirements' own
 // cr-all-ran-training row) — both real certificates checked print an
 // explicit "Expiry date: 31 December 2027" directly, extractExpiryDate's
