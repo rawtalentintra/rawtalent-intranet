@@ -11798,11 +11798,17 @@
     // (candidateDetailHtml et al, above), or this page's own candidate
     // search. Only requirement names in SUPPORTED_DOC_CHECK_TYPES have a
     // real rule set behind them.
+    // Real bug fix (2026-09-09) — the three WWCC lines below use RT's actual
+    // curly apostrophe (’ U+2019), not a straight one — see
+    // routes/documentChecker.js's REQUIREMENT_NAME_TO_TYPE for the full
+    // explanation; a straight-apostrophe version here would never match a
+    // real requirementName and every one of these three documents would
+    // wrongly show "No automated check for this document type yet".
     const SUPPORTED_DOC_CHECK_TYPES = new Set([
       'Police Check',
-      "Working with Children's Check (WwCC)",
-      "Working with Children's Check (NSW)",
-      "Working with Children's Check (SA)",
+      'Working with Children’s Check (WwCC)',
+      'Working with Children’s Check (NSW)',
+      'Working with Children’s Check (SA)',
       'Working with Children Check',
       'Protecting Children Certificate (VIC Only)',
       'Working with Vulnerable People Card',
@@ -11928,7 +11934,7 @@
       const reasons = check.reasons || [];
       return `
         <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;background:white">
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${check.extraction_method === 'tesseract-ocr' ? `OCR confidence: ${check.ocr_confidence}%` : 'Read from PDF text layer'} · checked ${fmtDate(check.created_at)} by ${escHtml(check.checked_by_name || check.checked_by_email)}${check.document_source_url ? ` · <a href="${escHtml(check.document_source_url)}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${check.extraction_method === 'scanned-pdf-ocr' ? `Scanned PDF, OCR confidence: ${check.ocr_confidence}%` : check.extraction_method === 'tesseract-ocr' ? `OCR confidence: ${check.ocr_confidence}%` : 'Read from PDF text layer'} · checked ${fmtDate(check.created_at)} by ${escHtml(check.checked_by_name || check.checked_by_email)}${check.document_source_url ? ` · <a href="${escHtml(check.document_source_url)}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:var(--orange)">📄 View Document →</a>` : ''}</div>
           ${reasons.length ? `<ul style="margin:0 0 10px;padding-left:16px;font-size:12px;color:var(--text)">${reasons.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>` : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">All checks passed.</div>'}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:12px">
             <div><span style="color:var(--text-muted)">Document type confirmed:</span> ${e.documentTypeConfirmed ? 'Yes' : 'No'}</div>

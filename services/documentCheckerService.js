@@ -33,7 +33,12 @@ async function extractText(buffer, filename) {
   await fs.writeFile(tempPath, buffer);
   try {
     const stdout = await new Promise((resolve, reject) => {
-      execFile('node', [WORKER_PATH, tempPath, filename], { timeout: 60000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+      // 120s (was 60s) — Phase 3 (2026-09-09) adds rasterize-then-OCR for
+      // scanned PDFs with no text layer, which can mean several pages of
+      // Tesseract OCR back-to-back instead of one image; 60s was enough
+      // margin for a single photo but not reliably enough for a multi-page
+      // scan.
+      execFile('node', [WORKER_PATH, tempPath, filename], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
         if (err && !stdout) return reject(err);
         resolve(stdout);
       });
@@ -156,7 +161,17 @@ function extractIssueDate(text) {
   // false "expired" result off someone's date of birth. Drop whichever
   // date sits right next to a "Birth Date" label (a few characters away,
   // not just nearest across the whole document) before falling back.
-  const birthLabelIndex = text.search(/birth\s*date/i);
+  //
+  // "born on" added (2026-09-09) after finding a real Digital National
+  // Police Certificate — AFP's own template, distinct from the ACIC-branded
+  // "Report Run Date"/"Name(s) Primary" template every other real
+  // certificate seen so far uses — that phrases it as "MIOLE, Deniel Ann
+  // born on 26 April 2003" with no "Birth Date" label at all. Without this,
+  // the birth date won the earliest-date fallback and produced a false
+  // "expired" result off a 2003 birth date instead of the real 2023 issue
+  // date — exactly the same failure mode this exclusion already exists to
+  // prevent, just from different real-world wording.
+  const birthLabelIndex = text.search(/birth\s*date|\bborn\s+on\b/i);
   if (birthLabelIndex !== -1 && valid.length > 1) {
     let closestIdx = -1, closestDist = Infinity;
     valid.forEach((d, i) => {
@@ -167,7 +182,17 @@ function extractIssueDate(text) {
   }
   if (!valid.length) return null;
 
-  const labelIndex = text.search(/date\s+of\s+issue|issue\s+date|date\s+issued|certificate\s+date|issued\s*:|report\s+run\s+date/i);
+  // "as at" added (2026-09-09) — the same real AFP "Digital National Police
+  // Certificate" template above states its effective date only as "...as at
+  // 23 December 2023", no "issue date"-style label anywhere on the page at
+  // all. Note text.search() returns whichever alternative occurs EARLIEST
+  // in the document, not whichever is listed first here — "as at" being
+  // generic enough to theoretically appear elsewhere in a longer document
+  // is an accepted, pre-existing trade-off shared by every other label in
+  // this pattern (any of them could technically appear in unrelated text
+  // too); it's still far more specific to a certificate's effective date
+  // than the plain earliest-date fallback below.
+  const labelIndex = text.search(/date\s+of\s+issue|issue\s+date|date\s+issued|certificate\s+date|issued\s*:|report\s+run\s+date|\bas\s+at\b/i);
   if (labelIndex !== -1) {
     const nearest = valid.reduce((best, d) => {
       const dist = Math.abs(d.index - labelIndex);
@@ -187,17 +212,27 @@ function extractIssueDate(text) {
 // assume a space or colon after the label the way a simple "Name:" does.
 const SUBJECT_NAME_PATTERN = /name\(s\)\s*primary\s*([a-z][a-z,'\-\s]{2,60}?)(?=additional\s+identifier|birth\s+date|birth\s+place|gender\s*:|address|$)/i;
 
+// A second real AFP template — "Digital National Police Certificate"
+// (2026-09-09, a genuinely different real document from the ACIC-branded
+// one SUBJECT_NAME_PATTERN above targets) — states the name only as
+// "...against the name of:\nSURNAME, Given Name born on DD Month YYYY".
+// Neither a colon-labelled "Name:" field nor an ACIC "Subject Details"
+// table exists on this template at all.
+const NAME_OF_PATTERN = /name\s+of\s*:?\s*([a-z][a-z,'\-\s]{2,60}?)\s+born\s+on\b/i;
+
 // Best-effort name extraction — looks for a line right after a "Name:"/
 // "Applicant:" label first (simpler certificate formats), then falls back
-// to the ACIC "Subject Details" table (real National Police Certificates,
-// which don't use a colon-labelled name at all). Genuinely free-form across
-// issuers, so this is a hint for the human reviewer, not something the
-// outcome hinges on by itself — see namesLikelyMatch.
+// to the ACIC "Subject Details" table, then the AFP "...name of:...born
+// on" phrasing. Genuinely free-form across issuers, so this is a hint for
+// the human reviewer, not something the outcome hinges on by itself — see
+// namesLikelyMatch.
 function extractApplicantName(text) {
   const labelMatch = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
   if (labelMatch) return labelMatch[1].trim();
   const subjectMatch = text.match(SUBJECT_NAME_PATTERN);
   if (subjectMatch) return subjectMatch[1].trim().replace(/\s+/g, ' ');
+  const nameOfMatch = text.match(NAME_OF_PATTERN);
+  if (nameOfMatch) return nameOfMatch[1].trim().replace(/\s+/g, ' ');
   return null;
 }
 

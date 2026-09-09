@@ -63,19 +63,74 @@ const LAPLACIAN_KERNEL = { width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1
 // large majority — ordinary phone-camera JPEGs) so a normal file isn't put
 // through an unnecessary second lossy compression pass that could itself
 // soften edges and skew the blur reading.
-async function computeImageQuality(filePath) {
-  const meta = await sharp(filePath).metadata();
+// `source` is a file path for a real image upload, or an in-memory PNG
+// Buffer for one rasterized page of a scanned PDF (Phase 3) — sharp accepts
+// either identically, so the same function covers both without change.
+async function computeImageQuality(source) {
+  const meta = await sharp(source).metadata();
   const needsNormalizing = meta.depth !== 'uchar';
-  const source = needsNormalizing
-    ? await sharp(filePath).rotate().jpeg({ quality: 92 }).toBuffer()
-    : filePath;
-  const brightnessStats = await sharp(source).rotate().greyscale().stats();
-  const sharpnessStats = await sharp(source).rotate().greyscale().convolve(LAPLACIAN_KERNEL).stats();
+  const normalized = needsNormalizing
+    ? await sharp(source).rotate().jpeg({ quality: 92 }).toBuffer()
+    : source;
+  const brightnessStats = await sharp(normalized).rotate().greyscale().stats();
+  const sharpnessStats = await sharp(normalized).rotate().greyscale().convolve(LAPLACIAN_KERNEL).stats();
   return {
     width: meta.width || null,
     height: meta.height || null,
     brightness: Math.round(brightnessStats.channels[0].mean),
     blurVariance: Math.round(sharpnessStats.channels[0].stdev ** 2)
+  };
+}
+
+// ── Phase 3 (2026-09-09) — scanned-PDF support ───────────────────────────
+// A PDF with no real text layer used to be a hard dead end here ("upload as
+// JPG/PNG instead") — a live query against real production documents found
+// ~30% of real PDF uploads sampled are genuinely scanned copies with no text
+// layer at all, so this was a real, common gap, not an edge case. Rasterizes
+// each page to a PNG (pdf-to-png-converter, itself pdfjs-dist +
+// @napi-rs/canvas — both ship prebuilt native binaries, no system package
+// like poppler needed on Railway) and runs the exact same Tesseract OCR +
+// photo-quality pipeline already built for a real image upload, page by
+// page. Capped at MAX_SCANNED_PDF_PAGES — compliance documents are
+// realistically always 1-2 pages; a cap bounds worst-case OCR time on
+// whatever multi-page PDF someone attaches instead of letting it run
+// unbounded.
+const MAX_SCANNED_PDF_PAGES = 5;
+
+async function ocrScannedPdf(buffer) {
+  const { pdfToPng } = require('pdf-to-png-converter');
+  const pages = await pdfToPng(buffer, { viewportScale: 2.5, pagesToProcess: Array.from({ length: MAX_SCANNED_PDF_PAGES }, (_, i) => i + 1) });
+  if (!pages.length) throw new Error('This PDF could not be rasterized for OCR — it may be corrupted or password-protected.');
+
+  const texts = [];
+  const confidences = [];
+  const qualities = [];
+  for (const page of pages) {
+    const { data } = await Tesseract.recognize(page.content, 'eng', { cachePath: TESSERACT_CACHE_PATH });
+    texts.push(data.text.trim());
+    confidences.push(data.confidence);
+    qualities.push(await computeImageQuality(page.content).catch(() => null));
+  }
+
+  // Multiple pages are reported as one combined result, not one per page —
+  // check-from-rt (routes/documentChecker.js) and every checker in
+  // documentCheckerService.js already work on a single block of text/one
+  // quality reading per document, same as a single-page image upload
+  // always has. Confidence/quality are averaged across pages rather than
+  // e.g. taking the worst page, since a mostly-clear multi-page scan
+  // shouldn't read as badly as its single worst page.
+  const validQualities = qualities.filter(Boolean);
+  const avg = arr => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+  return {
+    text: texts.join('\n\n').trim(),
+    method: 'scanned-pdf-ocr',
+    confidence: avg(confidences),
+    quality: validQualities.length ? {
+      width: Math.min(...validQualities.map(q => q.width || Infinity)),
+      height: Math.min(...validQualities.map(q => q.height || Infinity)),
+      brightness: avg(validQualities.map(q => q.brightness)),
+      blurVariance: avg(validQualities.map(q => q.blurVariance))
+    } : null
   };
 }
 
@@ -86,11 +141,12 @@ async function run() {
 
   if (ext === '.pdf') {
     const fs = require('fs');
-    const pdfText = (await pdfParse(fs.readFileSync(filePath))).text.trim();
+    const buffer = fs.readFileSync(filePath);
+    const pdfText = (await pdfParse(buffer)).text.trim();
     if (pdfText.length >= MIN_TEXT_LAYER_LENGTH) {
       return { text: pdfText, method: 'pdf-text-layer', confidence: null, quality: null };
     }
-    throw new Error('This PDF has no readable text layer (likely a scanned copy) — please upload it as a JPG or PNG instead so it can be OCR\'d.');
+    return ocrScannedPdf(buffer);
   }
 
   if (IMAGE_EXTENSIONS.has(ext)) {

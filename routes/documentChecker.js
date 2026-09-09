@@ -20,18 +20,24 @@ router.use(requireAdmin);
 // requirementName+documentId pairs), not guessed labels. Several different
 // RT strings intentionally map to the SAME internal type — RT names each
 // state's card differently (or not at all — some are just the generic
-// "Working with Children's Check (WwCC)"/"Working with Children Check"),
+// "Working with Children's Check (WwCC)"/"Working with Children Check") —
 // but which compliance_requirements row actually applies is resolved by the
 // candidate's own real state at check time (see documentCheckerService.js's
 // makeExpiringDocumentChecker), never by which RT label was used. The two
 // distinct RT Child Safety Training labels ("Foundations"/"Advanced") both
 // map to one 'child_safety_training' type — see schema.sql's
 // cr-all-child-safety row for why.
+// Real Bug fix (2026-09-09) — the three RT labels below use a CURLY
+// apostrophe (’ U+2019), not a straight one ('). Confirmed against the
+// literal Unicode codepoints of real production requirementName values —
+// every one of these three was silently NEVER matching a single real
+// document until this fix, because the straight-apostrophe versions first
+// shipped in this map can never equal RT's actual curly-apostrophe strings.
 const REQUIREMENT_NAME_TO_TYPE = {
   'Police Check': 'police_check',
-  "Working with Children's Check (WwCC)": 'wwcc',
-  "Working with Children's Check (NSW)": 'wwcc',
-  "Working with Children's Check (SA)": 'wwcc',
+  'Working with Children’s Check (WwCC)': 'wwcc',
+  'Working with Children’s Check (NSW)': 'wwcc',
+  'Working with Children’s Check (SA)': 'wwcc',
   'Working with Children Check': 'wwcc',
   'Working with Vulnerable People Card': 'wwcc',
   'Registration to Work with Vulnerable People': 'wwcc',

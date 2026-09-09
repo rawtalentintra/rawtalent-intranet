@@ -26,6 +26,7 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pdf-parse": "^1.1.1",
+    "pdf-to-png-converter": "^4.2.1",
     "pdfkit": "^0.20.1",
     "pg": "^8.22.0",
     "sharp": "^0.35.4",
