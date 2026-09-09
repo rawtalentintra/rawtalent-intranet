@@ -306,7 +306,253 @@ async function checkPoliceCheck(text, { candidateName, state } = {}) {
   };
 }
 
-const CHECKERS = { police_check: checkPoliceCheck };
+// ── Phase 1 (2026-09-09) — WWCC-family, Blue Card, First Aid, Child Safety
+// Training ────────────────────────────────────────────────────────────
+// Type-mapping (routes/documentChecker.js's REQUIREMENT_NAME_TO_TYPE) is
+// grounded in a live query against real production rt_candidates_cache.raw
+// ->'attachedRequirements' — 19 distinct real RT requirementName strings —
+// rather than guessed labels. Several different RT label strings (per-state
+// naming: "Protecting Children Certificate (VIC Only)", "Blue Card",
+// "Registration to Work with Vulnerable People", the generic "Working with
+// Children's Check (WwCC)", ...) all funnel into the small set of internal
+// document_type keys below. Which STATE's compliance_requirements row
+// applies is never inferred from which RT label was used — it always comes
+// from the candidate's own actual state (threaded through as `state`,
+// resolved from their real address), the same way checkPoliceCheck already
+// works. That keeps this correct even though RT itself isn't consistent
+// about naming every state's card differently.
+
+// Extracts a printed expiry date the same way extractIssueDate (above) finds
+// an issue date — looks for a recognised expiry label first. Falls back to
+// the LATEST plausible date in the document when no label matches, the
+// mirror image of extractIssueDate's earliest-date fallback: on a WWCC-style
+// card with no recognised label, the expiry is the last date printed, an
+// issue/application date is the first.
+const EXPIRY_LABEL_PATTERN = /expiry\s*date|expir(?:y|es|ation)\s*:|expires\s*(on)?|valid\s*until|date\s+of\s+expiry|valid\s*to/i;
+function extractExpiryDate(text) {
+  const dates = [...text.matchAll(DATE_PATTERN)].map(m => ({ raw: m[0], parsed: parseFlexibleDate(m[0]), index: m.index }));
+  const valid = dates.filter(d => d.parsed && d.parsed.getFullYear() > 2000);
+  if (!valid.length) return null;
+
+  const labelIndex = text.search(EXPIRY_LABEL_PATTERN);
+  if (labelIndex !== -1) {
+    const nearest = valid.reduce((best, d) => {
+      const dist = Math.abs(d.index - labelIndex);
+      return dist < best.dist ? { d, dist } : best;
+    }, { d: valid[0], dist: Infinity }).d;
+    return nearest.parsed;
+  }
+  return valid.sort((a, b) => b.parsed - a.parsed)[0].parsed;
+}
+
+// Doc-type confirmation patterns — deliberately broad enough to catch every
+// real RT label for the type (see the Phase 1 comment above) without being
+// so broad they'd match an unrelated document.
+// work(ing) both accepted — RT's own real label "Registration to Work with
+// Vulnerable People" (docId=57) uses the bare verb, not "Working", unlike
+// every other real WWCC-family label seen; a document echoing its own
+// requirement's exact wording needs to match both forms.
+const WWCC_TYPE_PATTERN = /work(ing)?\s+with\s+(children|vulnerable\s+people)('?s)?\s*(check|card|clearance|registration)?|ochre\s+card|wwcc|wwvp/i;
+// Verified against a real QLD Blue Card (2026-09-09, OCR confidence only 31
+// on that particular scan — heavy security-watermark background — but this
+// phrase still came through clearly): the card's own printed/watermark text
+// says "WORKING WITH CHILDREN CARD", not the words "Blue Card" anywhere —
+// "Blue Card" is only the scheme's brand name, never what's actually printed
+// on the card itself. Matching on "blue card" alone (the first, unverified
+// assumption) would have flagged every real Blue Card as the wrong document.
+const BLUE_CARD_TYPE_PATTERN = /blue\s*card|working\s+with\s+children\s+card/i;
+const FIRST_AID_TYPE_PATTERN = /first\s+aid|hltaid0\d\d|cardiopulmonary\s+resuscitation|\bcpr\b/i;
+const CHILD_SAFETY_TYPE_PATTERN = /child\s*safe(ty)?\s*(standards?|training)?|foundations?\s+of\s+child\s+safety|advanced\s+child\s+safety/i;
+// Verified against a real "Protecting Children Certificate (VIC Only)"
+// file (2026-09-09) — see schema.sql's cr-vic-protecting-children-training
+// comment for why this is its own type rather than folded into 'wwcc'.
+const PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN = /protecting\s+children\s*(-|—)?\s*mandatory\s+reporting|protecting\s+children\s+certificate/i;
+
+// Shared shape for any document type whose compliance_requirements row is
+// keyed by (state, document_type) and whose validity is confirmed by one
+// recognisable phrase somewhere in the document — WWCC-family cards, Blue
+// Card, and First Aid certificates all fit this (only the expiry HANDLING
+// differs between them, and that's driven entirely by the requirement row's
+// own expiry_source, not by which of these three it is). Child Safety
+// Training doesn't fit this shape (no_expiry, never has a date to check at
+// all) — see checkChildSafetyTraining below instead.
+function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage) {
+  return async function check(text, { candidateName, state } = {}) {
+    const reasons = [];
+    const flags = [];
+
+    const requirement = await getComplianceRequirement(documentType, state);
+    if (!requirement) {
+      reasons.push(`No compliance_requirements row found for this document type${state ? ` in ${state}` : ''} — add one in Compliance Rules before this can be checked properly.`);
+      flags.push('requirement_row_missing');
+    } else if (!requirement.verified) {
+      reasons.push(`This document type's rule is still an unverified draft in Compliance Rules (${requirement.source_note || 'no source noted'}) — confirm it before trusting the result below.`);
+      flags.push('requirement_unverified');
+    }
+
+    const isRightDocType = typePattern.test(text);
+    if (!isRightDocType) {
+      reasons.push(wrongTypeMessage);
+      flags.push('wrong_document_type');
+    }
+
+    // Expiry handling branches on the requirement row's own expiry_source —
+    // 'printed_on_document' is the default assumption for this whole family
+    // (every real WWCC/Blue Card/First Aid seed row uses it today) since
+    // that's how these documents actually work: the card/certificate itself
+    // states its own expiry, there's no separate "issue date + N days" math
+    // to do. 'computed' stays supported for a future row (e.g. a state that
+    // genuinely works like Police Check) without needing new checker code.
+    const expirySource = requirement?.expiry_source || 'printed_on_document';
+    let issueDate = null, expiryDate = null, isExpired = null;
+
+    if (expirySource === 'no_expiry') {
+      // Nothing to extract — this requirement type has no expiry at all.
+    } else if (expirySource === 'computed') {
+      issueDate = extractIssueDate(text);
+      const validityDays = requirement?.validity_days ?? null;
+      if (issueDate && validityDays) {
+        expiryDate = new Date(issueDate.getTime() + validityDays * 24 * 60 * 60 * 1000);
+      } else if (!issueDate) {
+        reasons.push('Could not find a clear issue date in the document — check manually.');
+        flags.push('no_issue_date_found');
+      } else if (!validityDays) {
+        reasons.push('This requirement is marked as computed from an issue date, but has no validity_days set in Compliance Rules.');
+        flags.push('requirement_row_missing');
+      }
+    } else {
+      expiryDate = extractExpiryDate(text);
+      if (!expiryDate) {
+        reasons.push('Could not find a clear expiry date printed on the document — check manually.');
+        flags.push('no_expiry_date_found');
+      }
+    }
+
+    if (expiryDate) {
+      isExpired = expiryDate < new Date();
+      if (isExpired) {
+        reasons.push(`Expired ${expiryDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })}.`);
+        flags.push('expired');
+      }
+    }
+
+    const extractedName = extractApplicantName(text);
+    const nameMatch = candidateName ? namesLikelyMatch(candidateName, extractedName) : null;
+    if (candidateName && extractedName && nameMatch === false) {
+      reasons.push(`Extracted name "${extractedName}" doesn't obviously match the candidate name provided ("${candidateName}") — check manually.`);
+      flags.push('name_mismatch');
+    } else if (candidateName && !extractedName) {
+      reasons.push('Could not extract a name from the document to compare against the candidate.');
+      flags.push('name_not_found');
+    }
+
+    let outcome;
+    if (flags.includes('wrong_document_type') || flags.includes('expired')) {
+      outcome = 'invalid';
+    } else if (flags.length > 0) {
+      outcome = 'needs_review';
+    } else {
+      outcome = 'valid';
+    }
+
+    return {
+      outcome,
+      reasons,
+      flags,
+      extracted: {
+        documentTypeConfirmed: isRightDocType,
+        issueDate: issueDate ? issueDate.toISOString().slice(0, 10) : null,
+        expiryDate: expiryDate ? expiryDate.toISOString().slice(0, 10) : null,
+        applicantName: extractedName,
+        nameMatchesCandidate: nameMatch,
+        expirySourceUsed: expirySource,
+        validityDaysUsed: requirement?.validity_days ?? null,
+        requirementVerified: requirement?.verified ?? null,
+        stateUsed: state || null
+      }
+    };
+  };
+}
+
+const checkWwcc = makeExpiringDocumentChecker('wwcc', WWCC_TYPE_PATTERN,
+  'Could not find wording confirming this is a Working with Children Check / Protecting Children Certificate / Working with Vulnerable People registration — may be the wrong document.');
+const checkBlueCard = makeExpiringDocumentChecker('blue_card', BLUE_CARD_TYPE_PATTERN,
+  'Could not find wording confirming this is a Blue Card — may be the wrong document.');
+const checkFirstAid = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PATTERN,
+  'Could not find wording confirming this is a First Aid certificate — may be the wrong document.');
+
+// Shared shape for a document type that never has an expiry to check at all
+// (Child Safety Training and the VIC Protecting Children training
+// certificate both confirmed 'no_expiry' against real documents) — just
+// doc-type confirmation, the requirement-row verified check, and a name
+// match, same as makeExpiringDocumentChecker minus everything date-related.
+function makeNoExpiryTrainingChecker(documentType, typePattern, wrongTypeMessage) {
+  return async function check(text, { candidateName, state } = {}) {
+    const reasons = [];
+    const flags = [];
+
+    const requirement = await getComplianceRequirement(documentType, state);
+    if (!requirement) {
+      reasons.push(`No compliance_requirements row found for this document type${state ? ` in ${state}` : ''} — add one in Compliance Rules before this can be checked properly.`);
+      flags.push('requirement_row_missing');
+    } else if (!requirement.verified) {
+      reasons.push(`This document type's rule is still an unverified draft in Compliance Rules (${requirement.source_note || 'no source noted'}) — confirm it before trusting the result below.`);
+      flags.push('requirement_unverified');
+    }
+
+    const isRightDocType = typePattern.test(text);
+    if (!isRightDocType) {
+      reasons.push(wrongTypeMessage);
+      flags.push('wrong_document_type');
+    }
+
+    const extractedName = extractApplicantName(text);
+    const nameMatch = candidateName ? namesLikelyMatch(candidateName, extractedName) : null;
+    if (candidateName && extractedName && nameMatch === false) {
+      reasons.push(`Extracted name "${extractedName}" doesn't obviously match the candidate name provided ("${candidateName}") — check manually.`);
+      flags.push('name_mismatch');
+    } else if (candidateName && !extractedName) {
+      reasons.push('Could not extract a name from the document to compare against the candidate.');
+      flags.push('name_not_found');
+    }
+
+    let outcome;
+    if (flags.includes('wrong_document_type')) {
+      outcome = 'invalid';
+    } else if (flags.length > 0) {
+      outcome = 'needs_review';
+    } else {
+      outcome = 'valid';
+    }
+
+    return {
+      outcome,
+      reasons,
+      flags,
+      extracted: {
+        documentTypeConfirmed: isRightDocType,
+        applicantName: extractedName,
+        nameMatchesCandidate: nameMatch,
+        requirementVerified: requirement?.verified ?? null,
+        stateUsed: state || null
+      }
+    };
+  };
+}
+
+const checkChildSafetyTraining = makeNoExpiryTrainingChecker('child_safety_training', CHILD_SAFETY_TYPE_PATTERN,
+  'Could not find wording confirming this is a Child Safety Training certificate — may be the wrong document.');
+const checkProtectingChildrenTraining = makeNoExpiryTrainingChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
+  'Could not find wording confirming this is a Protecting Children (Mandatory Reporting) training certificate — may be the wrong document.');
+
+const CHECKERS = {
+  police_check: checkPoliceCheck,
+  wwcc: checkWwcc,
+  blue_card: checkBlueCard,
+  first_aid: checkFirstAid,
+  child_safety_training: checkChildSafetyTraining,
+  protecting_children_training: checkProtectingChildrenTraining
+};
 
 async function runCheck(documentType, text, options) {
   const checker = CHECKERS[documentType];
@@ -314,4 +560,7 @@ async function runCheck(documentType, text, options) {
   return checker(text, options);
 }
 
-module.exports = { extractText, runCheck, checkPoliceCheck, getComplianceRequirement, invalidateRequirementCache };
+module.exports = {
+  extractText, runCheck, getComplianceRequirement, invalidateRequirementCache,
+  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining
+};

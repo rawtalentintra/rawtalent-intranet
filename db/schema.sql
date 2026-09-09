@@ -1670,7 +1670,29 @@ INSERT INTO compliance_requirements (id, state, document_type, display_name, req
   ('cr-all-first-aid', 'ALL', 'first_aid', 'First Aid Certificate (HLTAID011 or equivalent)', true, 'printed_on_document', NULL, false,
    'DRAFT — nationally, the full First Aid unit is commonly cited as valid ~3 years, with the CPR component alone needing a ~12-month refresher — these are two different expiries on the same broad requirement, which this single row doesn''t yet distinguish. Needs confirming against current national First Aid currency guidelines and how Raw Talent wants the CPR-vs-full-certificate distinction handled.'),
   ('cr-all-child-safety', 'ALL', 'child_safety_training', 'Child Safety Training', true, 'no_expiry', NULL, false,
-   'DRAFT — assumed one-off/no fixed expiry pending confirmation; several states have been moving towards mandatory periodic refreshers for child-safe standards training. Needs confirming against current requirements and whether Raw Talent wants a refresher cadence applied regardless.')
+   'DRAFT — assumed one-off/no fixed expiry pending confirmation; several states have been moving towards mandatory periodic refreshers for child-safe standards training. Needs confirming against current requirements and whether Raw Talent wants a refresher cadence applied regardless. Covers BOTH of RT''s real requirement names for this — "Foundations of Child Safety Training" and "Advanced Child Safety Training" — as one row/one internal type, since neither Raw Talent policy nor state legislation currently distinguishes a different expiry rule between the two levels; split into two rows later if that changes.')
+ON CONFLICT (state, document_type) DO NOTHING;
+
+-- Phase 1 (2026-09-09) correction — queried RT's own real attachedRequirements
+-- data directly, then went one step further and actually opened a real
+-- candidate's real "Protecting Children Certificate (VIC Only)" file rather
+-- than assuming from the name alone. It reads "Certificate of Completion...
+-- Protecting Children - Mandatory Reporting and other Obligations for the
+-- Early Childhood Sector" — this is a MANDATORY-REPORTER TRAINING CERTIFICATE,
+-- not Victoria's government Working with Children Check card at all. Mapping
+-- it to the 'wwcc' type (as first assumed, before actually opening the file)
+-- would have applied the wrong compliance rule and expiry logic to it.
+-- cr-vic-wwcc below stays a placeholder for VIC's actual (government) WWCC
+-- scheme, unconnected to this — see the new cr-vic-protecting-children-
+-- training row instead, which reflects what this RT requirement actually is.
+UPDATE compliance_requirements
+SET display_name = 'Working with Children Check (VIC)',
+    source_note = source_note || ' [2026-09-09: confirmed RT does NOT track this specific card under any of its real requirementName values seen so far — VIC candidates'' real WWCC document, if tracked at all in RT, would need identifying under one of the generic "Working with Children''s Check (WwCC)"/"Working with Children Check" labels instead. This row stays unconnected to any automated check until that''s confirmed.]'
+WHERE id = 'cr-vic-wwcc' AND display_name = 'Protecting Children Certificate (VIC Only)';
+
+INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
+  ('cr-vic-protecting-children-training', 'VIC', 'protecting_children_training', 'Protecting Children Certificate (VIC Only)', true, 'no_expiry', NULL, false,
+   'DRAFT — a Raw Talent/RT-tracked training-course completion certificate ("Protecting Children - Mandatory Reporting and other Obligations for the Early Childhood Sector"), confirmed against a real uploaded certificate (2026-09-09) — NOT Victoria''s government Working with Children Check card (see cr-vic-wwcc). The real certificate shows only a completion date, no printed expiry. Needs confirming whether Raw Talent or Victorian regulation requires this to be periodically retaken regardless.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
 -- Local mirror of RT's Candidates report — RT's API has no server-side name

@@ -11,9 +11,41 @@ router.use(requireAdmin);
 
 // Only RT's own requirementName strings that have a real rule set in
 // documentCheckerService.js map to something — everything else on a
-// candidate's Documents list (Passport, First Aid, etc.) shows as "not yet
-// supported" in the UI rather than silently failing or guessing.
-const REQUIREMENT_NAME_TO_TYPE = { 'Police Check': 'police_check' };
+// candidate's Documents list (Passport, Qualification, Agency Payslip, etc.)
+// shows as "not yet supported" in the UI rather than silently failing or
+// guessing.
+//
+// Phase 1 (2026-09-09) — grounded in a live query against real production
+// rt_candidates_cache.raw->'attachedRequirements' (19 distinct real
+// requirementName+documentId pairs), not guessed labels. Several different
+// RT strings intentionally map to the SAME internal type — RT names each
+// state's card differently (or not at all — some are just the generic
+// "Working with Children's Check (WwCC)"/"Working with Children Check"),
+// but which compliance_requirements row actually applies is resolved by the
+// candidate's own real state at check time (see documentCheckerService.js's
+// makeExpiringDocumentChecker), never by which RT label was used. The two
+// distinct RT Child Safety Training labels ("Foundations"/"Advanced") both
+// map to one 'child_safety_training' type — see schema.sql's
+// cr-all-child-safety row for why.
+const REQUIREMENT_NAME_TO_TYPE = {
+  'Police Check': 'police_check',
+  "Working with Children's Check (WwCC)": 'wwcc',
+  "Working with Children's Check (NSW)": 'wwcc',
+  "Working with Children's Check (SA)": 'wwcc',
+  'Working with Children Check': 'wwcc',
+  'Working with Vulnerable People Card': 'wwcc',
+  'Registration to Work with Vulnerable People': 'wwcc',
+  'Blue Card': 'blue_card',
+  'First Aid': 'first_aid',
+  'Foundations of Child Safety Training': 'child_safety_training',
+  'Advanced Child Safety Training': 'child_safety_training',
+  // NOT 'wwcc' — opened a real one of these (2026-09-09) and it's actually a
+  // Mandatory Reporting training-course completion certificate, not
+  // Victoria's government WWCC card. See schema.sql's
+  // cr-vic-protecting-children-training row and documentCheckerService.js's
+  // checkProtectingChildrenTraining for the full reasoning.
+  'Protecting Children Certificate (VIC Only)': 'protecting_children_training'
+};
 
 // Documents are never uploaded here — they're fetched server-side from the
 // URL RT already gives us on the candidate's own attachedRequirements[]

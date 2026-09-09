@@ -11798,7 +11798,20 @@
     // (candidateDetailHtml et al, above), or this page's own candidate
     // search. Only requirement names in SUPPORTED_DOC_CHECK_TYPES have a
     // real rule set behind them.
-    const SUPPORTED_DOC_CHECK_TYPES = new Set(['Police Check']);
+    const SUPPORTED_DOC_CHECK_TYPES = new Set([
+      'Police Check',
+      "Working with Children's Check (WwCC)",
+      "Working with Children's Check (NSW)",
+      "Working with Children's Check (SA)",
+      'Working with Children Check',
+      'Protecting Children Certificate (VIC Only)',
+      'Working with Vulnerable People Card',
+      'Registration to Work with Vulnerable People',
+      'Blue Card',
+      'First Aid',
+      'Foundations of Child Safety Training',
+      'Advanced Child Safety Training'
+    ]);
     const DOC_CHECK_OUTCOME_META = {
       valid: { label: '✅ Valid', cls: 'badge-published' },
       needs_review: { label: '⚠️ Needs Review', cls: 'badge-user' },
@@ -11949,7 +11962,7 @@
         const res = await fetch('/api/document-checker/check-from-rt', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            candidateId: ctx.candidateId, candidateName: ctx.candidateName,
+            candidateId: ctx.candidateId, candidateName: ctx.candidateName, candidateState: ctx.candidateState,
             userDocumentDetailId, requirementName: req.requirementName, documentPath: req.documentPath
           })
         });
@@ -14725,6 +14738,11 @@
       currentCandidateDetailContext = {
         candidateId: candidate.userId,
         candidateName: [candidate.firstName, candidate.lastName].filter(Boolean).join(' '),
+        // First of the candidate's own normalized states — used so the
+        // Document Checker looks up the RIGHT state's compliance rule
+        // (WWCC/Blue Card/etc. are genuinely state-specific) rather than
+        // guessing from which RT label the requirement happens to use.
+        candidateState: candidateStates(candidate)[0] || null,
         requirementsByDetailId: Object.fromEntries(reqs.map(r => [r.userDocumentDetailId, r]))
       };
       return reqs;
