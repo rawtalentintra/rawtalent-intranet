@@ -554,10 +554,107 @@ const CHECKERS = {
   protecting_children_training: checkProtectingChildrenTraining
 };
 
+// ── Phase 2 (2026-09-09) — non-AI photo-quality checks ──────────────────
+// Applied centrally here (once, after whichever type-specific checker ran)
+// rather than duplicated inside every checker above — quality is a property
+// of the PHOTO, not of the document type, so it's the same test regardless
+// of whether it's a Police Check or a Blue Card.
+//
+// Thresholds below were calibrated against ~60 real production documents
+// (2026-09-09), not chosen abstractly — see the actual distribution this
+// produced (after fixing a real bug the same pass turned up: a handful of
+// uploads are 16-bit PNGs — iOS screenshots — whose raw brightness/blur
+// numbers came back on a 0-65535 scale instead of 0-255 until
+// documentExtractionWorker.js started normalizing through 8-bit JPEG first):
+//   - OCR confidence ranged ~25-83 on real (legitimately genuine, just
+//     phone-photographed) documents. Tesseract's own confidence score IS
+//     already a direct, well-understood measure of "how legible was this
+//     text" — the single most reliable signal here, and free (already
+//     computed for every image check). <45 was where real documents in the
+//     sample started being ones a human actually would want to double-check.
+//   - Laplacian-variance blur score turned out NOT to have a single
+//     universal "sharp" cutoff that works across document types — a
+//     plain-text certificate naturally produces far less edge variance than
+//     a busy ID-card photo even when both are perfectly in focus (confirmed
+//     empirically: a clean, well-read First Aid certificate scored LOWER on
+//     this metric than a blurry-looking WWCC photo that still had decent
+//     OCR confidence).
+//   - Resolution has the same problem in miniature: a real 606×428 document
+//     read at 88% confidence and a real 1340×280 crop read at 94% — both
+//     well under a naive "too small" cutoff, but neither was actually a
+//     problem. A small image that OCR'd fine is not something to flag.
+//   - Brightness has a real ceiling problem too: real, perfectly legible
+//     documents reached up to 246/255 (most compliance documents ARE white
+//     paper, so a high average brightness is the NORMAL case, not a red
+//     flag) — a ceiling anywhere near that would misfire on ordinary scans
+//     constantly. Only near-total whiteout is worth flagging.
+// Net result: OCR confidence and brightness extremes are the only signals
+// trustworthy enough to flag on their own; resolution and blur are only
+// used as SUPPORTING context alongside an already-poor OCR read, never as
+// an independent trigger — a small or lower-edge-variance image that still
+// read fine is not a quality problem.
+const MIN_OCR_CONFIDENCE = 45;
+const MIN_BLUR_VARIANCE = 400; // supporting signal only — see comment above
+const MIN_BRIGHTNESS = 20;
+const MAX_BRIGHTNESS = 253;
+const MIN_RESOLUTION_PX = 380; // shorter side — supporting signal only, see comment above
+
+// Mutates flags/reasons in place and returns whether anything was flagged —
+// called once per check, after the type-specific checker has already run,
+// so its own flags/reasons are added alongside rather than replacing them.
+function applyPhotoQualityFlags(flags, reasons, { confidence, quality } = {}) {
+  let flagged = false;
+  const lowConfidence = typeof confidence === 'number' && confidence < MIN_OCR_CONFIDENCE;
+  if (lowConfidence) {
+    reasons.push(`OCR could only read this document with ${confidence}% confidence — the photo may be blurry, poorly lit, or at an angle. Check the original manually.`);
+    flags.push('low_ocr_confidence');
+    flagged = true;
+  }
+  if (quality) {
+    if (typeof quality.brightness === 'number' && quality.brightness < MIN_BRIGHTNESS) {
+      reasons.push('Photo looks very dark — check it isn\'t underexposed or has something covering part of it.');
+      flags.push('too_dark');
+      flagged = true;
+    } else if (typeof quality.brightness === 'number' && quality.brightness > MAX_BRIGHTNESS) {
+      reasons.push('Photo looks washed out/overexposed — check for glare or flash reflection over the document.');
+      flags.push('too_bright');
+      flagged = true;
+    }
+    // Both gated on low OCR confidence too — see the threshold comment
+    // above for why resolution/blur alone aren't trustworthy predictors of
+    // an actual problem across different document types/crops.
+    if (lowConfidence) {
+      const shortSide = Math.min(quality.width || 0, quality.height || 0);
+      if (shortSide && shortSide < MIN_RESOLUTION_PX) {
+        reasons.push(`Image resolution is very low (${quality.width}×${quality.height}px) — likely contributing to the poor OCR read above.`);
+        flags.push('low_resolution');
+        flagged = true;
+      }
+      if (typeof quality.blurVariance === 'number' && quality.blurVariance < MIN_BLUR_VARIANCE) {
+        reasons.push('Photo looks blurry (low image sharpness) — likely contributing to the poor OCR read above.');
+        flags.push('blurry_image');
+        flagged = true;
+      }
+    }
+  }
+  return flagged;
+}
+
 async function runCheck(documentType, text, options) {
   const checker = CHECKERS[documentType];
   if (!checker) throw new Error(`No checker implemented for document type "${documentType}" yet.`);
-  return checker(text, options);
+  const result = await checker(text, options);
+
+  const qualityFlagged = applyPhotoQualityFlags(result.flags, result.reasons, options || {});
+  // A quality problem can only ever pull a clean 'valid' down to
+  // 'needs_review' — it never gets to upgrade an already-'invalid' result
+  // (that's already the most severe outcome) and never silently produces a
+  // false 'valid' on its own (there's always some other flag involved,
+  // never wrong_document_type/expired triggering purely off a quality
+  // issue).
+  if (qualityFlagged && result.outcome === 'valid') result.outcome = 'needs_review';
+  result.extracted = { ...result.extracted, ocrConfidence: options?.confidence ?? null, imageQuality: options?.quality ?? null };
+  return result;
 }
 
 module.exports = {

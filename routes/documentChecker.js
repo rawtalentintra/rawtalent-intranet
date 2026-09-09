@@ -171,13 +171,16 @@ router.post('/check-from-rt', async (req, res) => {
 
   try {
     const { buffer, filename } = await fetchRtDocument(documentPath);
-    const { text, method, confidence } = await extractText(buffer, filename);
+    const { text, method, confidence, quality } = await extractText(buffer, filename);
     if (!text) return res.status(422).json({ error: 'No readable text could be extracted from this document.' });
 
     // candidateState threaded through for the state-specific checkers
     // Phase 1 adds (WWCC/Blue Card/etc.) — Police Check's own requirement
     // row is state-independent ('ALL') so it's a no-op for it today.
-    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null });
+    // confidence/quality threaded through for Phase 2's photo-quality
+    // checks — applied once, centrally, inside runCheck itself, not
+    // duplicated per document type.
+    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality });
 
     const db = getDb();
     const id = uuidv4();
