@@ -1532,6 +1532,7 @@
           <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="clearDocCheckCandidate()">← Back to search</button>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div style="font-weight:700;color:var(--navy);font-size:16px" id="docCheckCandidateName"></div>
+            <a id="docCheckRtPortalLink" href="#" target="_blank" rel="noopener noreferrer" style="font-size:12px;font-weight:700;color:var(--orange);display:none">View in RT Portal →</a>
           </div>
           <div id="docCheckComplianceGapsWrap" style="margin-bottom:16px"></div>
           <div id="docCheckCandidateDocsWrap"></div>
@@ -12014,6 +12015,13 @@
         const reqs = setCurrentCandidateContext(candidate);
         await loadCandidateDocChecks(candidate.userId);
         document.getElementById('docCheckCandidateName').textContent = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || 'Unnamed candidate';
+        // RT's own web portal (not its API — separate thing entirely), real
+        // URL pattern confirmed directly by Joy (2026-09-10): a plain query
+        // param on a hash route, no further encoding needed for a numeric
+        // candidate id.
+        const rtLink = document.getElementById('docCheckRtPortalLink');
+        rtLink.href = `https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${candidate.userId}`;
+        rtLink.style.display = 'inline';
         docsWrap.innerHTML = reqs.length
           ? reqs.map(req => renderCandidateDocCard(req)).join('')
           : '<div style="font-size:12.5px;color:var(--text-muted)">No compliance documents on file.</div>';
@@ -12027,6 +12035,7 @@
       document.getElementById('docCheckCandidateWrap').style.display = 'none';
       document.getElementById('docCheckCandidateDocsWrap').innerHTML = '';
       document.getElementById('docCheckComplianceGapsWrap').innerHTML = '';
+      document.getElementById('docCheckRtPortalLink').style.display = 'none';
       currentCandidateDetailContext = null;
       document.getElementById('docCheckSearchScreen').style.display = 'block';
       window.scrollTo({ top: 0 });
