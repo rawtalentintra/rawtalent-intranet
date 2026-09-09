@@ -1590,6 +1590,16 @@ CREATE INDEX IF NOT EXISTS idx_document_checks_created_at ON document_checks(cre
 CREATE INDEX IF NOT EXISTS idx_document_checks_outcome ON document_checks(outcome);
 CREATE INDEX IF NOT EXISTS idx_document_checks_candidate ON document_checks(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_document_checks_requirement ON document_checks(user_document_detail_id);
+-- Phase 4 (2026-09-09) — cross-candidate duplicate-file detection, the
+-- fake-document heuristic that actually held up: the same exact file
+-- (SHA-256 of its raw bytes) turning up under two different candidates is a
+-- strong, 100% deterministic signal worth flagging on its own, unlike two
+-- image-forensics approaches that WERE tried and rejected after testing
+-- against real documents — see documentCheckerService.js's Phase 4 comment
+-- for what didn't hold up and why. Builds up value going forward as real
+-- checks accumulate; there's no historical backfill.
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS file_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_document_checks_file_hash ON document_checks(file_hash);
 
 -- Document Checker Phase 0 (2026-09-09, Joy): a structured, admin-editable
 -- rule set — which document types are required per state, how their expiry

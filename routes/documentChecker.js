@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { extractText, runCheck, invalidateRequirementCache } = require('../services/documentCheckerService');
@@ -177,32 +178,54 @@ router.post('/check-from-rt', async (req, res) => {
 
   try {
     const { buffer, filename } = await fetchRtDocument(documentPath);
-    const { text, method, confidence, quality } = await extractText(buffer, filename);
+    const { text, method, confidence, quality, pdfMetadata } = await extractText(buffer, filename);
     if (!text) return res.status(422).json({ error: 'No readable text could be extracted from this document.' });
 
     // candidateState threaded through for the state-specific checkers
     // Phase 1 adds (WWCC/Blue Card/etc.) — Police Check's own requirement
     // row is state-independent ('ALL') so it's a no-op for it today.
     // confidence/quality threaded through for Phase 2's photo-quality
-    // checks — applied once, centrally, inside runCheck itself, not
-    // duplicated per document type.
-    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality });
+    // checks, pdfMetadata for Phase 4's document-integrity checks — all
+    // applied once, centrally, inside runCheck itself, not duplicated per
+    // document type.
+    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality, pdfMetadata });
 
     const db = getDb();
+
+    // Cross-candidate duplicate-file check (Phase 4) — the one fake-document
+    // heuristic that's 100% deterministic, no threshold to get wrong: the
+    // exact same file (by content hash, not filename/path — RT gives every
+    // upload its own S3 path regardless of content) already used for a
+    // DIFFERENT real candidate is a strong, specific signal on its own. Only
+    // ever pulls a clean 'valid' down to 'needs_review', same as every other
+    // heuristic — a human decides what a duplicate actually means, this just
+    // makes sure they see it.
+    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    const dup = (await db.execute({
+      sql: `SELECT candidate_id, candidate_name_input, created_at FROM document_checks
+            WHERE file_hash = ? AND candidate_id IS NOT NULL AND candidate_id != ? ORDER BY created_at ASC LIMIT 1`,
+      args: [fileHash, candidateId]
+    })).rows[0];
+    if (dup) {
+      result.flags.push('duplicate_document_across_candidates');
+      result.reasons.push(`This exact file was already used for a different candidate (${dup.candidate_name_input || `ID ${dup.candidate_id}`}) on ${new Date(dup.created_at).toLocaleDateString('en-AU')} — check this isn't a reused or shared document.`);
+      if (result.outcome === 'valid') result.outcome = 'needs_review';
+    }
+
     const id = uuidv4();
     await db.execute({
       sql: `INSERT INTO document_checks (
               id, document_type, filename, extraction_method, ocr_confidence,
               candidate_name_input, outcome, flags, reasons, extracted_fields, extracted_text,
               checked_by_email, checked_by_name,
-              candidate_id, user_document_detail_id, requirement_name, document_source_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              candidate_id, user_document_detail_id, requirement_name, document_source_url, file_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id, documentType, filename, method, confidence,
         candidateName || null, result.outcome, JSON.stringify(result.flags), JSON.stringify(result.reasons),
         JSON.stringify(result.extracted), text.slice(0, 20000),
         req.user.email, req.user.name || req.user.email,
-        candidateId, userDocumentDetailId, requirementName, documentPath
+        candidateId, userDocumentDetailId, requirementName, documentPath, fileHash
       ]
     });
 

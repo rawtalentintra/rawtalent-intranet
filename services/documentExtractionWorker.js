@@ -9,6 +9,22 @@
 // extraction its own disposable process sidesteps the interaction entirely:
 // there's no shared module state left to corrupt, and if either library
 // hard-crashes on a bad file, only this child dies.
+// Some real PDFs trip pdf.js's own internal warnings (an unusual embedded
+// TrueType font table, confirmed against a real production document:
+// "Warning: TT: undefined function: 32") which it writes straight to
+// stdout via console.warn/log, not stderr — this worker's own result-
+// passing protocol to its parent (documentCheckerService.js) is JSON on
+// stdout ONLY (see run().then()/catch() below, the only two places this
+// file ever calls process.stdout.write), so that stray warning line landed
+// right before the real JSON and broke JSON.parse() in the parent for that
+// document. Redirected to stderr instead of silenced outright, so it's
+// still visible running this file directly for debugging — must happen
+// before requiring pdf-parse, since a warning could in principle fire at
+// require time too.
+for (const method of ['log', 'warn', 'info']) {
+  console[method] = (...args) => process.stderr.write(args.map(String).join(' ') + '\n');
+}
+
 const os = require('os');
 const path = require('path');
 const pdfParse = require('pdf-parse');
@@ -142,9 +158,18 @@ async function run() {
   if (ext === '.pdf') {
     const fs = require('fs');
     const buffer = fs.readFileSync(filePath);
-    const pdfText = (await pdfParse(buffer)).text.trim();
+    const parsed = await pdfParse(buffer);
+    const pdfText = parsed.text.trim();
     if (pdfText.length >= MIN_TEXT_LAYER_LENGTH) {
-      return { text: pdfText, method: 'pdf-text-layer', confidence: null, quality: null };
+      // Producer/Creator (Phase 4, 2026-09-09) — only meaningful for a real
+      // native PDF, not a rasterized scan, since it's metadata about
+      // whatever software generated the FILE. See
+      // documentCheckerService.js's applyDocumentIntegrityFlags for what
+      // this is actually used for and why.
+      return {
+        text: pdfText, method: 'pdf-text-layer', confidence: null, quality: null,
+        pdfMetadata: { producer: parsed.info?.Producer || null, creator: parsed.info?.Creator || null }
+      };
     }
     return ocrScannedPdf(buffer);
   }
