@@ -193,15 +193,50 @@ async function run() {
   throw new Error('Unsupported file type. Please upload a PDF, JPG, or PNG.');
 }
 
+// Real bug (found 2026-09-09, stress-testing): process.stdout.write()
+// followed immediately by process.exit() races the OS pipe — confirmed
+// empirically that output over ~64KB (the default pipe buffer size) gets
+// silently truncated before the parent (documentCheckerService.js, reading
+// via execFile) ever sees the rest, breaking its JSON.parse() with a
+// confusing "unterminated string" error instead of a clean result. A big
+// multi-page scanned document's combined OCR text can easily cross that.
+// write()'s own callback fires once the data has actually been accepted/
+// flushed, not merely queued — exiting only from inside it (instead of on
+// the very next line) is the standard fix for this exact race.
+function writeResultAndExit(payload) {
+  process.stdout.write(JSON.stringify(payload), () => process.exit(0));
+}
+
 run()
-  .then(result => { process.stdout.write(JSON.stringify({ ok: true, result })); process.exit(0); })
-  .catch(err => { process.stdout.write(JSON.stringify({ ok: false, error: err.message })); process.exit(0); });
+  .then(result => writeResultAndExit({ ok: true, result }))
+  .catch(err => writeResultAndExit({ ok: false, error: err.message }));
 
 // A stray background rejection from either library (the actual root cause
 // above) lands here instead of crashing the real API server — this process
 // is disposable, so print what we can and exit rather than letting Node's
 // default unhandled-rejection behavior take the process down mid-write.
 process.on('unhandledRejection', (reason) => {
-  try { process.stdout.write(JSON.stringify({ ok: false, error: (reason && reason.message) || String(reason) })); } catch {}
-  process.exit(0);
+  try { writeResultAndExit({ ok: false, error: (reason && reason.message) || String(reason) }); }
+  catch { process.exit(0); }
+});
+
+// Real bug (found 2026-09-09, stress-testing a garbage/corrupted image
+// file): tesseract.js's internal Worker thread emits an 'error' event on
+// its own EventEmitter when it can't read a genuinely invalid image —
+// Node's built-in behavior for an EventEmitter 'error' event with no
+// listener attached is to throw it as a real UNCAUGHT EXCEPTION (via
+// process.nextTick), not a rejected promise. That completely bypasses both
+// the run().catch() above AND the unhandledRejection handler — confirmed
+// by reproducing it directly: the process crashed with exit code 1 and a
+// raw stack trace, never reaching either handler. This is the same
+// "disposable, always exit cleanly" contract as unhandledRejection, just
+// for the one failure class a rejected-promise handler can't catch.
+// Resuming normal operation after an uncaughtException is unsafe in
+// general (Node's own docs warn the process may be in an undefined state)
+// but this worker's entire design is "do one thing, then exit either way"
+// — there's no further work to corrupt, so writing a clean result and
+// exiting immediately is exactly the safe, intended use of this handler.
+process.on('uncaughtException', (err) => {
+  try { writeResultAndExit({ ok: false, error: err?.message || String(err) }); }
+  catch { process.exit(1); }
 });

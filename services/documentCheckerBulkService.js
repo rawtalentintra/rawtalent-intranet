@@ -81,10 +81,28 @@ function isBulkRunning(row) {
 async function startBulkRun(stateFilter, triggeredBy, deps) {
   const db = getDb();
   const runId = uuidv4();
-  await db.execute({
-    sql: `INSERT INTO document_check_bulk_runs (id, state_filter, status, triggered_by) VALUES (?, ?, 'running', ?)`,
-    args: [runId, stateFilter || 'ALL', triggeredBy]
-  });
+  try {
+    await db.execute({
+      sql: `INSERT INTO document_check_bulk_runs (id, state_filter, status, triggered_by) VALUES (?, ?, 'running', ?)`,
+      args: [runId, stateFilter || 'ALL', triggeredBy]
+    });
+  } catch (err) {
+    // Real bug (found 2026-09-09, stress-testing): the caller's own
+    // getLatestBulkRun()+isBulkRunning() pre-check (routes/documentChecker.js)
+    // is only a fast, friendly path — reproduced empirically that two
+    // concurrent "start a sweep" calls can both pass that check before
+    // either commits, both actually starting a real sweep at once. The
+    // partial unique index on (status) WHERE status='running' (schema.sql)
+    // is what actually guarantees only one can exist; this INSERT is
+    // expected to occasionally fail with a unique-violation under real
+    // concurrent load, and that's the correct, intended outcome — turned
+    // into the same friendly error the pre-check already produces for the
+    // common (non-racing) case, not a raw Postgres error.
+    if (err.message?.includes('duplicate key') || err.code === '23505') {
+      throw new Error('A bulk sweep is already in progress.');
+    }
+    throw err;
+  }
   runBulkCheck(runId, stateFilter || 'ALL', deps).catch(err => console.error('Bulk document check sweep error:', err.message));
   return runId;
 }

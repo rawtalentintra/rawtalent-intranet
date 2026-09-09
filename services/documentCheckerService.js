@@ -32,18 +32,35 @@ async function extractText(buffer, filename) {
   const tempPath = path.join(os.tmpdir(), `doc-check-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
   await fs.writeFile(tempPath, buffer);
   try {
-    const stdout = await new Promise((resolve, reject) => {
+    const { stdout, execErr } = await new Promise((resolve) => {
       // 120s (was 60s) — Phase 3 (2026-09-09) adds rasterize-then-OCR for
       // scanned PDFs with no text layer, which can mean several pages of
       // Tesseract OCR back-to-back instead of one image; 60s was enough
       // margin for a single photo but not reliably enough for a multi-page
       // scan.
-      execFile('node', [WORKER_PATH, tempPath, filename], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
-        if (err && !stdout) return reject(err);
-        resolve(stdout);
+      execFile('node', [WORKER_PATH, tempPath, filename], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdoutData) => {
+        resolve({ stdout: stdoutData, execErr: err });
       });
     });
-    const parsed = JSON.parse(stdout);
+    // Real bug (found 2026-09-09, stress-testing): the old logic only
+    // trusted execErr when stdout was completely EMPTY — a timeout kill
+    // that catches the worker mid-write (large output, right on the
+    // boundary the earlier stdout-truncation fix addresses) can leave a
+    // PARTIAL JSON fragment in the pipe, which used to get handed straight
+    // to JSON.parse() and fail with a confusing "Unterminated string"
+    // error, completely masking the real cause. Reproduced empirically:
+    // a killed-by-timeout worker with partial output. Now JSON.parse is
+    // always tried first (it's the source of truth whenever the worker
+    // actually finished normally, timeout or not), and execErr is only
+    // consulted as the fallback explanation when parsing genuinely fails.
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      if (execErr?.killed) throw new Error('Document extraction timed out — the file may be too large or complex to process.');
+      if (execErr) throw new Error(`Document extraction failed unexpectedly (${execErr.signal || execErr.code || execErr.message}).`);
+      throw new Error('Extraction worker produced no readable output.');
+    }
     if (!parsed.ok) throw new Error(parsed.error);
     return parsed.result;
   } finally {

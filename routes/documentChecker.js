@@ -191,27 +191,7 @@ async function performDocumentCheck({ candidateId, candidateName, candidateState
   const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality, pdfMetadata });
 
   const db = getDb();
-
-  // Cross-candidate duplicate-file check (Phase 4) — the one fake-document
-  // heuristic that's 100% deterministic, no threshold to get wrong: the
-  // exact same file (by content hash, not filename/path — RT gives every
-  // upload its own S3 path regardless of content) already used for a
-  // DIFFERENT real candidate is a strong, specific signal on its own. Only
-  // ever pulls a clean 'valid' down to 'needs_review', same as every other
-  // heuristic — a human decides what a duplicate actually means, this just
-  // makes sure they see it.
   const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
-  const dup = (await db.execute({
-    sql: `SELECT candidate_id, candidate_name_input, created_at FROM document_checks
-          WHERE file_hash = ? AND candidate_id IS NOT NULL AND candidate_id != ? ORDER BY created_at ASC LIMIT 1`,
-    args: [fileHash, candidateId]
-  })).rows[0];
-  if (dup) {
-    result.flags.push('duplicate_document_across_candidates');
-    result.reasons.push(`This exact file was already used for a different candidate (${dup.candidate_name_input || `ID ${dup.candidate_id}`}) on ${new Date(dup.created_at).toLocaleDateString('en-AU')} — check this isn't a reused or shared document.`);
-    if (result.outcome === 'valid') result.outcome = 'needs_review';
-  }
-
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO document_checks (
@@ -228,6 +208,43 @@ async function performDocumentCheck({ candidateId, candidateName, candidateState
       candidateId, userDocumentDetailId, requirementName, documentPath, fileHash, bulkRunId
     ]
   });
+
+  // Cross-candidate duplicate-file check (Phase 4) — the one fake-document
+  // heuristic that's 100% deterministic, no threshold to get wrong: the
+  // exact same file (by content hash, not filename/path — RT gives every
+  // upload its own S3 path regardless of content) already used for a
+  // DIFFERENT real candidate is a strong, specific signal on its own. Only
+  // ever pulls a clean 'valid' down to 'needs_review', same as every other
+  // heuristic — a human decides what a duplicate actually means, this just
+  // makes sure they see it.
+  //
+  // Real bug (found 2026-09-09, stress-testing): this used to run BEFORE
+  // the insert above — a check-then-act race. Reproduced empirically: 3
+  // concurrent check-from-rt calls for the exact same file, and one of
+  // them missed the other two entirely, because its own "does a row for
+  // this hash already exist" query ran before either of the others had
+  // committed their INSERT. Running this AFTER the insert instead closes
+  // that window — it now reads against the row set that includes this
+  // call's own just-written row, so a companion request's row (if its
+  // insert already landed) is visible. Any residual near-simultaneous miss
+  // is self-healing: the very next check-from-rt call on that file (a
+  // manual re-check, or reviewing a sibling candidate later) will see the
+  // complete row set and correctly flag it retroactively — the only
+  // window is a same-instant race, never a permanent miss.
+  const dup = (await db.execute({
+    sql: `SELECT candidate_id, candidate_name_input, created_at FROM document_checks
+          WHERE file_hash = ? AND candidate_id IS NOT NULL AND candidate_id != ? ORDER BY created_at ASC LIMIT 1`,
+    args: [fileHash, candidateId]
+  })).rows[0];
+  if (dup) {
+    result.flags.push('duplicate_document_across_candidates');
+    result.reasons.push(`This exact file was already used for a different candidate (${dup.candidate_name_input || `ID ${dup.candidate_id}`}) on ${new Date(dup.created_at).toLocaleDateString('en-AU')} — check this isn't a reused or shared document.`);
+    if (result.outcome === 'valid') result.outcome = 'needs_review';
+    await db.execute({
+      sql: `UPDATE document_checks SET flags = ?, reasons = ?, outcome = ? WHERE id = ?`,
+      args: [JSON.stringify(result.flags), JSON.stringify(result.reasons), result.outcome, id]
+    });
+  }
 
   return { id, extractionMethod: method, ocrConfidence: confidence, reviewed: false, ...result };
 }
@@ -386,7 +403,11 @@ router.post('/bulk-check', requireSuperAdmin, async (req, res) => {
     const runId = await bulkService.startBulkRun(req.body.state || 'ALL', req.user.email, { performDocumentCheck, REQUIREMENT_NAME_TO_TYPE });
     res.json({ started: true, runId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // 409 for the race-lost case too (bulkService throws this exact
+    // message when the DB's own unique-running-row guarantee is what
+    // actually caught it, not the pre-check above) — same status a caller
+    // would get from the common, non-racing "already running" path.
+    res.status(err.message === 'A bulk sweep is already in progress.' ? 409 : 500).json({ error: err.message });
   }
 });
 

@@ -1620,6 +1620,19 @@ CREATE TABLE IF NOT EXISTS document_check_bulk_runs (
   finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_document_check_bulk_runs_started_at ON document_check_bulk_runs(started_at);
+-- Real bug (found 2026-09-09, stress-testing): the route's own
+-- getLatestBulkRun()+isBulkRunning() check-then-insert guard has a genuine
+-- race — reproduced empirically, two concurrent "start a sweep" calls both
+-- read "nothing currently running" before either had committed its own
+-- 'running' row, so BOTH started a real sweep at once (double the RT/OCR
+-- load, competing writes). A partial unique index makes this impossible at
+-- the database level instead of merely unlikely at the application level —
+-- only ever one row with status='running' can exist; a second concurrent
+-- INSERT fails outright with a unique-violation instead of silently
+-- succeeding. The application-level check stays too (services/
+-- documentCheckerBulkService.js) as the fast, friendly path for the
+-- ordinary (non-racing) case; this index is what actually guarantees it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_check_bulk_runs_one_running ON document_check_bulk_runs ((status)) WHERE status = 'running';
 -- Which bulk run (if any) produced this check — nullable, since most checks
 -- are still a human clicking "Check Document" on one candidate. Lets a
 -- reviewer pull up everything one specific sweep found.
