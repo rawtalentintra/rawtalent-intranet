@@ -60,7 +60,12 @@ const REQUIREMENT_NAME_TO_TYPE = {
   // Confirmed 2026-09-10 — this exact requirementName found on real
   // candidates via a direct rt_candidates_cache query (used to find and
   // download 8 real certificates for checkQualification's own patterns).
-  'Qualification/Course of Study': 'qualification'
+  'Qualification/Course of Study': 'qualification',
+  // Confirmed 2026-09-10 — same query pattern, used to find and download
+  // 13 real documents for checkPassport's own patterns (see its own
+  // comment in documentCheckerService.js for the real acceptable-type
+  // and expiry-rule breakdown).
+  'Passport/ Birth Certificate/ Citizenship': 'passport'
 };
 
 // Documents are never uploaded here — they're fetched server-side from the

@@ -1770,6 +1770,25 @@ INSERT INTO compliance_requirements (id, state, document_type, display_name, req
    'Confirmed 2026-09-10 by sampling 8 real candidate certificates directly from rt_candidates_cache (Sage Institute of Education, Melbourne City Institute of Education, Partners in Training, CMC-Training At Work, Australian Catholic University, Elite College Australia, New Futures Training) and by directly querying every real candidate''s own RT expiryDate for this requirement (100% are the 9999-12-31 sentinel, confirming no_expiry). No expected-issuer check, deliberately — genuinely no single expected issuer across real samples (7 different RTOs/universities), same reasoning as the retracted Child Safety Training/PCC issuer checks.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
+-- Passport/Birth Certificate/Citizenship (2026-09-10) — grounded in the
+-- real "Compliance Documents – Passport" Article (Australian passport
+-- current or expired within 2 years; foreign passport needs a valid visa
+-- + VEVO check; Australian birth certificate if no passport available)
+-- and 13 real candidate documents sampled from rt_candidates_cache.
+-- expiry_source is nominal here ('printed_on_document') — the checker
+-- (checkPassport in documentCheckerService.js) is fully bespoke, not built
+-- on the shared expiring-document factory, because this one requirement
+-- genuinely accepts 3 structurally different document types with 3
+-- different expiry rules (a 2-year grace period for AU passports; no
+-- expiry at all for a birth/citizenship certificate; and a foreign
+-- passport, which can never resolve to a confident 'valid' from this
+-- checker alone since verifying visa/work-rights needs a manual VEVO
+-- check — confirmed 2026-09-10 that no self-service VEVO API exists).
+INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
+  ('cr-all-passport', 'ALL', 'passport', 'Passport/Birth Certificate/Citizenship', true, 'printed_on_document', NULL, true,
+   'Confirmed 2026-09-10 against the real "Compliance Documents – Passport" Article and 13 real candidate documents sampled directly from rt_candidates_cache: 5 real passport bio pages (4 Australian, 1 Colombian — MRZ decoded correctly on all 5, cross-checked against RT''s own recorded expiryDate on the Colombian sample), 2 real Australian birth certificates (one genuinely mirror-reversed by whatever scanned it — an honest OCR limitation), and 2 real Australian Citizenship certificates. Also found, via the same real sample, a genuine data-quality problem this checker now catches: driver''s licences and visa grant-notification letters uploaded under this requirement instead of an actual passport/birth cert/citizenship document.')
+ON CONFLICT (state, document_type) DO NOTHING;
+
 -- Phase 1 correction take 2 (2026-09-10) — grounded in real, first-party
 -- source material Joy provided directly: three HeartBeat Articles ("Working
 -- with Children Check (WWCC) — RawTalent Requirements", "Compliance

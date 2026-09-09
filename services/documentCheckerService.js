@@ -797,6 +797,203 @@ const QUALIFICATION_TYPE_PATTERN = /has\s+fulfilled\s+the\s+requirements|has\s+s
 const checkQualification = makeExpiringDocumentChecker('qualification', QUALIFICATION_TYPE_PATTERN,
   'Could not find wording confirming this is a qualification certificate, testamur, or statement of attainment — may be the wrong document.');
 
+// ── Passport/Birth Certificate/Citizenship (2026-09-10) ──────────────────
+// Grounded in the real "Compliance Documents – Passport" Article and 13
+// real candidate documents sampled directly from rt_candidates_cache under
+// RT's own "Passport/ Birth Certificate/ Citizenship" requirement. Not
+// built on makeExpiringDocumentChecker — this requirement genuinely
+// accepts THREE structurally different real document types (a passport
+// bio page, an Australian birth certificate, an Australian citizenship
+// certificate), each with its own expiry rule the shared factory's three
+// branches don't fit:
+//   - Australian passport: current OR expired within the last 2 years
+//     (the real Article's own wording) — a grace-period rule no existing
+//     expiry_source models.
+//   - Foreign passport: the Article requires "a valid visa... check visa
+//     work rights via VEVO" — genuinely not verifiable from the passport
+//     document's own text (a visa is a separate stamp/document, and VEVO
+//     has no self-service API — confirmed 2026-09-10, no automatable
+//     path exists). This can only ever be needs_review, by design, same
+//     as this checker deliberately never claims to resolve something a
+//     human still has to do.
+//   - Australian birth certificate / citizenship certificate: no expiry
+//     at all, ever.
+// Real evidence also turned up a genuine, common data-quality problem
+// worth catching: several real candidates have a driver's licence, a
+// WWCC+licence combo scan, or a visa grant-notification LETTER (not the
+// passport itself) uploaded under this exact requirement instead of an
+// actual passport/birth cert/citizenship document.
+
+// ICAO 9303 TD3 passport MRZ (machine-readable zone) — two fixed-width
+// 44-character lines at the bottom of every passport bio page. Found to
+// OCR remarkably reliably even when the rest of the bio page is a mess —
+// confirmed against 5 real passports (4 Australian, 1 Colombian) sampled
+// directly, OCR confidence on the full page as low as 36%. Independently
+// cross-checked on the Colombian sample: the expiry this pattern decodes
+// from the MRZ (2025-04-21) exactly matches RT's own separately-recorded
+// expiryDate for that exact document. Deliberately NOT used for name
+// extraction — the "filler" portion after the real name (meant to be
+// literal `<` padding) consistently OCR'd as random garbage letters
+// across every real sample, which risks silently extracting a subtly
+// WRONG name rather than honestly finding none; the visible printed name
+// is left to the generic fallback patterns instead, same as everywhere
+// else in this file.
+// Line 1: "P<{nationality:3}{SURNAME}<<{GIVEN}<{NAMES}<<<...<" (44 chars) —
+// matched loosely here (just "P<" + nationality, then any filler up to the
+// line break) rather than the full fixed-width shape: 2 of the 5 real
+// samples have a single stray OCR'd space inside line 1's filler section,
+// which broke an earlier, stricter version of this pattern outright.
+// Line 2: {passport no:9}{check}{nationality:3}{YYMMDD dob}{check}
+//         {sex}{YYMMDD expiry}{check}{personal no:14}{check}{check} — the
+// passport-number-plus-check-digit segment before the nationality code is
+// matched as a loose 5-15-character gap rather than the exact "9 chars +
+// 1 check digit" ICAO width: the real Colombian sample OCR'd that segment
+// with an extra inserted character ("AQB865843<B8COL..." — 9 real chars,
+// then 2 stray characters, not 1, before "COL"), which silently broke an
+// earlier version requiring the exact field width — found only by
+// actually running this checker against all 5 real samples end-to-end,
+// not by inspecting the MRZ text visually beforehand. The check digit
+// right after the DOB is similarly loose (digit or `<`) for the same
+// reason. The structured part actually used (3-letter nationality, two
+// real 6-digit dates, the sex marker) stays strict — only the
+// unused/check-digit filler around it tolerates noise.
+const PASSPORT_MRZ_PATTERN = /P[A-Z<][A-Z]{3}[\s\S]{10,60}?\n[\s\S]{5,15}?([A-Z]{3})(\d{2})(\d{2})(\d{2})[0-9<][MF<](\d{2})(\d{2})(\d{2})[0-9<]/;
+
+// Real evidence (2026-09-10): "BIRTH CERTIFICATE" heading plus "REGISTRY/
+// REGISTER OF BIRTHS..." wording appears on a real NSW-issued certificate.
+// A second real sample (VIC-issued) turned out to be genuinely mirror-
+// reversed by whatever scanned/exported it (every line's characters
+// backwards) — an honest OCR/scan limitation no regex can recover from,
+// not a gap in this pattern.
+const BIRTH_CERTIFICATE_PATTERN = /birth\s+certificate|regist(?:ry|er)\s+of\s+births/i;
+
+// Real evidence (2026-09-10): both real Australian Citizenship certificates
+// sampled use this exact standardised Commonwealth wording verbatim —
+// "Australian Citizenship Act 2007" and "...abovenamed is an Australian
+// citizen...".
+const CITIZENSHIP_CERTIFICATE_PATTERN = /australian\s+citizenship\s+act|abovenamed\s+is\s+an\s+australian\s+citizen/i;
+
+// Real evidence (2026-09-10): a genuine wrong-document upload found twice
+// in the same real sample set — a VicRoads driver licence photographed/
+// scanned and attached under this requirement instead of an actual
+// passport/birth certificate/citizenship document.
+const DRIVER_LICENCE_PATTERN = /driver'?s?\s+licen[cs]e/i;
+
+const CITIZENSHIP_NAME_PATTERN = /australian\s+citizenship\s*\n\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n\s*born\s+on/i;
+
+// MRZ 2-digit years need a real century — passports/candidates in this
+// system are always real, currently-relevant people, so: a birth year is
+// whichever century puts it in the past (nobody on file was born after
+// today), and an expiry year is assumed 2000s (no real passport in this
+// dataset was issued before 2000). Verified against all 5 real MRZ
+// samples — every resolved date matched the visually-printed date on the
+// same bio page.
+function mrzYearToDate(yy, mm, dd, kind) {
+  const yyNum = parseInt(yy, 10);
+  const century = kind === 'dob' && (2000 + yyNum) > new Date().getFullYear() ? 1900 : 2000;
+  return new Date(Date.UTC(century + yyNum, parseInt(mm, 10) - 1, parseInt(dd, 10)));
+}
+
+async function checkPassport(text, { candidateName, state } = {}) {
+  const reasons = [];
+  const flags = [];
+
+  const requirement = await getComplianceRequirement('passport', state);
+  if (!requirement) {
+    reasons.push(`No compliance_requirements row found for this document type${state ? ` in ${state}` : ''} — add one in Compliance Rules before this can be checked properly.`);
+    flags.push('requirement_row_missing');
+  } else if (!requirement.verified) {
+    reasons.push(`This document type's rule is still an unverified draft in Compliance Rules (${requirement.source_note || 'no source noted'}) — confirm it before trusting the result below.`);
+    flags.push('requirement_unverified');
+  }
+
+  const mrzMatch = text.match(PASSPORT_MRZ_PATTERN);
+  const isCitizenship = CITIZENSHIP_CERTIFICATE_PATTERN.test(text);
+  const isBirthCertificate = BIRTH_CERTIFICATE_PATTERN.test(text);
+
+  let passportDocType = null; // 'au_passport' | 'foreign_passport' | 'birth_certificate' | 'citizenship'
+  let nationality = null, dob = null, expiryDate = null;
+
+  if (mrzMatch) {
+    nationality = mrzMatch[1].toUpperCase();
+    dob = mrzYearToDate(mrzMatch[2], mrzMatch[3], mrzMatch[4], 'dob');
+    expiryDate = mrzYearToDate(mrzMatch[5], mrzMatch[6], mrzMatch[7], 'expiry');
+    passportDocType = nationality === 'AUS' ? 'au_passport' : 'foreign_passport';
+  } else if (isCitizenship) {
+    passportDocType = 'citizenship';
+  } else if (isBirthCertificate) {
+    passportDocType = 'birth_certificate';
+  }
+
+  if (!passportDocType) {
+    flags.push('wrong_document_type');
+    if (DRIVER_LICENCE_PATTERN.test(text)) {
+      reasons.push('This looks like a driver\'s licence, not a passport, birth certificate, or citizenship certificate — wrong document type.');
+    } else {
+      reasons.push('Could not find a passport MRZ, or wording confirming this is a birth certificate or citizenship certificate — may be the wrong document (e.g. a visa grant notification or another ID document), or a low-quality scan.');
+    }
+  }
+
+  let isExpired = null;
+  if (passportDocType === 'au_passport') {
+    const graceDeadline = new Date(expiryDate);
+    graceDeadline.setUTCFullYear(graceDeadline.getUTCFullYear() + 2);
+    isExpired = new Date() > graceDeadline;
+    if (isExpired) {
+      reasons.push(`Australian passport expired ${expiryDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })} — more than 2 years ago, outside Raw Talent's accepted grace period (per the real Compliance Documents – Passport Article).`);
+      flags.push('expired');
+    } else if (expiryDate < new Date()) {
+      reasons.push(`Australian passport expired ${expiryDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })}, but within the accepted 2-year grace period — still acceptable per policy.`);
+      flags.push('expired_within_grace_period');
+    }
+  } else if (passportDocType === 'foreign_passport') {
+    reasons.push(`Foreign (${nationality}) passport — per the real Compliance Documents – Passport Article, this requires a valid visa and a VEVO work-rights check, neither of which can be verified from the passport document alone (no self-service VEVO API exists — checked directly with the Department of Home Affairs' own published process, 2026-09-10). Confirm a visa is attached and check VEVO manually.`);
+    flags.push('foreign_passport_needs_vevo');
+  }
+  // birth_certificate / citizenship: genuinely no expiry to check at all.
+
+  const extractedName = passportDocType === 'citizenship'
+    ? (text.match(CITIZENSHIP_NAME_PATTERN)?.[1]?.trim().replace(/\s+/g, ' ') || extractApplicantName(text))
+    : extractApplicantName(text);
+  const nameMatch = candidateName ? namesLikelyMatch(candidateName, extractedName) : null;
+  if (candidateName && extractedName && nameMatch === false) {
+    reasons.push(`Extracted name "${extractedName}" doesn't obviously match the candidate name provided ("${candidateName}") — check manually.`);
+    flags.push('name_mismatch');
+  } else if (candidateName && !extractedName) {
+    reasons.push('Could not extract a name from the document to compare against the candidate.');
+    flags.push('name_not_found');
+  }
+
+  let outcome;
+  if (flags.includes('wrong_document_type') || flags.includes('expired')) {
+    outcome = 'invalid';
+  } else if (flags.length > 0) {
+    outcome = 'needs_review';
+  } else {
+    outcome = 'valid';
+  }
+
+  return {
+    outcome,
+    reasons,
+    flags,
+    extracted: {
+      documentTypeConfirmed: !!passportDocType,
+      passportDocumentType: passportDocType,
+      nationality,
+      dateOfBirth: dob ? dob.toISOString().slice(0, 10) : null,
+      issueDate: null,
+      expiryDate: expiryDate ? expiryDate.toISOString().slice(0, 10) : null,
+      applicantName: extractedName,
+      nameMatchesCandidate: nameMatch,
+      expirySourceUsed: 'passport_custom_logic',
+      validityDaysUsed: null,
+      requirementVerified: requirement?.verified ?? null,
+      stateUsed: state || null
+    }
+  };
+}
+
 const CHECKERS = {
   police_check: checkPoliceCheck,
   wwcc: checkWwcc,
@@ -805,7 +1002,8 @@ const CHECKERS = {
   child_safety_training: checkChildSafetyTraining,
   protecting_children_training: checkProtectingChildrenTraining,
   ran_training: checkRanTraining,
-  qualification: checkQualification
+  qualification: checkQualification,
+  passport: checkPassport
 };
 
 // ── Phase 2 (2026-09-09) — non-AI photo-quality checks ──────────────────
@@ -1001,5 +1199,5 @@ async function runCheck(documentType, text, options) {
 
 module.exports = {
   extractText, runCheck, getComplianceRequirement, invalidateRequirementCache,
-  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining, checkQualification
+  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining, checkQualification, checkPassport
 };
