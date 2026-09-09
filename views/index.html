@@ -65,7 +65,25 @@
       display: flex;
       flex-direction: column;
       gap: 3px;
-      min-height: 100vh;
+      /* position:fixed, not sticky — same fix, same reasoning, as
+         .admin-sidebar in style.css (see that comment for the full Chrome
+         GPU-compositor bug explanation) and the same real bug this exact
+         page's sidebar was hitting: with no fixed/sticky positioning at
+         all, a long main-content page scrolled this whole (only 100vh
+         tall) column away with it, leaving the sidebar-footer/Sign Out
+         area stranded with blank space above it once the page had
+         scrolled further than the sidebar's own short height — this
+         column was never meant to have a fixed height at all, it needed
+         to occupy the actual viewport regardless of how far the page next
+         to it has scrolled. own internal scroll (overflow-y:auto) instead
+         of min-height:100vh, matching admin-sidebar's approach. */
+      position: fixed;
+      top: 64px;
+      left: 0;
+      height: calc(100vh - 64px);
+      overflow-y: auto;
+      contain: paint;
+      transform-style: flat;
       /* No transition here on purpose — matches the admin-layout fix in
          style.css. Animating this width was the actual trigger for the
          navbar/sidebar blink bug (confirmed via screen recording): it
@@ -79,6 +97,7 @@
       padding-right: 0;
       border-right: none;
     }
+    .app-shell.sidebar-collapsed .app-main { margin-left: 0; }
     .sidebar-nav.collapsed .sidebar-nav-items,
     .sidebar-nav.collapsed .sidebar-footer { display: none; }
     /* Pushed to the bottom of the sidebar's own flex column (.sidebar-nav
@@ -111,17 +130,29 @@
       transition: var(--transition);
     }
     .sidebar-signout-btn:hover { background: var(--gray-100); }
+    /* .sidebar-nav leaving normal flow (position:fixed, above) means this
+       no longer has it as a flex sibling taking up space — needs its own
+       matching margin-left instead (collapsing back to 0 in lockstep with
+       the same .sidebar-collapsed state that zeroes the sidebar's own
+       width, see that rule just below .sidebar-nav.collapsed above). */
     .app-main {
       flex: 1;
       min-width: 0;
+      margin-left: 216px;
     }
 
     /* Collapse/expand toggle — a sibling of .sidebar-nav (not a descendant),
        positioned with `left` so it tracks the sidebar's actual width and
-       animates smoothly between expanded and collapsed. */
+       animates smoothly between expanded and collapsed. position:fixed
+       (was absolute) to match .sidebar-nav going fixed above — otherwise
+       this button (positioned relative to .app-shell, which still spans
+       the page's full scrollable height) would drift away from the
+       now-stationary sidebar the moment the page scrolled. top:80px =
+       .sidebar-nav's own top:64px (the fixed navbar's height) + this
+       button's original 16px offset from the sidebar's top edge. */
     .sidebar-collapse-toggle {
-      position: absolute;
-      top: 16px;
+      position: fixed;
+      top: 80px;
       left: 203px;
       width: 26px;
       height: 26px;
@@ -139,7 +170,12 @@
       transition: left .22s ease, transform .22s ease;
     }
     .sidebar-collapse-toggle:hover { background: var(--gray-100); }
-    .app-shell.sidebar-collapsed .sidebar-collapse-toggle { left: -13px; transform: rotate(180deg); }
+    /* left:10px, not a negative value — same bug and same fix already
+       found in style.css's .admin-layout.sidebar-collapsed version of this
+       exact button: a negative left clips half of it off the left edge of
+       the viewport entirely, leaving it nearly invisible (a sliver of
+       white on white) as the only way to bring the sidebar back. */
+    .app-shell.sidebar-collapsed .sidebar-collapse-toggle { left: 10px; transform: rotate(180deg); }
 
     /* Mobile nav — below 900px the sidebar becomes a slide-in drawer
        instead of a permanent 216px column, opened via a hamburger button
@@ -161,6 +197,13 @@
       }
       .sidebar-nav.mobile-open { transform: translateX(0); }
       .sidebar-collapse-toggle { display: none; }
+      /* .app-main's new margin-left:216px (added alongside .sidebar-nav
+         going position:fixed at the desktop breakpoint, above) would
+         otherwise reserve a 216px blank gutter here too — on mobile the
+         sidebar was ALREADY position:fixed and off-canvas by default
+         (this block, pre-existing), so .app-main never needed that margin
+         at this breakpoint in the first place. */
+      .app-main { margin-left: 0; }
       /* Joy, 2026-09-01: the Quick Links row (external tool shortcuts) is
          desktop-only clutter on a small screen — full removal, not just
          wrapping, on mobile. */
