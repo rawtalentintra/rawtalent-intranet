@@ -1463,7 +1463,10 @@
             <div class="admin-page-title">Document Checker</div>
             <div class="admin-page-sub">Find a candidate, then check their compliance documents — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles.</div>
           </div>
-          <button class="btn-secondary" onclick="openComplianceRequirementsModal()">Compliance Rules</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn-secondary super-admin-only" style="display:none" onclick="openBulkSweepModal()">Bulk Compliance Sweep</button>
+            <button class="btn-secondary" onclick="openComplianceRequirementsModal()">Compliance Rules</button>
+          </div>
         </div>
 
         <!-- Search screen: find-a-candidate + audit log. Selecting a result
@@ -1515,7 +1518,24 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div style="font-weight:700;color:var(--navy);font-size:16px" id="docCheckCandidateName"></div>
           </div>
+          <div id="docCheckComplianceGapsWrap" style="margin-bottom:16px"></div>
           <div id="docCheckCandidateDocsWrap"></div>
+        </div>
+      </div>
+
+      <!-- Bulk Compliance Sweep (Document Checker Phase 5, 2026-09-09) —
+           super_admin only, same justification as Reports' "Sync Now": a
+           full sweep runs a real OCR check per document across up to 200
+           candidates in the background (services/documentCheckerBulkService.js),
+           polled the same fire-and-forget + poll pattern as the RT
+           candidates cache sync. Content filled in by openBulkSweepModal(). -->
+      <div class="modal-overlay" id="bulkSweepModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeBulkSweepModal()">
+        <div class="modal" style="max-width:640px">
+          <div class="modal-header">
+            <div class="modal-title">Bulk Compliance Sweep</div>
+            <button class="modal-close" onclick="closeBulkSweepModal()">×</button>
+          </div>
+          <div class="modal-body" id="bulkSweepModalBody"></div>
         </div>
       </div>
       </template>
@@ -11788,6 +11808,94 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // ── Bulk Compliance Sweep (Document Checker Phase 5, 2026-09-09) ──
+    // Fire-and-forget + poll, same pattern as the RT candidates cache sync
+    // (triggerCandidatesSync/loadCandidatesSyncStatus above) — a real sweep
+    // runs a genuine OCR check per document across up to 200 candidates in
+    // the background (services/documentCheckerBulkService.js) and can take
+    // many minutes, too long to hold this modal open waiting on one request.
+    const BULK_SWEEP_STATES = ['ALL', 'NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
+    let bulkSweepPollTimer = null;
+
+    function openBulkSweepModal() {
+      document.getElementById('bulkSweepModal').classList.add('open');
+      loadBulkSweepStatus();
+    }
+    function closeBulkSweepModal() {
+      document.getElementById('bulkSweepModal').classList.remove('open');
+      if (bulkSweepPollTimer) { clearInterval(bulkSweepPollTimer); bulkSweepPollTimer = null; }
+    }
+
+    async function startBulkSweep() {
+      const state = document.getElementById('bulkSweepStateSelect').value;
+      if (!confirm(`Run a compliance sweep across up to 200 ${state === 'ALL' ? '' : state + ' '}candidates? This runs a real check per document and can take a while — you'll see live progress here.`)) return;
+      try {
+        const res = await fetch('/api/document-checker/bulk-check', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to start sweep', 'error'); return; }
+        toast('Sweep started', 'success');
+        loadBulkSweepStatus();
+      } catch { toast('Network error', 'error'); }
+    }
+
+    async function loadBulkSweepStatus() {
+      const body = document.getElementById('bulkSweepModalBody');
+      try {
+        const run = await fetch('/api/document-checker/bulk-check/status').then(r => r.json());
+        const isRunning = run?.isRunning;
+        if (isRunning && !bulkSweepPollTimer) bulkSweepPollTimer = setInterval(loadBulkSweepStatus, 4000);
+        if (!isRunning && bulkSweepPollTimer) { clearInterval(bulkSweepPollTimer); bulkSweepPollTimer = null; }
+
+        const picker = `
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+            <select id="bulkSweepStateSelect" class="form-control" style="width:auto" ${isRunning ? 'disabled' : ''}>
+              ${BULK_SWEEP_STATES.map(s => `<option value="${s}">${s === 'ALL' ? 'All states' : s}</option>`).join('')}
+            </select>
+            <button class="btn-add" onclick="startBulkSweep()" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Sweep running…' : 'Run Sweep'}</button>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Checks up to 200 candidates (prioritized by soonest-expiring documents), skipping anything checked in the last 14 days. Uses the nightly-synced candidate cache, not a live RT fetch per candidate — same trade-off the Candidates list already makes for speed.</div>`;
+
+        if (!run) { body.innerHTML = picker + '<div style="font-size:12.5px;color:var(--text-muted)">No sweep has been run yet.</div>'; return; }
+
+        const pct = run.candidates_total ? Math.round((run.candidates_processed / run.candidates_total) * 100) : 0;
+        const statusLine = isRunning
+          ? `<div style="font-weight:600;color:var(--navy);font-size:13px;margin-bottom:6px">⏳ Running — ${run.candidates_processed}/${run.candidates_total} candidates (${pct}%)</div>
+             <div style="background:var(--gray-100);border-radius:6px;height:8px;overflow:hidden;margin-bottom:10px"><div style="background:var(--orange);height:100%;width:${pct}%;transition:width .3s"></div></div>`
+          : run.status === 'failed'
+            ? `<div style="font-weight:600;color:#c0392b;font-size:13px;margin-bottom:6px">⚠️ Last sweep failed: ${escHtml(run.error_message || 'unknown error')}</div>`
+            : `<div style="font-weight:600;color:#166534;font-size:13px;margin-bottom:6px">✓ Last sweep finished ${fmtRelativeTime(run.finished_at)}</div>`;
+
+        body.innerHTML = picker + `
+          <div style="background:var(--gray-100);border-radius:var(--radius);padding:14px 16px">
+            ${statusLine}
+            <div style="font-size:12px;color:var(--text)">State: ${run.state_filter} · ${run.candidates_processed} candidates processed · ${run.documents_checked} documents checked · ${run.documents_flagged} flagged for review</div>
+            ${run.documents_checked ? `<button class="btn-secondary" style="margin-top:10px;font-size:11.5px;padding:4px 10px" onclick="viewBulkSweepResults('${run.id}')">View Results</button>` : ''}
+          </div>
+          <div id="bulkSweepResultsWrap" style="margin-top:14px"></div>`;
+      } catch {
+        body.innerHTML = '<div style="color:#c0392b;font-size:12.5px">Failed to load sweep status.</div>';
+      }
+    }
+
+    async function viewBulkSweepResults(runId) {
+      const wrap = document.getElementById('bulkSweepResultsWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const results = await fetch(`/api/document-checker/bulk-check/${runId}/results`).then(r => r.json());
+        wrap.innerHTML = `
+          <div style="max-height:260px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:var(--radius)">
+            <table class="data-table data-table-compact" style="width:100%">
+              <thead><tr><th>Candidate</th><th>Document</th><th>Outcome</th></tr></thead>
+              <tbody>
+                ${results.map(r => `<tr><td>${escHtml(r.candidate_name_input || `#${r.candidate_id}`)}</td><td>${escHtml(r.requirement_name)}</td><td>${(DOC_CHECK_OUTCOME_META[r.outcome] || { label: r.outcome }).label}</td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
+      } catch { wrap.innerHTML = '<div style="color:#c0392b;font-size:12.5px">Failed to load results.</div>'; }
+    }
+
     // ── Document Checker ──────────────────────────────────────────
     // Deterministic (no AI credits) — OCR via self-hosted Tesseract plus a
     // rule set derived from our own Articles/SOPs (see
@@ -11880,6 +11988,7 @@
         docsWrap.innerHTML = reqs.length
           ? reqs.map(req => renderCandidateDocCard(req)).join('')
           : '<div style="font-size:12.5px;color:var(--text-muted)">No compliance documents on file.</div>';
+        renderComplianceGapsPanel(candidate, currentCandidateDetailContext.candidateState, reqs);
       } catch {
         docsWrap.innerHTML = '<div style="color:#c0392b;font-size:12.5px">Failed to load this candidate.</div>';
       }
@@ -11888,9 +11997,72 @@
     function clearDocCheckCandidate() {
       document.getElementById('docCheckCandidateWrap').style.display = 'none';
       document.getElementById('docCheckCandidateDocsWrap').innerHTML = '';
+      document.getElementById('docCheckComplianceGapsWrap').innerHTML = '';
       currentCandidateDetailContext = null;
       document.getElementById('docCheckSearchScreen').style.display = 'block';
       window.scrollTo({ top: 0 });
+    }
+
+    // ── Compliance Gaps (Document Checker Phase 5, 2026-09-09) ──────
+    // "Does this candidate have what's actually required for their state" —
+    // a question the per-document Check Document button can't answer on its
+    // own, since it only ever reacts to a document that's already attached.
+    // This cross-references compliance_requirements (required rows for the
+    // candidate's state + 'ALL') against which internal document_types the
+    // candidate's REAL attachedRequirements resolve to (via the same
+    // REQUIREMENT_NAME_TO_TYPE map check-from-rt itself uses server-side —
+    // fetched once and cached here rather than duplicated as a second,
+    // driftable copy client-side) — entirely computed client-side from data
+    // already on screen, no new per-candidate endpoint needed.
+    let docCheckTypeMapCache = null;
+    async function getDocCheckTypeMap() {
+      if (!docCheckTypeMapCache) docCheckTypeMapCache = await fetch('/api/document-checker/type-map').then(r => r.json());
+      return docCheckTypeMapCache;
+    }
+    async function getComplianceRequirementsForGaps() {
+      // Reuses the Compliance Rules modal's own cached array when it's
+      // already been loaded this session; otherwise fetches it fresh —
+      // either way, always the same live table, never a second source of
+      // truth.
+      if (!complianceRequirements.length) complianceRequirements = await fetch('/api/document-checker/requirements').then(r => r.json());
+      return complianceRequirements;
+    }
+
+    async function renderComplianceGapsPanel(candidate, state, attachedRequirements) {
+      const wrap = document.getElementById('docCheckComplianceGapsWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const [typeMap, requirements] = await Promise.all([getDocCheckTypeMap(), getComplianceRequirementsForGaps()]);
+
+        // State-specific row wins over an 'ALL' row for the same
+        // document_type when both exist — same fallback rule
+        // getComplianceRequirement uses server-side, mirrored here purely
+        // for display consistency (this panel never makes an actual
+        // compliance decision itself, only shows what a real check would
+        // find missing before it's even run).
+        const byType = new Map();
+        requirements.filter(r => r.required && r.state === 'ALL').forEach(r => byType.set(r.document_type, r));
+        requirements.filter(r => r.required && r.state === state).forEach(r => byType.set(r.document_type, r));
+
+        const presentTypes = new Set(attachedRequirements.map(r => typeMap[r.requirementName]).filter(Boolean));
+        const missing = [...byType.values()].filter(r => !presentTypes.has(r.document_type));
+
+        if (!state) {
+          wrap.innerHTML = `<div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;font-size:12.5px;color:var(--text-muted)">Candidate has no state on file — can't check which compliance documents are required for them.</div>`;
+          return;
+        }
+        if (!missing.length) {
+          wrap.innerHTML = `<div style="background:#f0fdf4;border-radius:var(--radius);padding:12px 16px;font-size:12.5px;color:#166534">✓ Has a document on file for every required compliance type in ${escHtml(state)}.</div>`;
+          return;
+        }
+        wrap.innerHTML = `
+          <div style="background:#fef2f2;border-radius:var(--radius);padding:12px 16px">
+            <div style="font-weight:700;color:#991b1b;font-size:13px;margin-bottom:6px">Missing for ${escHtml(state)}</div>
+            <div style="font-size:12px;color:#7f1d1d">This candidate has no document on file at all for: ${missing.map(r => escHtml(r.display_name)).join(', ')}.</div>
+          </div>`;
+      } catch {
+        wrap.innerHTML = '';
+      }
     }
 
     function renderCandidateDocCard(req) {

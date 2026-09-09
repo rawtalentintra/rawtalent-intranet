@@ -1601,6 +1601,31 @@ CREATE INDEX IF NOT EXISTS idx_document_checks_requirement ON document_checks(us
 ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS file_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_document_checks_file_hash ON document_checks(file_hash);
 
+-- Phase 5 (2026-09-09) — bulk automation. One row per bulk sweep run,
+-- mirroring rt_candidates_sync_state's own singleton-job pattern (status/
+-- started_at/finished_at/error_message/triggered_by, a stale-running
+-- timeout) but NOT a singleton — bulk runs happen periodically over time,
+-- each worth its own history row, not overwritten in place.
+CREATE TABLE IF NOT EXISTS document_check_bulk_runs (
+  id TEXT PRIMARY KEY,
+  state_filter TEXT NOT NULL DEFAULT 'ALL', -- an AU state code, or 'ALL'
+  status TEXT NOT NULL DEFAULT 'running', -- 'running' | 'success' | 'failed'
+  candidates_total INTEGER NOT NULL DEFAULT 0,
+  candidates_processed INTEGER NOT NULL DEFAULT 0,
+  documents_checked INTEGER NOT NULL DEFAULT 0,
+  documents_flagged INTEGER NOT NULL DEFAULT 0, -- needs_review + invalid, combined
+  error_message TEXT,
+  triggered_by CITEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_document_check_bulk_runs_started_at ON document_check_bulk_runs(started_at);
+-- Which bulk run (if any) produced this check — nullable, since most checks
+-- are still a human clicking "Check Document" on one candidate. Lets a
+-- reviewer pull up everything one specific sweep found.
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS bulk_run_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_document_checks_bulk_run ON document_checks(bulk_run_id);
+
 -- Document Checker Phase 0 (2026-09-09, Joy): a structured, admin-editable
 -- rule set — which document types are required per state, how their expiry
 -- works, and which real source (a HeartBeat Article, an AI Source, or RT's

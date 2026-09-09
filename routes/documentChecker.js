@@ -168,71 +168,94 @@ router.delete('/requirements/:id', requireSuperAdmin, async (req, res) => {
 // this route. One row per check run (append-only — see schema.sql), so
 // re-checking a document after RT shows an updated file just adds a new
 // row rather than overwriting the last result.
+//
+// Extracted (Phase 5, 2026-09-09) so both the single "Check Document"
+// button (below) and services/documentCheckerBulkService.js's bulk sweep
+// call the exact same logic — the bulk runner is not a separate,
+// parallel-maintained copy of this. `bulkRunId` is null for a normal
+// single check, set for one produced by a sweep.
+async function performDocumentCheck({ candidateId, candidateName, candidateState, userDocumentDetailId, requirementName, documentPath, checkedByEmail, checkedByName, bulkRunId = null }) {
+  const documentType = REQUIREMENT_NAME_TO_TYPE[requirementName];
+  if (!documentType) throw new Error(`No automated check is available yet for "${requirementName}"`);
+
+  const { buffer, filename } = await fetchRtDocument(documentPath);
+  const { text, method, confidence, quality, pdfMetadata } = await extractText(buffer, filename);
+  if (!text) throw new Error('No readable text could be extracted from this document.');
+
+  // candidateState threaded through for the state-specific checkers Phase 1
+  // adds (WWCC/Blue Card/etc.) — Police Check's own requirement row is
+  // state-independent ('ALL') so it's a no-op for it today. confidence/
+  // quality threaded through for Phase 2's photo-quality checks,
+  // pdfMetadata for Phase 4's document-integrity checks — all applied once,
+  // centrally, inside runCheck itself, not duplicated per document type.
+  const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality, pdfMetadata });
+
+  const db = getDb();
+
+  // Cross-candidate duplicate-file check (Phase 4) — the one fake-document
+  // heuristic that's 100% deterministic, no threshold to get wrong: the
+  // exact same file (by content hash, not filename/path — RT gives every
+  // upload its own S3 path regardless of content) already used for a
+  // DIFFERENT real candidate is a strong, specific signal on its own. Only
+  // ever pulls a clean 'valid' down to 'needs_review', same as every other
+  // heuristic — a human decides what a duplicate actually means, this just
+  // makes sure they see it.
+  const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const dup = (await db.execute({
+    sql: `SELECT candidate_id, candidate_name_input, created_at FROM document_checks
+          WHERE file_hash = ? AND candidate_id IS NOT NULL AND candidate_id != ? ORDER BY created_at ASC LIMIT 1`,
+    args: [fileHash, candidateId]
+  })).rows[0];
+  if (dup) {
+    result.flags.push('duplicate_document_across_candidates');
+    result.reasons.push(`This exact file was already used for a different candidate (${dup.candidate_name_input || `ID ${dup.candidate_id}`}) on ${new Date(dup.created_at).toLocaleDateString('en-AU')} — check this isn't a reused or shared document.`);
+    if (result.outcome === 'valid') result.outcome = 'needs_review';
+  }
+
+  const id = uuidv4();
+  await db.execute({
+    sql: `INSERT INTO document_checks (
+            id, document_type, filename, extraction_method, ocr_confidence,
+            candidate_name_input, outcome, flags, reasons, extracted_fields, extracted_text,
+            checked_by_email, checked_by_name,
+            candidate_id, user_document_detail_id, requirement_name, document_source_url, file_hash, bulk_run_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      id, documentType, filename, method, confidence,
+      candidateName || null, result.outcome, JSON.stringify(result.flags), JSON.stringify(result.reasons),
+      JSON.stringify(result.extracted), text.slice(0, 20000),
+      checkedByEmail, checkedByName || checkedByEmail,
+      candidateId, userDocumentDetailId, requirementName, documentPath, fileHash, bulkRunId
+    ]
+  });
+
+  return { id, extractionMethod: method, ocrConfidence: confidence, reviewed: false, ...result };
+}
+
 router.post('/check-from-rt', async (req, res) => {
   const { candidateId, candidateName, candidateState, userDocumentDetailId, requirementName, documentPath } = req.body;
   if (!candidateId || !userDocumentDetailId || !requirementName || !documentPath) {
     return res.status(400).json({ error: 'candidateId, userDocumentDetailId, requirementName, and documentPath are required' });
   }
-  const documentType = REQUIREMENT_NAME_TO_TYPE[requirementName];
-  if (!documentType) return res.status(400).json({ error: `No automated check is available yet for "${requirementName}"` });
-
   try {
-    const { buffer, filename } = await fetchRtDocument(documentPath);
-    const { text, method, confidence, quality, pdfMetadata } = await extractText(buffer, filename);
-    if (!text) return res.status(422).json({ error: 'No readable text could be extracted from this document.' });
-
-    // candidateState threaded through for the state-specific checkers
-    // Phase 1 adds (WWCC/Blue Card/etc.) — Police Check's own requirement
-    // row is state-independent ('ALL') so it's a no-op for it today.
-    // confidence/quality threaded through for Phase 2's photo-quality
-    // checks, pdfMetadata for Phase 4's document-integrity checks — all
-    // applied once, centrally, inside runCheck itself, not duplicated per
-    // document type.
-    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null, confidence, quality, pdfMetadata });
-
-    const db = getDb();
-
-    // Cross-candidate duplicate-file check (Phase 4) — the one fake-document
-    // heuristic that's 100% deterministic, no threshold to get wrong: the
-    // exact same file (by content hash, not filename/path — RT gives every
-    // upload its own S3 path regardless of content) already used for a
-    // DIFFERENT real candidate is a strong, specific signal on its own. Only
-    // ever pulls a clean 'valid' down to 'needs_review', same as every other
-    // heuristic — a human decides what a duplicate actually means, this just
-    // makes sure they see it.
-    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const dup = (await db.execute({
-      sql: `SELECT candidate_id, candidate_name_input, created_at FROM document_checks
-            WHERE file_hash = ? AND candidate_id IS NOT NULL AND candidate_id != ? ORDER BY created_at ASC LIMIT 1`,
-      args: [fileHash, candidateId]
-    })).rows[0];
-    if (dup) {
-      result.flags.push('duplicate_document_across_candidates');
-      result.reasons.push(`This exact file was already used for a different candidate (${dup.candidate_name_input || `ID ${dup.candidate_id}`}) on ${new Date(dup.created_at).toLocaleDateString('en-AU')} — check this isn't a reused or shared document.`);
-      if (result.outcome === 'valid') result.outcome = 'needs_review';
-    }
-
-    const id = uuidv4();
-    await db.execute({
-      sql: `INSERT INTO document_checks (
-              id, document_type, filename, extraction_method, ocr_confidence,
-              candidate_name_input, outcome, flags, reasons, extracted_fields, extracted_text,
-              checked_by_email, checked_by_name,
-              candidate_id, user_document_detail_id, requirement_name, document_source_url, file_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        id, documentType, filename, method, confidence,
-        candidateName || null, result.outcome, JSON.stringify(result.flags), JSON.stringify(result.reasons),
-        JSON.stringify(result.extracted), text.slice(0, 20000),
-        req.user.email, req.user.name || req.user.email,
-        candidateId, userDocumentDetailId, requirementName, documentPath, fileHash
-      ]
+    const result = await performDocumentCheck({
+      candidateId, candidateName, candidateState, userDocumentDetailId, requirementName, documentPath,
+      checkedByEmail: req.user.email, checkedByName: req.user.name
     });
-
-    res.json({ id, extractionMethod: method, ocrConfidence: confidence, reviewed: false, ...result });
+    res.json(result);
   } catch (err) {
     res.status(422).json({ error: err.message });
   }
+});
+
+// Every real RT requirementName that maps to a supported internal type —
+// the same map check-from-rt uses server-side, exposed read-only so the
+// frontend's Compliance Gaps panel (admin.html) can tell "has a document,
+// but of an unsupported type" apart from "genuinely missing the document
+// entirely" without duplicating this list client-side and risking the two
+// silently drifting apart.
+router.get('/type-map', (req, res) => {
+  res.json(REQUIREMENT_NAME_TO_TYPE);
 });
 
 // The latest check per requirement for one candidate — what the Candidate
@@ -301,4 +324,65 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// ── Bulk automation (Phase 5) ────────────────────────────────────────
+// A full sweep hits RT-cached data for potentially hundreds of candidates
+// and runs a real OCR check per document — restricted to super_admin, same
+// justification as Reports' own "Sync Now" (routes/reports.js): routine use
+// doesn't need this, "I need this run right now" does. Runs in the
+// background and responds immediately, same fire-and-forget + poll pattern
+// as rt_candidates_sync_state — see services/documentCheckerBulkService.js.
+const bulkService = require('../services/documentCheckerBulkService');
+
+router.post('/bulk-check', requireSuperAdmin, async (req, res) => {
+  try {
+    const latest = await bulkService.getLatestBulkRun();
+    if (bulkService.isBulkRunning(latest)) {
+      return res.status(409).json({ error: `A bulk sweep is already in progress (started ${latest.started_at}).` });
+    }
+    // performDocumentCheck/REQUIREMENT_NAME_TO_TYPE passed in rather than
+    // required back from bulkService — this file already requires
+    // bulkService above; having bulkService require this file too would be
+    // a circular require, resolved unreliably depending on which module
+    // finishes loading first. Passing them as plain arguments avoids that
+    // entirely.
+    const runId = await bulkService.startBulkRun(req.body.state || 'ALL', req.user.email, { performDocumentCheck, REQUIREMENT_NAME_TO_TYPE });
+    res.json({ started: true, runId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/bulk-check/status', async (req, res) => {
+  try {
+    const latest = await bulkService.getLatestBulkRun();
+    res.json(latest ? { ...latest, isRunning: bulkService.isBulkRunning(latest) } : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/bulk-check/:runId/results', async (req, res) => {
+  try {
+    const result = await getDb().execute({
+      sql: `SELECT id, document_type, filename, candidate_name_input, candidate_id, requirement_name,
+                   outcome, flags, reasons, reviewed, created_at
+            FROM document_checks WHERE bulk_run_id = ? ORDER BY created_at DESC`,
+      args: [req.params.runId]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
+// Express Router is a plain function, so attaching extra properties here
+// doesn't interfere with app.js's app.use('/api/document-checker',
+// require('./routes/documentChecker')) — kept for direct testability
+// against real data without going through HTTP. Not used by
+// documentCheckerBulkService.js itself (that gets these passed as plain
+// arguments instead — see the /bulk-check route above for why: this file
+// already requires that service, so having it require this file back would
+// be a circular require).
+module.exports.performDocumentCheck = performDocumentCheck;
+module.exports.REQUIREMENT_NAME_TO_TYPE = REQUIREMENT_NAME_TO_TYPE;
