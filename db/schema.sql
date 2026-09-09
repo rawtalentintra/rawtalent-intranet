@@ -1783,10 +1783,15 @@ ON CONFLICT (state, document_type) DO NOTHING;
 -- expiry at all for a birth/citizenship certificate; and a foreign
 -- passport, which can never resolve to a confident 'valid' from this
 -- checker alone since verifying visa/work-rights needs a manual VEVO
--- check — confirmed 2026-09-10 that no self-service VEVO API exists).
+-- check — confirmed 2026-09-10 that VEVO has no PUBLIC/self-service API;
+-- a real programmatic "VEVO Business Service" does exist, but only via a
+-- formal agreement with the Department of Home Affairs, not a self-serve
+-- sign-up (confirmed via a real accredited vendor's own page: "CheckWorkRights
+-- holds approved organisation access to the Department of Home Affairs
+-- VEVO Business Service, limited by agreement with the Commonwealth").
 INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
   ('cr-all-passport', 'ALL', 'passport', 'Passport/Birth Certificate/Citizenship', true, 'printed_on_document', NULL, true,
-   'Confirmed 2026-09-10 against the real "Compliance Documents – Passport" Article and 13 real candidate documents sampled directly from rt_candidates_cache: 5 real passport bio pages (4 Australian, 1 Colombian — MRZ decoded correctly on all 5, cross-checked against RT''s own recorded expiryDate on the Colombian sample), 2 real Australian birth certificates (one genuinely mirror-reversed by whatever scanned it — an honest OCR limitation), and 2 real Australian Citizenship certificates. Also found, via the same real sample, a genuine data-quality problem this checker now catches: driver''s licences and visa grant-notification letters uploaded under this requirement instead of an actual passport/birth cert/citizenship document.')
+   'Confirmed 2026-09-10 against the real "Compliance Documents – Passport" Article and 13 real candidate documents sampled directly from rt_candidates_cache: 5 real passport bio pages (4 Australian, 1 Colombian — MRZ decoded correctly on all 5, cross-checked against RT''s own recorded expiryDate on the Colombian sample), 2 real Australian birth certificates (one genuinely mirror-reversed by whatever scanned it — an honest OCR limitation), and 2 real Australian Citizenship certificates. Also found, via the same real sample, a genuine data-quality problem this checker now catches: driver''s licences and visa grant-notification letters uploaded under this requirement instead of an actual passport/birth cert/citizenship document. Foreign-passport VEVO check: no public/self-service API exists (Home Affairs'' free VEVO-for-organisations tier is manual, one-at-a-time); a real programmatic "VEVO Business Service" exists but requires a formal Commonwealth agreement, same as the accredited vendors (IDV Pacific, CheckWorkRights) Raw Talent could instead pay for bulk/API access.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
 -- Phase 1 correction take 2 (2026-09-10) — grounded in real, first-party

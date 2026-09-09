@@ -811,11 +811,19 @@ const checkQualification = makeExpiringDocumentChecker('qualification', QUALIFIC
 //     expiry_source models.
 //   - Foreign passport: the Article requires "a valid visa... check visa
 //     work rights via VEVO" — genuinely not verifiable from the passport
-//     document's own text (a visa is a separate stamp/document, and VEVO
-//     has no self-service API — confirmed 2026-09-10, no automatable
-//     path exists). This can only ever be needs_review, by design, same
-//     as this checker deliberately never claims to resolve something a
-//     human still has to do.
+//     document's own text (a visa is a separate stamp/document). VEVO has
+//     no PUBLIC/self-service API — confirmed 2026-09-10 directly against
+//     Home Affairs' own published VEVO-for-organisations process (free,
+//     ABN-based registration, but manual and one-at-a-time only). A real
+//     programmatic tier does exist — the "VEVO Business Service" — but
+//     only via a formal agreement with the Department (confirmed via a
+//     real accredited vendor's own page: "CheckWorkRights holds approved
+//     organisation access to the Department of Home Affairs VEVO Business
+//     Service, limited by agreement with the Commonwealth"), not a
+//     self-service sign-up RT could complete on its own the way this
+//     document type is otherwise checked. This can only ever be
+//     needs_review, by design, same as this checker deliberately never
+//     claims to resolve something a human still has to do.
 //   - Australian birth certificate / citizenship certificate: no expiry
 //     at all, ever.
 // Real evidence also turned up a genuine, common data-quality problem
@@ -947,7 +955,7 @@ async function checkPassport(text, { candidateName, state } = {}) {
       flags.push('expired_within_grace_period');
     }
   } else if (passportDocType === 'foreign_passport') {
-    reasons.push(`Foreign (${nationality}) passport — per the real Compliance Documents – Passport Article, this requires a valid visa and a VEVO work-rights check, neither of which can be verified from the passport document alone (no self-service VEVO API exists — checked directly with the Department of Home Affairs' own published process, 2026-09-10). Confirm a visa is attached and check VEVO manually.`);
+    reasons.push(`Foreign (${nationality}) passport — per the real Compliance Documents – Passport Article, this requires a valid visa and a VEVO work-rights check, neither of which can be verified from the passport document alone (VEVO has no public/self-service API — Home Affairs' programmatic "VEVO Business Service" exists, but only via a formal agreement with the Department, not something RT can self-serve into; checked directly against Home Affairs' own published process, 2026-09-10). Confirm a visa is attached and check VEVO manually.`);
     flags.push('foreign_passport_needs_vevo');
   }
   // birth_certificate / citizenship: genuinely no expiry to check at all.
