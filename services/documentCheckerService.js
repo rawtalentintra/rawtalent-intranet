@@ -400,7 +400,19 @@ async function checkPoliceCheck(text, { candidateName, state } = {}) {
 // mirror image of extractIssueDate's earliest-date fallback: on a WWCC-style
 // card with no recognised label, the expiry is the last date printed, an
 // issue/application date is the first.
-const EXPIRY_LABEL_PATTERN = /expiry\s*date|expir(?:y|es|ation)\s*:|expires\s*(on)?|valid\s*until|date\s+of\s+expiry|valid\s*to/i;
+// \bexpiry\b added 2026-09-10 — a real VIC digital WWCC printout (Service
+// Victoria's own "Download your WWCC" PDF) prints the label as a bare
+// "EXPIRY" directly followed by the date, no "date"/":"/"on" connecting
+// word at all ("EXPIRY 05 OCT 2027"). Without it, this specific real
+// document only got the right expiry by luck of the fallback (latest date
+// on the page) rather than because the label was actually recognised —
+// found while investigating why the field looked unconfirmed even though
+// the outcome happened to be correct. Listed last in the alternation so
+// the more specific patterns above it still win where they apply (regex
+// alternation picks whichever alternative matches first in the list at a
+// given position, and "expiry date"/"expiry:" etc. all start at the same
+// position "expiry" alone would).
+const EXPIRY_LABEL_PATTERN = /expiry\s*date|expir(?:y|es|ation)\s*:|expires\s*(on)?|valid\s*until|date\s+of\s+expiry|valid\s*to|\bexpiry\b/i;
 function extractExpiryDate(text) {
   const dates = [...text.matchAll(DATE_PATTERN)].map(m => ({ raw: m[0], parsed: parseFlexibleDate(m[0]), index: m.index }));
   const valid = dates.filter(d => d.parsed && d.parsed.getFullYear() > 2000);
