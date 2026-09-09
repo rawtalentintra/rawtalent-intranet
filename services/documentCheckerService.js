@@ -2,6 +2,7 @@ const os = require('os');
 const fs = require('fs/promises');
 const path = require('path');
 const { execFile } = require('child_process');
+const { getDb } = require('../db/database');
 
 // A PDF with a real text layer (e.g. the "issued digitally via secure email
 // link" National Police Certificate our Police Check SOP describes) parses
@@ -45,13 +46,34 @@ async function extractText(buffer, filename) {
   }
 }
 
-// ── Police Check rule set ──────────────────────────────────────────
-// Derived from our own SOPs, not invented: "Compliance Documents – Police
-// Check (VIC)" (National Police Check, name-based, issued by Victoria
-// Police) and "VIT-Registered Teachers – WWCC & Police Check Requirements"
-// ("Raw Talent requires all educators to provide a current National Police
-// Check that is renewed annually" — the 12-month validity window below).
-const POLICE_CHECK_VALIDITY_DAYS = 365;
+// ── Compliance Requirements lookup (Phase 0, 2026-09-09) ────────────────
+// Every checker below reads its validity period/expiry rule from
+// compliance_requirements (db/schema.sql) instead of a hardcoded JS
+// constant — a validity-period change is now a data edit through the
+// Document Checker's own admin UI, not a code change. Cached briefly
+// purely to avoid a DB round-trip on every single document check in a
+// batch run (Phase 5); this table changes rarely enough that a short TTL
+// costs nothing real in staleness.
+const REQUIREMENT_CACHE_TTL_MS = 5 * 60 * 1000;
+let requirementCache = { byKey: null, expiresAt: 0 };
+
+async function getComplianceRequirement(documentType, state = 'ALL') {
+  if (!requirementCache.byKey || Date.now() >= requirementCache.expiresAt) {
+    const rows = (await getDb().execute('SELECT * FROM compliance_requirements')).rows;
+    const byKey = new Map();
+    for (const r of rows) byKey.set(`${r.state}:${r.document_type}`, r);
+    requirementCache = { byKey, expiresAt: Date.now() + REQUIREMENT_CACHE_TTL_MS };
+  }
+  // A real state-specific row wins over the 'ALL' fallback when both exist
+  // for the same document_type (not the case for police_check today, but
+  // future document types like 'wwcc' are state-specific by design).
+  return requirementCache.byKey.get(`${state}:${documentType}`) || requirementCache.byKey.get(`ALL:${documentType}`) || null;
+}
+// Exported so an admin edit to compliance_requirements (routes/
+// documentChecker.js's PUT) can invalidate this immediately instead of
+// waiting out the TTL — a validity-period change should apply to the very
+// next check, not up to 5 minutes later.
+function invalidateRequirementCache() { requirementCache = { byKey: null, expiresAt: 0 }; }
 
 const DOCUMENT_TYPE_PATTERN = /national\s+police\s+(check|certificate)|nationally\s+coordinated\s+criminal\s+history\s+check|police\s+certificate|criminal\s+history\s+check/i;
 
@@ -195,10 +217,27 @@ function namesLikelyMatch(a, b) {
 // Runs the whole deterministic check — no AI call. Returns an outcome of
 // 'valid' (passed every check), 'needs_review' (something's inconclusive —
 // a human should look), or 'invalid' (a check actively failed, e.g.
-// expired or wrong document type).
-function checkPoliceCheck(text, { candidateName } = {}) {
+// expired or wrong document type). `state` is the candidate's own state,
+// threaded through even though Police Check's requirement row is 'ALL'
+// (state-independent) — every other checker built on this same pattern
+// (WWCC, Blue Card, ...) will be genuinely state-specific.
+async function checkPoliceCheck(text, { candidateName, state } = {}) {
   const reasons = [];
   const flags = [];
+
+  const requirement = await getComplianceRequirement('police_check', state);
+  // No row at all would mean the Phase 0 seed got deleted — fall back to
+  // the policy's own known value rather than crashing, but flag it loudly
+  // since silently guessing a validity period is exactly what this table
+  // exists to prevent.
+  const validityDays = requirement?.validity_days ?? 365;
+  if (!requirement) {
+    reasons.push('No compliance_requirements row found for Police Check — used the 365-day fallback. Check the Compliance Rules table.');
+    flags.push('requirement_row_missing');
+  } else if (!requirement.verified) {
+    reasons.push(`This document type's validity period is still an unverified draft in Compliance Rules (${requirement.source_note || 'no source noted'}) — confirm it before trusting the expiry below.`);
+    flags.push('requirement_unverified');
+  }
 
   const isRightDocType = DOCUMENT_TYPE_PATTERN.test(text);
   if (!isRightDocType) {
@@ -216,10 +255,10 @@ function checkPoliceCheck(text, { candidateName } = {}) {
   let expiryDate = null;
   let isExpired = null;
   if (issueDate) {
-    expiryDate = new Date(issueDate.getTime() + POLICE_CHECK_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
+    expiryDate = new Date(issueDate.getTime() + validityDays * 24 * 60 * 60 * 1000);
     isExpired = expiryDate < new Date();
     if (isExpired) {
-      reasons.push(`Issued ${issueDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })} — past our 12-month renewal policy (expired ${expiryDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })}).`);
+      reasons.push(`Issued ${issueDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })} — past our ${validityDays}-day renewal policy (expired ${expiryDate.toLocaleDateString('en-AU', { timeZone: 'UTC' })}).`);
       flags.push('expired');
     }
   } else {
@@ -237,6 +276,10 @@ function checkPoliceCheck(text, { candidateName } = {}) {
     flags.push('name_not_found');
   }
 
+  // A document whose only issue is an unverified compliance rule still
+  // can't honestly be called 'valid' — the expiry it was just checked
+  // against might itself be wrong, so it goes to needs_review same as
+  // every other inconclusive case, not a silent pass.
   let outcome;
   if (flags.includes('wrong_document_type') || flags.includes('expired')) {
     outcome = 'invalid';
@@ -256,17 +299,19 @@ function checkPoliceCheck(text, { candidateName } = {}) {
       issueDate: issueDate ? issueDate.toISOString().slice(0, 10) : null,
       expiryDate: expiryDate ? expiryDate.toISOString().slice(0, 10) : null,
       applicantName: extractedName,
-      nameMatchesCandidate: nameMatch
+      nameMatchesCandidate: nameMatch,
+      validityDaysUsed: validityDays,
+      requirementVerified: requirement?.verified ?? null
     }
   };
 }
 
 const CHECKERS = { police_check: checkPoliceCheck };
 
-function runCheck(documentType, text, options) {
+async function runCheck(documentType, text, options) {
   const checker = CHECKERS[documentType];
   if (!checker) throw new Error(`No checker implemented for document type "${documentType}" yet.`);
   return checker(text, options);
 }
 
-module.exports = { extractText, runCheck, checkPoliceCheck };
+module.exports = { extractText, runCheck, checkPoliceCheck, getComplianceRequirement, invalidateRequirementCache };

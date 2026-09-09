@@ -1463,6 +1463,7 @@
             <div class="admin-page-title">Document Checker</div>
             <div class="admin-page-sub">Find a candidate, then check their compliance documents — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles.</div>
           </div>
+          <button class="btn-secondary" onclick="openComplianceRequirementsModal()">Compliance Rules</button>
         </div>
 
         <!-- Search screen: find-a-candidate + audit log. Selecting a result
@@ -1764,6 +1765,43 @@
           <div class="modal-body" id="nurtureCadenceBody" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-footer">
             <button class="btn-secondary" onclick="closeNurtureCadenceModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compliance Rules (Document Checker Phase 0, 2026-09-09) — the
+           structured, state-by-document-type rule set every checker in
+           documentCheckerService.js reads its validity period from, instead
+           of a hardcoded JS constant. Plain table + inline edit, no AI
+           anywhere near it. Content filled in by openComplianceRequirementsModal(). -->
+      <div class="modal-overlay" id="complianceRequirementsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeComplianceRequirementsModal()">
+        <div class="modal" style="max-width:920px">
+          <div class="modal-header">
+            <div>
+              <div class="modal-title">Compliance Rules</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Which document types are required per state, how their expiry works, and what real source justifies each rule. "Draft" rows are a best-effort starting point — confirm against the current real requirement before trusting them.</div>
+            </div>
+            <button class="modal-close" onclick="closeComplianceRequirementsModal()">×</button>
+          </div>
+          <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+            <button class="btn-add" style="margin-bottom:12px" onclick="showAddComplianceRequirementForm()">+ Add Requirement</button>
+            <div id="addComplianceRequirementForm" style="display:none;background:var(--offwhite);border-radius:var(--radius);padding:14px;margin-bottom:14px"></div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact" style="width:100%">
+                <thead>
+                  <tr>
+                    <th>State</th><th>Document Type</th><th>Display Name</th><th>Required</th>
+                    <th>Expiry</th><th>Status</th><th>Source</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="complianceRequirementsBody">
+                  <tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeComplianceRequirementsModal()">Close</button>
           </div>
         </div>
       </div>
@@ -11591,6 +11629,163 @@
       if (lead.suburb && !street.toLowerCase().includes(lead.suburb.toLowerCase())) parts.push(lead.suburb);
       if (lead.state && !street.toUpperCase().includes(lead.state.toUpperCase())) parts.push(lead.state);
       return parts.filter(Boolean).join(', ');
+    }
+
+    // ── Compliance Rules (Document Checker Phase 0) ─────────────────
+    // Structured, state-by-document-type rule set — see compliance_
+    // requirements' own schema.sql comment. Every checker in
+    // documentCheckerService.js reads its validity period from this table
+    // instead of a hardcoded constant, so a rule change is a data edit
+    // here, not a code change.
+    const EXPIRY_SOURCE_LABELS = { computed: 'Computed (issue date + validity)', printed_on_document: 'Printed on the document', no_expiry: 'No expiry' };
+    let complianceRequirements = [];
+
+    function openComplianceRequirementsModal() {
+      document.getElementById('complianceRequirementsModal').classList.add('open');
+      document.getElementById('addComplianceRequirementForm').style.display = 'none';
+      loadComplianceRequirements();
+    }
+    function closeComplianceRequirementsModal() {
+      document.getElementById('complianceRequirementsModal').classList.remove('open');
+    }
+    async function loadComplianceRequirements() {
+      const body = document.getElementById('complianceRequirementsBody');
+      body.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        complianceRequirements = await fetch('/api/document-checker/requirements').then(r => r.json());
+        renderComplianceRequirementsTable();
+      } catch {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">Failed to load.</td></tr>';
+      }
+    }
+    function complianceExpiryCell(r) {
+      if (r.expiry_source === 'computed') return `${r.validity_days ?? '—'} days (computed)`;
+      return EXPIRY_SOURCE_LABELS[r.expiry_source] || r.expiry_source;
+    }
+    function renderComplianceRequirementsTable() {
+      const body = document.getElementById('complianceRequirementsBody');
+      if (!complianceRequirements.length) {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">No compliance rules yet.</td></tr>';
+        return;
+      }
+      const canDelete = currentUserRole === 'super_admin';
+      body.innerHTML = complianceRequirements.map(r => `
+        <tr>
+          <td style="font-weight:700">${escHtml(r.state)}</td>
+          <td><code style="font-size:11px">${escHtml(r.document_type)}</code></td>
+          <td>${escHtml(r.display_name)}</td>
+          <td>${r.required ? 'Yes' : 'No'}</td>
+          <td style="font-size:12px">${escHtml(complianceExpiryCell(r))}</td>
+          <td>${r.verified ? '<span class="badge badge-published">Verified</span>' : '<span class="badge badge-user" title="Best-effort starting point — not yet confirmed against a real current source">Draft</span>'}</td>
+          <td style="font-size:11.5px;color:var(--text-muted);max-width:220px" title="${escHtml(r.source_note || '')}">${escHtml((r.source_note || '—').slice(0, 70))}${(r.source_note || '').length > 70 ? '…' : ''}</td>
+          <td style="white-space:nowrap">
+            <button class="action-btn edit" style="font-size:10.5px;padding:2px 8px" onclick="showAddComplianceRequirementForm('${r.id}')">Edit</button>
+            ${canDelete ? `<button class="action-btn delete" style="font-size:10.5px;padding:2px 8px" onclick="deleteComplianceRequirement('${r.id}')">Delete</button>` : ''}
+          </td>
+        </tr>`).join('');
+    }
+
+    // One form, two modes — `editId` null means "Add", otherwise pre-fills
+    // from the matching row and PUTs instead of POSTs. Same pattern as
+    // several other add/edit forms in this app rather than a separate
+    // modal-on-a-modal for editing one row.
+    function showAddComplianceRequirementForm(editId) {
+      const existing = editId ? complianceRequirements.find(r => r.id === editId) : null;
+      const wrap = document.getElementById('addComplianceRequirementForm');
+      wrap.dataset.editId = editId || '';
+      wrap.innerHTML = `
+        <div style="font-weight:700;color:var(--navy);margin-bottom:10px">${existing ? 'Edit' : 'Add'} Requirement</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+          <div>
+            <label class="form-label-modal">State</label>
+            <input type="text" id="crState" class="form-control" placeholder="e.g. VIC, or ALL" value="${escHtml(existing?.state || '')}" ${existing ? 'disabled' : ''}>
+          </div>
+          <div>
+            <label class="form-label-modal">Document Type (internal key)</label>
+            <input type="text" id="crDocType" class="form-control" placeholder="e.g. wwcc" value="${escHtml(existing?.document_type || '')}" ${existing ? 'disabled' : ''}>
+          </div>
+          <div>
+            <label class="form-label-modal">Display Name</label>
+            <input type="text" id="crDisplayName" class="form-control" placeholder="e.g. Working with Children Check (VIC)" value="${escHtml(existing?.display_name || '')}">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+          <div>
+            <label class="form-label-modal">Required</label>
+            <select id="crRequired" class="form-control">
+              <option value="true" ${existing?.required !== false ? 'selected' : ''}>Yes</option>
+              <option value="false" ${existing?.required === false ? 'selected' : ''}>No</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label-modal">Expiry Source</label>
+            <select id="crExpirySource" class="form-control" onchange="document.getElementById('crValidityDaysWrap').style.display=this.value==='computed'?'':'none'">
+              <option value="computed" ${(!existing || existing.expiry_source === 'computed') ? 'selected' : ''}>Computed (issue date + validity)</option>
+              <option value="printed_on_document" ${existing?.expiry_source === 'printed_on_document' ? 'selected' : ''}>Printed on the document</option>
+              <option value="no_expiry" ${existing?.expiry_source === 'no_expiry' ? 'selected' : ''}>No expiry</option>
+            </select>
+          </div>
+          <div id="crValidityDaysWrap" style="${existing && existing.expiry_source !== 'computed' ? 'display:none' : ''}">
+            <label class="form-label-modal">Validity (days)</label>
+            <input type="number" id="crValidityDays" class="form-control" placeholder="e.g. 365" value="${existing?.validity_days ?? ''}">
+          </div>
+          <div>
+            <label class="form-label-modal">Status</label>
+            <select id="crVerified" class="form-control">
+              <option value="false" ${!existing?.verified ? 'selected' : ''}>Draft (unverified)</option>
+              <option value="true" ${existing?.verified ? 'selected' : ''}>Verified</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <label class="form-label-modal">Source (which Article/AI Source/policy this comes from)</label>
+          <textarea id="crSourceNote" class="form-control" style="min-height:50px;resize:vertical">${escHtml(existing?.source_note || '')}</textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-add" onclick="saveComplianceRequirement()">Save</button>
+          <button class="btn-secondary" onclick="document.getElementById('addComplianceRequirementForm').style.display='none'">Cancel</button>
+        </div>`;
+      wrap.style.display = 'block';
+      wrap.scrollIntoView({ block: 'nearest' });
+    }
+    async function saveComplianceRequirement() {
+      const wrap = document.getElementById('addComplianceRequirementForm');
+      const editId = wrap.dataset.editId;
+      const payload = {
+        display_name: document.getElementById('crDisplayName').value.trim(),
+        required: document.getElementById('crRequired').value === 'true',
+        expiry_source: document.getElementById('crExpirySource').value,
+        validity_days: document.getElementById('crValidityDays').value ? Number(document.getElementById('crValidityDays').value) : null,
+        verified: document.getElementById('crVerified').value === 'true',
+        source_note: document.getElementById('crSourceNote').value.trim() || null
+      };
+      if (!editId) {
+        payload.state = document.getElementById('crState').value.trim();
+        payload.document_type = document.getElementById('crDocType').value.trim();
+        if (!payload.state || !payload.document_type || !payload.display_name) {
+          toast('State, Document Type, and Display Name are required', 'error'); return;
+        }
+      }
+      try {
+        const res = await fetch(editId ? `/api/document-checker/requirements/${editId}` : '/api/document-checker/requirements', {
+          method: editId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to save', 'error'); return; }
+        toast(editId ? 'Requirement updated' : 'Requirement added', 'success');
+        wrap.style.display = 'none';
+        loadComplianceRequirements();
+      } catch { toast('Network error', 'error'); }
+    }
+    async function deleteComplianceRequirement(id) {
+      if (!confirm('Delete this compliance requirement? Any checker relying on it will fall back to its own hardcoded default, if it has one.')) return;
+      try {
+        const res = await fetch(`/api/document-checker/requirements/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to delete', 'error'); return; }
+        toast('Requirement deleted', 'success');
+        loadComplianceRequirements();
+      } catch { toast('Network error', 'error'); }
     }
 
     // ── Document Checker ──────────────────────────────────────────

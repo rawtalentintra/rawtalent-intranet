@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
-const { extractText, runCheck } = require('../services/documentCheckerService');
+const { extractText, runCheck, invalidateRequirementCache } = require('../services/documentCheckerService');
 
 // Compliance documents are sensitive — admin/super_admin only for now,
 // same tier as everything else touching candidate/educator personal data.
@@ -37,6 +37,92 @@ async function fetchRtDocument(documentPath) {
   return { buffer, filename };
 }
 
+// ── Compliance Rules (Phase 0) ──────────────────────────────────────
+// The structured, state-by-document-type rule set every checker in
+// documentCheckerService.js reads its validity period from — see
+// compliance_requirements' own schema.sql comment for the full reasoning.
+// Plain CRUD, admin-editable, no AI anywhere near it.
+router.get('/requirements', async (req, res) => {
+  try {
+    const result = await getDb().execute('SELECT * FROM compliance_requirements ORDER BY document_type, state');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const REQUIREMENT_FIELDS = ['state', 'document_type', 'display_name', 'required', 'expiry_source', 'validity_days', 'verified', 'source_note', 'source_url', 'notes'];
+const EXPIRY_SOURCES = new Set(['computed', 'printed_on_document', 'no_expiry']);
+
+router.post('/requirements', async (req, res) => {
+  const { state, document_type, display_name, expiry_source } = req.body;
+  if (!state?.trim() || !document_type?.trim() || !display_name?.trim()) {
+    return res.status(400).json({ error: 'state, document_type, and display_name are required' });
+  }
+  if (expiry_source && !EXPIRY_SOURCES.has(expiry_source)) {
+    return res.status(400).json({ error: `expiry_source must be one of: ${[...EXPIRY_SOURCES].join(', ')}` });
+  }
+  try {
+    const id = uuidv4();
+    await getDb().execute({
+      sql: `INSERT INTO compliance_requirements
+              (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note, source_url, notes, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id, state.trim().toUpperCase(), document_type.trim(), display_name.trim(),
+        req.body.required !== false, expiry_source || 'computed', req.body.validity_days ?? null, !!req.body.verified,
+        req.body.source_note || null, req.body.source_url || null, req.body.notes || null,
+        req.user.email, req.user.email
+      ]
+    });
+    invalidateRequirementCache();
+    const row = (await getDb().execute({ sql: 'SELECT * FROM compliance_requirements WHERE id = ?', args: [id] })).rows[0];
+    res.json(row);
+  } catch (err) {
+    // Most likely the (state, document_type) unique index — surfaced as a
+    // normal validation error rather than a raw 500, since "this state/
+    // type combo already has a row" is an expected, correctable mistake.
+    res.status(err.message?.includes('duplicate key') ? 409 : 500).json({ error: err.message?.includes('duplicate key') ? 'A requirement already exists for this state and document type — edit that row instead.' : err.message });
+  }
+});
+
+router.put('/requirements/:id', async (req, res) => {
+  if (req.body.expiry_source && !EXPIRY_SOURCES.has(req.body.expiry_source)) {
+    return res.status(400).json({ error: `expiry_source must be one of: ${[...EXPIRY_SOURCES].join(', ')}` });
+  }
+  const sets = [];
+  const args = [];
+  for (const field of REQUIREMENT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+      sets.push(`${field} = ?`);
+      args.push(field === 'state' ? String(req.body[field]).toUpperCase() : req.body[field]);
+    }
+  }
+  if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+  sets.push('updated_by = ?', 'updated_at = now()');
+  args.push(req.user.email, req.params.id);
+  try {
+    const result = await getDb().execute({ sql: `UPDATE compliance_requirements SET ${sets.join(', ')} WHERE id = ?`, args });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Requirement not found' });
+    invalidateRequirementCache();
+    const row = (await getDb().execute({ sql: 'SELECT * FROM compliance_requirements WHERE id = ?', args: [req.params.id] })).rows[0];
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/requirements/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await getDb().execute({ sql: 'DELETE FROM compliance_requirements WHERE id = ?', args: [req.params.id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Requirement not found' });
+    invalidateRequirementCache();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // The whole point of this feature is avoiding AI credits — OCR (free,
 // self-hosted Tesseract) plus a deterministic rule set derived from our own
 // SOPs (see services/documentCheckerService.js). No AI call anywhere in
@@ -44,7 +130,7 @@ async function fetchRtDocument(documentPath) {
 // re-checking a document after RT shows an updated file just adds a new
 // row rather than overwriting the last result.
 router.post('/check-from-rt', async (req, res) => {
-  const { candidateId, candidateName, userDocumentDetailId, requirementName, documentPath } = req.body;
+  const { candidateId, candidateName, candidateState, userDocumentDetailId, requirementName, documentPath } = req.body;
   if (!candidateId || !userDocumentDetailId || !requirementName || !documentPath) {
     return res.status(400).json({ error: 'candidateId, userDocumentDetailId, requirementName, and documentPath are required' });
   }
@@ -56,7 +142,10 @@ router.post('/check-from-rt', async (req, res) => {
     const { text, method, confidence } = await extractText(buffer, filename);
     if (!text) return res.status(422).json({ error: 'No readable text could be extracted from this document.' });
 
-    const result = runCheck(documentType, text, { candidateName: candidateName || null });
+    // candidateState threaded through for the state-specific checkers
+    // Phase 1 adds (WWCC/Blue Card/etc.) — Police Check's own requirement
+    // row is state-independent ('ALL') so it's a no-op for it today.
+    const result = await runCheck(documentType, text, { candidateName: candidateName || null, state: candidateState || null });
 
     const db = getDb();
     const id = uuidv4();

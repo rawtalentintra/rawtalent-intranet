@@ -1591,6 +1591,88 @@ CREATE INDEX IF NOT EXISTS idx_document_checks_outcome ON document_checks(outcom
 CREATE INDEX IF NOT EXISTS idx_document_checks_candidate ON document_checks(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_document_checks_requirement ON document_checks(user_document_detail_id);
 
+-- Document Checker Phase 0 (2026-09-09, Joy): a structured, admin-editable
+-- rule set — which document types are required per state, how their expiry
+-- works, and which real source (a HeartBeat Article, an AI Source, or RT's
+-- own stated policy) justifies each row — so documentCheckerService.js's
+-- actual per-document checks can read validity periods etc. as DATA instead
+-- of hardcoded JS constants, without ever calling AI to do it. This is the
+-- foundation every later document-type checker builds on.
+--
+-- state = 'ALL' for a requirement that's the same everywhere (Police Check
+-- today — a Raw Talent internal policy, not government-mandated, so it
+-- doesn't vary by state) or a real state/territory code for one that does
+-- (WWCC-equivalent schemes genuinely differ VIC/NSW/QLD/SA/WA/TAS/NT/ACT).
+-- document_type is our own internal key (matches documentCheckerService.js's
+-- CHECKERS map — e.g. 'police_check'), not RT's requirementName/documentId
+-- directly, so multiple RT-side labels for the same real-world document
+-- can map onto one requirement row.
+--
+-- `verified` is the important safety valve: false means this row is a
+-- best-effort starting draft (seeded from general knowledge, not a
+-- confirmed-current government source) and must NOT be trusted as an
+-- authoritative compliance decision until a human — Joy or someone on the
+-- compliance/RT side — has actually checked it against the real current
+-- rule and flipped it to true. The Document Checker UI surfaces this
+-- distinction rather than hiding it.
+CREATE TABLE IF NOT EXISTS compliance_requirements (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  document_type TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  required BOOLEAN NOT NULL DEFAULT true,
+  expiry_source TEXT NOT NULL DEFAULT 'computed', -- 'computed' (issue date + validity_days) | 'printed_on_document' (extract a real expiry date straight off the document) | 'no_expiry'
+  validity_days INTEGER, -- only meaningful when expiry_source = 'computed'
+  verified BOOLEAN NOT NULL DEFAULT false,
+  source_note TEXT, -- free-text citation — which Article/AI Source/policy this came from
+  source_url TEXT,
+  notes TEXT,
+  created_by CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_by CITEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_requirements_state_doctype ON compliance_requirements(state, document_type);
+
+-- Seeded once, never overwritten on a later boot (ON CONFLICT DO NOTHING) —
+-- once someone edits a row through the admin UI, schema.sql re-running on
+-- every deploy must never silently revert it back to this starting draft.
+-- Police Check is the one row seeded as verified=true: it's RT's own stated
+-- internal policy (see documentCheckerService.js's existing comment/
+-- constant, migrated to read from this table in the same change that adds
+-- it), not something that needed research. Every other row here is a
+-- best-effort DRAFT from general knowledge of how each state's WWCC-
+-- equivalent scheme typically works — genuinely useful as a starting point
+-- for Onboarding/compliance to react to, but explicitly NOT confirmed
+-- against each state's actual current legislation, and marked verified=false
+-- for exactly that reason. Nothing downstream should treat an unverified
+-- row's validity_days as ground truth for a real pass/fail decision without
+-- a human first reviewing it.
+INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
+  ('cr-all-police-check', 'ALL', 'police_check', 'National Police Check', true, 'computed', 365, true,
+   'Raw Talent internal policy, not government-mandated — renewed annually. See "Compliance Documents – Police Check (VIC)" and "VIT-Registered Teachers – WWCC & Police Check Requirements" Articles.'),
+  ('cr-vic-wwcc', 'VIC', 'wwcc', 'Working with Children Check (VIC)', true, 'printed_on_document', NULL, false,
+   'DRAFT — Victoria''s WWCC card historically states its own expiry (commonly issued for 5 years for a volunteer/employee check), but Victoria has also moved parts of its scheme towards ongoing monitoring rather than a fixed reissue date. Needs confirming against the current Working with Children Check Victoria scheme before this is relied on.'),
+  ('cr-nsw-wwcc', 'NSW', 'wwcc', 'Working with Children Check (NSW)', true, 'printed_on_document', NULL, false,
+   'DRAFT — NSW WWCC clearances are commonly issued for around 5 years and the expiry is printed on the clearance itself. Needs confirming against the current NSW Office of the Children''s Guardian requirements.'),
+  ('cr-qld-blue-card', 'QLD', 'blue_card', 'Blue Card (QLD)', true, 'printed_on_document', NULL, false,
+   'DRAFT — Queensland uses the Blue Card system (Blue Card Services) rather than a "WWCC" — historically a fixed-term card (commonly cited around 3 years) that has also been moving towards continuous/no-card renewal models. Needs confirming against Blue Card Services'' current requirements.'),
+  ('cr-sa-wwcc', 'SA', 'wwcc', 'Working with Children Check / DHS Screening (SA)', true, 'printed_on_document', NULL, false,
+   'DRAFT — South Australia''s child-related and DHS screening checks have commonly been valid around 5 years historically, with ongoing-monitoring changes also introduced in recent years. Needs confirming against the current SA DHS Screening Unit requirements.'),
+  ('cr-wa-wwcc', 'WA', 'wwcc', 'Working with Children Check (WA)', true, 'printed_on_document', NULL, false,
+   'DRAFT — WA''s Working with Children Card has commonly been issued for around 3 years. Needs confirming against the current WA Working with Children Screening Unit requirements.'),
+  ('cr-tas-wwvp', 'TAS', 'wwcc', 'Registration to Work with Vulnerable People (TAS)', true, 'printed_on_document', NULL, false,
+   'DRAFT — Tasmania''s Working with Vulnerable People registration has commonly been issued for around 3 years. Needs confirming against the current Tasmanian WWVP scheme requirements.'),
+  ('cr-nt-ochre', 'NT', 'wwcc', 'Ochre Card (NT)', true, 'printed_on_document', NULL, false,
+   'DRAFT — the NT Working with Children Clearance ("Ochre Card") has commonly been issued for around 3 years. Needs confirming against the current NT Screening Authority requirements.'),
+  ('cr-act-wwvp', 'ACT', 'wwcc', 'Working with Vulnerable People Registration (ACT)', true, 'printed_on_document', NULL, false,
+   'DRAFT — the ACT''s Working with Vulnerable People registration has commonly been issued for around 3 years. Needs confirming against the current Access Canberra requirements.'),
+  ('cr-all-first-aid', 'ALL', 'first_aid', 'First Aid Certificate (HLTAID011 or equivalent)', true, 'printed_on_document', NULL, false,
+   'DRAFT — nationally, the full First Aid unit is commonly cited as valid ~3 years, with the CPR component alone needing a ~12-month refresher — these are two different expiries on the same broad requirement, which this single row doesn''t yet distinguish. Needs confirming against current national First Aid currency guidelines and how Raw Talent wants the CPR-vs-full-certificate distinction handled.'),
+  ('cr-all-child-safety', 'ALL', 'child_safety_training', 'Child Safety Training', true, 'no_expiry', NULL, false,
+   'DRAFT — assumed one-off/no fixed expiry pending confirmation; several states have been moving towards mandatory periodic refreshers for child-safe standards training. Needs confirming against current requirements and whether Raw Talent wants a refresher cadence applied regardless.')
+ON CONFLICT (state, document_type) DO NOTHING;
+
 -- Local mirror of RT's Candidates report — RT's API has no server-side name
 -- search and no "updated since" field (only createdDate), so the only way
 -- to know what changed on an EXISTING candidate is a full re-fetch. This
