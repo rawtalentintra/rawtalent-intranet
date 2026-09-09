@@ -341,6 +341,19 @@ router.get('/history', async (req, res) => {
 // needs_review/invalid — reviewed means a human has actually looked at it,
 // which is the whole point of this list (surfacing what nobody has looked
 // at yet), not "outcome is currently clean".
+//
+// Real bug (found 2026-09-09, accuracy-auditing against a real candidate):
+// a candidate whose RT record is itself a superseded "_migration_delete"
+// ghost profile (is_deleted=true — the exact same duplicate-profile pattern
+// already fixed in services/taskPersonMatchService.js's match queries
+// earlier this session, just never carried over here) was showing up in
+// this list. A manager reviewing "who needs attention" has no use for a
+// deleted, superseded RT record — it wastes their time and can't actually
+// be acted on. Excludes any candidate whose current rt_candidates_cache row
+// is_deleted, via a LEFT JOIN (LEFT, not INNER — a check on a candidate
+// who's since dropped out of the cache entirely, e.g. never synced, must
+// still show rather than silently vanishing just because the join found
+// nothing).
 router.get('/flagged', async (req, res) => {
   try {
     const result = await getDb().execute(`
@@ -350,15 +363,17 @@ router.get('/flagged', async (req, res) => {
         WHERE candidate_id IS NOT NULL
         ORDER BY candidate_id, user_document_detail_id, created_at DESC
       )
-      SELECT candidate_id,
-             (array_agg(candidate_name_input ORDER BY created_at DESC))[1] AS candidate_name,
+      SELECT l.candidate_id,
+             (array_agg(l.candidate_name_input ORDER BY l.created_at DESC))[1] AS candidate_name,
              COUNT(*) AS flagged_count,
-             array_agg(DISTINCT outcome) AS outcomes,
-             array_agg(DISTINCT requirement_name ORDER BY requirement_name) AS flagged_documents,
-             MAX(created_at) AS most_recent_at
-      FROM latest
-      WHERE outcome IN ('needs_review', 'invalid') AND reviewed = false
-      GROUP BY candidate_id
+             array_agg(DISTINCT l.outcome) AS outcomes,
+             array_agg(DISTINCT l.requirement_name ORDER BY l.requirement_name) AS flagged_documents,
+             MAX(l.created_at) AS most_recent_at
+      FROM latest l
+      LEFT JOIN rt_candidates_cache c ON c.user_id = l.candidate_id
+      WHERE l.outcome IN ('needs_review', 'invalid') AND l.reviewed = false
+        AND (c.is_deleted IS NOT TRUE)
+      GROUP BY l.candidate_id
       ORDER BY most_recent_at DESC
       LIMIT 100
     `);

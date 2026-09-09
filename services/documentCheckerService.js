@@ -743,6 +743,33 @@ function applyDocumentIntegrityFlags(flags, reasons, { documentType, pdfMetadata
   return false;
 }
 
+// Real finding (2026-09-09, auditing checker accuracy against a real
+// candidate): a candidate's "Police Check" slot held a Cited.com.au
+// payment RECEIPT for the police check ("TAX INVOICE... National Police
+// CheckBT1704686133949$43.16... Total Paid: $43.16"), not the actual
+// certificate — a real, plausibly common onboarding mistake (uploading
+// proof of payment instead of the document itself). The overall outcome
+// still correctly landed on 'invalid' (no issuing authority, no applicant
+// name found), so nothing false-positived through as valid — but the
+// REASONS given were misleading: "Issued 08/01/2024 — past our 365-day
+// renewal policy" reads as "ask them to renew it", when the real problem
+// is there's no certificate here at all, not that one expired. The generic
+// keyword type-check even reported documentTypeConfirmed=true, since the
+// receipt's own "National Police Check" line-item description happens to
+// contain the exact same wording a real certificate uses.
+// Requires at least 2 of these invoice-specific terms to co-occur,
+// deliberately conservative — a genuine certificate mentioning a fee or
+// payment once in passing shouldn't trip this; a real payment receipt
+// reliably has several of these together.
+const INVOICE_MARKERS = [/tax\s+invoice/i, /invoice\s*#/i, /total\s*\(excl\s*gst\)/i, /total\s+gst\b/i, /total\s+paid\b/i, /total\s+outstanding\b/i, /receipt\s+number/i];
+
+function applyInvoiceReceiptFlag(flags, reasons, text) {
+  if (INVOICE_MARKERS.filter(p => p.test(text)).length < 2) return false;
+  reasons.push('This looks like a payment receipt/invoice for the document, not the actual certificate itself — the real compliance document still needs to be uploaded.');
+  flags.push('looks_like_receipt_not_document');
+  return true;
+}
+
 async function runCheck(documentType, text, options) {
   const checker = CHECKERS[documentType];
   if (!checker) throw new Error(`No checker implemented for document type "${documentType}" yet.`);
@@ -750,6 +777,7 @@ async function runCheck(documentType, text, options) {
 
   const qualityFlagged = applyPhotoQualityFlags(result.flags, result.reasons, options || {});
   const integrityFlagged = applyDocumentIntegrityFlags(result.flags, result.reasons, { documentType, ...(options || {}) });
+  const receiptFlagged = applyInvoiceReceiptFlag(result.flags, result.reasons, text);
   // A quality/integrity concern can only ever pull a clean 'valid' down to
   // 'needs_review' — it never gets to upgrade an already-'invalid' result
   // (that's already the most severe outcome) and never silently produces a
@@ -758,7 +786,13 @@ async function runCheck(documentType, text, options) {
   // Fake-document signals in particular are deliberately never allowed to
   // auto-set 'invalid' on their own — only a human should make that call;
   // this system's job is surfacing it for review, not accusing anyone.
-  if ((qualityFlagged || integrityFlagged) && result.outcome === 'valid') result.outcome = 'needs_review';
+  // A payment receipt is the one exception that DOES force 'invalid'
+  // outright rather than just 'needs_review' — unlike a fake-document
+  // heuristic (uncertain, needs a human's judgment call), "this is
+  // definitely not the certificate" is not actually ambiguous once at
+  // least 2 real invoice markers co-occur.
+  if (receiptFlagged) result.outcome = 'invalid';
+  else if ((qualityFlagged || integrityFlagged) && result.outcome === 'valid') result.outcome = 'needs_review';
   result.extracted = { ...result.extracted, ocrConfidence: options?.confidence ?? null, imageQuality: options?.quality ?? null };
   return result;
 }
