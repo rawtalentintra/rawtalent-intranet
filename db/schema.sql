@@ -2262,3 +2262,61 @@ CREATE TABLE IF NOT EXISTS calendar_feed_tokens (
   token TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- ACECQA approved qualifications list (2026-09-10) — a local snapshot of
+-- ACECQA's real public "NQF approved qualifications list"
+-- (acecqa.gov.au/qualifications/nqf-approved), used by checkQualification
+-- (documentCheckerService.js) to cross-check a candidate's OCR-extracted
+-- training-package code (e.g. "CHC50113") against the real, current
+-- government-approved list — not just confirming a document LOOKS like a
+-- qualification certificate (the existing type-pattern check), but that
+-- the specific qualification named on it is genuinely ACECQA-approved.
+--
+-- Deliberately a periodically-refreshed SNAPSHOT, not a live lookup — no
+-- automatable path exists to the live site. Confirmed directly 2026-09-10:
+-- the site's own search/export routes (Drupal Views, no auth needed) are
+-- real and genuinely useful, but sit behind Cloudflare's JS challenge —
+-- a plain server-side request gets a 403 "Just a moment..." page, not
+-- real data. The export flow ALSO only works via a real browser (it's a
+-- two-step async batch job — trigger the export, then a second request
+-- fetches the generated file), so even a scripted approach would need a
+-- full headless browser to solve Cloudflare's challenge, which this
+-- codebase deliberately doesn't take on as a dependency (real complexity
+-- and fragility for a list that doesn't change often, not worth it here).
+-- The one genuine gap found: once an export is actually triggered by a
+-- real browser, the resulting static file itself
+-- (/sites/default/files/views_data_export/.../qualification-export.csv)
+-- is NOT behind the same Cloudflare protection and fetches fine
+-- server-side — so refreshing this table is a real, if manual, two-step
+-- process (trigger the export via a real browser, then re-import the
+-- resulting CSV), not something that needs re-scraping by hand. See
+-- scripts/refreshAcecqaQualifications.js for the full refresh process and
+-- the import logic itself. This table is NOT auto-seeded on boot the way
+-- compliance_requirements is (1,345 rows doesn't belong inline in this
+-- file) — a fresh environment should run that script once, pointed at
+-- db/seeds/acecqa-qualifications-2026-09-10.csv (the real full export
+-- this table was first seeded from) as a reasonable starting point until
+-- someone does a real refresh.
+CREATE TABLE IF NOT EXISTS acecqa_approved_qualifications (
+  id SERIAL PRIMARY KEY,
+  qualification_level TEXT, -- 'ECT' | 'Diploma' | 'Certificate III' | 'Suitably qualified person' | etc. — ACECQA's own free-text level label, not normalised
+  awarding_institution TEXT,
+  qualification_name TEXT NOT NULL,
+  qualification_code TEXT, -- e.g. 'CHC50113' — the real training-package code; many older/university entries have none at all (see documentCheckerService.js's own fallback-to-name-matching note)
+  date_awarded TEXT, -- ACECQA's own free-text validity window (e.g. "Any date prior to 21 January 2023") — not a real date column, deliberately: several real values are ranges/conditions, not a single date
+  where_approved TEXT,
+  awarding_institution_country TEXT,
+  important_information TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_acecqa_qual_code ON acecqa_approved_qualifications ((upper(qualification_code)));
+CREATE INDEX IF NOT EXISTS idx_acecqa_qual_name_trgm ON acecqa_approved_qualifications USING gin (qualification_name gin_trgm_ops);
+
+-- Tracks when the snapshot above was last refreshed, and how many rows it
+-- held — surfaced in the Document Checker so a reviewer can see how stale
+-- the ACECQA cross-check is, the same "don't hide staleness" principle as
+-- REQUIREMENT_CACHE_TTL_MS's own comment in documentCheckerService.js.
+CREATE TABLE IF NOT EXISTS acecqa_sync_log (
+  id SERIAL PRIMARY KEY,
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  row_count INTEGER NOT NULL
+);

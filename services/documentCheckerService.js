@@ -794,8 +794,66 @@ const checkRanTraining = makeExpiringDocumentChecker('ran_training', RAN_TRAININ
 // /s flag, which silently failed this exact real sample until caught here.
 const QUALIFICATION_TYPE_PATTERN = /has\s+fulfilled\s+the\s+requirements|has\s+successfully\s+completed[\s\S]{0,60}requirements\s+for\s+the\s+qualification|australian\s+qualifications?\s+framework|has\s+attained|having\s+fulfilled\s+all\s+the\s+requirements/i;
 
-const checkQualification = makeExpiringDocumentChecker('qualification', QUALIFICATION_TYPE_PATTERN,
+const _checkQualificationBase = makeExpiringDocumentChecker('qualification', QUALIFICATION_TYPE_PATTERN,
   'Could not find wording confirming this is a qualification certificate, testamur, or statement of attainment — may be the wrong document.');
+
+// ── ACECQA approved-qualifications cross-check (2026-09-10) ─────────────
+// Real training-package codes ("CHC50113", "CHC30113", ...) appeared on
+// 6 of 9 real Qualification samples sampled this session — a clean,
+// standardised format worth cross-checking against ACECQA's real public
+// "NQF approved qualifications list" (acecqa_approved_qualifications, a
+// periodically-refreshed local snapshot — see that table's own schema.sql
+// comment for why this can't be a live lookup: the real site is behind
+// Cloudflare's JS challenge for any server-side request). Deliberately
+// code-only, not also fuzzy-matching qualification NAMES — the 3 real
+// samples with no extractable code (a "Record of Results" listing unit
+// codes instead of one overall qualification code, and a university
+// Bachelor of Education degree) are an honest gap, not force-fit into a
+// fuzzy name-match that risks a false negative on real, valid wording
+// variation across issuers.
+const ACECQA_CODE_PATTERN = /\bCHC\d{5}\b/i;
+
+let acecqaCodeCache = { byCode: null, expiresAt: 0 };
+async function getAcecqaQualificationByCode(code) {
+  if (!acecqaCodeCache.byCode || Date.now() >= acecqaCodeCache.expiresAt) {
+    const rows = (await getDb().execute(
+      `SELECT qualification_code, qualification_name, qualification_level, important_information
+       FROM acecqa_approved_qualifications WHERE qualification_code IS NOT NULL`
+    )).rows;
+    const byCode = new Map();
+    for (const r of rows) byCode.set(String(r.qualification_code).toUpperCase(), r);
+    acecqaCodeCache = { byCode, expiresAt: Date.now() + REQUIREMENT_CACHE_TTL_MS };
+  }
+  return acecqaCodeCache.byCode.get(code.toUpperCase()) || null;
+}
+
+async function checkQualification(text, options = {}) {
+  const result = await _checkQualificationBase(text, options);
+  const codeMatch = text.match(ACECQA_CODE_PATTERN);
+  if (!codeMatch) {
+    result.extracted.qualificationCode = null;
+    result.extracted.acecqaMatch = null;
+    return result;
+  }
+  const code = codeMatch[0].toUpperCase();
+  result.extracted.qualificationCode = code;
+  const acecqaEntry = await getAcecqaQualificationByCode(code);
+  if (acecqaEntry) {
+    result.extracted.acecqaMatch = {
+      qualificationName: acecqaEntry.qualification_name,
+      level: acecqaEntry.qualification_level,
+      note: acecqaEntry.important_information || null
+    };
+  } else {
+    result.extracted.acecqaMatch = null;
+    result.flags.push('acecqa_code_not_found');
+    const syncRow = (await getDb().execute('SELECT synced_at, row_count FROM acecqa_sync_log ORDER BY synced_at DESC LIMIT 1')).rows[0];
+    const syncedNote = syncRow ? `local snapshot synced ${new Date(syncRow.synced_at).toLocaleDateString('en-AU', { timeZone: 'UTC' })}, ${syncRow.row_count} entries` : 'local snapshot never synced';
+    result.reasons.push(`Found training-package code ${code} on the document, but it doesn't appear on ACECQA's approved qualifications list (${syncedNote}) — check manually. Could be a very recent real addition not yet in this snapshot, or an OCR misread of the code.`);
+    if (result.outcome === 'valid') result.outcome = 'needs_review';
+  }
+  return result;
+}
 
 // ── Passport/Birth Certificate/Citizenship (2026-09-10) ──────────────────
 // Grounded in the real "Compliance Documents – Passport" Article and 13

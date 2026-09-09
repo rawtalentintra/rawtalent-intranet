@@ -12198,6 +12198,8 @@
             <div><span style="color:var(--text-muted)">Expiry (12mo policy):</span> ${escHtml(e.expiryDate || '—')}</div>
             <div><span style="color:var(--text-muted)">Name on document:</span> ${escHtml(e.applicantName || '—')}</div>
             <div><span style="color:var(--text-muted)">Name matches candidate:</span> ${e.nameMatchesCandidate === null ? '—' : (e.nameMatchesCandidate ? 'Yes' : 'No')}</div>
+            ${e.qualificationCode ? `<div><span style="color:var(--text-muted)">Qualification code:</span> ${escHtml(e.qualificationCode)}</div>
+            <div><span style="color:var(--text-muted)">ACECQA approved list:</span> ${e.acecqaMatch ? `✓ Yes — ${escHtml(e.acecqaMatch.qualificationName)}${e.acecqaMatch.note ? ` <span title="${escHtml(e.acecqaMatch.note)}" style="cursor:help">ⓘ</span>` : ''}` : '⚠ Not found on list — check manually'}</div>` : ''}
           </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-bottom:8px">
             <input type="checkbox" id="doc-reviewed-${check.id}" ${check.reviewed ? 'checked' : ''}> Reviewed
