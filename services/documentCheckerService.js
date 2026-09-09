@@ -252,13 +252,46 @@ const AWARDED_TO_PATTERN = /awarded\s+to\s*:?\s*\n?\s*([A-Za-z][A-Za-z '\-]{2,60
 // label/colon and no "Awarded to" phrasing either.
 const HAS_COMPLETED_PATTERN = /^\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n\s*has\s+completed\b/im;
 
+// Qualification/Course of Study (2026-09-10) — sampled 8 real candidate
+// certificates directly from rt_candidates_cache (not guessed). The
+// dominant real template, 5 of 8 samples (Cert III/Diploma of Early
+// Childhood Education and Care, issued by several different private RTOs —
+// Partners in Training, CMC-Training At Work, New Futures Training, MCIE):
+// "This is to certify that\n<Name>\nhas fulfilled the requirements for".
+const FULFILLED_REQUIREMENTS_PATTERN = /this\s+is\s+to\s+certify\s+that\s*\n\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n\s*has\s+fulfilled/i;
+// A second real template (Elite College Australia, CHC30113 Certificate
+// III): "THIS CERTIFIES THAT\n<Name>\nhas successfully completed".
+// [^\n]{0,10} tolerates OCR noise between the name and the line break (real
+// sample: "Kowsar Mohamed Abshir :" — a stray colon the capture group's own
+// character class deliberately excludes, so without this the match would
+// silently fail right where the name ends).
+const CERTIFIES_THAT_PATTERN = /this\s+certifies\s+that\s*\n\s*([A-Za-z][A-Za-z '\-]{2,60})[^\n]{0,10}\n\s*has\s+successfully\s+completed/i;
+// A third real template ("Record of Results" from Sage Institute of
+// Education, a scanned/OCR'd unit-by-unit transcript rather than a single
+// certificate): "This is a record that\n<Name>\nhas attained". [^\n]{0,20}
+// tolerates trailing junk before the line break — the one real sample of
+// this template has a bracketed student ID right after the name
+// ("Ritiya Nantib (25335)"), which without this addition made the whole
+// pattern silently fail to match at all (found by actually running this
+// checker against the real sample, not assumed). That real sample also has
+// a misread surname ("Nantib" for a candidate on file as "McGlone") — a
+// genuine OCR/scan-quality limitation no regex can fix; namesLikelyMatch
+// will correctly flag it as a mismatch rather than silently accepting it.
+const RECORD_THAT_PATTERN = /this\s+is\s+a\s+record\s+that\s*\n\s*([A-Za-z][A-Za-z '\-]{2,60})[^\n]{0,20}\n\s*has\s+attained/i;
+
 // Best-effort name extraction — looks for a line right after a "Name:"/
 // "Applicant:" label first (simpler certificate formats), then falls back
 // to the ACIC "Subject Details" table, then the AFP "...name of:...born
 // on" phrasing, then a training-certificate's "Awarded to" or "<Name> has
-// completed" phrasing. Genuinely free-form across issuers, so this is a
-// hint for the human reviewer, not something the outcome hinges on by
-// itself — see namesLikelyMatch.
+// completed" phrasing, then the three real Qualification-certificate
+// templates above. Genuinely free-form across issuers, so this is a hint
+// for the human reviewer, not something the outcome hinges on by itself —
+// see namesLikelyMatch. (Two other real Qualification templates sampled —
+// a university degree's "be it known that... having fulfilled all the
+// requirements..." and a variant where the name prints BEFORE "This is to
+// certify that" instead of after — aren't covered by any pattern here; a
+// name-extraction miss on those is an honest gap, not a silent wrong
+// answer, exactly like the existing WWCC name-extraction gap.)
 function extractApplicantName(text) {
   const labelMatch = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
   if (labelMatch) return labelMatch[1].trim();
@@ -270,6 +303,12 @@ function extractApplicantName(text) {
   if (awardedToMatch) return awardedToMatch[1].trim().replace(/\s+/g, ' ');
   const hasCompletedMatch = text.match(HAS_COMPLETED_PATTERN);
   if (hasCompletedMatch) return hasCompletedMatch[1].trim().replace(/\s+/g, ' ');
+  const fulfilledMatch = text.match(FULFILLED_REQUIREMENTS_PATTERN);
+  if (fulfilledMatch) return fulfilledMatch[1].trim().replace(/\s+/g, ' ');
+  const certifiesMatch = text.match(CERTIFIES_THAT_PATTERN);
+  if (certifiesMatch) return certifiesMatch[1].trim().replace(/\s+/g, ' ');
+  const recordMatch = text.match(RECORD_THAT_PATTERN);
+  if (recordMatch) return recordMatch[1].trim().replace(/\s+/g, ' ');
   return null;
 }
 
@@ -717,6 +756,47 @@ async function checkProtectingChildrenTraining(text, options = {}) {
 const checkRanTraining = makeExpiringDocumentChecker('ran_training', RAN_TRAINING_TYPE_PATTERN,
   'Could not find wording confirming this is a RAN (Responding to Risks of Harm, Abuse and Neglect) training certificate — may be the wrong document.');
 
+// Qualification/Course of Study (2026-09-10) — expiry_source='no_expiry'
+// (see cr-all-qualification's own compliance_requirements comment): every
+// real candidate on file with this requirement has RT's own expiryDate set
+// to the '9999-12-31' sentinel, confirmed by directly querying
+// rt_candidates_cache — a childcare qualification, once obtained, doesn't
+// expire the way a police check or WWCC does.
+//
+// Type pattern is a compound OR across every real phrasing found sampling
+// 8 real candidate certificates directly (Sage Institute, MCIE, Partners in
+// Training, CMC-Training At Work, Australian Catholic University, Elite
+// College Australia, New Futures Training — genuinely different RTOs/
+// universities, no single expected issuer the way Police Check has one
+// named authority, so — same reasoning as Child Safety Training/PCC's
+// retracted issuer checks — no expectedIssuerPattern here):
+//   - "has fulfilled the requirements" — 5 of 8 real samples, the dominant
+//     Cert III/Diploma template regardless of which RTO issued it.
+//   - "has successfully completed ... requirements for the qualification"
+//     — Elite College's real "THIS CERTIFIES THAT" template.
+//   - "australian qualifications framework" — printed on 6 of 8 real
+//     samples (every RTO-issued one; the one genuine exception in this
+//     sample, a Bachelor of Education degree, is covered by "having
+//     fulfilled all the requirements" below instead), a broad real safety
+//     net independent of the certificate's exact wording style.
+//   - "has attained" — the real "Record of Results" / "Statement of
+//     Attainment" template (Sage Institute; also the unit-level pages
+//     bundled into Maheen Hyder's real file alongside her actual Diploma).
+//   - "having fulfilled all the requirements" — Australian Catholic
+//     University's real Bachelor of Education degree parchment (a
+//     genuinely valid Qualification/Course of Study document with no CHC
+//     code and no AQF wording at all).
+// [\s\S]{0,60} (not a plain .{0,60}) between "completed" and "requirements
+// for the qualification" — Elite College's real OCR text wraps that gap
+// across a line break with stray characters in between ("has successfully
+// completed all a :\nrequirements for the qualification of"), and a plain
+// `.` never matches a newline without the (unsupported-in-this-codebase)
+// /s flag, which silently failed this exact real sample until caught here.
+const QUALIFICATION_TYPE_PATTERN = /has\s+fulfilled\s+the\s+requirements|has\s+successfully\s+completed[\s\S]{0,60}requirements\s+for\s+the\s+qualification|australian\s+qualifications?\s+framework|has\s+attained|having\s+fulfilled\s+all\s+the\s+requirements/i;
+
+const checkQualification = makeExpiringDocumentChecker('qualification', QUALIFICATION_TYPE_PATTERN,
+  'Could not find wording confirming this is a qualification certificate, testamur, or statement of attainment — may be the wrong document.');
+
 const CHECKERS = {
   police_check: checkPoliceCheck,
   wwcc: checkWwcc,
@@ -724,7 +804,8 @@ const CHECKERS = {
   first_aid: checkFirstAid,
   child_safety_training: checkChildSafetyTraining,
   protecting_children_training: checkProtectingChildrenTraining,
-  ran_training: checkRanTraining
+  ran_training: checkRanTraining,
+  qualification: checkQualification
 };
 
 // ── Phase 2 (2026-09-09) — non-AI photo-quality checks ──────────────────
@@ -920,5 +1001,5 @@ async function runCheck(documentType, text, options) {
 
 module.exports = {
   extractText, runCheck, getComplianceRequirement, invalidateRequirementCache,
-  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining
+  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining, checkQualification
 };

@@ -1758,6 +1758,18 @@ INSERT INTO compliance_requirements (id, state, document_type, display_name, req
    'Confirmed 2026-09-10 against 2 real Educators SA/Plink-issued certificates — both print an explicit "Expiry date: ..." directly, extracted the same way as WWCC/Blue Card/First Aid. Named in Raw Talent''s own internal QA SOP ("SOP: Educator Profile Screening Process", Step 7: RAN Training Certificate — "College Name is entered as: Plink").')
 ON CONFLICT (state, document_type) DO NOTHING;
 
+-- Qualification/Course of Study (2026-09-10) — expiry_source='no_expiry'
+-- confirmed directly against real data, not assumed: queried
+-- rt_candidates_cache for every real candidate with a "Qualification/Course
+-- of Study" requirement attached, and every single one has RT's own
+-- expiryDate set to the '9999-12-31' sentinel (same sentinel used elsewhere
+-- in this codebase to mean "does not expire") — a childcare qualification
+-- doesn't expire the way a police check or WWCC does.
+INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
+  ('cr-all-qualification', 'ALL', 'qualification', 'Qualification/Course of Study', true, 'no_expiry', NULL, true,
+   'Confirmed 2026-09-10 by sampling 8 real candidate certificates directly from rt_candidates_cache (Sage Institute of Education, Melbourne City Institute of Education, Partners in Training, CMC-Training At Work, Australian Catholic University, Elite College Australia, New Futures Training) and by directly querying every real candidate''s own RT expiryDate for this requirement (100% are the 9999-12-31 sentinel, confirming no_expiry). No expected-issuer check, deliberately — genuinely no single expected issuer across real samples (7 different RTOs/universities), same reasoning as the retracted Child Safety Training/PCC issuer checks.')
+ON CONFLICT (state, document_type) DO NOTHING;
+
 -- Phase 1 correction take 2 (2026-09-10) — grounded in real, first-party
 -- source material Joy provided directly: three HeartBeat Articles ("Working
 -- with Children Check (WWCC) — RawTalent Requirements", "Compliance

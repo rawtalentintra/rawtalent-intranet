@@ -56,7 +56,11 @@ const REQUIREMENT_NAME_TO_TYPE = {
   // candidates (overwhelmingly SA, a handful in VIC/QLD too) hold this
   // exact requirementName, a genuinely common compliance document this
   // codebase had zero support for until now.
-  'RAN Training Certificate (Master/Refresher)': 'ran_training'
+  'RAN Training Certificate (Master/Refresher)': 'ran_training',
+  // Confirmed 2026-09-10 — this exact requirementName found on real
+  // candidates via a direct rt_candidates_cache query (used to find and
+  // download 8 real certificates for checkQualification's own patterns).
+  'Qualification/Course of Study': 'qualification'
 };
 
 // Documents are never uploaded here — they're fetched server-side from the
