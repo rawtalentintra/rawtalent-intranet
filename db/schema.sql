@@ -1828,6 +1828,26 @@ UPDATE compliance_requirements
 SET source_note = 'DRAFT — "Working with Children Check (WWCC) — RawTalent Requirements" Article (2026-09-10) confirms a Blue Card "Has an expiry date — must be kept current" but doesn''t state the exact period. Historically commonly cited around 3 years; needs confirming against Blue Card Services'' current requirements before a specific validity_days figure is set.'
 WHERE id = 'cr-qld-blue-card' AND verified = false;
 
+-- cr-all-first-aid: the real "Compliance Documents – First Aid" Article
+-- resolves the exact uncertainty this row's original DRAFT note was
+-- flagging — "Certificate is valid for 3 years; CPR component must be
+-- renewed annually" confirms the 3-year figure directly (matching what was
+-- only a guess before). The CPR-vs-full-certificate distinction still
+-- isn't separately tracked here — Raw Talent's own internal QA SOP ("SOP:
+-- Educator Profile Screening Process", Step 7: First Aid) only checks a
+-- single "Expiry Date is correct" against the certificate, with no mention
+-- of tracking the CPR sub-component's own earlier expiry separately, so
+-- expiry_source stays 'printed_on_document' (the real certificate's own
+-- printed expiry is authoritative) rather than trying to compute or
+-- distinguish a separate CPR-only date this codebase has no real evidence
+-- Raw Talent actually wants tracked. Accepted course codes (HLTAID
+-- 003/004/011/012) were already covered correctly by the existing
+-- FIRST_AID_TYPE_PATTERN before this Article — confirmed, not a bug found.
+UPDATE compliance_requirements
+SET validity_days = 1095, verified = true,
+    source_note = 'Confirmed 2026-09-10 — "Compliance Documents – First Aid" Article: "Validity: Certificate is valid for 3 years; CPR component must be renewed annually." Approved course codes: HLTAID012 (Provide First Aid in an Education and Care Setting), HLTAID011 (Provide First Aid), and the older HLTAID003/004 — all already matched by the existing hltaid0\d\d pattern. The CPR-only annual sub-component is NOT separately tracked here — Raw Talent''s own internal QA SOP checks a single certificate expiry date, not a distinct CPR-component date.'
+WHERE id = 'cr-all-first-aid' AND verified = false;
+
 -- Local mirror of RT's Candidates report — RT's API has no server-side name
 -- search and no "updated since" field (only createdDate), so the only way
 -- to know what changed on an EXISTING candidate is a full re-fetch. This
