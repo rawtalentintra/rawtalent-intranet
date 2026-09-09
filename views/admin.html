@@ -1484,6 +1484,20 @@
             <div id="docCheckCandidateResults" style="display:none;margin-top:14px"></div>
           </div>
 
+          <!-- Flagged Profiles (Phase 6, 2026-09-09) — real candidates with
+               an unresolved compliance concern (needs_review/invalid,
+               nobody's marked it reviewed yet), grouped so a reviewer sees
+               "these people need attention" at a glance rather than
+               scrolling the full history table. Clicking a row jumps
+               straight to that candidate, same as a search result. -->
+          <div class="admin-table-card" id="docCheckFlaggedCard" style="margin-bottom:20px;display:none">
+            <div style="padding:16px 20px 0">
+              <div style="font-weight:700;color:var(--navy);font-size:14px">Flagged Profiles</div>
+              <div style="font-size:11px;color:var(--text-muted)">Candidates with a document check that needs a second look</div>
+            </div>
+            <div id="docCheckFlaggedBody" style="padding:14px 20px"></div>
+          </div>
+
           <div class="admin-table-card">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
               <div style="font-weight:700;color:var(--navy);font-size:14px">Recent Checks</div>
@@ -6085,7 +6099,7 @@
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'payroll') initPayrollSection();
       if (id === 'leads') loadLeadsTable();
-      if (id === 'document-checker') loadDocumentCheckHistory();
+      if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
       if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
@@ -12160,11 +12174,14 @@
         // the findings panel collapsed like any other card.
         toggleDocFindings(userDocumentDetailId);
         toast('Check complete', 'success');
-        // Recent Checks lives on the search screen, hidden behind this one
-        // right now — refresh it in the background so it's already current
-        // by the time "← Back to search" is clicked, not stale until a
-        // manual page reload.
+        // Recent Checks and Flagged Profiles both live on the search
+        // screen, hidden behind this one right now — refresh them in the
+        // background so they're already current by the time "← Back to
+        // search" is clicked, not stale until a manual page reload. A
+        // fresh check can newly flag a candidate, or clear one that was
+        // flagged before.
         loadDocumentCheckHistory();
+        loadFlaggedProfiles();
       } catch { toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Document'; } }
     }
 
@@ -12209,6 +12226,13 @@
           loadDocumentCheckHistory();
         }
 
+        // Flagged Profiles is hidden behind whichever screen this save
+        // happened on (candidate view or history table) — refresh it in
+        // the background too, same reasoning as loadDocumentCheckHistory
+        // just above, so a just-reviewed item stops showing there without
+        // needing a full page revisit.
+        loadFlaggedProfiles();
+
         toast('Review saved', 'success');
       } catch { toast('Network error', 'error'); }
     }
@@ -12216,6 +12240,33 @@
     function toggleDocHistoryFindings(checkId) {
       const row = document.getElementById(`doc-history-findings-row-${checkId}`);
       if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+    }
+
+    // ── Flagged Profiles (Phase 6) ───────────────────────────────────
+    // Built on the LATEST check per (candidate, document) server-side —
+    // see routes/documentChecker.js's /flagged for why a stale flag from
+    // before a document was re-checked and passed must not linger here.
+    // The card itself stays hidden entirely when nothing's flagged, rather
+    // than showing an empty "Flagged Profiles" shell every time someone
+    // opens Document Checker with a clean queue.
+    async function loadFlaggedProfiles() {
+      const card = document.getElementById('docCheckFlaggedCard');
+      const body = document.getElementById('docCheckFlaggedBody');
+      try {
+        const rows = await fetch('/api/document-checker/flagged').then(r => r.json());
+        if (!rows.length) { card.style.display = 'none'; return; }
+        card.style.display = 'block';
+        body.innerHTML = `<div style="border:1px solid var(--gray-200);border-radius:var(--radius);overflow:hidden">` + rows.map((r, i) => `
+          <div style="padding:10px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;${i < rows.length - 1 ? 'border-bottom:1px solid var(--gray-100)' : ''}" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''" onclick="selectDocCheckCandidate(${r.candidate_id})">
+            <div>
+              <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml(r.candidate_name || `Candidate #${r.candidate_id}`)}</div>
+              <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(r.flagged_documents.join(', '))}</div>
+            </div>
+            <span class="badge ${r.outcomes.includes('invalid') ? 'badge-draft' : 'badge-user'}" style="font-size:11px;flex-shrink:0">${r.flagged_count} flagged</span>
+          </div>`).join('') + `</div>`;
+      } catch {
+        card.style.display = 'none';
+      }
     }
 
     // ── Document Checker audit log (all candidates) ─────────────────
@@ -12262,6 +12313,7 @@
         if (!res.ok) { toast('Failed to delete', 'error'); return; }
         toast('Deleted', 'success');
         loadDocumentCheckHistory();
+        loadFlaggedProfiles();
       } catch { toast('Network error', 'error'); }
     }
 

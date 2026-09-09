@@ -313,6 +313,44 @@ router.get('/history', async (req, res) => {
   }
 });
 
+// Flagged Profiles (Phase 6, 2026-09-09) — which real candidates currently
+// have an unresolved compliance concern, grouped so a reviewer sees "these
+// 12 people need attention" at a glance instead of scrolling the full
+// history table looking for outcome != 'valid'. Built on the LATEST check
+// per (candidate, document) only — document_checks is append-only, so a
+// document that was flagged once but has since been re-checked and passed
+// must not still count it as flagged forever off stale history. "reviewed"
+// clears an item from this list even if the outcome itself is still
+// needs_review/invalid — reviewed means a human has actually looked at it,
+// which is the whole point of this list (surfacing what nobody has looked
+// at yet), not "outcome is currently clean".
+router.get('/flagged', async (req, res) => {
+  try {
+    const result = await getDb().execute(`
+      WITH latest AS (
+        SELECT DISTINCT ON (candidate_id, user_document_detail_id) *
+        FROM document_checks
+        WHERE candidate_id IS NOT NULL
+        ORDER BY candidate_id, user_document_detail_id, created_at DESC
+      )
+      SELECT candidate_id,
+             (array_agg(candidate_name_input ORDER BY created_at DESC))[1] AS candidate_name,
+             COUNT(*) AS flagged_count,
+             array_agg(DISTINCT outcome) AS outcomes,
+             array_agg(DISTINCT requirement_name ORDER BY requirement_name) AS flagged_documents,
+             MAX(created_at) AS most_recent_at
+      FROM latest
+      WHERE outcome IN ('needs_review', 'invalid') AND reviewed = false
+      GROUP BY candidate_id
+      ORDER BY most_recent_at DESC
+      LIMIT 100
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Deleting the audit record outright (not just archiving) is kept to
 // super_admin, same as the other hard-delete actions in this app.
 router.delete('/:id', requireSuperAdmin, async (req, res) => {
