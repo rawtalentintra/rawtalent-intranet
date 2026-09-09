@@ -51,7 +51,12 @@ const REQUIREMENT_NAME_TO_TYPE = {
   // Victoria's government WWCC card. See schema.sql's
   // cr-vic-protecting-children-training row and documentCheckerService.js's
   // checkProtectingChildrenTraining for the full reasoning.
-  'Protecting Children Certificate (VIC Only)': 'protecting_children_training'
+  'Protecting Children Certificate (VIC Only)': 'protecting_children_training',
+  // Confirmed 2026-09-10 against real production data — 500+ real
+  // candidates (overwhelmingly SA, a handful in VIC/QLD too) hold this
+  // exact requirementName, a genuinely common compliance document this
+  // codebase had zero support for until now.
+  'RAN Training Certificate (Master/Refresher)': 'ran_training'
 };
 
 // Documents are never uploaded here — they're fetched server-side from the
@@ -378,6 +383,59 @@ router.get('/flagged', async (req, res) => {
       LIMIT 100
     `);
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// WWCC bulk-verification CSV export (2026-09-10) — researched live whether
+// VIC/SA expose a public API for automated WWCC status cross-checking:
+// neither does. Confirmed for SA via a real third-party verification-
+// automation vendor's own documentation ("South Australia needs your
+// organisation's DHS Screening Unit portal login... There's no anonymous
+// route — the portal is the only way to check an SA clearance" — even a
+// company whose entire business is automating this kind of check has no
+// real API to call, only portal-login simulation). Confirmed for VIC by
+// opening the real, live status-checker tool directly: no API, but it DOES
+// offer an official bulk-CSV upload (up to 1500 at once, exactly 2
+// columns: "family name" and "card number") — a genuine, sanctioned way to
+// make the SOP's existing manual "verify through the state portal" step
+// far less painful than one-by-one, even though it's still a human
+// uploading a file and reading results back, not a live automated
+// cross-check. This endpoint generates that exact CSV from whichever real
+// WWCC registration numbers the checker has already extracted and
+// confirmed the format of (see documentCheckerService.js's
+// checkWwccNumberFormat) — nothing here is invented, only real captured
+// numbers from real checks already on file.
+router.get('/export-wwcc-csv', async (req, res) => {
+  const state = (req.query.state || 'VIC').toUpperCase();
+  try {
+    const result = await getDb().execute({
+      sql: `WITH latest AS (
+              SELECT DISTINCT ON (candidate_id, user_document_detail_id) *
+              FROM document_checks
+              WHERE candidate_id IS NOT NULL AND document_type = 'wwcc'
+              ORDER BY candidate_id, user_document_detail_id, created_at DESC
+            )
+            SELECT c.last_name, l.extracted_fields->>'wwccRegistrationNumber' AS card_number
+            FROM latest l
+            JOIN rt_candidates_cache c ON c.user_id = l.candidate_id
+            WHERE l.extracted_fields->>'wwccRegistrationNumber' IS NOT NULL
+              AND l.extracted_fields->>'stateUsed' = ?
+              AND (c.is_deleted IS NOT TRUE)
+            ORDER BY c.last_name`,
+      args: [state]
+    });
+    // CSV-escape each field per RFC 4180 (wrap in quotes, double any
+    // embedded quote) — a family name with a comma or quote in it would
+    // otherwise silently corrupt the column alignment VIC's own bulk tool
+    // expects.
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['family name', 'card number'], ...result.rows.map(r => [r.last_name, r.card_number])];
+    const csv = rows.map(row => row.map(esc).join(',')).join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="wwcc-bulk-check-${state}.csv"`);
+    res.send(csv);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1464,6 +1464,7 @@
             <div class="admin-page-sub">Find a candidate, then check their compliance documents — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles.</div>
           </div>
           <div style="display:flex;gap:8px">
+            <button class="btn-secondary" onclick="exportVicWwccCsv()" title="Neither VIC nor SA has a public API for WWCC status checking (checked live 2026-09-10) — VIC does offer a real bulk-upload tool though (up to 1500 at once). This downloads a CSV in exactly the 2-column format that tool expects, built from real WWCC numbers already extracted and confirmed by this Document Checker.">Export VIC WWCC CSV</button>
             <button class="btn-secondary super-admin-only" style="display:none" onclick="openBulkSweepModal()">Bulk Compliance Sweep</button>
             <button class="btn-secondary" onclick="openComplianceRequirementsModal()">Compliance Rules</button>
           </div>
@@ -11822,6 +11823,19 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // ── VIC WWCC bulk-verification CSV export (2026-09-10) ──────────
+    // See routes/documentChecker.js's own comment on /export-wwcc-csv for
+    // the full research behind this — no public API exists for VIC or SA
+    // WWCC status checking, confirmed live; VIC's real status-checker tool
+    // does have an official bulk-CSV upload (family name + card number, up
+    // to 1500 at once) though, which this feeds directly. A plain anchor
+    // click rather than fetch+blob — this is a real authenticated download
+    // from the live app, not something rendered inside an Artifact-style
+    // sandbox that blocks script-driven saves.
+    function exportVicWwccCsv() {
+      window.open('/api/document-checker/export-wwcc-csv?state=VIC', '_blank');
+    }
+
     // ── Bulk Compliance Sweep (Document Checker Phase 5, 2026-09-09) ──
     // Fire-and-forget + poll, same pattern as the RT candidates cache sync
     // (triggerCandidatesSync/loadCandidatesSyncStatus above) — a real sweep
@@ -11938,7 +11952,8 @@
       'Blue Card',
       'First Aid',
       'Foundations of Child Safety Training',
-      'Advanced Child Safety Training'
+      'Advanced Child Safety Training',
+      'RAN Training Certificate (Master/Refresher)'
     ]);
     const DOC_CHECK_OUTCOME_META = {
       valid: { label: '✅ Valid', cls: 'badge-published' },
@@ -12042,6 +12057,29 @@
       return complianceRequirements;
     }
 
+    // VIT (Victorian Institute of Teaching) exemption (2026-09-10) — real,
+    // first-party HeartBeat Article ("VIT-Registered Teachers – WWCC &
+    // Police Check Requirements"): a teacher holding current VIT
+    // registration is exempt from WWCC entirely (VIT's own registration
+    // process already includes an equivalent suitability assessment) —
+    // Police Check stays required regardless, unaffected by this. RT
+    // tracks teacher registration under its own "Teachers Accreditation"
+    // requirement type; "current" means a real, non-expired one is on file
+    // — reads RT's own expiryDate directly (no OCR/checker involved, same
+    // field the rest of this app already reads for expiring-docs counts),
+    // excluding the same two sentinel dates ('0001-01-01' unset,
+    // '9999-12-31' never-expires) every other real date comparison in this
+    // codebase already excludes.
+    function hasCurrentVitRegistration(attachedRequirements) {
+      return attachedRequirements.some(r => {
+        if (r.requirementName !== 'Teachers Accreditation') return false;
+        if (!r.expiryDate) return true;
+        const dateStr = String(r.expiryDate).slice(0, 10);
+        if (dateStr === '9999-12-31' || dateStr === '0001-01-01') return true;
+        return new Date(r.expiryDate).getTime() >= Date.now();
+      });
+    }
+
     async function renderComplianceGapsPanel(candidate, state, attachedRequirements) {
       const wrap = document.getElementById('docCheckComplianceGapsWrap');
       wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
@@ -12059,20 +12097,25 @@
         requirements.filter(r => r.required && r.state === state).forEach(r => byType.set(r.document_type, r));
 
         const presentTypes = new Set(attachedRequirements.map(r => typeMap[r.requirementName]).filter(Boolean));
-        const missing = [...byType.values()].filter(r => !presentTypes.has(r.document_type));
+        let missing = [...byType.values()].filter(r => !presentTypes.has(r.document_type));
+
+        const vitExempt = state === 'VIC' && hasCurrentVitRegistration(attachedRequirements);
+        if (vitExempt) missing = missing.filter(r => r.document_type !== 'wwcc');
 
         if (!state) {
           wrap.innerHTML = `<div style="background:var(--gray-100);border-radius:var(--radius);padding:12px 16px;font-size:12.5px;color:var(--text-muted)">Candidate has no state on file — can't check which compliance documents are required for them.</div>`;
           return;
         }
+        const vitNote = vitExempt ? `<div style="font-size:11.5px;color:#166534;margin-top:6px">✓ WWCC not required — current VIT (Victorian Institute of Teaching) registration on file exempts this candidate.</div>` : '';
         if (!missing.length) {
-          wrap.innerHTML = `<div style="background:#f0fdf4;border-radius:var(--radius);padding:12px 16px;font-size:12.5px;color:#166534">✓ Has a document on file for every required compliance type in ${escHtml(state)}.</div>`;
+          wrap.innerHTML = `<div style="background:#f0fdf4;border-radius:var(--radius);padding:12px 16px;font-size:12.5px;color:#166534">✓ Has a document on file for every required compliance type in ${escHtml(state)}.${vitNote}</div>`;
           return;
         }
         wrap.innerHTML = `
           <div style="background:#fef2f2;border-radius:var(--radius);padding:12px 16px">
             <div style="font-weight:700;color:#991b1b;font-size:13px;margin-bottom:6px">Missing for ${escHtml(state)}</div>
             <div style="font-size:12px;color:#7f1d1d">This candidate has no document on file at all for: ${missing.map(r => escHtml(r.display_name)).join(', ')}.</div>
+            ${vitNote}
           </div>`;
       } catch {
         wrap.innerHTML = '';

@@ -246,13 +246,19 @@ const NAME_OF_PATTERN = /name\s+of\s*:?\s*([a-z][a-z,'\-\s]{2,60}?)\s+born\s+on\
 // text-run structure.
 const AWARDED_TO_PATTERN = /awarded\s+to\s*:?\s*\n?\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n/i;
 
+// A RAN (Responding to Risks of Harm, Abuse and Neglect) training
+// certificate — real, Educators SA/Plink-issued, 2026-09-10 — states the
+// name only as "<Name>\nhas completed\nFULL CERTIFICATION...", no
+// label/colon and no "Awarded to" phrasing either.
+const HAS_COMPLETED_PATTERN = /^\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n\s*has\s+completed\b/im;
+
 // Best-effort name extraction — looks for a line right after a "Name:"/
 // "Applicant:" label first (simpler certificate formats), then falls back
 // to the ACIC "Subject Details" table, then the AFP "...name of:...born
-// on" phrasing, then a training-certificate's "Awarded to" phrasing.
-// Genuinely free-form across issuers, so this is a hint for the human
-// reviewer, not something the outcome hinges on by itself — see
-// namesLikelyMatch.
+// on" phrasing, then a training-certificate's "Awarded to" or "<Name> has
+// completed" phrasing. Genuinely free-form across issuers, so this is a
+// hint for the human reviewer, not something the outcome hinges on by
+// itself — see namesLikelyMatch.
 function extractApplicantName(text) {
   const labelMatch = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
   if (labelMatch) return labelMatch[1].trim();
@@ -262,6 +268,8 @@ function extractApplicantName(text) {
   if (nameOfMatch) return nameOfMatch[1].trim().replace(/\s+/g, ' ');
   const awardedToMatch = text.match(AWARDED_TO_PATTERN);
   if (awardedToMatch) return awardedToMatch[1].trim().replace(/\s+/g, ' ');
+  const hasCompletedMatch = text.match(HAS_COMPLETED_PATTERN);
+  if (hasCompletedMatch) return hasCompletedMatch[1].trim().replace(/\s+/g, ' ');
   return null;
 }
 
@@ -440,6 +448,14 @@ const CHILD_SAFETY_TYPE_PATTERN = /child\s*safe(ty)?\s*(standards?|training)?|fo
 // class as Phase 1's curly-apostrophe fix, just a dash instead of a quote.
 const PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN = /protecting\s+children\s*[-–—]?\s*mandatory\s+reporting|protecting\s+children\s+certificate/i;
 
+// RAN (Responding to Risks of Harm, Abuse and Neglect) training —
+// verified against 2 real Educators SA/Plink-issued certificates
+// (2026-09-10). "RRHAN" is the training's own registration-number prefix
+// (e.g. "RRHAN-22539092-24912286") — reliable and distinctive on its own,
+// so it's included as an alternative to the full descriptive phrase in
+// case OCR/formatting mangles the longer wording.
+const RAN_TRAINING_TYPE_PATTERN = /\bRRHAN\b|responding\s+to\s+risks?\s+of\s+harm/i;
+
 // Shared shape for any document type whose compliance_requirements row is
 // keyed by (state, document_type) and whose validity is confirmed by one
 // recognisable phrase somewhere in the document — WWCC-family cards, Blue
@@ -560,8 +576,57 @@ function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage
   };
 }
 
-const checkWwcc = makeExpiringDocumentChecker('wwcc', WWCC_TYPE_PATTERN,
+// ── WWCC registration-number format validation (2026-09-10) ─────────────
+// Real internal QA SOP ("SOP: Educator Profile Screening Process") Step 7
+// gives the exact expected registration-number format per state, since
+// staff are told to enter it "using the correct format" when logging their
+// manual portal verification:
+//   Victoria (VIC): 1111111A-01  (7 digits, 1 letter, dash, 2 digits)
+//   South Australia (SA): SRN1111-1111  (SRN, 4 digits, dash, 4 digits)
+// NOT independently verified against a real production VIC/SA document,
+// unlike most other patterns in this file — every real WWCC-labelled
+// document currently on file in this dataset turned out to be WA's, and
+// zero real SA-labelled ones have a file attached at all (checked
+// directly, 2026-09-10). Built straight from the SOP's own literal stated
+// examples instead, and flagged accordingly in its own reason text so a
+// reviewer knows this specific check hasn't been confirmed against a real
+// card yet. Only checked when the candidate's state IS VIC or SA (no
+// format is stated for any other state) and only ever a soft,
+// needs_review-level signal — an OCR misread or an unanticipated card
+// layout variation shouldn't be treated as a confirmed problem.
+const WWCC_NUMBER_PATTERNS = {
+  VIC: { pattern: /\b\d{7}[A-Z]-\d{2}\b/i, example: '1111111A-01' },
+  SA: { pattern: /\bSRN\d{4}-\d{4}\b/i, example: 'SRN1111-1111' }
+};
+
+// Returns the matched number (for capturing into extracted fields — see
+// checkWwcc below, useful for e.g. exporting VIC's own official bulk
+// verification CSV: service.vic.gov.au's real "Working with Children Check
+// status checker" bulk tool takes exactly "family name" + "card number"
+// columns, confirmed live 2026-09-10) or null if none found.
+function checkWwccNumberFormat(text, state, flags, reasons) {
+  const expected = WWCC_NUMBER_PATTERNS[state];
+  if (!expected) return null; // no stated format for this state — nothing to check
+  const match = text.match(expected.pattern);
+  if (!match) {
+    reasons.push(`Could not find a ${state}-format WWCC registration number on this document (expected like ${expected.example}, per Raw Talent's own internal QA SOP — not yet independently confirmed against a real ${state} card) — check manually.`);
+    flags.push('wwcc_number_format_unconfirmed');
+    return null;
+  }
+  return match[0].toUpperCase();
+}
+
+const _checkWwccBase = makeExpiringDocumentChecker('wwcc', WWCC_TYPE_PATTERN,
   'Could not find wording confirming this is a Working with Children Check / Protecting Children Certificate / Working with Vulnerable People registration — may be the wrong document.');
+
+async function checkWwcc(text, options = {}) {
+  const result = await _checkWwccBase(text, options);
+  const registrationNumber = checkWwccNumberFormat(text, options.state, result.flags, result.reasons);
+  result.extracted.wwccRegistrationNumber = registrationNumber;
+  if (result.flags.includes('wwcc_number_format_unconfirmed') && result.outcome === 'valid') result.outcome = 'needs_review';
+  return result;
+}
+
 const checkBlueCard = makeExpiringDocumentChecker('blue_card', BLUE_CARD_TYPE_PATTERN,
   'Could not find wording confirming this is a Blue Card — may be the wrong document.');
 const checkFirstAid = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PATTERN,
@@ -604,6 +669,13 @@ const checkChildSafetyTraining = makeExpiringDocumentChecker('child_safety_train
   'Could not find wording confirming this is a Child Safety Training certificate — may be the wrong document.');
 const checkProtectingChildrenTraining = makeExpiringDocumentChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
   'Could not find wording confirming this is a Protecting Children (Mandatory Reporting) training certificate — may be the wrong document.');
+// expiry_source='printed_on_document' (see compliance_requirements' own
+// cr-all-ran-training row) — both real certificates checked print an
+// explicit "Expiry date: 31 December 2027" directly, extractExpiryDate's
+// existing "expiry date" label already catches it with no new pattern
+// needed.
+const checkRanTraining = makeExpiringDocumentChecker('ran_training', RAN_TRAINING_TYPE_PATTERN,
+  'Could not find wording confirming this is a RAN (Responding to Risks of Harm, Abuse and Neglect) training certificate — may be the wrong document.');
 
 const CHECKERS = {
   police_check: checkPoliceCheck,
@@ -611,7 +683,8 @@ const CHECKERS = {
   blue_card: checkBlueCard,
   first_aid: checkFirstAid,
   child_safety_training: checkChildSafetyTraining,
-  protecting_children_training: checkProtectingChildrenTraining
+  protecting_children_training: checkProtectingChildrenTraining,
+  ran_training: checkRanTraining
 };
 
 // ── Phase 2 (2026-09-09) — non-AI photo-quality checks ──────────────────
@@ -807,5 +880,5 @@ async function runCheck(documentType, text, options) {
 
 module.exports = {
   extractText, runCheck, getComplianceRequirement, invalidateRequirementCache,
-  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining
+  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining
 };

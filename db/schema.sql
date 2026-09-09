@@ -1743,6 +1743,21 @@ INSERT INTO compliance_requirements (id, state, document_type, display_name, req
    'DRAFT — a Raw Talent/RT-tracked training-course completion certificate ("Protecting Children - Mandatory Reporting and other Obligations for the Early Childhood Sector"), confirmed against a real uploaded certificate (2026-09-09) — NOT Victoria''s government Working with Children Check card (see cr-vic-wwcc). The real certificate shows only a completion date, no printed expiry. Needs confirming whether Raw Talent or Victorian regulation requires this to be periodically retaken regardless.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
+-- RAN (Responding to Risks of Harm, Abuse and Neglect) training
+-- (2026-09-10) — named in Raw Talent's own internal QA SOP ("SOP:
+-- Educator Profile Screening Process", Step 7), and confirmed against real
+-- production data: 500+ real candidates hold this exact document
+-- (overwhelmingly SA, a handful in VIC/QLD too — a genuinely national
+-- training module, just delivered here via an SA-based provider).
+-- state='ALL' since real holders aren't limited to one state. verified=true
+-- since the expiry rule itself is directly read off the certificate, not
+-- an assumption — 2 real certificates checked both print an explicit
+-- "Expiry date: 31 December 2027".
+INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
+  ('cr-all-ran-training', 'ALL', 'ran_training', 'RAN Training Certificate (Responding to Risks of Harm, Abuse and Neglect)', true, 'printed_on_document', NULL, true,
+   'Confirmed 2026-09-10 against 2 real Educators SA/Plink-issued certificates — both print an explicit "Expiry date: ..." directly, extracted the same way as WWCC/Blue Card/First Aid. Named in Raw Talent''s own internal QA SOP ("SOP: Educator Profile Screening Process", Step 7: RAN Training Certificate — "College Name is entered as: Plink").')
+ON CONFLICT (state, document_type) DO NOTHING;
+
 -- Phase 1 correction take 2 (2026-09-10) — grounded in real, first-party
 -- source material Joy provided directly: three HeartBeat Articles ("Working
 -- with Children Check (WWCC) — RawTalent Requirements", "Compliance
