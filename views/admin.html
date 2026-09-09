@@ -1811,7 +1811,7 @@
            of a hardcoded JS constant. Plain table + inline edit, no AI
            anywhere near it. Content filled in by openComplianceRequirementsModal(). -->
       <div class="modal-overlay" id="complianceRequirementsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeComplianceRequirementsModal()">
-        <div class="modal" style="max-width:920px">
+        <div class="modal" style="max-width:1200px;width:95vw">
           <div class="modal-header">
             <div>
               <div class="modal-title">Compliance Rules</div>
@@ -1823,11 +1823,11 @@
             <button class="btn-add" style="margin-bottom:12px" onclick="showAddComplianceRequirementForm()">+ Add Requirement</button>
             <div id="addComplianceRequirementForm" style="display:none;background:var(--offwhite);border-radius:var(--radius);padding:14px;margin-bottom:14px"></div>
             <div style="overflow-x:auto">
-              <table class="data-table data-table-compact" style="width:100%">
+              <table class="data-table data-table-compact" style="width:100%;table-layout:fixed">
                 <thead>
                   <tr>
-                    <th>State</th><th>Document Type</th><th>Display Name</th><th>Required</th>
-                    <th>Expiry</th><th>Status</th><th>Source</th><th></th>
+                    <th style="width:60px">State</th><th style="width:130px">Document Type</th><th style="width:15%">Display Name</th><th style="width:70px">Required</th>
+                    <th style="width:140px">Expiry</th><th style="width:80px">Status</th><th>Source</th><th style="width:120px"></th>
                   </tr>
                 </thead>
                 <tbody id="complianceRequirementsBody">
@@ -11711,16 +11711,25 @@
         return;
       }
       const canDelete = currentUserRole === 'super_admin';
+      // table-layout:fixed (set on the table itself) gives every column a
+      // real, predictable width from the <th>s above — but a fixed-width
+      // column does nothing on its own to stop a <td>'s content from
+      // visually spilling into the next column; every cell whose content
+      // could plausibly be longer than its column still needs its own
+      // overflow:hidden + text-overflow:ellipsis, or (found live, not
+      // guessed) long Display Name/Source text renders right on top of the
+      // Edit/Delete buttons instead of truncating.
+      const truncCell = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       body.innerHTML = complianceRequirements.map(r => `
         <tr>
           <td style="font-weight:700">${escHtml(r.state)}</td>
-          <td><code style="font-size:11px">${escHtml(r.document_type)}</code></td>
-          <td>${escHtml(r.display_name)}</td>
+          <td style="${truncCell}"><code style="font-size:11px">${escHtml(r.document_type)}</code></td>
+          <td style="${truncCell}" title="${escHtml(r.display_name)}">${escHtml(r.display_name)}</td>
           <td>${r.required ? 'Yes' : 'No'}</td>
           <td style="font-size:12px">${escHtml(complianceExpiryCell(r))}</td>
           <td>${r.verified ? '<span class="badge badge-published">Verified</span>' : '<span class="badge badge-user" title="Best-effort starting point — not yet confirmed against a real current source">Draft</span>'}</td>
-          <td style="font-size:11.5px;color:var(--text-muted);max-width:220px" title="${escHtml(r.source_note || '')}">${escHtml((r.source_note || '—').slice(0, 70))}${(r.source_note || '').length > 70 ? '…' : ''}</td>
-          <td style="white-space:nowrap">
+          <td style="font-size:11.5px;color:var(--text-muted);${truncCell}" title="${escHtml(r.source_note || '')}">${escHtml(r.source_note || '—')}</td>
+          <td style="white-space:nowrap;text-align:right">
             <button class="action-btn edit" style="font-size:10.5px;padding:2px 8px" onclick="showAddComplianceRequirementForm('${r.id}')">Edit</button>
             ${canDelete ? `<button class="action-btn delete" style="font-size:10.5px;padding:2px 8px" onclick="deleteComplianceRequirement('${r.id}')">Delete</button>` : ''}
           </td>
