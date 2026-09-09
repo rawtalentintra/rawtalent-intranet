@@ -237,11 +237,21 @@ const SUBJECT_NAME_PATTERN = /name\(s\)\s*primary\s*([a-z][a-z,'\-\s]{2,60}?)(?=
 // table exists on this template at all.
 const NAME_OF_PATTERN = /name\s+of\s*:?\s*([a-z][a-z,'\-\s]{2,60}?)\s+born\s+on\b/i;
 
+// A training-completion certificate template ("Protecting Children —
+// Mandatory Reporting...", real Department of Education-branded
+// certificate, 2026-09-10) states the name only as "Awarded to\n<Name>\nFor
+// successful completion of...", no label/colon at all. `\n?` between
+// "Awarded to" and the name since pdf-parse sometimes collapses the
+// linebreak and sometimes doesn't, depending on the exact PDF's internal
+// text-run structure.
+const AWARDED_TO_PATTERN = /awarded\s+to\s*:?\s*\n?\s*([A-Za-z][A-Za-z '\-]{2,60})\s*\n/i;
+
 // Best-effort name extraction — looks for a line right after a "Name:"/
 // "Applicant:" label first (simpler certificate formats), then falls back
 // to the ACIC "Subject Details" table, then the AFP "...name of:...born
-// on" phrasing. Genuinely free-form across issuers, so this is a hint for
-// the human reviewer, not something the outcome hinges on by itself — see
+// on" phrasing, then a training-certificate's "Awarded to" phrasing.
+// Genuinely free-form across issuers, so this is a hint for the human
+// reviewer, not something the outcome hinges on by itself — see
 // namesLikelyMatch.
 function extractApplicantName(text) {
   const labelMatch = text.match(/(?:applicant|full\s+name|name)\s*:\s*([A-Za-z][A-Za-z '\-]{2,60})/i);
@@ -250,6 +260,8 @@ function extractApplicantName(text) {
   if (subjectMatch) return subjectMatch[1].trim().replace(/\s+/g, ' ');
   const nameOfMatch = text.match(NAME_OF_PATTERN);
   if (nameOfMatch) return nameOfMatch[1].trim().replace(/\s+/g, ' ');
+  const awardedToMatch = text.match(AWARDED_TO_PATTERN);
+  if (awardedToMatch) return awardedToMatch[1].trim().replace(/\s+/g, ' ');
   return null;
 }
 
@@ -418,7 +430,15 @@ const CHILD_SAFETY_TYPE_PATTERN = /child\s*safe(ty)?\s*(standards?|training)?|fo
 // Verified against a real "Protecting Children Certificate (VIC Only)"
 // file (2026-09-09) — see schema.sql's cr-vic-protecting-children-training
 // comment for why this is its own type rather than folded into 'wwcc'.
-const PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN = /protecting\s+children\s*(-|—)?\s*mandatory\s+reporting|protecting\s+children\s+certificate/i;
+// Real bug (found 2026-09-10, checking a real candidate's real documents):
+// a genuine certificate ("Awarded to [name]... For successful completion
+// of Protecting Children – Mandatory Reporting and Other Obligations...")
+// was flagged as the WRONG document — traced to an EN DASH (– U+2013)
+// between "Children" and "Mandatory", which this pattern's (-|—) only
+// covered a plain hyphen and EM dash (—  U+2014) for, missing the
+// character actually used. The exact same Unicode-punctuation-mismatch bug
+// class as Phase 1's curly-apostrophe fix, just a dash instead of a quote.
+const PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN = /protecting\s+children\s*[-–—]?\s*mandatory\s+reporting|protecting\s+children\s+certificate/i;
 
 // Shared shape for any document type whose compliance_requirements row is
 // keyed by (state, document_type) and whose validity is confirmed by one
