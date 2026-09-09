@@ -443,12 +443,21 @@ const PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN = /protecting\s+children\s*[-–
 // Shared shape for any document type whose compliance_requirements row is
 // keyed by (state, document_type) and whose validity is confirmed by one
 // recognisable phrase somewhere in the document — WWCC-family cards, Blue
-// Card, and First Aid certificates all fit this (only the expiry HANDLING
-// differs between them, and that's driven entirely by the requirement row's
-// own expiry_source, not by which of these three it is). Child Safety
-// Training doesn't fit this shape (no_expiry, never has a date to check at
-// all) — see checkChildSafetyTraining below instead.
-function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage) {
+// Card, First Aid certificates, and the two training-completion types all
+// fit this (only the expiry HANDLING differs, and that's driven entirely
+// by the requirement row's own expiry_source, not by which type it is).
+//
+// `expectedIssuerPattern` (2026-09-10, grounded in Raw Talent's own real
+// internal QA SOP — "SOP: Educator Profile Screening Process" — Step 7's
+// checklist explicitly names the exact issuing college/authority to verify
+// per document type: "College Name is entered as: Department of
+// Education" for the Protecting Children Certificate, "GECCKO" for Child
+// Safety Training) — optional; when given and NOT found in the text, adds
+// a soft `unrecognised_issuer` flag, same severity as checkPoliceCheck's
+// own issuing-authority check (needs_review, never forces invalid on its
+// own — an OCR misread or a template variation shouldn't be treated the
+// same as a confirmed wrong document).
+function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage, expectedIssuerPattern = null) {
   return async function check(text, { candidateName, state } = {}) {
     const reasons = [];
     const flags = [];
@@ -466,6 +475,11 @@ function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage
     if (!isRightDocType) {
       reasons.push(wrongTypeMessage);
       flags.push('wrong_document_type');
+    }
+
+    if (expectedIssuerPattern && !expectedIssuerPattern.test(text)) {
+      reasons.push(`Could not find the expected issuing college/authority in the document — check this is genuinely from the right provider.`);
+      flags.push('unrecognised_issuer');
     }
 
     // Expiry handling branches on the requirement row's own expiry_source —
@@ -553,68 +567,42 @@ const checkBlueCard = makeExpiringDocumentChecker('blue_card', BLUE_CARD_TYPE_PA
 const checkFirstAid = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PATTERN,
   'Could not find wording confirming this is a First Aid certificate — may be the wrong document.');
 
-// Shared shape for a document type that never has an expiry to check at all
-// (Child Safety Training and the VIC Protecting Children training
-// certificate both confirmed 'no_expiry' against real documents) — just
-// doc-type confirmation, the requirement-row verified check, and a name
-// match, same as makeExpiringDocumentChecker minus everything date-related.
-function makeNoExpiryTrainingChecker(documentType, typePattern, wrongTypeMessage) {
-  return async function check(text, { candidateName, state } = {}) {
-    const reasons = [];
-    const flags = [];
-
-    const requirement = await getComplianceRequirement(documentType, state);
-    if (!requirement) {
-      reasons.push(`No compliance_requirements row found for this document type${state ? ` in ${state}` : ''} — add one in Compliance Rules before this can be checked properly.`);
-      flags.push('requirement_row_missing');
-    } else if (!requirement.verified) {
-      reasons.push(`This document type's rule is still an unverified draft in Compliance Rules (${requirement.source_note || 'no source noted'}) — confirm it before trusting the result below.`);
-      flags.push('requirement_unverified');
-    }
-
-    const isRightDocType = typePattern.test(text);
-    if (!isRightDocType) {
-      reasons.push(wrongTypeMessage);
-      flags.push('wrong_document_type');
-    }
-
-    const extractedName = extractApplicantName(text);
-    const nameMatch = candidateName ? namesLikelyMatch(candidateName, extractedName) : null;
-    if (candidateName && extractedName && nameMatch === false) {
-      reasons.push(`Extracted name "${extractedName}" doesn't obviously match the candidate name provided ("${candidateName}") — check manually.`);
-      flags.push('name_mismatch');
-    } else if (candidateName && !extractedName) {
-      reasons.push('Could not extract a name from the document to compare against the candidate.');
-      flags.push('name_not_found');
-    }
-
-    let outcome;
-    if (flags.includes('wrong_document_type')) {
-      outcome = 'invalid';
-    } else if (flags.length > 0) {
-      outcome = 'needs_review';
-    } else {
-      outcome = 'valid';
-    }
-
-    return {
-      outcome,
-      reasons,
-      flags,
-      extracted: {
-        documentTypeConfirmed: isRightDocType,
-        applicantName: extractedName,
-        nameMatchesCandidate: nameMatch,
-        requirementVerified: requirement?.verified ?? null,
-        stateUsed: state || null
-      }
-    };
-  };
-}
-
-const checkChildSafetyTraining = makeNoExpiryTrainingChecker('child_safety_training', CHILD_SAFETY_TYPE_PATTERN,
+// makeExpiringDocumentChecker (above) already fully handles
+// expiry_source='no_expiry' as one of its three branches, making it a
+// strict superset of what a separate "no expiry ever" checker function
+// would do — Child Safety Training and Protecting Children Training both
+// used to go through a dedicated makeNoExpiryTrainingChecker, retired
+// 2026-09-10 once Protecting Children Training turned out to need real
+// expiry logic after all (see PCC's compliance_requirements row comment:
+// a real certificate literally states "valid for 12 months from the date
+// of completion", missed originally because the type-confirmation and the
+// expiry-computation were built as two separate concerns and only the
+// former was checked against the real document at the time). One shared
+// function now covers all of police_check/wwcc/blue_card/first_aid/
+// child_safety_training/protecting_children_training — whichever
+// expiry_source a row is set to just works, no checker-code change needed
+// if a type's real expiry rule changes later.
+// No expected-issuer check on either of these, deliberately — the real
+// internal QA SOP names an expected "College Name" for both ("GECCKO" for
+// Child Safety Training, "Department of Education" for the Protecting
+// Children Certificate), and both were tried and tested against real
+// documents (2026-09-10) before being retracted:
+//   - Child Safety Training: a genuine, valid Foundations certificate came
+//     from "Adelaide Centre for Child Protection" (University of
+//     Adelaide), not GECCKO.
+//   - Protecting Children Certificate: sampled 5 more real certificates —
+//     only 2 of 5 actually printed "Department of Education" anywhere; a
+//     genuine, valid one (same real course, same "valid for 12 months"
+//     wording confirming the expiry logic above generalises fine) simply
+//     used an earlier template without that phrase at all.
+// Real evidence both times that the SOP's "College Name" checklist item
+// describes what a HUMAN enters into an RT data-entry field, not something
+// guaranteed to appear verbatim on every real certificate template — an
+// automated text-presence check on either would have produced a real,
+// meaningful false-positive rate rather than catching genuine problems.
+const checkChildSafetyTraining = makeExpiringDocumentChecker('child_safety_training', CHILD_SAFETY_TYPE_PATTERN,
   'Could not find wording confirming this is a Child Safety Training certificate — may be the wrong document.');
-const checkProtectingChildrenTraining = makeNoExpiryTrainingChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
+const checkProtectingChildrenTraining = makeExpiringDocumentChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
   'Could not find wording confirming this is a Protecting Children (Mandatory Reporting) training certificate — may be the wrong document.');
 
 const CHECKERS = {

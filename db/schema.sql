@@ -1743,6 +1743,76 @@ INSERT INTO compliance_requirements (id, state, document_type, display_name, req
    'DRAFT — a Raw Talent/RT-tracked training-course completion certificate ("Protecting Children - Mandatory Reporting and other Obligations for the Early Childhood Sector"), confirmed against a real uploaded certificate (2026-09-09) — NOT Victoria''s government Working with Children Check card (see cr-vic-wwcc). The real certificate shows only a completion date, no printed expiry. Needs confirming whether Raw Talent or Victorian regulation requires this to be periodically retaken regardless.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
+-- Phase 1 correction take 2 (2026-09-10) — grounded in real, first-party
+-- source material Joy provided directly: three HeartBeat Articles ("Working
+-- with Children Check (WWCC) — RawTalent Requirements", "Compliance
+-- Documents – SA Working With Children Check (WwCC)", "Compliance Documents
+-- – VIC Working With Children Check (WwCC)") plus Raw Talent's own internal
+-- QA SOP ("SOP: Educator Profile Screening Process"). Each UPDATE is
+-- guarded on verified=false so a human edit made through the Compliance
+-- Rules UI in the meantime is never silently overwritten by this file
+-- re-running on a later deploy.
+--
+-- cr-vic-protecting-children-training: the real certificate text itself
+-- states "This certificate is valid for 12 months from the date of
+-- completion" — missed in the original Phase 1 pass because the
+-- type-confirmation and the expiry logic were assessed as two separate
+-- questions and only the former was checked against the real document at
+-- the time. The SOP's own Step 7 checklist ("Protecting Children
+-- Certificate... Expiry Date is correct") independently confirms RT
+-- expects a real expiry to be tracked here, not "no_expiry". Found while
+-- checking a real candidate's real documents (2026-09-10) — her PCC now
+-- correctly computes as expired instead of being silently treated as
+-- having no expiry at all.
+UPDATE compliance_requirements
+SET expiry_source = 'computed', validity_days = 365, verified = true,
+    source_note = 'Confirmed 2026-09-10 — the certificate itself states "This certificate is valid for 12 months from the date of completion" (verified against a real uploaded certificate), corroborated by Raw Talent''s own internal QA SOP ("SOP: Educator Profile Screening Process", Step 7: Protecting Children Certificate — "Expiry Date is correct"). Computed from the certificate''s own completion date, not a separately printed expiry.'
+WHERE id = 'cr-vic-protecting-children-training' AND verified = false;
+
+-- cr-vic-wwcc: the real "Compliance Documents – VIC Working With Children
+-- Check (WwCC)" Article states plainly "Card is valid for 5 years" — the
+-- exact uncertainty the original DRAFT note was flagging (fixed term vs.
+-- ongoing monitoring) is resolved by this source. Stays
+-- expiry_source='printed_on_document' (the real card prints its own
+-- expiry; this validity_days is retained as documented reference/fallback
+-- context, not the primary extraction method for this row).
+UPDATE compliance_requirements
+SET validity_days = 1825, verified = true,
+    source_note = 'Confirmed 2026-09-10 — "Compliance Documents – VIC Working With Children Check (WwCC)" Article: "Card is valid for 5 years." Applied for via workingwithchildren.vic.gov.au (Employee Check); validated via the real VIC government status checker at service.vic.gov.au/services/working-with-children-check-status-checker/home — that live cross-check stays a manual staff step, not something this automated OCR-based checker can perform.'
+WHERE id = 'cr-vic-wwcc' AND verified = false;
+
+-- cr-sa-wwcc: the real "Compliance Documents – SA Working With Children
+-- Check (WwCC)" Article states "Once approved, the WWCC is valid for five
+-- years and is continuously monitored" — also resolves the original DRAFT
+-- note's uncertainty. Same official name correction as the general WWCC
+-- Article: SA's real screening name is "DHS Screening (Child Related
+-- Employment)", not literally "WWCC" — RT's own requirementName still
+-- calls it "Working with Children's Check (SA)" regardless, which is why
+-- the internal document_type stays 'wwcc' for state-resolution purposes.
+UPDATE compliance_requirements
+SET validity_days = 1825, verified = true,
+    display_name = 'DHS Screening / Working with Children Check (SA)',
+    source_note = 'Confirmed 2026-09-10 — "Compliance Documents – SA Working With Children Check (WwCC)" Article: "Once approved, the WWCC is valid for five years and is continuously monitored." Officially a DHS Screening Unit "Child Related Employment" clearance, not literally called a WWCC by SA — RT''s own requirementName still says "Working with Children''s Check (SA)" though. Raw Talent only accepts the "Paid Employment" application type (not Volunteer or Tertiary Student) — a Tertiary Student screening must be upgraded before starting work. Interstate WWCC cards do NOT satisfy SA''s own requirement.'
+WHERE id = 'cr-sa-wwcc' AND verified = false;
+
+-- cr-act-wwvp: real name correction — the general WWCC Article names ACT's
+-- actual scheme "Working with Children Registration (WWCR)" issued by
+-- Access Canberra, not "Working with Vulnerable People" as originally
+-- guessed. Exact validity period still not given in the source provided,
+-- so this stays unverified/DRAFT — only the name and note are corrected.
+UPDATE compliance_requirements
+SET display_name = 'Working with Children Registration (WWCR) (ACT)',
+    source_note = 'DRAFT — real name correction 2026-09-10 per "Working with Children Check (WWCC) — RawTalent Requirements" Article: ACT''s actual scheme is "Working with Children Registration (WWCR)", issued by Access Canberra (not "Working with Vulnerable People" as this row originally guessed). Exact validity period still not confirmed by the source available — needs the current Access Canberra WWCR requirements to set validity_days with confidence.'
+WHERE id = 'cr-act-wwvp' AND verified = false;
+
+-- cr-qld-blue-card: the general WWCC Article confirms a Blue Card "Has an
+-- expiry date — must be kept current" but doesn't give the exact period —
+-- stays DRAFT/unverified, note updated to reflect this source rather than
+-- claiming a specific figure that isn't actually confirmed.
+UPDATE compliance_requirements
+SET source_note = 'DRAFT — "Working with Children Check (WWCC) — RawTalent Requirements" Article (2026-09-10) confirms a Blue Card "Has an expiry date — must be kept current" but doesn''t state the exact period. Historically commonly cited around 3 years; needs confirming against Blue Card Services'' current requirements before a specific validity_days figure is set.'
+WHERE id = 'cr-qld-blue-card' AND verified = false;
+
 -- Local mirror of RT's Candidates report — RT's API has no server-side name
 -- search and no "updated since" field (only createdDate), so the only way
 -- to know what changed on an EXISTING candidate is a full re-fetch. This
