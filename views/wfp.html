@@ -88,6 +88,12 @@
       background: var(--card); border: 1px solid var(--border); border-radius: 12px;
       padding: 13px 15px; margin-bottom: 10px; cursor: pointer;
     }
+    /* A centre that just converted its first-ever booking and hasn't been
+       visited yet — "the whole tile lights up green... one of the most
+       important touch points" (Liam, 2026-09-06). Whole card, not just a
+       badge, so it can't be missed in the Needs Attention list. */
+    .card.first-booking { background: var(--green-bg); border-color: var(--green); }
+    .card.first-booking .why { color: var(--green); font-weight: 600; }
     .card .name { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
     .card .sub { font-size: 13px; color: var(--text-muted); }
     .card .why { font-size: 12px; color: var(--text); margin-top: 4px; }
@@ -1068,7 +1074,10 @@
         ` : ''}
         <label>Starting address</label>
         <div style="position:relative">
-          <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${escHtml(routeBuilderStart)}" oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')" onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();},150)">
+          <input type="text" id="routeStartInput" placeholder="Where are you starting from?" value="${typedVal && typedVal === savedHome ? 'Home' : escHtml(routeBuilderStart)}"
+            onfocus="if(this.value==='Home'){this.value=routeBuilderStart}"
+            oninput="onAddressAutocompleteInput('routeStartInput','routeStartSuggestions')"
+            onblur="setTimeout(()=>{document.getElementById('routeStartSuggestions').innerHTML='';resolveStartCoordIfNeeded();if(routeBuilderStart.trim()&&routeBuilderStart.trim()===(currentUser.homeAddress||'').trim())document.getElementById('routeStartInput').value='Home';},150)">
           <div id="routeStartSuggestions" class="autocomplete-dropdown"></div>
         </div>
         ${homeUiHtml}
@@ -1224,11 +1233,17 @@
     let currentAddressSuggestions = [];
     function onAddressAutocompleteInput(inputId, dropdownId) {
       if (inputId === 'routeStartInput') {
-        routeBuilderStart = document.getElementById(inputId).value;
+        const v = document.getElementById(inputId).value;
+        // "Home" is only ever the masked display of the saved Home Address
+        // (see the input's onfocus) — never let that literal string land in
+        // routeBuilderStart, where it'd be geocoded/sent to the optimizer.
+        if (v === 'Home') return;
+        routeBuilderStart = v;
         routeBuilderStartCoord = null; // typing again invalidates whatever was previously resolved
       }
       clearTimeout(addressAutocompleteTimer);
       const val = document.getElementById(inputId).value.trim();
+      if (val === 'Home') { document.getElementById(dropdownId).innerHTML = ''; return; }
       const dropdown = document.getElementById(dropdownId);
       if (val.length < 3) { dropdown.innerHTML = ''; return; }
       addressAutocompleteTimer = setTimeout(async () => {
@@ -1489,7 +1504,7 @@
       }
       const c = item.centre;
       return `
-        <div class="card" onclick="openCentre('${c.centreKey}')">
+        <div class="card${item._tier === 1 ? ' first-booking' : ''}" onclick="openCentre('${c.centreKey}')">
           <div class="name">${escHtml(item.label || c.name)}</div>
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
           ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}

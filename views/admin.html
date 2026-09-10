@@ -1680,7 +1680,7 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
             <div>
               <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Start Location</label>
-              <input type="text" id="routeStartAddress" class="form-control" placeholder="e.g. your home or office address" style="width:260px">
+              <input type="text" id="routeStartAddress" class="form-control" placeholder="e.g. your home or office address" style="width:260px" onfocus="onRouteStartFocus(this)" onblur="onRouteStartBlur(this)">
             </div>
             <div>
               <label style="display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Departure Time</label>
@@ -11638,6 +11638,29 @@
     function defaultRouteStartAddress() {
       return ROUTE_START_ADDRESS_BY_EMAIL[(currentUserEmail || '').toLowerCase()] || ROUTE_START_ADDRESS_FALLBACK;
     }
+    // The Start Location field shows the literal word "Home" (not the full
+    // street address) whenever it's holding the WFP's own saved/default
+    // home address — "instead of it displaying the address, can it just
+    // display the word home?" (Liam, 2026-09-06). The real address is kept
+    // on the input's own dataset.realStart; every place that actually
+    // geocodes / builds a Maps link / sends it to the optimizer reads
+    // through this, never the raw .value.
+    function routeStartAddressValue() {
+      const el = document.getElementById('routeStartAddress');
+      if (!el) return '';
+      if (el.value.trim() === 'Home') return (el.dataset.realStart || defaultRouteStartAddress()).trim();
+      return el.value.trim();
+    }
+    // Called on the field's own focus/blur (see its markup) to swap the
+    // masked "Home" for the real address while editing, and back after.
+    function onRouteStartFocus(el) {
+      if (el.value.trim() === 'Home' && el.dataset.realStart) el.value = el.dataset.realStart;
+    }
+    function onRouteStartBlur(el) {
+      const v = el.value.trim();
+      if (v && el.dataset.realStart && v === el.dataset.realStart.trim()) el.value = 'Home';
+      else { el.dataset.realStart = ''; localStorage.setItem('routePlannerStartAddress', v); }
+    }
     let routeMapInstance = null;
     let routeGeofenceLeadIds = null; // Set of lead ids within the searched route corridor, or null when no search is active
     let routeGeofenceDistances = new Map(); // lead id -> distanceKm, for the "Xkm from route" label
@@ -12412,6 +12435,15 @@
 
         const startInput = document.getElementById('routeStartAddress');
         if (!startInput.value) startInput.value = localStorage.getItem('routePlannerStartAddress') || defaultRouteStartAddress();
+        // Mask the WFP's own configured home address as "Home" — see
+        // routeStartAddressValue()/onRouteStartFocus/onRouteStartBlur. Only
+        // when it matches their real per-person entry, never the shared
+        // office fallback (that isn't anyone's "home").
+        const ownHome = (ROUTE_START_ADDRESS_BY_EMAIL[(currentUserEmail || '').toLowerCase()] || '').trim();
+        if (ownHome && startInput.value.trim() === ownHome) {
+          startInput.dataset.realStart = ownHome;
+          startInput.value = 'Home';
+        }
 
         if (!mapboxTokenCache) mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json());
         document.getElementById('routePlannerMapboxNotice').style.display = mapboxTokenCache.configured ? 'none' : 'block';
@@ -12835,7 +12867,7 @@
 
     async function generateRoute() {
       if (!routeSelectedOrder.length) { toast('Select at least one centre', 'error'); return; }
-      const startAddress = document.getElementById('routeStartAddress').value.trim();
+      const startAddress = routeStartAddressValue();
       if (!startAddress) { toast('Enter a start location', 'error'); return; }
       const hour12 = Number(document.getElementById('routeDepartureHour').value);
       const minute = Number(document.getElementById('routeDepartureMinute').value);
@@ -13046,7 +13078,7 @@
       const point = s => hasCoords ? `${s.latitude},${s.longitude}` : encodeURIComponent(formatLeadAddress(s) || s.centre_name);
       const origin = hasCoords
         ? `${currentRouteResult.startCoord.lat},${currentRouteResult.startCoord.lng}`
-        : encodeURIComponent(document.getElementById('routeStartAddress').value.trim());
+        : encodeURIComponent(routeStartAddressValue());
       const destination = point(stops[stops.length - 1]);
       const waypoints = stops.slice(0, -1).map(point).join('|');
 
@@ -13114,7 +13146,7 @@
           const stop = isStart ? null : data.stops[i - 1];
           title.textContent = isStart ? 'Start' : stop.centre_name;
           popupEl.appendChild(title);
-          const addressText = isStart ? document.getElementById('routeStartAddress').value.trim()
+          const addressText = isStart ? routeStartAddressValue()
             : formatLeadAddress(stop);
           if (addressText) {
             const addr = document.createElement('div');
