@@ -867,5 +867,9 @@ module.exports = {
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
-  analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL
+  analyzeBenchmarkCalls, BENCHMARK_SOURCE_LABEL,
+  // Exported so routes/calls.js's /regrade handler can recompute
+  // overallScore/outcome after forcing untouched categories' scores back
+  // to their pre-regrade values — see that route's own comment for why.
+  computeResult
 };

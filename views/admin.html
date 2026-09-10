@@ -19617,16 +19617,27 @@
     let manualGradeMode = 'call'; // 'call' | 'calibration'
     let manualGradeTargetId = null;
 
-    async function openManualGradeModal(mode, targetId, rubricType) {
+    // `prefill` (optional): { categoryScores: [{key, score, notes}], summary }
+    // from an existing evaluation being re-graded — every field starts at
+    // that category's real current value instead of the bare "3, no notes"
+    // default, so leaving a category untouched in this form actually keeps
+    // it untouched rather than silently reverting it. Omit (or pass null)
+    // for a genuine first-time grade, where blank/3 defaults are correct
+    // since there's nothing yet to preserve.
+    async function openManualGradeModal(mode, targetId, rubricType, prefill = null) {
       manualGradeMode = mode;
       manualGradeTargetId = targetId;
       if (Object.keys(callRubrics).length === 0) {
         callRubrics = await fetch('/api/calls/rubrics').then(r => r.json());
       }
       const rubric = callRubrics[rubricType];
+      const prefillByKey = new Map((prefill?.categoryScores || []).map(c => [c.key, c]));
       document.getElementById('manualGradeRubricType').value = rubricType;
       document.getElementById('manualGradeModalTitle').textContent = `Grade Manually — ${rubric.label}`;
-      document.getElementById('manualGradeForm').innerHTML = rubric.categories.map(c => `
+      document.getElementById('manualGradeForm').innerHTML = rubric.categories.map(c => {
+        const existing = prefillByKey.get(c.key);
+        const existingScore = existing?.score ?? 3;
+        return `
         <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px">
             <span style="font-weight:700;font-size:13.5px;color:var(--navy)">${escHtml(c.label)} <span style="font-weight:400;color:var(--text-muted);font-size:12px">(${c.weight}%)</span></span>
@@ -19637,17 +19648,18 @@
           </ul>
           <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
             <select id="manual-score-${c.key}" class="form-control" style="width:170px;flex-shrink:0">
-              <option value="1">1 — Absent</option>
-              <option value="2">2 — Weak</option>
-              <option value="3" selected>3 — Adequate</option>
-              <option value="4">4 — Strong</option>
-              <option value="5">5 — Exemplary</option>
+              <option value="1" ${existingScore === 1 ? 'selected' : ''}>1 — Absent</option>
+              <option value="2" ${existingScore === 2 ? 'selected' : ''}>2 — Weak</option>
+              <option value="3" ${existingScore === 3 ? 'selected' : ''}>3 — Adequate</option>
+              <option value="4" ${existingScore === 4 ? 'selected' : ''}>4 — Strong</option>
+              <option value="5" ${existingScore === 5 ? 'selected' : ''}>5 — Exemplary</option>
             </select>
-            <textarea id="manual-notes-${c.key}" class="form-control textarea" placeholder="Your comments on this category — what specifically did you hear?" style="flex:1;min-width:220px;min-height:60px"></textarea>
+            <textarea id="manual-notes-${c.key}" class="form-control textarea" placeholder="Your comments on this category — what specifically did you hear?" style="flex:1;min-width:220px;min-height:60px">${escHtml(existing?.notes || '')}</textarea>
           </div>
         </div>
-      `).join('');
-      document.getElementById('manualGradeSummary').value = '';
+      `;
+      }).join('');
+      document.getElementById('manualGradeSummary').value = prefill?.summary || '';
       document.getElementById('manualGradeModal').classList.add('open');
     }
 
@@ -19777,6 +19789,7 @@
     // optional infoOverride is a live object, which an inline onclick string
     // can't carry directly, so a named wrapper reads it from here instead.
     let calibrationDetailCurrentData = null;
+    let calibrationManualGradePrefill = null;
 
     function playCalibrationRecording() {
       const c = calibrationDetailCurrentData;
@@ -19795,6 +19808,10 @@
       document.getElementById('calibrationDetailTitle').textContent = `Calibration — ${c.rep_name || 'Unknown'}`;
       const contact = c.call_type === 'outbound' ? c.to_number : c.from_number;
       const mine = submissions.find(s => s.email === myEmail);
+      // Read by openCalibrationManualGrade below — Re-grade Manually needs
+      // to pre-fill with what's already there, not always open blank (see
+      // that function's own comment for the real incident this fixes).
+      calibrationManualGradePrefill = mine?.submitted ? { categoryScores: mine.categoryScores || [], summary: mine.summary || '' } : null;
       const rubricTypeForMine = mine?.rubricType || c.detected_rubric_type || 'auto';
 
       const metaRow = `
@@ -19977,6 +19994,20 @@
     // Resolves the rubric-type select's "🔍 Auto-detect" down to a real
     // rubric before opening the manual-grade form, which (unlike Evaluate
     // AI) has no server-side auto-detect step of its own to fall back on.
+    // Real bug (found 2026-09-10, reported live): this always opened a
+    // blank form — every score defaulted to 3, every notes box empty —
+    // with no idea an existing submission even existed. Re-grading meant
+    // retyping the ENTIRE grade from memory or losing whatever you didn't
+    // retype; a reviewer who opened this just to fix one category's notes
+    // silently wiped every other category back to "3, no notes" on
+    // submit (confirmed: exactly what happened to a real calibration
+    // submission — see call_evaluations, source='human', six categories
+    // all sitting at the form's bare defaults). Now pre-fills from
+    // calibrationManualGradePrefill (set by renderCalibrationDetail, from
+    // this reviewer's own already-submitted grade) when one exists —
+    // untouched categories keep their real value instead of reverting to
+    // the form's defaults, matching the "only what you actually changed"
+    // behaviour Give Feedback & Re-grade already promises.
     function openCalibrationManualGrade(calibrationId, detectedRubricType) {
       const sel = document.getElementById(`calibRubric-${calibrationId}`).value;
       const rubricType = sel === 'auto' ? (detectedRubricType || 'educator') : sel;
@@ -19984,8 +20015,9 @@
       // Log Call/Visit — two modal-overlays open at once would just stack
       // as double-dark. submitManualGrade's calibration branch re-opens
       // this detail modal on success (or on Cancel — see closeManualGradeModal).
+      const prefill = calibrationManualGradePrefill;
       closeCalibrationDetailModal();
-      openManualGradeModal('calibration', calibrationId, rubricType);
+      openManualGradeModal('calibration', calibrationId, rubricType, prefill);
     }
 
     async function evaluateCalibration(calibrationId, btn) {

@@ -9,7 +9,7 @@ const {
   logEvaluationFeedback, listEvaluationFeedback, detectRubricType,
   addCalibrationNote, listCalibrationNotes, updateCalibrationNote, deleteCalibrationNote,
   getAllEffectiveRubrics, saveRubricInstructions, saveRubricDescription,
-  analyzeBenchmarkCalls
+  analyzeBenchmarkCalls, computeResult
 } = require('../services/callGradingService');
 const { generateReport, answerQuestion } = require('../services/callReportService');
 const { extractFaqsFromCall } = require('../services/faqClassifier');
@@ -550,6 +550,37 @@ router.put('/evaluations/:id/regrade', async (req, res) => {
       return `${cat ? cat.label : 'General'}: ${item.feedbackText}`;
     }).join('\n');
     const combinedCategoryKeys = items.map(item => item.categoryKey).filter(Boolean);
+
+    // Real bug (found 2026-09-10, reported live): the prompt above tells
+    // the model to "copy forward EXACTLY" any category this round's
+    // feedback doesn't touch, but that's just an instruction — nothing
+    // stops the model from returning a blank/rewritten note for an
+    // untouched category anyway, and it demonstrably does sometimes (a
+    // real calibration re-grade came back with "No notes" on a category
+    // nobody had given feedback on). Enforce it deterministically instead
+    // of trusting the model to comply: for every category NOT named in
+    // this round's feedback, force its score/notes back to exactly what
+    // they were before this re-grade, no matter what the model returned.
+    // Skipped only when this round includes "General" (uncategorised)
+    // feedback (categoryKey === null) — that's deliberately free to touch
+    // any category, so there's nothing safe to force-preserve.
+    const touchedCategoryKeys = new Set(combinedCategoryKeys);
+    const hasGeneralFeedback = items.some(it => !it.categoryKey);
+    if (!hasGeneralFeedback && Array.isArray(currentResult.categoryScores) && Array.isArray(result.categoryScores)) {
+      const priorByKey = new Map(currentResult.categoryScores.map(c => [c.key, c]));
+      const mergedScores = result.categoryScores.map(c =>
+        touchedCategoryKeys.has(c.key) ? { key: c.key, score: c.score, notes: c.notes } : { key: c.key, score: priorByKey.get(c.key)?.score ?? c.score, notes: priorByKey.get(c.key)?.notes ?? c.notes }
+      );
+      // Re-derive overallScore/outcome from the merged scores via the same
+      // weighting/critical-failure logic every other grading path uses —
+      // otherwise the summary badge could show a % the model computed
+      // against ITS (possibly wrong) category scores, no longer matching
+      // what's actually stored per category after the merge above.
+      const recomputed = computeResult(rubric, mergedScores, result.summary);
+      result.categoryScores = recomputed.categoryScores;
+      result.overallScore = recomputed.overallScore;
+      result.outcome = recomputed.outcome;
+    }
 
     await updateEvaluationResult(evaluation.id, {
       result,
