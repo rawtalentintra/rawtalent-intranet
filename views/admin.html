@@ -342,6 +342,12 @@
         </div>
       </div>
       <div class="admin-nav-section">
+        <div class="admin-nav-label" onclick="toggleNavSection(this)">JobAdder</div>
+        <div class="admin-nav-item" onclick="showSection('jobadder-candidates', this)">
+          <span class="admin-nav-icon">🎯</span> Find Applicants Near Centres
+        </div>
+      </div>
+      <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
@@ -739,6 +745,61 @@
           </div>
         </div>
         <div id="approvedTimesheetsWrap"></div>
+      </div>
+      </template>
+
+      <!-- JobAdder: Find Applicants Near Centres (2026-09-11) — real
+           candidates pulled from JobAdder, filtered by qualification
+           keywords + real distance to whichever RT centres are selected.
+           See services/jobAdderCandidateService.js for why distance has to
+           be computed here (JobAdder's own search has no radius/geo param). -->
+      <template id="__lazy_jobadder_candidates">
+      <div class="admin-section" id="section-jobadder-candidates">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Find Applicants Near Centres</div>
+            <div class="admin-page-sub">Real JobAdder candidates, filtered by qualification and real distance to the centres you pick — not just a city/suburb text match.</div>
+          </div>
+        </div>
+
+        <div id="jobadderStatusBanner" style="display:none;margin-bottom:16px"></div>
+
+        <div class="admin-table-card" style="padding:18px 20px;margin-bottom:16px">
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">C3 Shortage</div>
+          <div id="jobadderQuickPicksC3" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">Other Centres</div>
+          <div id="jobadderQuickPicksOther" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;position:relative">
+            <input type="text" id="jobadderCentreSearchInput" class="form-control" style="max-width:320px" placeholder="+ Add another centre…" autocomplete="off" oninput="handleJobadderCentreSearch(this.value)">
+            <div id="jobadderCentreSearchDropdown" style="display:none;position:absolute;left:0;top:100%;width:320px;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;z-index:20"></div>
+            <div id="jobadderSelectedExtraChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          </div>
+
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid var(--gray-100);padding-top:14px">
+            <div style="flex:1;min-width:260px">
+              <label class="form-label-modal">Qualification / keywords <span class="optional">(searches each candidate's resume)</span></label>
+              <input type="text" id="jobadderKeywordsInput" class="form-control">
+            </div>
+            <div style="width:120px">
+              <label class="form-label-modal">Radius (km)</label>
+              <input type="number" id="jobadderRadiusInput" class="form-control" value="15" min="1" max="100">
+            </div>
+            <button class="btn-add" style="padding:9px 20px" onclick="runJobadderCandidateSearch()">Search</button>
+          </div>
+        </div>
+
+        <div id="jobadderResultsSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
+        <div id="jobadderResultsWrap"></div>
+      </div>
+      <div class="modal-overlay" id="jobadderCandidateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeJobadderCandidateModal()">
+        <div class="modal" style="max-width:640px">
+          <div class="modal-header">
+            <div class="modal-title" id="jobadderCandidateModalTitle">Candidate</div>
+            <button class="modal-close" onclick="closeJobadderCandidateModal()">×</button>
+          </div>
+          <div class="modal-body" id="jobadderCandidateModalBody" style="max-height:70vh;overflow-y:auto"></div>
+        </div>
       </div>
       </template>
 
@@ -6174,6 +6235,7 @@
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'payroll') initPayrollSection();
       if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
+      if (id === 'jobadder-candidates') initJobAdderCandidatesSection();
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
@@ -7336,6 +7398,216 @@
         wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load approved timesheets.</div>';
       }
     }
+
+    // ── JobAdder → Find Applicants Near Centres (2026-09-11) ────────
+    // See services/jobAdderCandidateService.js's own comment for why the
+    // real distance-to-centre work happens server-side, not here — this
+    // is just rendering whatever it hands back.
+    let jobadderQuickPickCentres = [];
+    let jobadderExtraCentres = []; // manually added via the search box, beyond the 10 quick-picks
+    let jobadderSelectedCentreKeys = new Set();
+    let jobadderCentreSearchResults = [];
+    let jobadderCentreSearchTimer = null;
+    let jobadderSearchResults = [];
+    let jobadderSearchInFlight = false;
+
+    async function initJobAdderCandidatesSection() {
+      const wrap = document.getElementById('jobadderResultsWrap');
+      wrap.innerHTML = '';
+      document.getElementById('jobadderResultsSummary').textContent = '';
+      document.getElementById('jobadderStatusBanner').style.display = 'none';
+      try {
+        const data = await fetch('/api/jobadder/target-centres').then(r => r.json());
+        jobadderQuickPickCentres = data.centres || [];
+        // All 10 selected by default — Joy's stated main goal is exactly
+        // "find applicants near these centres" (the whole list together),
+        // so the first Search click should already match that without
+        // needing to tick every box first.
+        jobadderSelectedCentreKeys = new Set(jobadderQuickPickCentres.map(c => c.centreKey));
+        document.getElementById('jobadderKeywordsInput').value = data.defaultKeywords || '';
+        renderJobadderQuickPicks();
+        runJobadderCandidateSearch();
+      } catch {
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load centres.</div>';
+      }
+    }
+
+    function jobadderCentreChipHtml(c) {
+      const selected = jobadderSelectedCentreKeys.has(c.centreKey);
+      const noResolvedGeo = c.lat == null;
+      const title = c.note ? c.note : (noResolvedGeo ? 'Could not resolve an address for this centre' : '');
+      return `
+        <button type="button" onclick="toggleJobadderCentre('${c.centreKey}')" title="${escHtml(title)}"
+          style="border:1px solid ${selected ? 'var(--orange)' : 'var(--gray-200)'};background:${selected ? 'var(--orange)' : 'white'};color:${selected ? 'white' : 'var(--text)'};border-radius:20px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;opacity:${noResolvedGeo ? '0.5' : '1'}">
+          ${escHtml(c.name)}${c.note ? ' ⓘ' : ''}
+        </button>`;
+    }
+    function renderJobadderQuickPicks() {
+      document.getElementById('jobadderQuickPicksC3').innerHTML = jobadderQuickPickCentres.filter(c => c.group === 'c3_shortage').map(jobadderCentreChipHtml).join('');
+      document.getElementById('jobadderQuickPicksOther').innerHTML = jobadderQuickPickCentres.filter(c => c.group === 'other').map(jobadderCentreChipHtml).join('');
+      renderJobadderSelectedExtraChips();
+    }
+    function renderJobadderSelectedExtraChips() {
+      document.getElementById('jobadderSelectedExtraChips').innerHTML = jobadderExtraCentres.map(c => `
+        <span style="display:inline-flex;align-items:center;gap:6px;background:var(--orange);color:white;border-radius:20px;padding:6px 10px;font-size:12px;font-weight:600">
+          ${escHtml(c.name)}
+          <span style="cursor:pointer" onclick="removeJobadderExtraCentre('${c.centreKey}')">✕</span>
+        </span>`).join('');
+    }
+    function toggleJobadderCentre(centreKey) {
+      if (jobadderSelectedCentreKeys.has(centreKey)) jobadderSelectedCentreKeys.delete(centreKey);
+      else jobadderSelectedCentreKeys.add(centreKey);
+      renderJobadderQuickPicks();
+    }
+    function removeJobadderExtraCentre(centreKey) {
+      jobadderExtraCentres = jobadderExtraCentres.filter(c => c.centreKey !== centreKey);
+      jobadderSelectedCentreKeys.delete(centreKey);
+      renderJobadderSelectedExtraChips();
+    }
+    function handleJobadderCentreSearch(value) {
+      clearTimeout(jobadderCentreSearchTimer);
+      const q = value.trim();
+      const dropdown = document.getElementById('jobadderCentreSearchDropdown');
+      if (q.length < 2) { dropdown.style.display = 'none'; return; }
+      jobadderCentreSearchTimer = setTimeout(async () => {
+        try {
+          jobadderCentreSearchResults = await fetch(`/api/jobadder/centres/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+          if (!jobadderCentreSearchResults.length) { dropdown.style.display = 'none'; return; }
+          dropdown.innerHTML = jobadderCentreSearchResults.map((c, i) => `<div class="task-mention-option" onmousedown="event.preventDefault();addJobadderExtraCentre(${i})">${escHtml(c.name)} <span style="color:var(--text-muted)">— ${escHtml(c.suburb || '')}</span></div>`).join('');
+          dropdown.style.display = 'block';
+        } catch { dropdown.style.display = 'none'; }
+      }, 350);
+    }
+    function addJobadderExtraCentre(i) {
+      const c = jobadderCentreSearchResults[i];
+      if (!c) return;
+      document.getElementById('jobadderCentreSearchDropdown').style.display = 'none';
+      document.getElementById('jobadderCentreSearchInput').value = '';
+      const alreadyKnown = jobadderQuickPickCentres.some(q => q.centreKey === c.centreKey) || jobadderExtraCentres.some(e => e.centreKey === c.centreKey);
+      if (!alreadyKnown) jobadderExtraCentres.push(c);
+      jobadderSelectedCentreKeys.add(c.centreKey);
+      renderJobadderQuickPicks();
+    }
+
+    async function runJobadderCandidateSearch() {
+      if (jobadderSearchInFlight) return;
+      const centreKeys = [...jobadderSelectedCentreKeys];
+      const wrap = document.getElementById('jobadderResultsWrap');
+      const summary = document.getElementById('jobadderResultsSummary');
+      const banner = document.getElementById('jobadderStatusBanner');
+      banner.style.display = 'none';
+      if (!centreKeys.length) {
+        summary.textContent = '';
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Select at least one centre above.</div>';
+        return;
+      }
+      jobadderSearchInFlight = true;
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      summary.textContent = '';
+      try {
+        const keywords = document.getElementById('jobadderKeywordsInput').value;
+        const radiusKm = document.getElementById('jobadderRadiusInput').value || 15;
+        const params = new URLSearchParams({ centreKeys: centreKeys.join(','), keywords, radiusKm });
+        const res = await fetch(`/api/jobadder/search-candidates?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.notConnected) {
+            banner.style.display = 'block';
+            banner.innerHTML = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;font-size:13px;color:#9a3412">JobAdder isn't connected yet. <a href="/auth/jobadder" target="_blank" style="color:var(--orange);font-weight:700">Connect JobAdder →</a></div>`;
+          }
+          summary.textContent = '';
+          wrap.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">${escHtml(data.error || 'Search failed.')}</div>`;
+          return;
+        }
+        jobadderSearchResults = data.results || [];
+        const capNote = data.hitScanCap ? ` — stopped after scanning ${data.scannedCount} (${data.totalCountAvailable} match your keywords/state in JobAdder total; narrow the keywords to see more)` : '';
+        summary.textContent = `${jobadderSearchResults.length} candidate${jobadderSearchResults.length === 1 ? '' : 's'} within ${radiusKm}km of the selected centre${centreKeys.length === 1 ? '' : 's'} (scanned ${data.scannedCount} of ${data.totalCountAvailable} matching JobAdder's own Victoria + keyword search)${capNote}`;
+        wrap.innerHTML = jobadderResultsTableHtml(jobadderSearchResults);
+      } catch {
+        summary.textContent = '';
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Network error.</div>';
+      } finally {
+        jobadderSearchInFlight = false;
+      }
+    }
+
+    // Compact, spreadsheet-style table (Joy, 2026-09-11: "clean excel like
+    // compact table and not really that spacious") — small font, tight
+    // padding throughout, unlike this app's normal roomier .data-table use.
+    function jobadderResultsTableHtml(results) {
+      if (!results.length) return '<div style="color:var(--text-muted);padding:20px;text-align:center">No candidates matched within that radius. Try a wider radius or fewer keywords.</div>';
+      const td = 'padding:4px 8px;font-size:11.5px;white-space:nowrap';
+      return `
+        <div class="admin-table-card"><div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100);background:var(--offwhite)">
+            <th style="${td}">Name</th><th style="${td}">Distance</th><th style="${td}">Nearest Centre</th>
+            <th style="${td}">Suburb</th><th style="${td}">Status</th><th style="${td}">Phone</th>
+            <th style="${td}">Email</th><th style="${td}">Updated</th>
+          </tr></thead>
+          <tbody>
+            ${results.map(c => `
+              <tr style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="openJobadderCandidateDetail(${c.candidateId})" onmouseover="this.style.background='var(--offwhite)'" onmouseout="this.style.background=''">
+                <td style="${td};font-weight:700;color:var(--navy)">${escHtml(c.name)}</td>
+                <td style="${td}">${c.distanceKm} km</td>
+                <td style="${td}">${escHtml(c.nearestCentreName)}</td>
+                <td style="${td}">${escHtml(c.suburb || '—')}${c.state ? ', ' + escHtml(c.state) : ''}</td>
+                <td style="${td}">${escHtml(c.status || '—')}</td>
+                <td style="${td}">${escHtml(c.mobile || c.phone || '—')}</td>
+                <td style="${td};max-width:200px;overflow:hidden;text-overflow:ellipsis">${escHtml(c.email || '—')}</td>
+                <td style="${td}">${c.updatedAt ? fmtDate(c.updatedAt) : '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        </div></div>`;
+    }
+
+    function jobadderAttachmentUrl(candidateId, att) {
+      return `/api/jobadder/candidates/${candidateId}/attachments/${att.attachmentId}?filename=${encodeURIComponent(att.fileName || 'attachment')}`;
+    }
+    function jobadderAttachmentTypeLabel(type) {
+      const labels = { Resume: '📄 Resume', FormattedResume: '📄 Formatted Resume', CoverLetter: '✉️ Cover Letter', Screening: '📋 Screening', Check: '✅ Check', Reference: '📞 Reference', License: '🪪 License', Other: '📎 Other' };
+      return labels[type] || type;
+    }
+    async function openJobadderCandidateDetail(candidateId) {
+      const modal = document.getElementById('jobadderCandidateModal');
+      const body = document.getElementById('jobadderCandidateModalBody');
+      document.getElementById('jobadderCandidateModalTitle').textContent = 'Loading…';
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      modal.classList.add('open');
+      try {
+        const [candidate, attachments] = await Promise.all([
+          fetch(`/api/jobadder/candidates/${candidateId}`).then(r => r.json()),
+          fetch(`/api/jobadder/candidates/${candidateId}/attachments`).then(r => r.json())
+        ]);
+        document.getElementById('jobadderCandidateModalTitle').textContent = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Candidate';
+        const addr = candidate.address ? [candidate.address.street?.join(', '), candidate.address.city, candidate.address.state, candidate.address.postalCode].filter(Boolean).join(', ') : '—';
+        const education = (candidate.education || []).map(e => `<div style="margin-bottom:6px"><b>${escHtml(e.course || 'Unknown course')}</b>${e.institution ? ' — ' + escHtml(e.institution) : ''}${e.date ? ` <span style="color:var(--text-muted)">(${escHtml(String(e.date))})</span>` : ''}</div>`).join('') || '<span style="color:var(--text-muted)">No education on file.</span>';
+        const current = candidate.employment?.current;
+        const attHtml = Array.isArray(attachments) && attachments.length
+          ? attachments.map(a => `<a href="${jobadderAttachmentUrl(candidateId, a)}" target="_blank" style="display:inline-block;margin:0 10px 8px 0;padding:6px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:12px;font-weight:600;color:var(--navy);text-decoration:none">${jobadderAttachmentTypeLabel(a.type)} — ${escHtml(a.fileName || '')}</a>`).join('')
+          : '<span style="color:var(--text-muted)">No files on file.</span>';
+        body.innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12.5px;margin-bottom:16px">
+            <div><b>Email</b><br>${escHtml(candidate.email || '—')}</div>
+            <div><b>Phone / Mobile</b><br>${escHtml(candidate.mobile || candidate.phone || '—')}</div>
+            <div style="grid-column:1/-1"><b>Address</b><br>${escHtml(addr)}</div>
+            <div><b>Current role</b><br>${current ? escHtml(`${current.position || ''}${current.employer ? ' at ' + current.employer : ''}`) : '—'}</div>
+            <div><b>Seeking</b><br>${escHtml(candidate.seeking || '—')}</div>
+          </div>
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px">🎓 Education</div>
+          <div style="font-size:12.5px;margin-bottom:16px">${education}</div>
+          ${candidate.summary ? `<div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px">Summary</div><div style="font-size:12.5px;white-space:pre-wrap;margin-bottom:16px">${escHtml(candidate.summary)}</div>` : ''}
+          <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px">📎 Files</div>
+          <div>${attHtml}</div>
+          <div style="margin-top:16px"><a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${candidateId}" target="_blank" style="color:var(--orange);font-weight:700;font-size:12.5px">View full profile in JobAdder ↗</a></div>
+        `;
+      } catch {
+        body.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load candidate.</div>';
+      }
+    }
+    function closeJobadderCandidateModal() { document.getElementById('jobadderCandidateModal').classList.remove('open'); }
 
     // ── Payroll → Company Totals (final-approval stage only) ───────
     async function loadPayrollCompany() {

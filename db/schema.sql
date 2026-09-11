@@ -1490,6 +1490,24 @@ CREATE TABLE IF NOT EXISTS centre_geocodes (
   geocoded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Same permanent-cache shape as centre_geocodes above, for JobAdder
+-- candidates (Find Applicants Near Centres, 2026-09-11) — JobAdder's own
+-- API returns a candidate's address as street/city/state/postcode text
+-- only, no coordinates, so each one has to be geocoded via Mapbox exactly
+-- once here before real distance-to-centre can be computed. Keyed by
+-- candidateId + a hash of the address text (not just candidateId alone)
+-- so a candidate whose address genuinely changes in JobAdder re-geocodes
+-- instead of silently keeping a stale pin forever.
+CREATE TABLE IF NOT EXISTS jobadder_candidate_geocodes (
+  candidate_id INTEGER NOT NULL,
+  address_hash TEXT NOT NULL,
+  address_text TEXT,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  geocoded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (candidate_id, address_hash)
+);
+
 -- Google Calendar sync (Workforce Partner scheduling) ──────────────
 -- Links a lead to the calendar event representing its scheduled call or
 -- visit, in either direction: 'app' = HeartBeat created/updated the
