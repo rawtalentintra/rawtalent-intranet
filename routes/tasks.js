@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
+const { isFinalApprover } = require('../services/leaveService');
 const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
 const { BUCKETS, ensureBucket, uploadBuffer, downloadAsBuffer, remove: removeFile, extForMimetype, setFileResponseHeaders } = require('../services/storageService');
 
@@ -34,27 +35,50 @@ function validateStatusForDepartment(status, departmentId) {
 
 // Department-level task visibility (Joy, 2026-08-30) — layered on top of
 // requireAuth above, which still just means "any signed-in user can use
-// Tasks at all". Three tiers, checked in order:
+// Tasks at all". Tiers, checked in order:
 //   1. A per-user restriction (users.restricted_task_department_id, e.g.
 //      Prince — role='admin', but restricted to ONLY 'app_dev') takes
 //      priority over everything below, including role.
-//   2. admin/super_admin/qa_view (with no restriction set) — everything.
-//   3. Everyone else — everything EXCEPT app_dev/marketing/
+//   2. The 'payroll' department (Joy, 2026-09-11) — a genuine
+//      confidentiality boundary, NOT board declutter: visible ONLY to the
+//      fixed payroll pool (Sophia/Joy, the same isFinalApprover pool that
+//      gates the whole Payroll section, final timesheet approval and
+//      payslips), regardless of role. Even other admins/super_admins
+//      don't see it. Because this one is a real boundary, it's also
+//      enforced on the per-task sub-resources below (notes/attachments/
+//      history), which the other hidden departments deliberately skip.
+//   3. admin/super_admin/qa_view (with no restriction set) — everything else.
+//   4. Everyone else — everything EXCEPT app_dev/marketing/
 //      workforce_partners, kept out of the general board so those
 //      department-specific work streams don't clutter/confuse people
 //      who aren't part of them.
-// Scope note: this gates the task LIST (GET /) and META (GET /meta)
-// endpoints, plus create/update (so a direct API call can't route around
-// the UI), not every sub-resource (notes/attachments) — a task id is a
-// UUID, not realistically guessable, and this is about decluttering the
-// general board, not a confidentiality boundary.
 const FULL_VISIBILITY_ROLES = new Set(['admin', 'super_admin', 'qa_view']);
 const HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS = new Set(['app_dev', 'marketing', 'workforce_partners']);
 
 function canAccessDepartment(user, departmentId) {
   if (user.restricted_task_department_id) return user.restricted_task_department_id === departmentId;
+  if (departmentId === 'payroll') return isFinalApprover(user.email);
   if (FULL_VISIBILITY_ROLES.has(user.role)) return true;
   return !HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS.has(departmentId);
+}
+
+// Sub-resource endpoints (notes/attachments/history) key off a task id in
+// the URL, not a department, so canAccessDepartment on GET / and the
+// mutation routes doesn't cover them. Only matters for 'payroll' today
+// (tier 2 above) — every other department a caller can name a task id
+// for, they can already see on the board anyway. Returns true for a
+// missing task so the endpoint's own 404 still fires.
+async function taskInAccessibleDepartment(user, taskId) {
+  const row = (await getDb().execute({ sql: 'SELECT department_id FROM tasks WHERE id = ?', args: [taskId] })).rows[0];
+  return !row || canAccessDepartment(user, row.department_id);
+}
+async function requireTaskAccess(req, res, next) {
+  try {
+    if (await taskInAccessibleDepartment(req.user, req.params.id)) return next();
+    return res.status(403).json({ error: 'You do not have access to this task' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 }
 
 // Finds @Name mentions in a note body against the known active-user list and
@@ -371,7 +395,7 @@ router.put('/:id', async (req, res) => {
 // gate here beyond requireAuth (matches the rest of this file's stance:
 // a task id is a UUID, not realistically guessable, and this is diagnostic
 // history for the task's own assignees, not new information about it).
-router.get('/:id/assignee-history', async (req, res) => {
+router.get('/:id/assignee-history', requireTaskAccess, async (req, res) => {
   try {
     const result = await getDb().execute({
       sql: 'SELECT previous_assignees, new_assignees, changed_by, changed_at FROM task_assignee_history WHERE task_id = ? ORDER BY changed_at DESC',
@@ -383,7 +407,7 @@ router.get('/:id/assignee-history', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireTaskAccess, async (req, res) => {
   try {
     const db = getDb();
     // task_attachments has no FK/cascade to tasks, so a plain task delete
@@ -420,7 +444,7 @@ function generateShortCode(length = 7) {
   for (let i = 0; i < length; i++) code += SHORT_CODE_ALPHABET[bytes[i] % SHORT_CODE_ALPHABET.length];
   return code;
 }
-router.post('/:id/short-link', async (req, res) => {
+router.post('/:id/short-link', requireTaskAccess, async (req, res) => {
   try {
     const db = getDb();
     const task = await db.execute({ sql: 'SELECT id FROM tasks WHERE id = ?', args: [req.params.id] });
@@ -452,7 +476,7 @@ router.post('/:id/short-link', async (req, res) => {
   }
 });
 
-router.get('/:id/notes', async (req, res) => {
+router.get('/:id/notes', requireTaskAccess, async (req, res) => {
   try {
     const result = await getDb().execute({
       sql: 'SELECT * FROM task_notes WHERE task_id = ? ORDER BY created_at ASC',
@@ -464,7 +488,7 @@ router.get('/:id/notes', async (req, res) => {
   }
 });
 
-router.post('/:id/notes', async (req, res) => {
+router.post('/:id/notes', requireTaskAccess, async (req, res) => {
   const { body } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'Note text is required' });
   try {
@@ -496,7 +520,7 @@ function canModifyNote(note, user) {
   return note.author_email.toLowerCase() === user.email.toLowerCase() || ['admin', 'super_admin'].includes(user.role);
 }
 
-router.put('/:id/notes/:noteId', async (req, res) => {
+router.put('/:id/notes/:noteId', requireTaskAccess, async (req, res) => {
   const { body } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'Note text is required' });
   try {
@@ -521,7 +545,7 @@ router.put('/:id/notes/:noteId', async (req, res) => {
   }
 });
 
-router.delete('/:id/notes/:noteId', async (req, res) => {
+router.delete('/:id/notes/:noteId', requireTaskAccess, async (req, res) => {
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ? AND task_id = ?', args: [req.params.noteId, req.params.id] });
@@ -539,7 +563,7 @@ router.delete('/:id/notes/:noteId', async (req, res) => {
 // All attachments for the task in one call (description's and every
 // note's together) — the modal fetches once on open, same call-shape as
 // GET /:id/notes, and the frontend buckets by note_id client-side.
-router.get('/:id/attachments', async (req, res) => {
+router.get('/:id/attachments', requireTaskAccess, async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC', args: [req.params.id] });
     res.json(result.rows);
@@ -555,7 +579,7 @@ router.get('/:id/attachments', async (req, res) => {
 // time this is ever called the task/note the file belongs to already
 // exists as a real row (see public/index.html's staging design: nothing
 // uploads until the task/note itself is actually saved).
-router.post('/:id/attachments', taskFileUpload.single('file'), async (req, res) => {
+router.post('/:id/attachments', requireTaskAccess, taskFileUpload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const db = getDb();
@@ -594,6 +618,7 @@ router.get('/attachments/:attachmentId/download', async (req, res) => {
   try {
     const file = (await getDb().execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] })).rows[0];
     if (!file) return res.status(404).json({ error: 'File not found' });
+    if (!(await taskInAccessibleDepartment(req.user, file.task_id))) return res.status(403).json({ error: 'You do not have access to this task' });
     if (!file.storage_path) return res.status(404).json({ error: 'This attachment has no stored content' });
     const buffer = await downloadAsBuffer(BUCKETS.taskFiles, file.storage_path);
     setFileResponseHeaders(res, { mimetype: file.mimetype, filename: file.filename, wantInline: true });
@@ -616,6 +641,7 @@ router.delete('/attachments/:attachmentId', async (req, res) => {
     const existing = await db.execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] });
     const attachment = existing.rows[0];
     if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+    if (!(await taskInAccessibleDepartment(req.user, attachment.task_id))) return res.status(403).json({ error: 'You do not have access to this task' });
     if (!canModifyAttachment(attachment, req.user)) return res.status(403).json({ error: 'Only the uploader or an admin can delete this attachment' });
 
     await db.execute({ sql: 'DELETE FROM task_attachments WHERE id = ?', args: [req.params.attachmentId] });

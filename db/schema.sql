@@ -2001,7 +2001,13 @@ INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
   -- task (2026-08-24) — the 🚨 icon/red colour and the note in the
   -- frontend's "What do these mean?" legend both exist to make that
   -- obvious at a glance, not just in this comment.
-  ('workforce_partners', 'Workforce Partners', '#dc2626', '🚨', 7)
+  ('workforce_partners', 'Workforce Partners', '#dc2626', '🚨', 7),
+  -- Payroll (Joy, 2026-09-11) — a real confidentiality boundary, not just
+  -- board declutter: routes/tasks.js's canAccessDepartment gates this one
+  -- to the fixed payroll pool (isFinalApprover — Sophia/Joy) regardless of
+  -- role, and the per-task sub-resources + the notification bell are gated
+  -- to match. Sorted last.
+  ('payroll', 'Payroll', '#4338ca', '💵', 8)
 ON CONFLICT (id) DO NOTHING;
 -- Dropping "Team" from the original 5 names (2026-08-24) — CREATE ... IF
 -- NOT EXISTS/ON CONFLICT DO NOTHING above won't rename a department that

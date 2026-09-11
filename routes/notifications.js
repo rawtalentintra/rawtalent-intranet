@@ -108,6 +108,11 @@ const REMINDER_DAYS_BEFORE = [0, 1, 2, 7];
 router.get('/', async (req, res) => {
   try {
     const db = getDb();
+    // Payroll-department tasks are visible only to the payroll pool
+    // (Sophia/Joy) — see routes/tasks.js's canAccessDepartment. Keep their
+    // titles/mention text out of everyone else's bell too, even if a
+    // payroll task somehow gets assigned to or @mentions an outsider.
+    const payrollTaskFilter = leave.isFinalApprover(req.user.email) ? '' : "AND t.department_id IS DISTINCT FROM 'payroll'";
     const teamRes = await db.execute('SELECT id, name, email, birthdate, employment_date FROM team_members');
     const me = teamRes.rows.find(m => m.email && req.user.email && m.email.toLowerCase() === req.user.email.toLowerCase());
 
@@ -250,6 +255,7 @@ router.get('/', async (req, res) => {
             LEFT JOIN task_departments td ON td.id = t.department_id
             WHERE t.assigned_to_emails @> to_jsonb(LOWER(?)::text) AND t.status != 'done'
               AND t.due_date IS NOT NULL AND t.due_date <= (CURRENT_DATE + INTERVAL '2 days')
+              ${payrollTaskFilter}
             ORDER BY t.due_date ASC`,
       args: [req.user.email]
     });
@@ -291,6 +297,7 @@ router.get('/', async (req, res) => {
             JOIN tasks t ON t.id = n.task_id
             LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:note:' || n.id AND d.user_email = ?
             WHERE n.mentioned_emails @> to_jsonb(LOWER(?)::text)
+              ${payrollTaskFilter}
             UNION ALL
             SELECT 'task' AS kind, t.id AS mention_id, t.id AS task_id, COALESCE(t.description, '') AS body,
                    t.created_by_name AS author_name, t.created_by AS author_email, t.created_at,
@@ -298,6 +305,7 @@ router.get('/', async (req, res) => {
             FROM tasks t
             LEFT JOIN notification_dismissals d ON d.notification_key = 'taskmention:task:' || t.id AND d.user_email = ?
             WHERE t.mentioned_emails @> to_jsonb(LOWER(?)::text)
+              ${payrollTaskFilter}
             ORDER BY created_at DESC LIMIT 30`,
       args: [req.user.email, req.user.email, req.user.email, req.user.email]
     });
