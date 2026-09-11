@@ -330,13 +330,23 @@ router.post('/:id/unarchive', leadsViewAccess, async (req, res) => {
 // already-flattened shape /api/centres returns. Kept as its own endpoint
 // (not folded into GET /) so the main leads list stays cheap for callers
 // that don't need this.
-let leadsMatchClientsCache = { clients: null, expiresAt: 0 };
-const LEADS_MATCH_CLIENTS_TTL_MS = 5 * 60 * 1000;
+//
+// Real bug (found 2026-09-11, reported live as "Today's still slow" —
+// wfp.html's ensureDataLoaded Promise.all's's what actually calls this,
+// alongside /api/centres): this used to run its OWN independent
+// rtApi.fetchAllPages('clients', {}) behind a plain 5-minute cache-or-
+// fetch, with no stale-while-revalidate — the exact same blocking-cold-
+// fetch shape routes/centres.js's getCentresAndBookings was fixed for on
+// 2026-09-08, just reintroduced here in a second place that fetch never
+// touched. Since ensureDataLoaded awaits BOTH calls together, this one
+// alone could still block the whole Today load for several seconds even
+// though /api/centres itself had gotten fast. getCentresAndBookings
+// already fetches and caches this exact same raw RT client list (see its
+// own cache.rawClients) — reusing it here removes the redundant fetch
+// entirely instead of just making it non-blocking, and inherits that
+// cache's stale-while-revalidate for free.
 async function getClientsForMatching() {
-  if (leadsMatchClientsCache.clients && Date.now() < leadsMatchClientsCache.expiresAt) return leadsMatchClientsCache.clients;
-  const clients = await rtApi.fetchAllPages('clients', {});
-  leadsMatchClientsCache = { clients, expiresAt: Date.now() + LEADS_MATCH_CLIENTS_TTL_MS };
-  return clients;
+  return (await getCentresAndBookings()).rawClients;
 }
 
 router.get('/existing-centre-matches', leadsViewAccess, async (req, res) => {

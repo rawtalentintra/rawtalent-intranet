@@ -58,6 +58,23 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS restricted_task_department_id TEXT;
 UPDATE users SET restricted_task_department_id = 'app_dev'
   WHERE LOWER(email) = 'prince@rawtalent.com.au' AND restricted_task_department_id IS NULL;
 
+-- Same idea, one level up (Joy, 2026-09-11): Nancy (accounts@rawtalent.com.au,
+-- role='user' — no admin access at all) should see NOTHING in the main app
+-- shell (views/index.html) except the Tasks tab — not Home, Search Articles,
+-- Ask AI, any of it. restricted_app_section names the ONE sidebar mode she's
+-- allowed into; index.html hides every other tab and forces setMode() back
+-- to this one no matter what's requested (mirrors admin.html's
+-- RESTRICTED_ROLE_SECTIONS/showSection guard, just for the general app shell
+-- instead of the admin panel, and per-user instead of per-role since this is
+-- one specific person's grant, not a whole tier). Combined with the existing
+-- restricted_task_department_id = 'payroll' below, "Tasks, Payroll
+-- department only" is fully covered by two already-existing mechanisms.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS restricted_app_section TEXT;
+UPDATE users SET restricted_app_section = 'tasks'
+  WHERE LOWER(email) = 'accounts@rawtalent.com.au' AND restricted_app_section IS NULL;
+UPDATE users SET restricted_task_department_id = 'payroll'
+  WHERE LOWER(email) = 'accounts@rawtalent.com.au' AND restricted_task_department_id IS NULL;
+
 -- Same per-person grant pattern again, for the Workforce Partner PWA
 -- (Aug 26 meeting) — Liam needs access despite being admin/super_admin,
 -- not every workforce_partner-role login automatically (Joy: "whoever I

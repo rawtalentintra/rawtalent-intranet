@@ -1321,6 +1321,7 @@
     let currentUserRole = '';
     let currentUserEmail = '';
     let currentUserName = '';
+    let currentUserRestrictedAppSection = null;
 
     async function init() {
       try {
@@ -1329,6 +1330,23 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserName = me.name || me.email;
+        currentUserRestrictedAppSection = me.restrictedAppSection || null;
+        // Per-user restriction (Joy, 2026-09-11 — Nancy: sees nothing but
+        // Tasks) — hide every other sidebar tab so there's nothing to even
+        // click into; setMode() itself is the actual enforcement (guards
+        // against a stale ?tab= link, a home-tile onclick, or a direct
+        // console call), this just keeps the UI honest about what's
+        // actually reachable.
+        if (currentUserRestrictedAppSection) {
+          // Explicit map, not a capitalize-first-letter guess — 'ai' -> 'AI'
+          // isn't a simple capitalization and would silently break on that
+          // one mode if this were ever reused for someone restricted to it.
+          const MODE_TAB_IDS = { home: 'tabHome', search: 'tabSearch', ai: 'tabAI', announcements: 'tabAnnouncements', glossary: 'tabGlossary', faq: 'tabFaq', leads: 'tabLeads', tasks: 'tabTasks', training: 'tabTraining', ideas: 'tabIdeas', leave: 'tabLeave', hours: 'tabHours', team: 'tabTeam' };
+          const allowedTabId = MODE_TAB_IDS[currentUserRestrictedAppSection];
+          document.querySelectorAll('#sidebarNavItems .mode-tab').forEach(btn => {
+            if (btn.id !== allowedTabId) btn.style.display = 'none';
+          });
+        }
         if (me.role === 'admin' || me.role === 'super_admin') {
           document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         }
@@ -2146,6 +2164,13 @@
 
     // ── Mode ──────────────────────────────────────────────────────
     function setMode(mode) {
+      // Per-user restriction (Joy, 2026-09-11 — Nancy specifically): forces
+      // every navigation attempt back to the one allowed section, no matter
+      // what's requested — a stale ?tab= link, a home-tile click, or a
+      // console call to setMode() directly. Mirrors admin.html's
+      // RESTRICTED_ROLE_SECTIONS/showSection guard, just per-user instead
+      // of per-role, for the general app shell instead of the admin panel.
+      if (currentUserRestrictedAppSection && mode !== currentUserRestrictedAppSection) mode = currentUserRestrictedAppSection;
       // A pending debounced search from the previous tab must not fire after
       // switching away — it renders into the same #resultsList every view
       // shares, so it would silently overwrite whatever tab is now active.
