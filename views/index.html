@@ -1213,7 +1213,8 @@
           </div>
           <div id="taskDescEditWrap" class="task-desc-highlight">
             <div style="position:relative">
-              <textarea id="taskDescInput" class="form-control" style="min-height:150px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
+              <div id="taskDescMentionBackdrop" class="task-mention-backdrop" aria-hidden="true"></div>
+              <textarea id="taskDescInput" class="form-control task-mention-input" style="min-height:150px;resize:vertical" placeholder="Any extra detail… type @ to mention someone" oninput="handleMentionInput(this,'taskDescMentionDropdown','taskDescMentionPreview')" onscroll="syncMentionBackdropScroll(this)" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskDescMentionDropdown'),150)"></textarea>
               <div id="taskDescMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
             </div>
             <div id="taskDescMentionPreview" class="task-mention-live-preview" style="display:none"></div>
@@ -1264,7 +1265,8 @@
           <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📝 Notes</div>
           <div id="taskNotesList" style="max-height:220px;overflow-y:auto;margin-bottom:10px"></div>
           <div style="position:relative">
-            <textarea id="taskNoteInput" class="form-control" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleMentionInput(this,'taskMentionDropdown','taskNoteMentionPreview')" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskMentionDropdown'),150)"></textarea>
+            <div id="taskNoteMentionBackdrop" class="task-mention-backdrop" aria-hidden="true"></div>
+            <textarea id="taskNoteInput" class="form-control task-mention-input" style="min-height:60px;resize:vertical" placeholder="Add a note… type @ to mention someone" oninput="handleMentionInput(this,'taskMentionDropdown','taskNoteMentionPreview')" onscroll="syncMentionBackdropScroll(this)" onkeydown="handleMentionKeydown(event)" onblur="setTimeout(()=>hideMentionDropdown('taskMentionDropdown'),150)"></textarea>
             <div id="taskMentionDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20"></div>
           </div>
           <div id="taskNoteMentionPreview" class="task-mention-live-preview" style="display:none"></div>
@@ -2283,11 +2285,19 @@
     // department context actually is Bookings — see
     // BOOKINGS_ONLY_STATUS/statusOrderForDept/boardStatusOrder below.
     const BOOKINGS_ONLY_STATUS = 'requested_bookings';
+    // Colors (2026-09-11, Joy: "highlight To Do as yellow, In Progress as
+    // orange, In Review as bluegreen and Done as green") — same light-bg/
+    // colored-border/dark-text chip style as requested_bookings' existing
+    // sky-blue treatment, just re-picked per status. Purely cosmetic —
+    // label/desc and every consumer (task-column headers, the legend, task
+    // cards, the status <select>) all read from this one object, so
+    // changing the swatches here is the only edit needed; nothing about
+    // how a task's actual status value is stored or saved changes.
     const TASK_STATUS_META = {
       requested_bookings: { label: 'Requested Bookings', color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', desc: 'A booking request has come in and needs actioning. Bookings department only.' },
-      to_do:       { label: 'To Do',       color: '#475569', bg: '#f1f5f9', border: '#e2e8f0', desc: 'Not started yet.' },
-      in_progress: { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', desc: 'Someone is actively working on it right now.' },
-      in_review:   { label: 'In Review',   color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', desc: 'Work is done and being checked before it closes out.' },
+      to_do:       { label: 'To Do',       color: '#a16207', bg: '#fefce8', border: '#fde68a', desc: 'Not started yet.' },
+      in_progress: { label: 'In Progress', color: '#c2410c', bg: '#fff7ed', border: '#fed7aa', desc: 'Someone is actively working on it right now.' },
+      in_review:   { label: 'In Review',   color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', desc: 'Work is done and being checked before it closes out.' },
       done:        { label: 'Done',        color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Completed — nothing left to do.' }
     };
     const TASK_PRIORITY_META = {
@@ -3096,6 +3106,7 @@
       // attachment-chip areas, which render from state but are never
       // re-rendered on open. Reset all three explicitly on every open.
       document.getElementById('taskNoteInput').value = '';
+      document.getElementById('taskNoteMentionBackdrop').innerHTML = '';
       hideMentionDropdown('taskMentionDropdown');
       const noteMentionPreview = document.getElementById('taskNoteMentionPreview');
       noteMentionPreview.style.display = 'none';
@@ -3125,6 +3136,7 @@
         creatorInfo.style.display = 'block';
         document.getElementById('taskTitleInput').value = t.title || '';
         document.getElementById('taskDescInput').value = t.description || '';
+        syncMentionBackdrop(document.getElementById('taskDescInput'));
         updateMentionPreview(document.getElementById('taskDescInput'), 'taskDescMentionPreview');
         document.getElementById('taskDeptSelect').value = t.department_id;
         populateTaskClassSelect(t.department_id, t.classification_id);
@@ -3158,6 +3170,7 @@
         document.getElementById('taskCreatorInfo').style.display = 'none';
         document.getElementById('taskTitleInput').value = '';
         document.getElementById('taskDescInput').value = '';
+        document.getElementById('taskDescMentionBackdrop').innerHTML = '';
         document.getElementById('taskDescMentionPreview').style.display = 'none';
         document.getElementById('taskDeptSelect').value = taskFilterDept !== 'all' ? taskFilterDept : (taskMeta.departments[0]?.id || '');
         populateTaskClassSelect(document.getElementById('taskDeptSelect').value, null);
@@ -3406,6 +3419,7 @@
       // (see the comment there) — an unsent note draft should never
       // outlive the modal it was typed in, whichever way it closes.
       document.getElementById('taskNoteInput').value = '';
+      document.getElementById('taskNoteMentionBackdrop').innerHTML = '';
       const noteMentionPreview = document.getElementById('taskNoteMentionPreview');
       noteMentionPreview.style.display = 'none';
       noteMentionPreview.innerHTML = '';
@@ -3661,6 +3675,7 @@
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to add note', 'error'); return; }
         input.value = '';
+        document.getElementById('taskNoteMentionBackdrop').innerHTML = '';
         hideMentionDropdown('taskMentionDropdown');
         document.getElementById('taskNoteMentionPreview').style.display = 'none';
         currentTaskNotes.push(data.note);
@@ -3698,10 +3713,40 @@
     let taskMentionActiveDropdownId = null;
     let taskMentionActivePreviewId = null;
 
+    // Backdrop id for each mention-enabled textarea — see .task-mention-
+    // backdrop's own CSS comment for why this exists. Only taskDescInput
+    // and taskNoteInput support live mentions at all (a per-note EDIT
+    // textarea, taskNoteEditInput_<id>, has never been wired for @mentions
+    // — this doesn't add it, matching that existing scope).
+    const MENTION_BACKDROP_IDS = { taskDescInput: 'taskDescMentionBackdrop', taskNoteInput: 'taskNoteMentionBackdrop' };
+
+    function syncMentionBackdrop(el) {
+      const backdrop = document.getElementById(MENTION_BACKDROP_IDS[el.id]);
+      if (!backdrop) return;
+      // A textarea always reserves space for one more line after a
+      // trailing newline — without the same padding here, the backdrop's
+      // last line sits a hair short of the real textarea's, and long
+      // multi-line content can drift visibly out of alignment as it grows.
+      const raw = el.value + (el.value.endsWith('\n') ? ' ' : '');
+      const html = escHtml(raw);
+      const re = mentionRegex(taskMeta.users);
+      backdrop.innerHTML = re ? html.replace(re, m => `<span class="task-mention-live">${m}</span>`) : html;
+      backdrop.scrollTop = el.scrollTop;
+    }
+    // Wired to the textarea's own onscroll — internal scrolling (content
+    // taller than the box, before it's been manually resized) only fires a
+    // scroll event on the real textarea; the backdrop underneath has no
+    // way to know unless told explicitly.
+    function syncMentionBackdropScroll(el) {
+      const backdrop = document.getElementById(MENTION_BACKDROP_IDS[el.id]);
+      if (backdrop) backdrop.scrollTop = el.scrollTop;
+    }
+
     function handleMentionInput(el, dropdownId, previewId) {
       taskMentionActiveEl = el;
       taskMentionActiveDropdownId = dropdownId;
       taskMentionActivePreviewId = previewId || null;
+      syncMentionBackdrop(el);
       const match = handleTaskMentionQuery(el.value);
       const dropdown = document.getElementById(dropdownId);
       if (!match) { dropdown.style.display = 'none'; taskMentionCandidates = []; }
@@ -3749,6 +3794,7 @@
       const name = u.name || u.email.split('@')[0];
       el.value = el.value.slice(0, match.atIndex) + '@' + name + ' ';
       hideMentionDropdown(taskMentionActiveDropdownId);
+      syncMentionBackdrop(el); // programmatic .value= — oninput never fires on its own
       if (taskMentionActivePreviewId) updateMentionPreview(el, taskMentionActivePreviewId);
       el.focus();
     }
