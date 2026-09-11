@@ -124,6 +124,19 @@ router.get('/pending', async (req, res) => {
   }
 });
 
+// Read-only "who approved what" list — a separate 4-person pool
+// (Sophia/Joy/Lorie/Adrianne) from requireFinalApprover above; row-scoping
+// (Sophia/Joy see all, Lorie/Adrianne see only their own approvals) lives
+// in timesheetService.listApprovedTimesheets, the single source of truth
+// for both the pool and the filtering.
+router.get('/approved', async (req, res) => {
+  try {
+    res.json(await timesheet.listApprovedTimesheets(req.user.email));
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
 router.post('/weeks/:id/approve', async (req, res) => {
   try {
     res.json(await timesheet.decide(req.params.id, req.user.email, 'approve', req.body.note));

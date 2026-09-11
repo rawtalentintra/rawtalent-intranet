@@ -341,6 +341,40 @@ async function listPendingFor(approverEmail) {
   return weeks;
 }
 
+// A distinct, smaller pool from FINAL_APPROVERS (Sophia/Joy only) — Lorie
+// and Adrianne (the L1 team approvers) are let onto this one read-only
+// list too, but row-scoped to only the approvals they personally made.
+// Not a role and not isFinalApprover — a fixed 4-person pool for this
+// feature specifically, per Joy's explicit ask (2026-09-11): "Keep this
+// view only for me, Sophia, Lorie and Adrianne."
+const APPROVED_LIST_VIEWERS = ['sophia@rawtalent.com.au', 'joy@rawtalent.com.au', 'lorie@rawtalent.com.au', 'adrianne@rawtalent.com.au'];
+function canViewApprovedList(email) {
+  return APPROVED_LIST_VIEWERS.includes((email || '').toLowerCase());
+}
+
+// Sophia/Joy (isFinalApprover) see every approved week, company-wide.
+// Lorie/Adrianne see only the ones where THEY were the l1_decided_by —
+// i.e. only what they personally approved at the team-manager stage —
+// per Joy's explicit "FOR LORIE ONLY WHAT LORIE APPROVED" spec. Note
+// l1_decided_by can also be Sophia/Joy themselves (decide() lets a final
+// approver act on a still-pending_l1 week without waiting on Lorie/Adzi —
+// see decide()'s comment above), which is exactly right here too: that
+// case is Sophia/Joy's own approval, not Lorie's or Adrianne's, so it
+// correctly stays out of their filtered view.
+async function listApprovedTimesheets(requesterEmail) {
+  if (!canViewApprovedList(requesterEmail)) throw new Error('You do not have access to this');
+  const db = getDb();
+  let sql = "SELECT * FROM timesheet_weeks WHERE status = 'approved'";
+  const args = [];
+  if (!isFinalApprover(requesterEmail)) {
+    sql += ' AND LOWER(l1_decided_by) = ?';
+    args.push(requesterEmail.toLowerCase());
+  }
+  sql += ' ORDER BY week_start_date DESC LIMIT 300';
+  const res = await db.execute({ sql, args });
+  return normalizeWeeks(res.rows);
+}
+
 async function companySummary(fromDate, toDate) {
   const db = getDb();
   const entriesRes = await db.execute({
@@ -408,5 +442,5 @@ module.exports = {
   weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, validateHours, resolveTeam,
   upsertEntry, deleteEntry, getWeek, listMyWeeks, submitWeek, recall, decide, listPendingFor,
   companyWeekSummary, companyPayPeriodSummary, companyMonthSummary, listAll, deleteWeek,
-  adminSetTotalHours
+  adminSetTotalHours, canViewApprovedList, listApprovedTimesheets
 };

@@ -5,6 +5,7 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { logActivity } = require('../services/activityLog');
 const { isFinalApprover } = require('../services/leaveService');
+const { canViewApprovedList } = require('../services/timesheetService');
 
 router.post('/login', (req, res, next) => {
   passport.authenticate('local', (err, user, info) => {
@@ -61,7 +62,7 @@ router.post('/logout', (req, res) => {
 
 router.get('/me', async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
-  const info = { email: req.user.email, name: req.user.name, role: req.user.role, canBuildTraining: !!req.user.can_build_training, canCreateOutreachLists: !!req.user.can_create_outreach_lists, canUseWfpPwa: !!req.user.can_use_wfp_pwa, canCalibrateCalls: req.user.role === 'super_admin' || !!req.user.can_calibrate_calls, wfpLabel: req.user.wfp_label || null, additionalTerritories: Array.isArray(req.user.additional_wfp_territories) ? req.user.additional_wfp_territories : [], homeAddress: req.user.home_address || null, homeLat: req.user.home_lat ?? null, homeLng: req.user.home_lng ?? null, isPayrollAdmin: isFinalApprover(req.user.email), restrictedAppSection: req.user.restricted_app_section || null };
+  const info = { email: req.user.email, name: req.user.name, role: req.user.role, canBuildTraining: !!req.user.can_build_training, canCreateOutreachLists: !!req.user.can_create_outreach_lists, canUseWfpPwa: !!req.user.can_use_wfp_pwa, canCalibrateCalls: req.user.role === 'super_admin' || !!req.user.can_calibrate_calls, wfpLabel: req.user.wfp_label || null, additionalTerritories: Array.isArray(req.user.additional_wfp_territories) ? req.user.additional_wfp_territories : [], homeAddress: req.user.home_address || null, homeLat: req.user.home_lat ?? null, homeLng: req.user.home_lng ?? null, isPayrollAdmin: isFinalApprover(req.user.email), canViewApprovedTimesheets: canViewApprovedList(req.user.email), restrictedAppSection: req.user.restricted_app_section || null };
   if (req.session.impersonatorId) {
     try {
       const origRes = await getDb().execute({ sql: 'SELECT name, email FROM users WHERE id = ?', args: [req.session.impersonatorId] });

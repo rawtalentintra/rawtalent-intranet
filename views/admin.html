@@ -301,6 +301,12 @@
         <div class="admin-nav-item" id="navPayroll" style="display:none" onclick="showSection('payroll', this)">
           <span class="admin-nav-icon">💰</span> Payroll
         </div>
+        <!-- Only shown to Lorie/Adrianne — Sophia/Joy already reach this
+             same list under Payroll → Approvals, so this entry stays
+             hidden for them to avoid a redundant second link. -->
+        <div class="admin-nav-item" id="navApprovedTimesheets" style="display:none" onclick="showSection('approved-timesheets', this)">
+          <span class="admin-nav-icon">✅</span> Approved Timesheets
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Projects</div>
@@ -630,6 +636,8 @@
 
         <div id="payrollApprovalsView" style="display:none">
           <div id="payrollApprovalsWrap"></div>
+          <div style="font-weight:700;color:var(--navy);font-size:15px;margin:28px 0 12px">Approved Timesheets — who approved</div>
+          <div id="payrollApprovedWrap"></div>
         </div>
 
         <div id="payrollCompanyView" style="display:none">
@@ -711,6 +719,26 @@
             </div>
           </div>
         </div>
+      </div>
+      </template>
+
+      <!-- Approved Timesheets — Lorie/Adrianne's own entry point to the
+           same read-only list Sophia/Joy see embedded under Payroll →
+           Approvals (see payrollApprovedWrap below). Gated to a fixed
+           4-person pool (timesheetService.canViewApprovedList), not a
+           role — deliberately its own minimal section rather than opening
+           the rest of Payroll (Profiles/Payslips/Company Totals, rates,
+           bank details) to Lorie/Adrianne, who were never asked to see any
+           of that. -->
+      <template id="__lazy_approved_timesheets">
+      <div class="admin-section" id="section-approved-timesheets">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Approved Timesheets</div>
+            <div class="admin-page-sub">Timesheets that have been approved, and who approved them</div>
+          </div>
+        </div>
+        <div id="approvedTimesheetsWrap"></div>
       </div>
       </template>
 
@@ -4489,6 +4517,11 @@
     let currentUserCanCreateOutreachLists = false;
     let currentUserCanCalibrateCalls = false;
     let currentUserIsPayrollAdmin = false;
+    // Separate, wider pool than currentUserIsPayrollAdmin (Sophia/Joy) —
+    // includes Lorie/Adrianne too, for the read-only Approved Timesheets
+    // list only (server-side row-scoped per-approver — see
+    // timesheetService.listApprovedTimesheets).
+    let currentUserCanViewApprovedTimesheets = false;
     let currentUserWfpLabel = null;
 
     // WFP Dashboard/My Centres/Leads/Micropods all share the same VIC/SA
@@ -4529,6 +4562,7 @@
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
         currentUserCanCalibrateCalls = !!me.canCalibrateCalls;
         currentUserIsPayrollAdmin = !!me.isPayrollAdmin;
+        currentUserCanViewApprovedTimesheets = !!me.canViewApprovedTimesheets;
         currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
@@ -4690,7 +4724,12 @@
       if (IS_PARTNERS_VIEW) return PARTNERS_VIEW_SECTIONS;
       const base = RESTRICTED_ROLE_SECTIONS[currentUserRole];
       if (!base) return null;
-      return (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) ? [...base, 'educator-outreach'] : base;
+      let allowed = base;
+      if (currentUserRole === 'qa_view' && currentUserCanCreateOutreachLists) allowed = [...allowed, 'educator-outreach'];
+      // Lorie/Adrianne's grant for the read-only Approved Timesheets list —
+      // same per-user-on-top-of-qa_view shape as educator-outreach above.
+      if (currentUserRole === 'qa_view' && currentUserCanViewApprovedTimesheets) allowed = [...allowed, 'approved-timesheets'];
+      return allowed;
     }
 
     function applyRoleVisibility() {
@@ -4717,6 +4756,17 @@
       if (currentUserIsPayrollAdmin) {
         const navPayroll = document.getElementById('navPayroll');
         if (navPayroll) navPayroll.style.display = '';
+      }
+      // Approved Timesheets — a wider pool than Payroll (adds Lorie/
+      // Adrianne), but only shown as its own nav entry to whoever ISN'T
+      // already a payroll admin (Sophia/Joy reach the same list inside
+      // Payroll → Approvals instead). Also re-gated in
+      // getEffectiveAllowedSections() below, since Lorie/Adrianne are
+      // qa_view and that role's allowlist loop runs after this and would
+      // otherwise hide it again.
+      if (currentUserCanViewApprovedTimesheets && !currentUserIsPayrollAdmin) {
+        const navAT = document.getElementById('navApprovedTimesheets');
+        if (navAT) navAT.style.display = '';
       }
       const effectiveAllowed = getEffectiveAllowedSections();
       if (effectiveAllowed) {
@@ -6056,6 +6106,14 @@
         // 403s and renders as "Failed to load…". Bounce it here too.
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
+      } else if (id === 'approved-timesheets' && !currentUserCanViewApprovedTimesheets) {
+        // Same direct-navigation bounce as payroll above, for the wider
+        // (Sophia/Joy/Lorie/Adrianne) but still fixed pool gating this
+        // section — an admin/super_admin outside the pool (Liam, Prince,
+        // Yuvraj) isn't restricted by the qa_view effectiveAllowed check
+        // above, so needs this explicit branch to actually be blocked.
+        showSection('articles', document.querySelector('[onclick*="articles"]'));
+        return;
       }
       // Lazy-build heavy sections on first visit instead of always having
       // their DOM present — confirmed live to measurably reduce how often
@@ -6115,6 +6173,7 @@
       if (id === 'team') loadOurTeam();
       if (id === 'leave-requests') loadLeaveRequestsAdmin();
       if (id === 'payroll') initPayrollSection();
+      if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
@@ -7119,7 +7178,7 @@
       }
       if (tab === 'profiles') loadPayrollProfiles();
       else if (tab === 'payslips') loadPayrollEligible();
-      else if (tab === 'approvals') loadPayrollApprovals();
+      else if (tab === 'approvals') { loadPayrollApprovals(); loadApprovedTimesheetsInto('payrollApprovedWrap'); }
       else if (tab === 'company') loadPayrollCompany();
     }
 
@@ -7230,6 +7289,52 @@
     function viewPayslipFromApproval(userEmailEncoded, payPeriodStart) {
       payrollPeriodStart = payPeriodStart;
       openPayrollGenerateModal(decodeURIComponent(userEmailEncoded));
+    }
+
+    // ── Approved Timesheets (Sophia/Joy see all; Lorie/Adrianne see only
+    // their own approvals) — GET /api/timesheets/approved does the actual
+    // row-scoping server-side (timesheetService.listApprovedTimesheets),
+    // this is just rendering whatever it hands back. Shared between the
+    // embedded copy under Payroll → Approvals (payrollApprovedWrap, for
+    // Sophia/Joy) and Lorie/Adrianne's own standalone section
+    // (approvedTimesheetsWrap) — same data, same markup, two entry points.
+    function approverDisplayName(email) {
+      if (!email) return '—';
+      const names = { 'lorie@rawtalent.com.au': 'Lorie Delara', 'adrianne@rawtalent.com.au': 'Adzi Estrella', 'sophia@rawtalent.com.au': 'Sophia', 'joy@rawtalent.com.au': 'Joy' };
+      return names[email.toLowerCase()] || email;
+    }
+    function approvedTimesheetsHtml(list) {
+      if (!list.length) return `<div style="color:var(--text-muted);padding:20px;text-align:center">No approved timesheets yet.</div>`;
+      return `
+        <div class="admin-table-card">
+          <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr><th>Employee</th><th>Week</th><th>Total Hours</th><th>Approved By</th><th>Final Approved By</th></tr></thead>
+            <tbody>
+              ${list.map(w => `
+                <tr>
+                  <td>${escHtml(w.user_name || w.user_email)}</td>
+                  <td>${fmtDate(w.week_start_date)} – ${fmtDate(w.week_end_date)}</td>
+                  <td>${Number(w.total_hours).toFixed(2)} hrs</td>
+                  <td>${escHtml(approverDisplayName(w.l1_decided_by))}</td>
+                  <td>${escHtml(approverDisplayName(w.final_decided_by))}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          </div>
+        </div>`;
+    }
+    async function loadApprovedTimesheetsInto(wrapId) {
+      const wrap = document.getElementById(wrapId);
+      if (!wrap) return;
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const list = await fetch('/api/timesheets/approved').then(r => r.json());
+        wrap.innerHTML = approvedTimesheetsHtml(Array.isArray(list) ? list : []);
+      } catch {
+        wrap.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load approved timesheets.</div>';
+      }
     }
 
     // ── Payroll → Company Totals (final-approval stage only) ───────
