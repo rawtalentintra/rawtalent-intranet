@@ -2179,6 +2179,22 @@
       clearTimeout(searchTimer);
       closeMobileSidebar();
       currentMode = mode;
+      // Keep the URL in sync with the active tab (Joy, 2026-09-11: a
+      // refresh always dropped back to Home) — every tab switch until now
+      // was a plain in-page setMode() call with no navigation at all, so
+      // the URL never changed and init()'s own ?tab= read (below) had
+      // nothing to restore from after a refresh. replaceState (not
+      // pushState) — a tab switch updates the current entry in place
+      // rather than growing browser history, so Back still leaves the app
+      // (or goes to wherever the user actually came from) instead of
+      // stepping backwards through every tab visited this session. 'home'
+      // stays a bare "/" with no ?tab= at all, matching what init() already
+      // treats as the default. Deliberately does NOT touch the task-detail
+      // deep-link's own one-shot ?task= param/history.replaceState below —
+      // that already runs its own full strip right after calling
+      // setMode('tasks'), which still wins since it runs later in init().
+      const modeUrl = location.pathname + (mode === 'home' ? '' : `?tab=${encodeURIComponent(mode)}`);
+      if (modeUrl !== location.pathname + location.search) history.replaceState(null, '', modeUrl);
       const isAI = mode === 'ai';
       const isAnnouncements = mode === 'announcements';
       const isGlossary = mode === 'glossary';
