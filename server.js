@@ -409,6 +409,22 @@ async function start() {
       .catch(err => console.error('Lead auto-sign check error:', err.message));
     runLeadAutoSignCheck();
     setInterval(runLeadAutoSignCheck, 15 * 60 * 1000);
+
+    // Warm routes/centres.js's shared centres+bookings cache on boot, not
+    // just on first request — reported live 2026-09-11 as "Today's still
+    // slow on initial load" even after the stale-while-revalidate fix
+    // (routes/centres.js's getCentresAndBookings): SWR only helps once
+    // something has been fetched at least once since the process started —
+    // it does nothing for the genuinely cold state right after a deploy
+    // restart, which is exactly when someone opening /wfp's Today tab is
+    // most likely to land (confirmed cold cost ~13s, see
+    // getCentresAndBookings's own comment). Same "run once on boot, don't
+    // make a redeploy wait on it" shape as the RT candidates bootstrap
+    // just above — by the time a real request needs this, the fetch
+    // is usually already done or at least already in flight instead of
+    // starting from zero.
+    require('./routes/centres').getCentresAndBookings()
+      .catch(err => console.error('Centres/bookings cache warm-up error:', err.message));
   }
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
