@@ -7563,8 +7563,10 @@
         </div></div>`;
     }
 
-    function jobadderAttachmentUrl(candidateId, att) {
-      return `/api/jobadder/candidates/${candidateId}/attachments/${att.attachmentId}?filename=${encodeURIComponent(att.fileName || 'attachment')}`;
+    function jobadderAttachmentUrl(candidateId, att, download) {
+      const q = new URLSearchParams({ filename: att.fileName || 'attachment' });
+      if (download) q.set('download', '1');
+      return `/api/jobadder/candidates/${candidateId}/attachments/${att.attachmentId}?${q.toString()}`;
     }
     function jobadderAttachmentTypeLabel(type) {
       const labels = { Resume: '📄 Resume', FormattedResume: '📄 Formatted Resume', CoverLetter: '✉️ Cover Letter', Screening: '📋 Screening', Check: '✅ Check', Reference: '📞 Reference', License: '🪪 License', Other: '📎 Other' };
@@ -7585,8 +7587,21 @@
         const addr = candidate.address ? [candidate.address.street?.join(', '), candidate.address.city, candidate.address.state, candidate.address.postalCode].filter(Boolean).join(', ') : '—';
         const education = (candidate.education || []).map(e => `<div style="margin-bottom:6px"><b>${escHtml(e.course || 'Unknown course')}</b>${e.institution ? ' — ' + escHtml(e.institution) : ''}${e.date ? ` <span style="color:var(--text-muted)">(${escHtml(String(e.date))})</span>` : ''}</div>`).join('') || '<span style="color:var(--text-muted)">No education on file.</span>';
         const current = candidate.employment?.current;
+        // View opens the same URL in a new tab with Content-Disposition:
+        // inline — a PDF renders straight in the browser's own viewer that
+        // way. Download forces a save dialog instead (?download=1). A
+        // format the browser can't render natively (e.g. .docx) still ends
+        // up downloading when View is clicked either way — a browser
+        // limitation, not something either link controls — so both are
+        // offered rather than promising one will always preview.
         const attHtml = Array.isArray(attachments) && attachments.length
-          ? attachments.map(a => `<a href="${jobadderAttachmentUrl(candidateId, a)}" target="_blank" style="display:inline-block;margin:0 10px 8px 0;padding:6px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:12px;font-weight:600;color:var(--navy);text-decoration:none">${jobadderAttachmentTypeLabel(a.type)} — ${escHtml(a.fileName || '')}</a>`).join('')
+          ? attachments.map(a => `
+            <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--gray-200);border-radius:8px;padding:6px 10px;margin:0 8px 8px 0;font-size:12px">
+              <span style="font-weight:600;color:var(--navy)">${jobadderAttachmentTypeLabel(a.type)}</span>
+              <span style="color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.fileName || '')}</span>
+              <a href="${jobadderAttachmentUrl(candidateId, a, false)}" target="_blank" style="color:var(--orange);font-weight:700;text-decoration:none">👁 View</a>
+              <a href="${jobadderAttachmentUrl(candidateId, a, true)}" target="_blank" style="color:var(--text-muted);font-weight:700;text-decoration:none">⬇ Download</a>
+            </div>`).join('')
           : '<span style="color:var(--text-muted)">No files on file.</span>';
         body.innerHTML = `
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12.5px;margin-bottom:16px">

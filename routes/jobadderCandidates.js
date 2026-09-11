@@ -91,7 +91,15 @@ router.get('/candidates/:id/attachments/:attachmentId', async (req, res) => {
     if (!apiRes.ok) return res.status(apiRes.status === 404 ? 404 : 502).send('Failed to load attachment');
     res.setHeader('Content-Type', apiRes.headers.get('content-type') || 'application/octet-stream');
     const filename = req.query.filename ? String(req.query.filename).replace(/["\r\n]/g, '') : 'attachment';
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    // Joy, 2026-09-11: wants an explicit View (opens in a new tab) AND a
+    // Download option per file, not just one link. `inline` is what makes
+    // a PDF actually render in the new tab instead of prompting to save —
+    // `attachment` (only when ?download=1 is passed) forces the save
+    // dialog instead. A format the browser has no native viewer for (e.g.
+    // .docx) still ends up downloading either way once clicked — that's a
+    // browser limitation, not something this header controls.
+    const disposition = req.query.download ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
     const buf = Buffer.from(await apiRes.arrayBuffer());
     res.send(buf);
   } catch (err) {
