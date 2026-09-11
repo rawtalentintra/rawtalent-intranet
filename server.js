@@ -145,6 +145,14 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 app.use('/auth/login', loginLimiter);
 app.use('/auth', require('./routes/auth'));
+// JobAdder's registered "Authorized redirect URI" for this application is
+// fixed at /auth/jobadder/callback — mounted under the same /auth prefix
+// as HeartBeat's own login OAuth for that reason, even though this is a
+// completely different kind of OAuth (granting HeartBeat server-to-server
+// access to JobAdder data, not logging a person into HeartBeat itself).
+// routes/auth.js above has no /jobadder route of its own, so requests fall
+// through to this router untouched — order here matters for that reason.
+app.use('/auth/jobadder', require('./routes/jobadderOAuth'));
 app.use('/api/articles', require('./routes/articles'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/sources', require('./routes/sources'));

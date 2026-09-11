@@ -621,6 +621,31 @@ CREATE TABLE IF NOT EXISTS webex_auth_state (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Single-row token store for the JobAdder integration (Sync candidates/
+-- placements into HeartBeat — application registered 2026-09-11). Unlike
+-- webex_auth_state above (seeded from a refresh token obtained manually
+-- outside this app), this one is populated by a real, in-app OAuth2
+-- authorization-code round trip — GET /auth/jobadder redirects a HeartBeat
+-- admin to JobAdder's own login+consent screen, and GET /auth/jobadder/
+-- callback (services/jobAdderService.js) exchanges the resulting code for
+-- tokens here. api_base_url/instance/account come back in that same token
+-- response and are specific to the JobAdder account that granted access
+-- (JobAdder's own docs: "api — The base URL to use for API access") — kept
+-- alongside the tokens rather than hardcoded, since a future reconnection
+-- (different account, different region) could change them.
+CREATE TABLE IF NOT EXISTS jobadder_auth_state (
+  id INTEGER PRIMARY KEY,
+  access_token TEXT,
+  refresh_token TEXT,
+  access_token_expires_at BIGINT,
+  api_base_url TEXT,
+  instance TEXT,
+  account TEXT,
+  connected_by CITEXT,
+  connected_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- How long each agent has held their current Webex status — Webex's API has
 -- no such field, so this is derived from our own poll history and must be
 -- persisted (not kept in memory) so a deploy/restart doesn't reset every
