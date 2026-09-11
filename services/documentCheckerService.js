@@ -735,6 +735,20 @@ const checkChildSafetyTraining = makeExpiringDocumentChecker('child_safety_train
 // match it.
 const EARLY_CHILDHOOD_SECTOR_PATTERN = /early\s+childhood/i;
 
+// The wrong variant's exact real wording, now confirmed directly (Joy sent
+// both real certificates side by side, 2026-09-11): the title itself ends
+// "...Mandatory Reporting and Other Obligations for Non-Government
+// Schools" — visually distinguished by an orange/red header instead of
+// the correct course's violet/purple one, though color isn't something
+// extracted PDF text can carry, so the wording is the actual signal here.
+// Both are genuine, validly-issued Victorian Department of Education
+// certificates — the Non-Government Schools one just isn't the sector RT's
+// ECEC educators need, so it's still wrong even though it's real. Named
+// explicitly in the reason below (on top of the pre-existing "school-based"
+// absence check, which stays as the actual enforcement — this only sharpens
+// the message a human reviewer sees when that exact wrong variant is why).
+const NON_GOVERNMENT_SCHOOLS_PATTERN = /non-government\s+schools?/i;
+
 const _checkProtectingChildrenTrainingBase = makeExpiringDocumentChecker('protecting_children_training', PROTECTING_CHILDREN_TRAINING_TYPE_PATTERN,
   'Could not find wording confirming this is a Protecting Children (Mandatory Reporting) training certificate — may be the wrong document.');
 
@@ -743,7 +757,11 @@ async function checkProtectingChildrenTraining(text, options = {}) {
   if (result.extracted.documentTypeConfirmed && !EARLY_CHILDHOOD_SECTOR_PATTERN.test(text)) {
     result.extracted.documentTypeConfirmed = false;
     result.flags.push('wrong_document_type');
-    result.reasons.push('This looks like the "Protecting Children – Mandatory Reporting" training, but the Early Childhood Services sector wording isn\'t present — Raw Talent only accepts the Early Childhood Services version of this course, not the School-based one (per the real Compliance Documents – PCC Article). Check manually.');
+    result.reasons.push(
+      NON_GOVERNMENT_SCHOOLS_PATTERN.test(text)
+        ? 'This is the "Protecting Children – Mandatory Reporting and Other Obligations for Non-Government Schools" version — a genuine, validly-issued Victorian Department of Education certificate, but not the one Raw Talent accepts for ECEC educators. Only the Early Childhood Services version (violet/purple header) is accepted. Ask the educator to complete the Early Childhood course and resubmit.'
+        : 'This looks like the "Protecting Children – Mandatory Reporting" training, but the Early Childhood Services sector wording isn\'t present — Raw Talent only accepts the Early Childhood Services version of this course, not the School-based one (per the real Compliance Documents – PCC Article). Check manually.'
+    );
     result.outcome = 'invalid';
   }
   return result;
