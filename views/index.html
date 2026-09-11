@@ -1254,7 +1254,7 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div class="form-group-modal" style="flex:1;min-width:140px">
             <label class="form-label-modal">Status</label>
-            <select id="taskStatusSelect" class="form-control"></select>
+            <select id="taskStatusSelect" class="form-control" onchange="applyTaskStatusSelectColor()"></select>
           </div>
           <div class="form-group-modal" style="flex:1;min-width:140px">
             <label class="form-label-modal">Priority</label>
@@ -2862,7 +2862,38 @@
       const sel = document.getElementById('taskStatusSelect');
       const order = statusOrderForDept(deptId);
       const finalSelected = order.includes(selectedStatus) ? selectedStatus : 'to_do';
-      sel.innerHTML = order.map(s => `<option value="${s}" ${s === finalSelected ? 'selected' : ''}>${TASK_STATUS_META[s].label}</option>`).join('');
+      // Each <option> carries its OWN status's color inline (not just the
+      // closed select reflecting whichever one is currently chosen) — Joy,
+      // 2026-09-11: "I want it to show the colours even if not selected
+      // yet", i.e. visible in the dropdown list itself. Chromium renders an
+      // <option>'s own background/color; Firefox/Safari don't consistently
+      // (a plain-list fallback there, not a crash) — acceptable since this
+      // app already leans on other Chrome-only behaviour (see CLAUDE.md's
+      // GPU-compositor note) and every real account here is on Chrome.
+      sel.innerHTML = order.map(s => {
+        const m = TASK_STATUS_META[s];
+        return `<option value="${s}" ${s === finalSelected ? 'selected' : ''} style="background:${m.bg};color:${m.color};font-weight:700">${m.label}</option>`;
+      }).join('');
+      applyTaskStatusSelectColor();
+    }
+
+    // Reported live (Joy, 2026-09-11, screenshot of the Edit Task modal):
+    // the board's new status colors (To Do/In Progress/In Review/Done)
+    // never reached this <select> — TASK_STATUS_META only ever drove the
+    // board's column headers/legend/cards, not the field someone actually
+    // picks a status FROM. Colors the select itself to match whatever
+    // status is currently chosen; wired to both onchange (picking a new
+    // status) and populateTaskStatusSelect (opening the modal or switching
+    // Department, which can silently reset the selection to To Do — see
+    // its own comment).
+    function applyTaskStatusSelectColor() {
+      const sel = document.getElementById('taskStatusSelect');
+      const meta = TASK_STATUS_META[sel.value];
+      if (!meta) return;
+      sel.style.background = meta.bg;
+      sel.style.color = meta.color;
+      sel.style.borderColor = meta.border;
+      sel.style.fontWeight = '700';
     }
 
     function populateTaskClassSelect(deptId, selectedId) {
