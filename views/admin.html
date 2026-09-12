@@ -12782,7 +12782,7 @@
             </div>
           </div>
           <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate && !['0001-01-01', '9999-12-31'].includes(String(req.expiryDate).slice(0, 10)) ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}</div>
           <div id="doc-controls-${detailId}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
             ${req.documentPath ? `<a href="${escHtml(req.documentPath)}" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : '<span style="font-size:11.5px;color:var(--text-muted);font-style:italic">No document uploaded</span>'}
             ${docCheckControlsHtml(req, check)}
