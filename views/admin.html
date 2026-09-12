@@ -448,6 +448,9 @@
         <div class="admin-nav-item" onclick="showSection('meetings', this)">
           <span class="admin-nav-icon">🗓️</span> Meetings
         </div>
+        <div class="admin-nav-item" onclick="showSection('task-reports', this)">
+          <span class="admin-nav-icon">📈</span> Task Reports
+        </div>
       </div>
       <!-- Account — was three separate top-navbar buttons ("← HeartBeat",
            "⚙️ Settings", "Sign Out") plus the avatar; Joy flagged the
@@ -2020,6 +2023,64 @@
             <input type="text" id="meetingsInput" class="form-control" placeholder="Ask a question about your meetings…" onkeydown="if(event.key==='Enter')askMeetings()">
             <button class="btn-add" id="meetingsAskBtn" onclick="askMeetings()" style="flex-shrink:0">Ask</button>
           </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- Task Reports (private — super_admin only, Joy 2026-09-13) -->
+      <template id="__lazy_task_reports">
+      <div class="admin-section" id="section-task-reports">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">📈 Task Reports</div>
+            <div class="admin-page-sub">Completion and throughput across every task on the board — by department, priority, and assignee.</div>
+          </div>
+          <button class="btn-secondary" onclick="loadTaskReportsSection(true)">🔄 Refresh</button>
+        </div>
+
+        <div class="kpi-row" id="taskReportsKpis" style="grid-template-columns:repeat(6,1fr)"></div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin:16px 0">
+          <div class="sd-card-title">Completed over time</div>
+          <div class="sd-card-sub">Tasks marked Done, by the week/month they were actually completed</div>
+          <div id="taskReportsTrend" style="margin-top:14px"></div>
+        </div>
+
+        <div style="display:flex;gap:16px;margin:16px 0;flex-wrap:wrap">
+          <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+            <div class="sd-card-title">By Department</div>
+            <div class="sd-card-sub">Done / total and completion rate, per department</div>
+            <div id="taskReportsByDept" style="margin-top:14px"></div>
+          </div>
+          <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+            <div class="sd-card-title">By Status</div>
+            <div class="sd-card-sub">Where every task currently sits</div>
+            <div id="taskReportsByStatus" style="margin-top:14px"></div>
+          </div>
+          <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+            <div class="sd-card-title">By Priority</div>
+            <div class="sd-card-sub">All tasks, regardless of status</div>
+            <div id="taskReportsByPriority" style="margin-top:14px"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:16px;margin:16px 0;flex-wrap:wrap">
+          <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+            <div class="sd-card-title">Most Tasks Completed</div>
+            <div class="sd-card-sub">By assignee, all-time</div>
+            <div id="taskReportsLeaderboard" style="margin-top:14px"></div>
+          </div>
+          <div class="admin-table-card" style="padding:20px 24px;flex:1;min-width:260px">
+            <div class="sd-card-title">Current Open Load</div>
+            <div class="sd-card-sub">Not yet Done — who's carrying what right now</div>
+            <div id="taskReportsOpenLoad" style="margin-top:14px"></div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin:16px 0">
+          <div class="sd-card-title">⚠️ Overdue Tasks</div>
+          <div class="sd-card-sub" id="taskReportsOverdueSub">Loading…</div>
+          <div id="taskReportsOverdueList" style="margin-top:14px"></div>
         </div>
       </div>
       </template>
@@ -6151,7 +6212,7 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
@@ -6251,6 +6312,7 @@
       if (id === 'glossary') loadGlossary();
       if (id === 'projects-dashboard') loadProjects();
       if (id === 'meetings') loadMeetingsStatus();
+      if (id === 'task-reports') loadTaskReportsSection();
       if (id === 'sources') loadSources();
       if (id === 'faq') loadFaqSection();
       if (id === 'calls') loadCallsSection();
@@ -15057,6 +15119,125 @@
       };
       svg.addEventListener('mousemove', e => showAt(e.clientX));
       svg.addEventListener('mouseleave', () => { crosshair.style.display = 'none'; tooltip.style.display = 'none'; });
+    }
+
+    // ── Task Reports (2026-09-13) ────────────────────────────────────────
+    // Joy, as the sole super_admin, wanted a completion-focused view over
+    // the Tasks board (views/index.html's kanban — admin.html previously
+    // had no Tasks UI at all). GET /api/tasks already returns every task
+    // this user can see (routes/tasks.js's own department-visibility rules
+    // — as super_admin that's everything except 'payroll', which is its
+    // own separate confidentiality boundary gated to the fixed Sophia/Joy
+    // pool regardless of role); this reuses that same one endpoint rather
+    // than adding a dedicated reporting API, since the whole dataset is
+    // small enough to aggregate client-side exactly like the existing
+    // Clients/Candidates/Bookings report tabs already do.
+    const TASK_STATUS_LABELS = {
+      requested_bookings: 'Requested (Bookings)', to_do: 'To Do',
+      in_progress: 'In Progress', in_review: 'In Review', done: 'Done'
+    };
+    const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' };
+    const TASK_DEPARTMENT_LABELS = {
+      bookings: 'Bookings', onboarding: 'Onboarding', app_dev: 'App Dev', management: 'Management',
+      marketing: 'Marketing', quality: 'Quality', workforce_partners: 'Workforce Partners', payroll: 'Payroll'
+    };
+
+    let taskReportsCache = null;
+    let taskReportsUserNameByEmail = {};
+
+    async function loadTaskReportsSection(forceRefresh) {
+      const kpiEl = document.getElementById('taskReportsKpis');
+      if (!taskReportsCache || forceRefresh) {
+        kpiEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+        try {
+          const [tasks, meta] = await Promise.all([
+            fetch('/api/tasks').then(r => r.json()),
+            fetch('/api/tasks/meta').then(r => r.json())
+          ]);
+          taskReportsCache = tasks;
+          taskReportsUserNameByEmail = Object.fromEntries((meta.users || []).map(u => [u.email, u.name || u.email]));
+        } catch {
+          kpiEl.innerHTML = '<div style="color:#c0392b;font-size:12.5px">Failed to load tasks.</div>';
+          return;
+        }
+      }
+      renderTaskReports(taskReportsCache);
+    }
+
+    function taskAssigneeNames(task) {
+      return (task.assigned_to_emails || []).map(e => taskReportsUserNameByEmail[e] || e);
+    }
+
+    function renderTaskReports(tasks) {
+      const now = Date.now();
+      const done = tasks.filter(t => t.status === 'done');
+      const open = tasks.filter(t => t.status !== 'done');
+      const overdue = open.filter(t => t.due_date && new Date(t.due_date).getTime() < now);
+
+      // Only tasks with both timestamps — completed_at is only ever set on
+      // the actual to-'done' transition (routes/tasks.js), never backfilled,
+      // so this is a genuine "how long did it really take" measure, not an
+      // estimate.
+      const durations = done
+        .filter(t => t.created_at && t.completed_at)
+        .map(t => (new Date(t.completed_at) - new Date(t.created_at)) / 86400000)
+        .filter(d => isFinite(d) && d >= 0);
+      const avgDays = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
+
+      renderKpiRow('taskReportsKpis', [
+        { label: 'Total Tasks', value: tasks.length, hint: 'Every department you can see' },
+        { label: 'Completed', value: done.length, hint: `${pct(done.length, tasks.length)}% of total` },
+        { label: 'Open', value: open.length, hint: `${pct(open.length, tasks.length)}% of total` },
+        { label: 'Overdue', value: overdue.length, hint: 'Open, past their due date' },
+        { label: 'In Review', value: tasks.filter(t => t.status === 'in_review').length, hint: 'Awaiting sign-off' },
+        { label: 'Avg Time to Complete', value: avgDays !== null ? `${avgDays.toFixed(1)}d` : '—', hint: 'Created → marked Done' }
+      ]);
+
+      renderLineChart('taskReportsTrend', computeTrendBuckets(done, 'completed_at'));
+
+      // Completion RATE per department, not just a raw count — the whole
+      // point of this report — with the bar's own length still showing
+      // relative volume so a busy-but-behind department is easy to spot.
+      const deptIds = [...new Set(tasks.map(t => t.department_id))];
+      const deptRows = deptIds.map(id => {
+        const deptTasks = tasks.filter(t => t.department_id === id);
+        const deptDone = deptTasks.filter(t => t.status === 'done').length;
+        return { label: `${TASK_DEPARTMENT_LABELS[id] || id} — ${deptDone}/${deptTasks.length} (${pct(deptDone, deptTasks.length)}%)`, count: deptTasks.length };
+      }).sort((a, b) => b.count - a.count);
+      renderBreakdownBars('taskReportsByDept', deptRows);
+
+      renderBreakdownBars('taskReportsByStatus', computeCodeBreakdown(tasks, 'status', 'Status', null, TASK_STATUS_LABELS));
+      renderBreakdownBars('taskReportsByPriority', computeCodeBreakdown(tasks, 'priority', 'Priority', null, TASK_PRIORITY_LABELS));
+
+      // assigned_to_emails is a JSON array (multiple assignees per task),
+      // so this can't reuse computeTopByField (one id per row) — flattened
+      // by hand instead.
+      const completedByAssignee = {};
+      done.forEach(t => taskAssigneeNames(t).forEach(name => { completedByAssignee[name] = (completedByAssignee[name] || 0) + 1; }));
+      renderBreakdownBars('taskReportsLeaderboard',
+        Object.entries(completedByAssignee).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, count]) => ({ label, count })));
+
+      const openByAssignee = {};
+      open.forEach(t => taskAssigneeNames(t).forEach(name => { openByAssignee[name] = (openByAssignee[name] || 0) + 1; }));
+      renderBreakdownBars('taskReportsOpenLoad',
+        Object.entries(openByAssignee).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, count]) => ({ label, count })));
+
+      const overdueSorted = overdue.slice().sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+      document.getElementById('taskReportsOverdueSub').textContent = overdue.length
+        ? `${overdue.length} task${overdue.length === 1 ? '' : 's'} past due, oldest first`
+        : 'Nothing overdue right now.';
+      document.getElementById('taskReportsOverdueList').innerHTML = overdueSorted.length ? overdueSorted.map(t => {
+        const daysOverdue = Math.floor((now - new Date(t.due_date).getTime()) / 86400000);
+        const names = taskAssigneeNames(t);
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100)">
+            <div style="min-width:0">
+              <div style="font-weight:600;color:var(--navy);font-size:13px;overflow-wrap:break-word">${escHtml(t.title || 'Untitled task')}</div>
+              <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(TASK_DEPARTMENT_LABELS[t.department_id] || t.department_id)} · ${escHtml(names.join(', ') || 'Unassigned')} · Due ${fmtDate(t.due_date)}</div>
+            </div>
+            <span style="font-size:11.5px;font-weight:700;color:#c0392b;white-space:nowrap;flex-shrink:0">${daysOverdue}d overdue</span>
+          </div>`;
+      }).join('') : '<div style="font-size:12.5px;color:var(--text-muted)">Nothing overdue right now.</div>';
     }
 
     function renderReportTable(type, rows) {
