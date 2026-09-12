@@ -170,7 +170,11 @@ function buildServerForUser(email) {
       // confirmed against real data (Passport/Payslip/etc. all carry the
       // 9999 sentinel). Both read as noise, not a real date, to a human.
       lines.push('', 'Compliance documents:', ...raw.attachedRequirements.map(r => {
-        const hasRealExpiry = r.expiryDate && !r.expiryDate.startsWith('0001') && !r.expiryDate.startsWith('9999');
+        // Qualification/Course of Study never has a real expiry, even when
+        // RT's own field holds a human-typed placeholder instead of the
+        // usual 9999 sentinel — see rtCandidatesSyncService.js's
+        // NO_EXPIRY_REQUIREMENT_NAMES comment for the evidence.
+        const hasRealExpiry = r.requirementName !== 'Qualification/Course of Study' && r.expiryDate && !r.expiryDate.startsWith('0001') && !r.expiryDate.startsWith('9999');
         const expiry = hasRealExpiry ? ` — expires ${new Date(r.expiryDate).toLocaleDateString('en-AU')}` : '';
         return `  • ${r.requirementName || 'Document'}${expiry}${r.isMandatory ? ' (mandatory)' : ''}`;
       }));

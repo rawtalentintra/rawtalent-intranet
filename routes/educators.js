@@ -48,11 +48,14 @@ router.get('/:userId', async (req, res) => {
       qualifications: Array.isArray(raw.qualifications) ? raw.qualifications : [],
       // Same sentinel-date filtering as get_educator (routes/mcp.js) — RT's
       // '0001-01-01' (unset) and '9999-12-31' (never expires) aren't real
-      // dates to show a person.
+      // dates to show a person. Qualification/Course of Study is excluded
+      // by name too — it has no real expiry concept at all, even when RT
+      // holds a human-typed placeholder instead of the usual sentinel (see
+      // rtCandidatesSyncService.js's NO_EXPIRY_REQUIREMENT_NAMES comment).
       complianceDocuments: (Array.isArray(raw.attachedRequirements) ? raw.attachedRequirements : []).map(r => ({
         name: r.requirementName || 'Document',
         mandatory: !!r.isMandatory,
-        expiryDate: (r.expiryDate && !r.expiryDate.startsWith('0001') && !r.expiryDate.startsWith('9999')) ? r.expiryDate : null
+        expiryDate: (r.requirementName !== 'Qualification/Course of Study' && r.expiryDate && !r.expiryDate.startsWith('0001') && !r.expiryDate.startsWith('9999')) ? r.expiryDate : null
       })),
       profileUrl: `https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${row.user_id}`
     });

@@ -89,6 +89,13 @@ async function getCandidatePoints() {
                 AND (
                      (r->>'isReviewed')::boolean IS NOT TRUE
                   OR (r->>'expiryDate' IS NOT NULL
+                      -- Qualification/Course of Study has no real expiry
+                      -- concept at all (see rtCandidatesSyncService.js's
+                      -- NO_EXPIRY_REQUIREMENT_NAMES comment) — excluded by
+                      -- name, not just RT's two sentinel dates, since some
+                      -- real candidates carry a human-typed far-future
+                      -- placeholder here instead.
+                      AND r->>'requirementName' <> 'Qualification/Course of Study'
                       AND left(r->>'expiryDate',10) NOT IN ('0001-01-01','9999-12-31')
                       AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD'))
                 )

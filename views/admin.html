@@ -12782,7 +12782,7 @@
             </div>
           </div>
           <div style="font-size:12.5px;color:var(--text)">${escHtml(req.uploadedDocumentName || '—')}${req.documentNumber ? ` · #${escHtml(req.documentNumber)}` : ''}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${req.expiryDate && !['0001-01-01', '9999-12-31'].includes(String(req.expiryDate).slice(0, 10)) ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file'}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${NO_EXPIRY_REQUIREMENT_NAMES.has(req.requirementName) ? 'No expiry — permanent qualification' : (req.expiryDate && !['0001-01-01', '9999-12-31'].includes(String(req.expiryDate).slice(0, 10)) ? `Expires ${fmtDate(req.expiryDate)}` : 'No expiry on file')}</div>
           <div id="doc-controls-${detailId}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
             ${req.documentPath ? `<a href="${escHtml(req.documentPath)}" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;font-weight:700;color:var(--orange)">📄 View Document →</a>` : '<span style="font-size:11.5px;color:var(--text-muted);font-style:italic">No document uploaded</span>'}
             ${docCheckControlsHtml(req, check)}
@@ -15122,6 +15122,25 @@
       return [...new Set((candidate.qualifications || []).map(q => q.qualificationName || q.shortCode).filter(Boolean))];
     }
 
+    // Requirement types with NO real expiry concept at all, regardless of
+    // whatever value RT happens to have stored against them. Qualification/
+    // Course of Study is the one confirmed real case (2026-09-13): unlike
+    // WWCC/Police Check/First Aid (genuine government- or RT-mandated
+    // renewal cycles), a Cert III/Diploma/Degree, once conferred, never
+    // expires — there is no real-world rule to compute a validity window
+    // from. This is already the verified setting in compliance_requirements
+    // (cr-all-qualification, expiry_source='no_expiry') — confirmed a
+    // second time by directly OCR-checking 22 real candidates' actual
+    // submitted certificates whose stored expiryDate was a suspicious
+    // human-looking placeholder (2039/2049/2059/2079/2099/2100, not RT's
+    // usual '9999-12-31' sentinel): zero of the 22 real documents print any
+    // expiry date anywhere. Filtering RT's two literal sentinel dates alone
+    // (below) isn't enough — it only catches the standard placeholder, not
+    // one of these one-off manually-typed "far enough to not matter" dates,
+    // so this requirement type is excluded by name instead, on top of the
+    // sentinel check, everywhere an expiry is computed or displayed.
+    const NO_EXPIRY_REQUIREMENT_NAMES = new Set(['Qualification/Course of Study']);
+
     // attachedRequirements[] is where WWCC/PCC-type compliance documents
     // live, each with its own expiryDate. isExpiry is NOT "already
     // expired" — verified against real data (2026-08-30): most
@@ -15137,6 +15156,7 @@
     function candidateExpiringDocsCount(candidate) {
       const soon = Date.now() + 30 * 86400000;
       return (candidate.attachedRequirements || []).filter(req => {
+        if (NO_EXPIRY_REQUIREMENT_NAMES.has(req.requirementName)) return false;
         if (!req.expiryDate) return false;
         const dateStr = String(req.expiryDate).slice(0, 10);
         if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;
@@ -15739,6 +15759,7 @@
     // document is flagged consistently between the list column and this
     // detail view.
     function isDocExpiring(req) {
+      if (NO_EXPIRY_REQUIREMENT_NAMES.has(req.requirementName)) return false;
       if (!req.expiryDate) return false;
       const dateStr = String(req.expiryDate).slice(0, 10);
       if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;

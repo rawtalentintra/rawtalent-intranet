@@ -41,9 +41,20 @@ function isSyncRunning(state) {
 // means anything here — excluding RT's two sentinel dates, which aren't
 // real dates at all: '0001-01-01' (unset) and '9999-12-31' (this instance
 // never expires).
+// Qualification/Course of Study has NO real expiry concept at all (see
+// admin.html's NO_EXPIRY_REQUIREMENT_NAMES comment for the full evidence —
+// a childcare qualification, once conferred, never expires, unlike WWCC/
+// Police Check/First Aid which have real renewal cycles). Excluded by name
+// on top of the two sentinel dates below, since a handful of real
+// candidates carry a human-typed far-future placeholder here instead of
+// RT's usual '9999-12-31' sentinel (confirmed by OCR-checking 22 real
+// submitted certificates: zero print any expiry date at all).
+const NO_EXPIRY_REQUIREMENT_NAMES = new Set(['Qualification/Course of Study']);
+
 function expiringDocsCount(candidate) {
   const soon = Date.now() + 30 * 24 * 60 * 60 * 1000;
   return (candidate.attachedRequirements || []).filter(req => {
+    if (NO_EXPIRY_REQUIREMENT_NAMES.has(req.requirementName)) return false;
     if (!req.expiryDate) return false;
     const dateStr = String(req.expiryDate).slice(0, 10);
     if (dateStr === '0001-01-01' || dateStr === '9999-12-31') return false;
