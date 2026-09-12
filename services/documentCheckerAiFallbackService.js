@@ -71,17 +71,50 @@ const EXTRACT_TOOL = {
   }
 };
 
-async function extractWithAi(text, documentType, candidateName) {
+// Real evidence this needed to exist (2026-09-12): a genuine WWCC photo
+// scored 53% Tesseract confidence — ABOVE MIN_OCR_CONFIDENCE (45, see
+// documentCheckerService.js) so no quality flag fired at all — yet the
+// actual extracted text was "WORKING WITH CHILDREN CHECK\n\nBi 0 == E
+// ae\nS == | \\\n\n= TORIA = 4 /": the card's own heading read perfectly
+// (hence a not-terrible average confidence) while literally everything
+// else — name, number, expiry — read as pure noise. Re-running text-only
+// extraction against that same garbled text can't recover information
+// the OCR pass never actually captured; the information genuinely still
+// exists, just in the IMAGE, not in the text Tesseract produced from it.
+// A vision-capable model reading the real photo directly is a
+// categorically different, more powerful capability than re-prompting
+// over already-lossy OCR output — this is what actually answers "automate
+// getting the info from the photo" rather than "try the same text again."
+// Text is still sent alongside the image (when available) as a second,
+// free signal Claude can cross-check against, but the image is the part
+// doing the real work here.
+const IMAGE_MEDIA_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
+
+async function extractWithAi(text, documentType, candidateName, imageAttachment) {
   const client = getClient();
   if (!client) throw new Error('AI is not configured (ANTHROPIC_API_KEY missing) — contact your administrator.');
+
+  const content = [];
+  if (imageAttachment) {
+    content.push({
+      type: imageAttachment.mediaType === 'application/pdf' ? 'document' : 'image',
+      source: { type: 'base64', media_type: imageAttachment.mediaType, data: imageAttachment.base64 }
+    });
+  }
+  content.push({
+    type: 'text',
+    text: imageAttachment
+      ? `Here is the actual document image, plus the OCR text our free automated pass extracted from it (for reference/cross-checking only — the image is ground truth, the OCR text may well be wrong or garbled):\n\n${(text || '(no usable OCR text at all)').slice(0, 8000)}`
+      : (text || '').slice(0, 12000)
+  });
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 500,
-    system: `You are doing a second-look, best-effort extraction on a compliance document's OCR text, after RawTalent's own deterministic rules-based checker already tried and came back with a genuine gap (no name/date found, or the document type unconfirmed). This is a real childcare-industry compliance document (expected type: "${documentType}"${candidateName ? `, expected to belong to "${candidateName}"` : ''}). The OCR text may be messy, have stray line breaks, or be genuinely garbled in places — do your honest best and say so plainly in your note rather than inventing anything you're not seeing. Call submit_extraction exactly once.`,
+    system: `You are doing a second-look, best-effort extraction on a compliance document, after RawTalent's own deterministic rules-based checker already tried and came back with a genuine gap (no name/date found, or the document type unconfirmed). This is a real childcare-industry compliance document (expected type: "${documentType}"${candidateName ? `, expected to belong to "${candidateName}"` : ''}).${imageAttachment ? ' You have the actual document image — read directly off it rather than relying on the (possibly poor) OCR text also provided.' : ' Only OCR text is available for this one (no source image could be re-fetched) — it may be messy, have stray line breaks, or be genuinely garbled in places.'} Do your honest best and say so plainly in your note rather than inventing anything you're not genuinely seeing. Call submit_extraction exactly once.`,
     tools: [EXTRACT_TOOL],
     tool_choice: { type: 'tool', name: 'submit_extraction' },
-    messages: [{ role: 'user', content: text.slice(0, 12000) }]
+    messages: [{ role: 'user', content }]
   });
 
   const toolUse = response.content.find(b => b.type === 'tool_use' && b.name === 'submit_extraction');
@@ -92,13 +125,38 @@ async function extractWithAi(text, documentType, candidateName) {
 // Runs the AI pass for one already-saved document_checks row, stores the
 // result on that same row (ai_* columns only — never touches the original
 // outcome/flags/reasons/extracted_fields), and returns the updated row.
+// Re-fetches the real source file from RT (same S3 host allowlist
+// routes/documentChecker.js already enforces) to hand Claude the actual
+// image, not just the lossy OCR text — see extractWithAi's own comment
+// for why that distinction is the entire point of this upgrade. Falls
+// back to text-only if the re-fetch fails or the file type isn't one
+// Claude can read as vision input (e.g. a scanned-PDF-of-a-photo edge
+// case) rather than failing the whole AI check outright.
 async function runAiFallbackForCheck(checkId, requestedByEmail) {
   const db = getDb();
   const row = (await db.execute({ sql: 'SELECT * FROM document_checks WHERE id = ?', args: [checkId] })).rows[0];
   if (!row) throw new Error('Document check not found.');
-  if (!row.extracted_text) throw new Error('No stored OCR text for this check to re-analyse.');
+  if (!row.extracted_text && !row.document_source_url) throw new Error('No stored OCR text or source document for this check to re-analyse.');
 
-  const extraction = await extractWithAi(row.extracted_text, row.document_type, row.candidate_name_input);
+  let imageAttachment = null;
+  if (row.document_source_url) {
+    try {
+      // Lazy require — see routes/documentChecker.js's own bulk-check
+      // comment for why (this file loading fully before that one
+      // requires it back would otherwise be a circular require; a
+      // require() inside a function body that only runs long after both
+      // modules have finished loading sidesteps that entirely).
+      const { fetchRtDocument } = require('../routes/documentChecker');
+      const { buffer, filename } = await fetchRtDocument(row.document_source_url);
+      const ext = (filename.match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase();
+      const mediaType = ext === '.pdf' ? 'application/pdf' : IMAGE_MEDIA_TYPES[ext];
+      if (mediaType) imageAttachment = { mediaType, base64: buffer.toString('base64') };
+    } catch (err) {
+      console.error(`AI fallback: could not re-fetch source document for check ${checkId}, falling back to text-only:`, err.message);
+    }
+  }
+
+  const extraction = await extractWithAi(row.extracted_text, row.document_type, row.candidate_name_input, imageAttachment);
   const now = new Date().toISOString();
   await db.execute({
     sql: `UPDATE document_checks SET ai_assist_used = true, ai_extracted_fields = ?, ai_note = ?, ai_requested_by = ?, ai_requested_at = ? WHERE id = ?`,

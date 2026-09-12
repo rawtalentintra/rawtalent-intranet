@@ -197,8 +197,27 @@ router.delete('/requirements/:id', requireSuperAdmin, async (req, res) => {
 // RT's own portal) still needs the candidate to act on it.
 const PHOTO_QUALITY_FLAGS = new Set(['low_ocr_confidence', 'too_dark', 'too_bright', 'low_resolution', 'blurry_image']);
 
+// Real evidence this second trigger needed to exist (2026-09-12): a real
+// WWCC photo scored 53% Tesseract confidence — ABOVE MIN_OCR_CONFIDENCE
+// (45), so low_ocr_confidence never fired at all — while the actual
+// extracted text was pure noise for everything except the card's own
+// printed heading (name/number/expiry all genuinely unreadable). A raw
+// confidence-score threshold missed this because the average was dragged
+// up by one perfectly-legible heading; the more reliable signal turned
+// out to be semantic, not numeric: the document type WAS confirmed (so
+// it's clearly the right kind of document) yet neither a name nor an
+// expiry date could be found anywhere in it — that combination means
+// "we got essentially nothing usable" regardless of what the confidence
+// number says. Independent of PHOTO_QUALITY_FLAGS on purpose: this can
+// fire even on a photo the quality heuristics call "fine".
+function hasInsufficientExtraction(flags) {
+  return flags.includes('name_not_found') && (flags.includes('no_expiry_date_found') || flags.includes('no_issue_date_found'));
+}
+
 async function maybeCreateRecaptureTask({ candidateId, candidateName, requirementName, reasons, flags, checkedByEmail, checkedByName }) {
-  if (!candidateId || !flags.some(f => PHOTO_QUALITY_FLAGS.has(f))) return null;
+  const qualityFlagged = flags.some(f => PHOTO_QUALITY_FLAGS.has(f));
+  const insufficientExtraction = hasInsufficientExtraction(flags);
+  if (!candidateId || (!qualityFlagged && !insufficientExtraction)) return null;
   const db = getDb();
 
   // One open request per candidate+document at a time — a nightly sweep
@@ -223,12 +242,20 @@ async function maybeCreateRecaptureTask({ candidateId, candidateName, requiremen
   // documentCheckerService.js: 37 vs 36), so matching by array position
   // would be a real, silent bug here. Matching on the literal quality-check
   // wording itself (a small, fixed set of templates from
-  // applyPhotoQualityFlags) is exact regardless of ordering elsewhere.
-  const QUALITY_REASON_SUBSTRINGS = ['OCR could only read', 'Photo looks very dark', 'washed out/overexposed', 'Image resolution is very low', 'Photo looks blurry'];
+  // applyPhotoQualityFlags, plus the name/date-not-found templates every
+  // expiring-document checker shares) is exact regardless of ordering
+  // elsewhere.
+  const QUALITY_REASON_SUBSTRINGS = [
+    'OCR could only read', 'Photo looks very dark', 'washed out/overexposed', 'Image resolution is very low', 'Photo looks blurry',
+    'Could not extract a name', 'Could not find a clear expiry date', 'Could not find a clear issue date'
+  ];
   const qualityReasons = reasons.filter(r => QUALITY_REASON_SUBSTRINGS.some(s => r.includes(s)));
   const name = candidateName || `Candidate #${candidateId}`;
+  const openingLine = qualityFlagged
+    ? `Automated Document Checker flag — this ${requirementName} photo couldn't be read reliably and needs a clearer re-upload.`
+    : `Automated Document Checker flag — this ${requirementName} document reads as the right document type, but neither a name nor an expiry date could be found on it anywhere. That usually means the image is too small/cropped/low-quality to make out the printed details, even though the overall photo doesn't look obviously bad — a clearer re-upload would help confirm it.`;
   const description = [
-    `Automated Document Checker flag — this ${requirementName} photo couldn't be read reliably and needs a clearer re-upload.`,
+    openingLine,
     ...qualityReasons,
     contact?.contact_no ? `Mobile: ${contact.contact_no}` : null,
     contact?.email ? `Email: ${contact.email}` : null,
@@ -672,3 +699,8 @@ module.exports = router;
 // be a circular require).
 module.exports.performDocumentCheck = performDocumentCheck;
 module.exports.REQUIREMENT_NAME_TO_TYPE = REQUIREMENT_NAME_TO_TYPE;
+// Exported for services/documentCheckerAiFallbackService.js's vision-based
+// AI check (2026-09-12) — it needs the real source image/PDF bytes, not
+// just the already-OCR'd text, so it re-fetches from the same RT S3 host
+// allowlist this file already enforces rather than duplicating that logic.
+module.exports.fetchRtDocument = fetchRtDocument;
