@@ -47,6 +47,22 @@ async function discoverExportCsvUrl() {
   // reproducible detection difference between plain headless Chromium and
   // everything else, confirmed by testing both back to back against the
   // real site.
+  //
+  // Real production failure (2026-09-12), fixed: this worked in local
+  // testing (Chromium downloads fine via `playwright install chromium`)
+  // but crashed on Railway at actual runtime — "chrome-headless-shell:
+  // error while loading shared libraries: libglib-2.0.so.0" — because a
+  // plain `playwright install` only fetches the browser BINARY, not the
+  // Linux system libraries (glib, nss, etc.) it needs to actually run,
+  // and Railway's base Node image doesn't ship those by default. The fix
+  // is NOT a package.json postinstall script (that's what was tried
+  // first, and is exactly what produced this failure) — Railway's own
+  // builder (Railpack) has native Playwright support that installs both
+  // the browser AND the required system packages together, gated behind
+  // one env var: RAILPACK_NODE_PLAYWRIGHT_INSTALL=1 (set directly on the
+  // `web` service, confirmed via `railway variables`) — see
+  // https://railpack.com/languages/node#playwright. No postinstall
+  // script needed at all once that's set.
   const { chromium } = require('playwright-extra');
   const stealthPlugin = require('puppeteer-extra-plugin-stealth');
   chromium.use(stealthPlugin());

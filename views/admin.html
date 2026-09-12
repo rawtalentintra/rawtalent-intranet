@@ -12388,9 +12388,25 @@
     // services/vevoCheckService.js's own header) — a real headless-browser
     // run per click, not instant, so the button disables with a clear
     // "Checking…" state rather than looking stuck.
-    function vevoCheckFormHtml(candidateId, candidateName) {
+    // Real ICAO/passport-MRZ nationality codes → the exact label text
+    // VEVO's own Country dropdown uses — sourced directly from that live
+    // form's option list (2026-09-12), not guessed. MRZ nationality codes
+    // are themselves ICAO 9303 codes, which VEVO's own dropdown values
+    // also turn out to be (confirmed: Germany prints as MRZ code "D",
+    // and VEVO's own dropdown uses value="D" for GERMANY too) — so a
+    // passport's own nationality code maps straight onto this table with
+    // no separate ISO-3166 conversion needed. Used only to PRE-FILL the
+    // Country text field with something readable for a human to check —
+    // never submitted directly; if a code is missing here the field just
+    // falls back to showing the raw code, which staff can retype.
+    const VEVO_COUNTRY_CODE_TO_LABEL = {
+      AFG:'AFGHANISTAN',ALB:'ALBANIA',DZA:'ALGERIA',ASM:'AMERICAN SAMOA',AND:'ANDORRA',AGO:'ANGOLA',AIA:'ANGUILLA',ATA:'ANTARCTICA',ATG:'ANTIGUA AND BARBUDA',ARG:'ARGENTINA',ARM:'ARMENIA',ABW:'ARUBA',AUS:'AUSTRALIA',AUT:'AUSTRIA',AZE:'AZERBAIJAN',BHS:'BAHAMAS',BHR:'BAHRAIN',BGD:'BANGLADESH',BRB:'BARBADOS',BLR:'BELARUS',BEL:'BELGIUM',BLZ:'BELIZE',BEN:'BENIN',BMU:'BERMUDA',BTN:'BHUTAN',BOL:'BOLIVIA',BES:'BONAIRE, SINT EUSTATIUS AND SABA',BIH:'BOSNIA AND HERZEGOVINA',BWA:'BOTSWANA',BVT:'BOUVET ISLAND',BRA:'BRAZIL',IOT:'BRIT INDIAN OCN TERR',BRN:'BRUNEI DARUSSALAM',BGR:'BULGARIA',BFA:'BURKINA FASO',MMR:'MYANMAR',BDI:'BURUNDI',CPV:'CABO VERDE',KHM:'CAMBODIA',CMR:'CAMEROON',CAN:'CANADA',CYM:'CAYMAN ISLANDS',CAF:'CENTRAL AFRICAN REPUBLIC',TCD:'CHAD',CHL:'CHILE',CHN:'CHINA',CXR:'CHRISTMAS ISLAND',CCK:'COCOS (KEELING) ISL.',COL:'COLOMBIA',COM:'COMOROS',COG:'CONGO',COD:'CONGO, DEMOCRATIC REPUBLIC OF THE',COK:'COOK ISLANDS',CRI:'COSTA RICA',CIV:"COTE D'IVOIRE",HRV:'CROATIA',CUB:'CUBA',CUW:'CURACAO',CYP:'CYPRUS',CZE:'CZECHIA (CZECH REP)',DNK:'DENMARK',DJI:'DJIBOUTI',DMA:'DOMINICA',DOM:'DOMINICAN REPUBLIC',TMP:'EAST TIMOR',ECU:'ECUADOR',EGY:'EGYPT',SLV:'EL SALVADOR',GNQ:'EQUATORIAL GUINEA',ERI:'ERITREA',EST:'ESTONIA',SWZ:'ESWATINI',ETH:'ETHIOPIA',FLK:'FALKLAND ISLANDS (MALVINAS)',FRO:'FAROE ISLANDS',FJI:'FIJI',FIN:'FINLAND',FRA:'FRANCE',GUF:'FRENCH GUIANA',PYF:'FRENCH POLYNESIA',ATF:'FRENCH SOUTHERN TERR',GAB:'GABON',GMB:'GAMBIA',GEO:'GEORGIA',D:'GERMANY',GHA:'GHANA',GIB:'GIBRALTAR',GRC:'GREECE',GRL:'GREENLAND',GRD:'GRENADA',GLP:'GUADELOUPE',GUM:'GUAM',GTM:'GUATEMALA',GIN:'GUINEA',GNB:'GUINEA-BISSAU',GUY:'GUYANA',HTI:'HAITI',HND:'HONDURAS',HKG:'HONG KONG SAR',HUN:'HUNGARY',ISL:'ICELAND',IND:'INDIA',IDN:'INDONESIA',IRN:'IRAN, ISLAMIC REPUBLIC OF',IRQ:'IRAQ',IRL:'IRELAND',ISR:'ISRAEL',ITA:'ITALY',JAM:'JAMAICA',JPN:'JAPAN',JOR:'JORDAN',KAZ:'KAZAKHSTAN',KEN:'KENYA',KIR:'KIRIBATI',PRK:'KOREA, DEMOCRATIC PEOPLES REPUBLIC OF (NORTH)',KOR:'KOREA, REPUBLIC OF (SOUTH)',RKS:'KOSOVO',KWT:'KUWAIT',KGZ:'KYRGYZSTAN',LAO:"LAO PEOPLE'S DEMOCRATIC REPUBLIC",LVA:'LATVIA',LBN:'LEBANON',LSO:'LESOTHO',LBR:'LIBERIA',LBY:'LIBYA',LIE:'LIECHTENSTEIN',LTU:'LITHUANIA',LUX:'LUXEMBOURG',MAC:'MACAU SAR',MDG:'MADAGASCAR',MWI:'MALAWI',MYS:'MALAYSIA',MDV:'MALDIVES',MLI:'MALI',MLT:'MALTA',MHL:'MARSHALL ISLANDS',MTQ:'MARTINIQUE',MRT:'MAURITANIA',MUS:'MAURITIUS',MYT:'MAYOTTE',MEX:'MEXICO',FSM:'MICRONESIA, FEDERATED STATES OF',MDA:'MOLDOVA, REPUBLIC OF',MCO:'MONACO',MNG:'MONGOLIA',MNE:'MONTENEGRO',MSR:'MONTSERRAT',MAR:'MOROCCO',MOZ:'MOZAMBIQUE',NAM:'NAMIBIA',NRU:'NAURU',NPL:'NEPAL',NLD:'NETHERLANDS',NCL:'NEW CALEDONIA',NZL:'NEW ZEALAND',NIC:'NICARAGUA',NER:'NIGER',NGA:'NIGERIA',NIU:'NIUE',NFK:'NORFOLK ISLAND',MKD:'NORTH MACEDONIA',MNP:'NORTHERN MARIANA ISL',NOR:'NORWAY',OMN:'OMAN',PAK:'PAKISTAN',PLW:'PALAU',PSE:'PALESTINE, STATE OF',PAN:'PANAMA',PNG:'PAPUA NEW GUINEA',PRY:'PARAGUAY',PER:'PERU',PHL:'PHILIPPINES',PCN:'PITCAIRN',POL:'POLAND',PRT:'PORTUGAL',PRI:'PUERTO RICO',QAT:'QATAR',REU:'REUNION',ROU:'ROMANIA',RUS:'RUSSIAN FEDERATION',RWA:'RWANDA',SHN:'SAINT HELENA, ASCENSION AND TRISTAN DA CUNHA',KNA:'SAINT KITTS AND NEVIS',LCA:'SAINT LUCIA',VCT:'SAINT VINCENT AND THE GRENADINES',WSM:'SAMOA',SMR:'SAN MARINO',STP:'SAO TOME AND PRINCIPE',SAU:'SAUDI ARABIA',SEN:'SENEGAL',SRB:'SERBIA',SYC:'SEYCHELLES',SLE:'SIERRA LEONE',SGP:'SINGAPORE',SXM:'SINT MAARTEN (DUTCH PART)',SVK:'SLOVAK REPUBLIC',SVN:'SLOVENIA',SLB:'SOLOMON ISLANDS',SOM:'SOMALIA',ZAF:'SOUTH AFRICA',SSD:'SOUTH SUDAN',ESP:'SPAIN',LKA:'SRI LANKA',SPM:'ST PIERRE & MIQUELON',SDN:'SUDAN',SUR:'SURINAME',SJM:'SVALBARD & JAN MAYEN',SWE:'SWEDEN',CHE:'SWITZERLAND',SYR:'SYRIAN ARAB REPUBLIC',TWN:'TAIWAN',TJK:'TAJIKISTAN',TZA:'TANZANIA, UNITED REPUBLIC OF',THA:'THAILAND',TLS:'TIMOR-LESTE',TGO:'TOGO',TKL:'TOKELAU',TON:'TONGA',TTO:'TRINIDAD AND TOBAGO',TUN:'TUNISIA',TUR:'TURKIYE',TKM:'TURKMENISTAN',TCA:'TURKS AND CAICOS ISLANDS',TUV:'TUVALU',UGA:'UGANDA',UKR:'UKRAINE',ARE:'UNITED ARAB EMIRATES',GBR:'UNITED KINGDOM - BRITISH CITIZEN',USA:'UNITED STATES',URY:'URUGUAY',UZB:'UZBEKISTAN',VUT:'VANUATU',VAT:'VATICAN CITY STATE (HOLY SEE)',VEN:'VENEZUELA',VNM:'VIET NAM',VGB:'VIRGIN ISLANDS (BRITISH)',VIR:'VIRGIN ISLANDS (U.S.)',WLF:'WALLIS & FUTUNA ISL',ESH:'WESTERN SAHARA',YEM:'YEMEN, REPUBLIC OF',ZMB:'ZAMBIA',ZWE:'ZIMBABWE'
+    };
+
+    function vevoCheckFormHtml(candidateId, candidateName, nationality, dateOfBirth) {
+      const countryPrefill = nationality ? (VEVO_COUNTRY_CODE_TO_LABEL[nationality.toUpperCase()] || nationality) : '';
       return `
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Runs the same VEVO self-check form our SOP already documents (Compliance Documents – Visa Article). This is the individual tool, not RT's own organisation VEVO access — see that Article for the distinction. You'll need the visa's reference number from the candidate's visa grant documents.</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Runs the same VEVO self-check form our SOP already documents (Compliance Documents – Visa Article). This is the individual tool, not RT's own organisation VEVO access — see that Article for the distinction. Date of birth and country are pre-filled from the passport's own machine-readable zone where available — double-check them. You'll still need the visa's reference number from the candidate's visa grant documents; that's not on the passport itself so it can't be pre-filled.</div>
         <label class="form-label-modal">Document Type</label>
         <select id="vevoDocType" class="form-control" style="margin-bottom:10px">
           <option value="passport">Passport</option>
@@ -12404,17 +12420,17 @@
         </select>
         <label class="form-label-modal">Reference Number</label>
         <input type="text" id="vevoRefNumber" class="form-control" style="margin-bottom:10px" placeholder="e.g. the TRN printed on their visa grant letter">
-        <label class="form-label-modal">Date of Birth</label>
-        <input type="date" id="vevoDob" class="form-control" style="margin-bottom:10px">
-        <label class="form-label-modal">Country of Document</label>
-        <input type="text" id="vevoCountry" class="form-control" style="margin-bottom:14px" placeholder="e.g. INDONESIA (as it appears on the passport)">
+        <label class="form-label-modal">Date of Birth${dateOfBirth ? ' <span style="font-weight:400;color:var(--text-muted)">(from passport)</span>' : ''}</label>
+        <input type="date" id="vevoDob" class="form-control" style="margin-bottom:10px" value="${escHtml(dateOfBirth || '')}">
+        <label class="form-label-modal">Country of Document${countryPrefill ? ' <span style="font-weight:400;color:var(--text-muted)">(from passport)</span>' : ''}</label>
+        <input type="text" id="vevoCountry" class="form-control" style="margin-bottom:14px" placeholder="e.g. INDONESIA (as it appears on the passport)" value="${escHtml(countryPrefill)}">
         <button class="btn-add" id="vevoCheckSubmitBtn" style="width:100%" onclick="submitVevoCheck(${candidateId ?? 'null'}, '${(candidateName || '').replace(/'/g, "\\'")}')">🛂 Run Check</button>
         <div id="vevoCheckResult" style="margin-top:14px"></div>
       `;
     }
 
-    function openVevoCheckModal(candidateId, candidateName) {
-      document.getElementById('vevoCheckModalBody').innerHTML = vevoCheckFormHtml(candidateId, candidateName);
+    function openVevoCheckModal(candidateId, candidateName, nationality, dateOfBirth) {
+      document.getElementById('vevoCheckModalBody').innerHTML = vevoCheckFormHtml(candidateId, candidateName, nationality, dateOfBirth);
       document.getElementById('vevoCheckModal').classList.add('open');
     }
     function closeVevoCheckModal() {
@@ -12874,7 +12890,7 @@
           <div style="margin-top:10px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius);font-size:12px;color:#0c4a6e">
             <div style="font-weight:700;margin-bottom:4px">🛂 Foreign passport — VEVO work-rights check available</div>
             <div style="margin-bottom:8px">Automates the same real VEVO self-check form our SOP already documents (not an official employer/organisation check — see the Article for that distinction). You'll need the visa's TRN, Visa Evidence Number, or Visa Grant Number from the candidate's visa documents.</div>
-            <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="openVevoCheckModal(${currentCandidateDetailContext?.candidateId || 'null'}, '${escHtml(currentCandidateDetailContext?.candidateName || '').replace(/'/g, "\\'")}')">🛂 Run VEVO Check</button>
+            <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="openVevoCheckModal(${currentCandidateDetailContext?.candidateId || 'null'}, '${escHtml(currentCandidateDetailContext?.candidateName || '').replace(/'/g, "\\'")}', '${escHtml(e.nationality || '')}', '${escHtml(e.dateOfBirth || '')}')">🛂 Run VEVO Check</button>
           </div>` : ''}
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-top:12px;margin-bottom:8px">
             <input type="checkbox" id="doc-reviewed-${check.id}" ${check.reviewed ? 'checked' : ''}> Reviewed
