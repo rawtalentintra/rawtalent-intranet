@@ -1655,6 +1655,20 @@
           <div class="modal-body" id="bulkSweepModalBody"></div>
         </div>
       </div>
+
+      <!-- VEVO Check (2026-09-12) — see services/vevoCheckService.js's own
+           header for the full real-vs-Article field mapping and the
+           compliance caveat (individual self-check tool, not RT's own
+           organisation VEVO access) this automates exactly as-is. -->
+      <div class="modal-overlay" id="vevoCheckModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeVevoCheckModal()">
+        <div class="modal" style="max-width:480px">
+          <div class="modal-header">
+            <div class="modal-title">🛂 VEVO Check</div>
+            <button class="modal-close" onclick="closeVevoCheckModal()">×</button>
+          </div>
+          <div class="modal-body" id="vevoCheckModalBody"></div>
+        </div>
+      </div>
       </template>
 
       <template id="__lazy_route_planner">
@@ -12369,6 +12383,85 @@
       if (bulkSweepPollTimer) { clearInterval(bulkSweepPollTimer); bulkSweepPollTimer = null; }
     }
 
+    // ── VEVO Check (2026-09-12) ────────────────────────────────────
+    // Automates the real, manual VEVO self-check form (see
+    // services/vevoCheckService.js's own header) — a real headless-browser
+    // run per click, not instant, so the button disables with a clear
+    // "Checking…" state rather than looking stuck.
+    function vevoCheckFormHtml(candidateId, candidateName) {
+      return `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Runs the same VEVO self-check form our SOP already documents (Compliance Documents – Visa Article). This is the individual tool, not RT's own organisation VEVO access — see that Article for the distinction. You'll need the visa's reference number from the candidate's visa grant documents.</div>
+        <label class="form-label-modal">Document Type</label>
+        <select id="vevoDocType" class="form-control" style="margin-bottom:10px">
+          <option value="passport">Passport</option>
+          <option value="immicard">ImmiCard</option>
+        </select>
+        <label class="form-label-modal">Reference Type</label>
+        <select id="vevoRefType" class="form-control" style="margin-bottom:10px">
+          <option value="trn">Transaction Reference Number (TRN)</option>
+          <option value="visa_evidence_number">Visa Evidence Number</option>
+          <option value="visa_grant_number">Visa Grant Number</option>
+        </select>
+        <label class="form-label-modal">Reference Number</label>
+        <input type="text" id="vevoRefNumber" class="form-control" style="margin-bottom:10px" placeholder="e.g. the TRN printed on their visa grant letter">
+        <label class="form-label-modal">Date of Birth</label>
+        <input type="date" id="vevoDob" class="form-control" style="margin-bottom:10px">
+        <label class="form-label-modal">Country of Document</label>
+        <input type="text" id="vevoCountry" class="form-control" style="margin-bottom:14px" placeholder="e.g. INDONESIA (as it appears on the passport)">
+        <button class="btn-add" id="vevoCheckSubmitBtn" style="width:100%" onclick="submitVevoCheck(${candidateId ?? 'null'}, '${(candidateName || '').replace(/'/g, "\\'")}')">🛂 Run Check</button>
+        <div id="vevoCheckResult" style="margin-top:14px"></div>
+      `;
+    }
+
+    function openVevoCheckModal(candidateId, candidateName) {
+      document.getElementById('vevoCheckModalBody').innerHTML = vevoCheckFormHtml(candidateId, candidateName);
+      document.getElementById('vevoCheckModal').classList.add('open');
+    }
+    function closeVevoCheckModal() {
+      document.getElementById('vevoCheckModal').classList.remove('open');
+    }
+
+    async function submitVevoCheck(candidateId, candidateName) {
+      const documentType = document.getElementById('vevoDocType').value;
+      const referenceType = document.getElementById('vevoRefType').value;
+      const referenceNumber = document.getElementById('vevoRefNumber').value.trim();
+      const dateOfBirth = document.getElementById('vevoDob').value;
+      const country = document.getElementById('vevoCountry').value.trim();
+      const resultEl = document.getElementById('vevoCheckResult');
+      if (!referenceNumber || !dateOfBirth || !country) { toast('Reference number, date of birth, and country are all required', 'error'); return; }
+
+      const btn = document.getElementById('vevoCheckSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Checking… (real browser run, ~10-15s)';
+      resultEl.innerHTML = '';
+      try {
+        const res = await fetch('/api/vevo-check', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ candidateId, candidateName, documentType, referenceType, referenceNumber, dateOfBirth, country })
+        });
+        const data = await res.json();
+        if (!res.ok) { resultEl.innerHTML = `<div style="padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius);font-size:12px;color:#991b1b">${escHtml(data.error || 'Check failed')}</div>`; return; }
+
+        if (data.outcome === 'no_match') {
+          resultEl.innerHTML = `<div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius);font-size:12px;color:#92400e">No matching visa record found — double-check the reference number, DOB, and country match the candidate's real documents exactly.</div>`;
+        } else if (data.outcome === 'success') {
+          const r = data.result || {};
+          resultEl.innerHTML = `
+            <div style="padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);font-size:12px;color:#15803d">
+              <div style="font-weight:700;margin-bottom:6px">✓ Result</div>
+              <div>Visa class/subclass: ${escHtml(r.visaClassSubclass || '—')}</div>
+              <div>Grant date: ${escHtml(r.grantDate || '—')}</div>
+              <div>Expiry date: ${escHtml(r.expiryDate || '—')}</div>
+              <div>Work rights: ${escHtml(r.workRights || '—')}</div>
+              <div>Study rights: ${escHtml(r.studyRights || '—')}</div>
+              <div>Conditions: ${escHtml(r.specialConditions || r.travelConditions || '—')}</div>
+              <div style="margin-top:6px;font-size:11px;font-style:italic">First real run — if any of these look wrong, the full raw page text is saved on this check (vevo_checks.raw_result_text) so the parsing can be corrected.</div>
+            </div>`;
+        }
+        toast('VEVO check complete', 'success');
+      } catch { resultEl.innerHTML = `<div style="padding:10px;background:#fef2f2;border-radius:var(--radius);font-size:12px;color:#991b1b">Network error</div>`; }
+      finally { btn.disabled = false; btn.textContent = '🛂 Run Check'; }
+    }
+
     async function startBulkSweep() {
       const state = document.getElementById('bulkSweepStateSelect').value;
       if (!confirm(`Run a compliance sweep across up to 200 ${state === 'ALL' ? '' : state + ' '}candidates? This runs a real check per document and can take a while — you'll see live progress here.`)) return;
@@ -12777,6 +12870,12 @@
             <div><span style="color:var(--text-muted)">ACECQA approved list:</span> ${e.acecqaMatch ? `✓ Yes — ${escHtml(e.acecqaMatch.qualificationName)}${e.acecqaMatch.note ? ` <span title="${escHtml(e.acecqaMatch.note)}" style="cursor:help">ⓘ</span>` : ''}` : '⚠ Not found on list — check manually'}</div>` : ''}
           </div>
           ${aiFallbackSectionHtml(check)}
+          ${(check.flags || []).includes('foreign_passport_needs_vevo') ? `
+          <div style="margin-top:10px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius);font-size:12px;color:#0c4a6e">
+            <div style="font-weight:700;margin-bottom:4px">🛂 Foreign passport — VEVO work-rights check available</div>
+            <div style="margin-bottom:8px">Automates the same real VEVO self-check form our SOP already documents (not an official employer/organisation check — see the Article for that distinction). You'll need the visa's TRN, Visa Evidence Number, or Visa Grant Number from the candidate's visa documents.</div>
+            <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px" onclick="openVevoCheckModal(${currentCandidateDetailContext?.candidateId || 'null'}, '${escHtml(currentCandidateDetailContext?.candidateName || '').replace(/'/g, "\\'")}')">🛂 Run VEVO Check</button>
+          </div>` : ''}
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-top:12px;margin-bottom:8px">
             <input type="checkbox" id="doc-reviewed-${check.id}" ${check.reviewed ? 'checked' : ''}> Reviewed
           </label>

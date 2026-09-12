@@ -1716,6 +1716,51 @@ ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_note TEXT;
 ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_requested_by CITEXT;
 ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_requested_at TIMESTAMPTZ;
 
+-- VEVO check automation (2026-09-12, services/vevoCheckService.js) — runs
+-- the same public "Visa Entitlement Verification Online: Visa holder
+-- enquiry" form (online.immi.gov.au/evo/firstParty) the real "Compliance
+-- Documents – Visa (VEVO Check)" Article already documents as a manual,
+-- step-by-step staff process, via Playwright instead of a human clicking
+-- through it. Explicit, deliberate choice (Joy, 2026-09-12): that specific
+-- tool's own Terms and Conditions state twice that it's "only" for making
+-- inquiries about "your own immigration status" — built for the visa
+-- holder to self-check, not for a third party checking on their behalf.
+-- The actually-sanctioned path for an employer is registering RT as an
+-- organisation for VEVO via ImmiAccount (free, ABN-based, "Work
+-- entitlements" category) — flagged clearly, but Joy chose to keep using
+-- the individual tool for now rather than set up organisation access
+-- first. Every row here is real, human-triggered, one candidate at a time
+-- — never a batch/background sweep — same restraint as everything else
+-- touching this specific government service.
+CREATE TABLE IF NOT EXISTS vevo_checks (
+  id TEXT PRIMARY KEY,
+  candidate_id BIGINT,
+  candidate_name_input TEXT,
+  document_type TEXT NOT NULL, -- 'passport' | 'immicard'
+  reference_type TEXT NOT NULL, -- 'trn' | 'visa_evidence_number' | 'visa_grant_number'
+  -- Real government reference numbers/DOB — same sensitivity tier this app
+  -- already stores elsewhere (document_checks' own extracted_text already
+  -- holds real passport/visa document content). No separate passport/
+  -- document-number column: confirmed live (2026-09-12) the real VEVO
+  -- form has only ONE number-entry field, and it takes whichever number
+  -- matches reference_type (the TRN/Visa Evidence/Visa Grant Number
+  -- itself) — RT's own Article SOP reads like a distinct second field
+  -- ("Add Document Number (or Passport Number)") but the real form
+  -- doesn't have one.
+  reference_number TEXT NOT NULL,
+  date_of_birth DATE NOT NULL,
+  country TEXT NOT NULL,
+  outcome TEXT NOT NULL, -- 'success' | 'no_match' | 'error'
+  result JSONB, -- visa class/subclass, grant/expiry dates, work/study rights, conditions — whatever the results page actually returned
+  raw_result_text TEXT, -- full scraped page text as a fallback if structured parsing misses a field the real results page turns out to use different wording for
+  error_message TEXT,
+  checked_by_email CITEXT NOT NULL,
+  checked_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vevo_checks_candidate ON vevo_checks(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_vevo_checks_created_at ON vevo_checks(created_at);
+
 -- Document Checker Phase 0 (2026-09-09, Joy): a structured, admin-editable
 -- rule set — which document types are required per state, how their expiry
 -- works, and which real source (a HeartBeat Article, an AI Source, or RT's
