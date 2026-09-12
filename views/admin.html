@@ -1559,6 +1559,18 @@
           </div>
         </div>
 
+        <!-- ACECQA approved-qualifications snapshot status (2026-09-12) —
+             the Qualification checker's own cross-check reads this table;
+             see services/acecqaSyncService.js for why a live per-check
+             lookup isn't possible (Cloudflare's JS challenge on ACECQA's
+             own site) and why a scheduled+manual snapshot refresh is the
+             real automated equivalent instead. Sync Now is super_admin-only,
+             same reasoning as Bulk Compliance Sweep above. -->
+        <div class="admin-table-card" style="padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="font-size:12.5px;color:var(--text-muted)">ACECQA approved-qualifications list: <span id="acecqaSyncStatus">…</span></div>
+          <button class="btn-secondary super-admin-only" id="acecqaSyncBtn" style="display:none;padding:5px 12px;font-size:12px" onclick="triggerAcecqaSync()">🔄 Sync Now</button>
+        </div>
+
         <!-- Search screen: find-a-candidate + audit log. Selecting a result
              swaps this whole screen out for docCheckCandidateScreen below,
              rather than appending the candidate's documents inline underneath
@@ -6237,7 +6249,7 @@
       if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
       if (id === 'jobadder-candidates') initJobAdderCandidatesSection();
       if (id === 'leads') loadLeadsTable();
-      if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); }
+      if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
       if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
@@ -12299,6 +12311,46 @@
       window.open('/api/document-checker/export-wwcc-csv?state=VIC', '_blank');
     }
 
+    // ── ACECQA live sync status + Sync Now (2026-09-12) ──────────────
+    // Same shape as loadCandidatesSyncStatus/triggerCandidatesSync below
+    // (RT Candidates cache sync) — fmtRelativeTime is that same section's
+    // shared helper, reused here rather than duplicated.
+    let acecqaSyncPollTimer = null;
+
+    async function loadAcecqaSyncStatus() {
+      const el = document.getElementById('acecqaSyncStatus');
+      if (!el) return;
+      try {
+        const state = await fetch('/api/document-checker/acecqa/sync-status').then(r => r.json());
+        if (state?.isRunning) {
+          el.textContent = '⏳ Syncing (loading a real ACECQA browser session)…';
+          if (!acecqaSyncPollTimer) acecqaSyncPollTimer = setInterval(loadAcecqaSyncStatus, 3000);
+          return;
+        }
+        if (acecqaSyncPollTimer) { clearInterval(acecqaSyncPollTimer); acecqaSyncPollTimer = null; }
+        if (state?.status === 'failed') {
+          el.innerHTML = `<span style="color:#c0392b">⚠️ Last sync failed (${escHtml(fmtRelativeTime(state.finished_at) || '')}) — ${escHtml(state.error_message || 'unknown error')}</span>`;
+        } else if (state?.status === 'success' && state.finished_at) {
+          el.textContent = `Last synced ${fmtRelativeTime(state.finished_at)} · ${state.row_count ?? '—'} qualifications`;
+        } else {
+          el.textContent = 'Not synced yet';
+        }
+      } catch { el.textContent = ''; }
+    }
+
+    async function triggerAcecqaSync() {
+      const btn = document.getElementById('acecqaSyncBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+      try {
+        const res = await fetch('/api/document-checker/acecqa/sync', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Failed to start sync', 'error'); return; }
+        toast('ACECQA sync started — takes about 10-15 seconds', 'success');
+        loadAcecqaSyncStatus();
+      } catch { toast('Network error', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Sync Now'; } }
+    }
+
     // ── Bulk Compliance Sweep (Document Checker Phase 5, 2026-09-09) ──
     // Fire-and-forget + poll, same pattern as the RT candidates cache sync
     // (triggerCandidatesSync/loadCandidatesSyncStatus above) — a real sweep
@@ -12631,6 +12683,82 @@
       `;
     }
 
+    // ── AI fallback (last resort) — 2026-09-12 ────────────────────────
+    // See services/documentCheckerAiFallbackService.js's own header: this
+    // is the one part of Document Checker that costs real AI credit, so it
+    // only ever appears as an explicit, named, opt-in button next to a
+    // SPECIFIC genuine gap the free deterministic pass left — never
+    // offered on a check that already found everything it needs.
+    // aiFallbackAvailable (present on a just-completed check-from-rt
+    // response) and this same rule computed from the persisted
+    // extracted_fields/flags (for a check loaded from history/a candidate's
+    // profile later) are kept in exact sync deliberately, not by
+    // coincidence — see routes/documentChecker.js's own
+    // isAiFallbackWorthwhile, which this mirrors field-for-field.
+    function checkNeedsAiFallback(check) {
+      if (check.ai_assist_used) return false;
+      if (typeof check.aiFallbackAvailable === 'boolean') return check.aiFallbackAvailable;
+      const e = check.extracted_fields || {};
+      const flags = check.flags || [];
+      if (!e.documentTypeConfirmed) return true;
+      if (!e.applicantName) return true;
+      if (flags.includes('no_issue_date_found')) return true;
+      return false;
+    }
+
+    function aiFallbackReasonText(check) {
+      const e = check.extracted_fields || {};
+      const flags = check.flags || [];
+      const gaps = [];
+      if (!e.documentTypeConfirmed) gaps.push("couldn't confirm this is even the right document type");
+      if (!e.applicantName) gaps.push("couldn't find a name on the document");
+      if (flags.includes('no_issue_date_found')) gaps.push("couldn't find a clear issue date");
+      return `Our free, rules-based checker ${gaps.join(' and ')} — usually this means the document uses a layout we haven't built a pattern for yet, or the scan is genuinely too poor for reliable text extraction. Everything else in Document Checker is completely free (self-hosted OCR plus rules matched against real documents) — this AI step is the one exception, and it's entirely optional.`;
+    }
+
+    function aiFallbackSectionHtml(check) {
+      if (checkNeedsAiFallback(check)) {
+        return `
+          <div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius);font-size:12px;color:#92400e">
+            <div style="font-weight:700;margin-bottom:4px">🤖 Genuine gap — our free check couldn't fully read this document</div>
+            <div style="margin-bottom:8px">${escHtml(aiFallbackReasonText(check))}</div>
+            <button class="btn-secondary" id="ai-fallback-btn-${check.id}" style="font-size:11.5px;padding:4px 10px" onclick="runAiFallbackCheck('${check.id}')">🤖 Run AI Check (uses paid AI credit)</button>
+          </div>`;
+      }
+      if (check.ai_assist_used) {
+        const ai = check.ai_extracted_fields || {};
+        return `
+          <div style="margin-top:10px;padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--radius);font-size:12px;color:#1e3a8a">
+            <div style="font-weight:700;margin-bottom:4px">🤖 AI second look (Claude) — requested by ${escHtml(check.ai_requested_by || '')}${check.ai_requested_at ? ` · ${fmtDate(check.ai_requested_at)}` : ''}</div>
+            <div style="margin-bottom:6px">${escHtml(check.ai_note || '')}</div>
+            <div style="font-size:11.5px">Name: ${escHtml(ai.applicantName || '—')} · Issue date: ${escHtml(ai.issueDate || '—')} · Expiry: ${escHtml(ai.expiryDate || '—')} · AI's own confidence: ${escHtml(ai.confidence || '—')}</div>
+            <div style="font-size:11px;color:#1e3a8a;margin-top:6px;font-style:italic">A hint for your review, not a decision — this never changes the outcome above by itself.</div>
+          </div>`;
+      }
+      return '';
+    }
+
+    async function runAiFallbackCheck(checkId) {
+      const btn = document.getElementById(`ai-fallback-btn-${checkId}`);
+      if (btn) { btn.disabled = true; btn.textContent = 'Asking Claude…'; }
+      try {
+        const res = await fetch(`/api/document-checker/${checkId}/ai-check`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'AI check failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🤖 Run AI Check (uses paid AI credit)'; } return; }
+
+        if (data.user_document_detail_id) {
+          currentCandidateDocChecks[data.user_document_detail_id] = data;
+          const req = currentCandidateDetailContext?.requirementsByDetailId?.[data.user_document_detail_id];
+          const card = req && document.getElementById(`doc-card-${data.user_document_detail_id}`);
+          if (card) { card.outerHTML = renderCandidateDocCard(req); toggleDocFindings(data.user_document_detail_id); }
+        }
+        const historyFindings = document.getElementById(`doc-history-findings-${checkId}`);
+        if (historyFindings) historyFindings.innerHTML = docCheckFindingsHtml(data);
+
+        toast('AI second look complete', 'success');
+      } catch { toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🤖 Run AI Check (uses paid AI credit)'; } }
+    }
+
     function docCheckFindingsHtml(check) {
       const e = check.extracted_fields || {};
       const reasons = check.reasons || [];
@@ -12648,7 +12776,8 @@
             ${e.qualificationCode ? `<div><span style="color:var(--text-muted)">Qualification code:</span> ${escHtml(e.qualificationCode)}</div>
             <div><span style="color:var(--text-muted)">ACECQA approved list:</span> ${e.acecqaMatch ? `✓ Yes — ${escHtml(e.acecqaMatch.qualificationName)}${e.acecqaMatch.note ? ` <span title="${escHtml(e.acecqaMatch.note)}" style="cursor:help">ⓘ</span>` : ''}` : '⚠ Not found on list — check manually'}</div>` : ''}
           </div>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-bottom:8px">
+          ${aiFallbackSectionHtml(check)}
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--navy);margin-top:12px;margin-bottom:8px">
             <input type="checkbox" id="doc-reviewed-${check.id}" ${check.reviewed ? 'checked' : ''}> Reviewed
           </label>
           <textarea id="doc-notes-${check.id}" class="form-control" style="min-height:50px;font-size:12px" placeholder="Notes on what you found…">${escHtml(check.review_notes || '')}</textarea>
@@ -12683,7 +12812,7 @@
           extracted_fields: data.extracted, extraction_method: data.extractionMethod, ocr_confidence: data.ocrConfidence,
           reviewed: false, review_notes: null, created_at: new Date().toISOString(),
           checked_by_name: currentUserEmail, checked_by_email: currentUserEmail, user_document_detail_id: userDocumentDetailId,
-          document_source_url: req.documentPath
+          document_source_url: req.documentPath, aiFallbackAvailable: data.aiFallbackAvailable
         };
         document.getElementById(`doc-card-${userDocumentDetailId}`).outerHTML = renderCandidateDocCard(req);
         // Show the reason right where the check just happened — a fresh

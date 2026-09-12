@@ -120,6 +120,45 @@ async function startBulkRun(stateFilter, triggeredBy, deps) {
 // from the real document fetched fresh from its own real S3 documentPath.
 const CANDIDATE_POOL_SIZE = 3000;
 
+// Concurrency (2026-09-12) — the previous version processed exactly one
+// candidate at a time, sequentially, for the whole sweep. That was a
+// deliberate original choice (each performDocumentCheck spawns its own
+// disposable OCR child process — see documentCheckerService.js's own
+// comment on why extraction is never done in-process), but "isolate every
+// extraction in its own process" and "run several of those processes at
+// once" are two separate concerns, not one — isolation is a property of
+// each individual performDocumentCheck call (still true, unchanged, no
+// matter how many run in parallel), while running them one-at-a-time was
+// just the simplest way to write the loop, not a requirement for safety.
+// Bounded here at the CANDIDATE level (each candidate's own documents still
+// run sequentially within that candidate, same as before — a real
+// candidate rarely has more than a handful) rather than flattening to one
+// global document queue, specifically so every existing per-candidate
+// progress-counter update below keeps its exact original meaning and
+// shape with no further changes needed. 5 concurrent candidates keeps
+// worst-case simultaneous child processes modest (each candidate is
+// usually 1-3 documents) while cutting a real sweep's wall-clock time by
+// roughly that same factor — chosen conservatively rather than pushed to
+// the edge of this Railway instance's CPU/memory, since a sweep already
+// runs unattended and there's no user waiting on it to finish faster than
+// "well under the length of one work day".
+const BULK_CONCURRENCY = 5;
+
+// Minimal bounded-concurrency runner — no new dependency for what's one
+// call site. Starts the next item the instant a running one finishes
+// (rather than fixed batches of N), so one slow candidate never leaves
+// other workers idle waiting for the whole batch to complete.
+async function runWithConcurrency(items, limit, worker) {
+  let nextIndex = 0;
+  async function runNext() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
+}
+
 async function runBulkCheck(runId, stateFilter, { performDocumentCheck, REQUIREMENT_NAME_TO_TYPE }) {
   const db = getDb();
   try {
@@ -136,8 +175,17 @@ async function runBulkCheck(runId, stateFilter, { performDocumentCheck, REQUIREM
 
     await db.execute({ sql: `UPDATE document_check_bulk_runs SET candidates_total = ? WHERE id = ?`, args: [candidates.length, runId] });
 
+    // Plain JS counters shared across concurrent workers are safe here —
+    // Node's single-threaded event loop means `checked++`/`flagged++`/
+    // `processed++` themselves are atomic (no `await` between the read and
+    // the write), so there's no lost-update race even with several
+    // candidates' async work interleaved. Each DB write below just persists
+    // whatever the current totals are at that moment — always
+    // monotonically increasing, never a torn read, no different in
+    // substance from the original sequential version's own writes.
     let processed = 0, checked = 0, flagged = 0;
-    for (const candidate of candidates) {
+
+    await runWithConcurrency(candidates, BULK_CONCURRENCY, async (candidate) => {
       const state = candidateState(candidate.raw);
       const requirements = dedupeByDocumentPath(candidate.raw?.attachedRequirements || []);
       for (const req of requirements) {
@@ -181,7 +229,7 @@ async function runBulkCheck(runId, stateFilter, { performDocumentCheck, REQUIREM
         sql: `UPDATE document_check_bulk_runs SET candidates_processed = ?, documents_checked = ?, documents_flagged = ? WHERE id = ?`,
         args: [processed, checked, flagged, runId]
       });
-    }
+    });
 
     await db.execute({ sql: `UPDATE document_check_bulk_runs SET status = 'success', finished_at = now() WHERE id = ?`, args: [runId] });
   } catch (err) {

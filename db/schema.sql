@@ -1699,6 +1699,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_document_check_bulk_runs_one_running ON do
 ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS bulk_run_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_document_checks_bulk_run ON document_checks(bulk_run_id);
 
+-- AI fallback extraction (2026-09-12, services/documentCheckerAiFallbackService.js)
+-- — explicit, per-check, human-clicked opt-in ONLY, never run automatically.
+-- This whole feature's founding principle (this file's own header comment:
+-- "The whole point of this feature is avoiding AI credits") stays true for
+-- every check by default; these columns exist purely to record when a
+-- reviewer specifically chose to spend AI credit on the small minority of
+-- documents the deterministic rules genuinely couldn't read (no name/date
+-- found, or document type unconfirmed) — additive only, next to the
+-- original deterministic outcome/flags/reasons above, never overwriting
+-- them. See that service's own comment for why this is a last resort, not
+-- a first pass.
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_assist_used BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_extracted_fields JSONB;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_note TEXT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_requested_by CITEXT;
+ALTER TABLE document_checks ADD COLUMN IF NOT EXISTS ai_requested_at TIMESTAMPTZ;
+
 -- Document Checker Phase 0 (2026-09-09, Joy): a structured, admin-editable
 -- rule set — which document types are required per state, how their expiry
 -- works, and which real source (a HeartBeat Article, an AI Source, or RT's
@@ -2386,3 +2403,24 @@ CREATE TABLE IF NOT EXISTS acecqa_sync_log (
   synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   row_count INTEGER NOT NULL
 );
+
+-- Singleton run-state row for the automated live sync (services/
+-- acecqaSyncService.js, 2026-09-12) — same shape and same purpose as
+-- rt_candidates_sync_state above: lets a scheduled run and a manual "Sync
+-- Now" guard against racing each other, and lets the admin UI show
+-- running/success/failed instead of just the historical log. acecqa_sync_log
+-- above stays exactly as-is (documentCheckerService.js already reads it
+-- directly for its own "how stale is this" messaging) — this is additive,
+-- not a replacement.
+CREATE TABLE IF NOT EXISTS acecqa_sync_state (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'idle', -- 'idle' | 'running' | 'success' | 'failed'
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  row_count INTEGER,
+  duration_ms INTEGER,
+  error_message TEXT,
+  triggered_by TEXT, -- 'schedule' or the super_admin's email for a manual Sync Now
+  CONSTRAINT acecqa_sync_state_singleton CHECK (id = 1)
+);
+INSERT INTO acecqa_sync_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

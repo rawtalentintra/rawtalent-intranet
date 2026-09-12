@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { extractText, runCheck, invalidateRequirementCache } = require('../services/documentCheckerService');
+const { createTask } = require('./tasks');
+const aiFallback = require('../services/documentCheckerAiFallbackService');
 
 // Compliance documents are sensitive — admin/super_admin only for now,
 // same tier as everything else touching candidate/educator personal data.
@@ -176,6 +178,75 @@ router.delete('/requirements/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// ── Auto re-capture request on a bad photo (2026-09-12) ──────────────────
+// The genuinely automatable version of "catch a bad photo before it's
+// accepted" — that literal idea isn't buildable here: Document Checker
+// never receives the original upload at all (see this file's own /check-
+// from-rt and admin.html's own comment, "Documents are never uploaded
+// here" — a candidate uploads directly into RT's own external portal, a
+// system this app has no code access to, so there's no upload moment in
+// HeartBeat to hook a client-side re-capture prompt into). What IS fully
+// ours: the moment AFTER a check already flags a real quality problem
+// (documentCheckerService.js's applyPhotoQualityFlags — low_ocr_confidence/
+// too_dark/too_bright/low_resolution/blurry_image), whether that check ran
+// from the single "Check Document" button or from the nightly bulk sweep.
+// Auto-raising the re-request task right there, the instant the flag
+// fires, means no reviewer has to first notice the flag buried in a result
+// before deciding to ask for a better photo — the ask itself is
+// automatic, only the actual re-upload (necessarily, since it happens in
+// RT's own portal) still needs the candidate to act on it.
+const PHOTO_QUALITY_FLAGS = new Set(['low_ocr_confidence', 'too_dark', 'too_bright', 'low_resolution', 'blurry_image']);
+
+async function maybeCreateRecaptureTask({ candidateId, candidateName, requirementName, reasons, flags, checkedByEmail, checkedByName }) {
+  if (!candidateId || !flags.some(f => PHOTO_QUALITY_FLAGS.has(f))) return null;
+  const db = getDb();
+
+  // One open request per candidate+document at a time — a nightly sweep
+  // re-checking the same still-uncorrected photo every night shouldn't
+  // raise a fresh task every night; a marker in the description (not a
+  // dedicated column — this is the one place that needs it) is enough to
+  // find an existing open one without a schema change.
+  const marker = `[[doc_recapture:${candidateId}:${requirementName}]]`;
+  const existing = (await db.execute({
+    sql: `SELECT id FROM tasks WHERE department_id = 'quality' AND status != 'done' AND description LIKE ? LIMIT 1`,
+    args: [`%${marker}%`]
+  })).rows[0];
+  if (existing) return existing.id;
+
+  const contact = (await db.execute({
+    sql: 'SELECT contact_no, email FROM rt_candidates_cache WHERE user_id = ?',
+    args: [candidateId]
+  })).rows[0];
+  // reasons/flags aren't reliably parallel arrays index-for-index across the
+  // whole checker (a few checks push a reason with no matching flag or vice
+  // versa — confirmed by counting both arrays' push() calls in
+  // documentCheckerService.js: 37 vs 36), so matching by array position
+  // would be a real, silent bug here. Matching on the literal quality-check
+  // wording itself (a small, fixed set of templates from
+  // applyPhotoQualityFlags) is exact regardless of ordering elsewhere.
+  const QUALITY_REASON_SUBSTRINGS = ['OCR could only read', 'Photo looks very dark', 'washed out/overexposed', 'Image resolution is very low', 'Photo looks blurry'];
+  const qualityReasons = reasons.filter(r => QUALITY_REASON_SUBSTRINGS.some(s => r.includes(s)));
+  const name = candidateName || `Candidate #${candidateId}`;
+  const description = [
+    `Automated Document Checker flag — this ${requirementName} photo couldn't be read reliably and needs a clearer re-upload.`,
+    ...qualityReasons,
+    contact?.contact_no ? `Mobile: ${contact.contact_no}` : null,
+    contact?.email ? `Email: ${contact.email}` : null,
+    `RT profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${candidateId}`,
+    marker
+  ].filter(Boolean).join('\n');
+
+  return createTask({
+    departmentId: 'quality',
+    title: `Ask ${name} to re-upload their ${requirementName} — photo unreadable`,
+    description,
+    priority: 'normal',
+    linkedCandidates: [{ userId: candidateId, name, phone: contact?.contact_no || null }],
+    createdByEmail: checkedByEmail,
+    createdByName: checkedByName
+  });
+}
+
 // The whole point of this feature is avoiding AI credits — OCR (free,
 // self-hosted Tesseract) plus a deterministic rule set derived from our own
 // SOPs (see services/documentCheckerService.js). No AI call anywhere in
@@ -260,7 +331,26 @@ async function performDocumentCheck({ candidateId, candidateName, candidateState
     });
   }
 
-  return { id, extractionMethod: method, ocrConfidence: confidence, reviewed: false, ...result };
+  // Fire-and-forget-adjacent, but awaited: cheap (one existence check, maybe
+  // one insert), and a caller that returns before this runs would leave a
+  // real quality flag silently un-actioned if the process happened to exit
+  // right after responding. Never lets a task-creation failure fail the
+  // check itself — the check already succeeded and is already saved above.
+  let recaptureTaskId = null;
+  try {
+    recaptureTaskId = await maybeCreateRecaptureTask({
+      candidateId, candidateName, requirementName, reasons: result.reasons, flags: result.flags,
+      checkedByEmail, checkedByName: checkedByName || checkedByEmail
+    });
+  } catch (err) {
+    console.error('Auto re-capture task creation error:', err.message);
+  }
+
+  return {
+    id, extractionMethod: method, ocrConfidence: confidence, reviewed: false, recaptureTaskId,
+    aiFallbackAvailable: aiFallback.isAiFallbackWorthwhile(result.extracted, result.flags),
+    ...result
+  };
 }
 
 router.post('/check-from-rt', async (req, res) => {
@@ -276,6 +366,29 @@ router.post('/check-from-rt', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(422).json({ error: err.message });
+  }
+});
+
+// Explicit, per-document, human-clicked only — see
+// services/documentCheckerAiFallbackService.js's own header for why this
+// exists as a deliberate last resort rather than something the checker
+// ever reaches for on its own. Never fired automatically from check-from-rt
+// or the bulk sweep; the frontend only shows the "Run AI Check" button at
+// all when the just-returned check itself said aiFallbackAvailable: true —
+// this route re-validates that same condition server-side rather than
+// trusting the client, so a stale/tampered request can't spend AI credit
+// on a check that already has everything the deterministic pass needs.
+router.post('/:id/ai-check', async (req, res) => {
+  try {
+    const row = (await getDb().execute({ sql: 'SELECT flags, extracted_fields FROM document_checks WHERE id = ?', args: [req.params.id] })).rows[0];
+    if (!row) return res.status(404).json({ error: 'Document check not found.' });
+    if (!aiFallback.isAiFallbackWorthwhile(row.extracted_fields, row.flags)) {
+      return res.status(409).json({ error: 'This check already has a name, date, and confirmed document type from the free deterministic pass — an AI second look isn\'t needed here.' });
+    }
+    const updated = await aiFallback.runAiFallbackForCheck(req.params.id, req.user.email);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -335,7 +448,8 @@ router.get('/history', async (req, res) => {
     const result = await getDb().execute(
       `SELECT id, document_type, filename, extraction_method, ocr_confidence, candidate_name_input, candidate_id,
               requirement_name, outcome, flags, reasons, extracted_fields, reviewed, reviewed_by, reviewed_at,
-              review_notes, checked_by_email, checked_by_name, created_at, document_source_url
+              review_notes, checked_by_email, checked_by_name, created_at, document_source_url,
+              user_document_detail_id, ai_assist_used, ai_extracted_fields, ai_note, ai_requested_by, ai_requested_at
        FROM document_checks ORDER BY created_at DESC LIMIT 200`
     );
     res.json(result.rows);
@@ -511,6 +625,37 @@ router.get('/bulk-check/:runId/results', async (req, res) => {
       args: [req.params.runId]
     });
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ACECQA live sync (2026-09-12) ────────────────────────────────────────
+// Same fire-and-forget + poll pattern as /bulk-check above and RT's own
+// Sync Now (routes/reports.js) — a real sync takes ~10-15s (a headless
+// browser launch + click + CSV download + table refresh), long enough that
+// the caller shouldn't sit on an open HTTP request waiting for it. Restricted
+// to super_admin for the same reason as bulk-check: routine use doesn't need
+// this, "I need this run right now" does.
+const acecqaSync = require('../services/acecqaSyncService');
+
+router.post('/acecqa/sync', requireSuperAdmin, async (req, res) => {
+  try {
+    const current = await acecqaSync.getSyncState();
+    if (acecqaSync.isSyncRunning(current)) {
+      return res.status(409).json({ error: `An ACECQA sync is already in progress (started ${current.started_at}).` });
+    }
+    acecqaSync.syncFromAcecqaLive(req.user.email).catch(err => console.error('Manual ACECQA sync error:', err.message));
+    res.json({ started: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/acecqa/sync-status', async (req, res) => {
+  try {
+    const state = await acecqaSync.getSyncState();
+    res.json(state ? { ...state, isRunning: acecqaSync.isSyncRunning(state) } : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

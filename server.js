@@ -15,6 +15,7 @@ const dubberService = require('./services/dubberService');
 const rtCandidatesSync = require('./services/rtCandidatesSyncService');
 const rtApiService = require('./services/rtApiReportService');
 const leadAutoSignService = require('./services/leadAutoSignService');
+const acecqaSync = require('./services/acecqaSyncService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -349,6 +350,34 @@ async function maybeRunNightlyCandidatesSync() {
   }
 }
 
+// ACECQA's approved-qualifications list changes rarely (a training package
+// getting added/removed is a slow, infrequent real-world event, unlike RT's
+// candidate pool which changes by the hour) — weekly, not nightly, is
+// plenty fresh while running the browser-automation sync far less often
+// than it would need to. Same 2-3am Melbourne window and same
+// already-ran-today-style guard as the RT sync, just gated to Mondays too.
+async function maybeRunWeeklyAcecqaSync() {
+  const state = await acecqaSync.getSyncState();
+  if (acecqaSync.isSyncRunning(state)) return;
+
+  const nowMelbourne = new Date(new Date().toLocaleString('en-US', { timeZone: RT_CANDIDATES_SYNC_TZ }));
+  if (nowMelbourne.getDay() !== 1) return; // Monday only
+  if (nowMelbourne.getHours() !== 2) return; // only inside the 2-3am Melbourne window
+
+  const lastRunDay = state?.started_at
+    ? new Date(new Date(state.started_at).toLocaleString('en-US', { timeZone: RT_CANDIDATES_SYNC_TZ })).toDateString()
+    : null;
+  if (lastRunDay === nowMelbourne.toDateString()) return; // already ran today
+
+  console.log('Starting weekly ACECQA qualifications sync…');
+  try {
+    const { rowCount, durationMs } = await acecqaSync.syncFromAcecqaLive('schedule');
+    console.log(`Weekly ACECQA sync complete — ${rowCount} qualifications in ${Math.round(durationMs / 1000)}s.`);
+  } catch (err) {
+    console.error('Weekly ACECQA sync failed:', err.message);
+  }
+}
+
 async function start() {
   await initDatabase();
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
@@ -435,6 +464,21 @@ async function start() {
     require('./routes/centres').getCentresAndBookings()
       .catch(err => console.error('Centres/bookings cache warm-up error:', err.message));
   }
+
+  // Independent of rtApiService.isConfigured() above — the Document
+  // Checker's ACECQA cross-check needs none of RT's own credentials, only
+  // Playwright + this app's own DB, so it shouldn't silently never schedule
+  // itself in an environment where RT happens not to be configured.
+  getDb().execute('SELECT count(*) AS n FROM acecqa_approved_qualifications').then(r => {
+    if (Number(r.rows[0].n) === 0) {
+      console.log('ACECQA qualifications table is empty — running an initial sync…');
+      acecqaSync.syncFromAcecqaLive('initial-bootstrap').catch(err => console.error('Initial ACECQA sync error:', err.message));
+    }
+  }).catch(err => console.error('ACECQA table check error:', err.message));
+  setInterval(() => {
+    maybeRunWeeklyAcecqaSync().catch(err => console.error('Weekly ACECQA sync check error:', err.message));
+  }, 30 * 60 * 1000);
+
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
     console.log(`   Admin: ${process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au'}\n`);
