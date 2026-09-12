@@ -680,8 +680,139 @@ async function checkWwcc(text, options = {}) {
 
 const checkBlueCard = makeExpiringDocumentChecker('blue_card', BLUE_CARD_TYPE_PATTERN,
   'Could not find wording confirming this is a Blue Card — may be the wrong document.');
-const checkFirstAid = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PATTERN,
+const _checkFirstAidBase = makeExpiringDocumentChecker('first_aid', FIRST_AID_TYPE_PATTERN,
   'Could not find wording confirming this is a First Aid certificate — may be the wrong document.');
+
+// ── CPR sub-component (2026-09-13) ───────────────────────────────────────
+// Real evidence: most genuine First Aid certificates bundle HLTAID009
+// "Provide cardiopulmonary resuscitation" as a separate unit with its own,
+// SHORTER expiry, confirmed directly against 3 real candidate certificates —
+//   Sharanjot Kaur: HLTAID011/012 (First Aid) valid to 31/08/2026, but
+//     HLTAID009 (CPR) only to 31/08/2024 — already expired 13+ months.
+//   Beant Kaur: First Aid valid to 13/05/2026, CPR only to 13/05/2024 —
+//     already expired 16+ months.
+//   Julie Anne: First Aid valid to 01/05/2025, CPR only to 01/05/2023.
+// This matches Raw Talent's own "Compliance Documents – First Aid" Article
+// ("valid for 3 years; CPR component must be renewed annually") — this
+// isn't a new rule, just one this checker never actually enforced.
+// makeExpiringDocumentChecker's own extractExpiryDate has no way to see
+// this: with no "expiry" label to anchor to on these templates, it always
+// picks the LATEST date on the page, which is always the 3-year First Aid
+// date — so a real, currently-lapsed CPR component was completely
+// invisible, with the certificate reporting compliant until the longer
+// First Aid date instead. Confirmed live (2026-09-13): this was silently
+// hiding a real compliance gap on active educators, not a theoretical one.
+const CPR_LABEL_PATTERN = /hltaid0*9|cardiopulmonary\s+resuscitation/i;
+
+// The First Aid unit itself (HLTAID011/012, plus the older HLTAID003/004 —
+// same codes compliance_requirements' cr-all-first-aid row already lists as
+// approved) — used below to pull ITS OWN date directly, the same targeted
+// way as CPR, rather than trusting the base checker's generic nearest-to-
+// "expiry"-label search.
+// No trailing \b — real OCR'd table rows run the code straight into the
+// next word with no separating space ("HLTAID011Provide First Aid..."),
+// and \b never matches between two word characters (a digit followed
+// directly by a letter), so a boundary requirement here silently missed
+// every real table-row occurrence and only matched a loose heading mention
+// instead (found live, 2026-09-13, chasing why this still returned the
+// wrong date on a real certificate).
+const FIRST_AID_UNIT_LABEL_PATTERN = /hltaid0*(?:11|12|3|4)/i;
+
+// Shared by both extractors below — finds the label, then the nearest date
+// AFTER it (not nearest in either direction). These certificates print each
+// unit as its own dense row ("HLTAID009 - Provide cardiopulmonary
+// resuscitation31/08/2024"), directly adjacent to the PRECEDING row's own
+// date with barely a newline between them (confirmed live, 2026-09-13:
+// Sharanjot Kaur's real certificate has the row above's "31/08/2026"
+// sitting immediately before "HLTAID009" starts — closer in raw character
+// distance than CPR's own trailing "31/08/2024" is) — a plain nearest-in-
+// either-direction search silently grabs the wrong row's date instead.
+// maxGap keeps this to "the date immediately following THIS mention of the
+// label", not just any later date in the document — needed because a real
+// certificate can mention a unit code twice: once in an introductory
+// heading with no date anywhere near it ("HLTAID012 Provide First Aid in
+// an Education and Care Setting"), and again as its own dense table row
+// with the real date right after it ("HLTAID012Provide First Aid in an
+// education and care\nsetting\n13/05/2026"). Iterating every occurrence in
+// order and taking the first one that actually has a date nearby skips the
+// heading correctly rather than latching onto it and then grabbing
+// whichever date happens to come next in the document (confirmed live,
+// 2026-09-13, on Beant Kaur's real certificate — its heading mention of
+// HLTAID012 sits before the CPR table row, so a single-match version of
+// this search returned CPR's date instead of the real First Aid one). 120
+// chars comfortably covers both real templates seen so far (an inline
+// "CODE - Description DATE" row, and one wrapped across a line break).
+function findDateAfterLabel(text, labelPattern, maxGap = 120) {
+  const global = new RegExp(labelPattern.source, labelPattern.flags.includes('g') ? labelPattern.flags : labelPattern.flags + 'g');
+  const dates = [...text.matchAll(DATE_PATTERN)]
+    .map(m => ({ parsed: parseFlexibleDate(m[0]), index: m.index }))
+    .filter(d => d.parsed && d.parsed.getFullYear() > 2000);
+  for (const labelMatch of text.matchAll(global)) {
+    const labelEnd = labelMatch.index + labelMatch[0].length;
+    const nearby = dates
+      .filter(d => d.index >= labelEnd && d.index - labelEnd <= maxGap)
+      .sort((a, b) => a.index - b.index)[0];
+    if (nearby) return nearby.parsed;
+  }
+  return null;
+}
+
+async function checkFirstAid(text, options = {}) {
+  const result = await _checkFirstAidBase(text, options);
+  // Only worth computing once we're confident this really is a First Aid
+  // document — no point anchoring to unit codes in the wrong document type
+  // or in noise text from a failed OCR pass.
+  if (!result.extracted.documentTypeConfirmed) {
+    result.extracted.cprExpiryDate = null;
+    return result;
+  }
+
+  // Real second bug found alongside the CPR one (2026-09-13): on the common
+  // "Unit of Competency | Unit Name | Expiry Date" table layout, that
+  // literal "Expiry Date" column header sits directly above the FIRST row
+  // of the table — which is sometimes the CPR unit, not First Aid itself.
+  // The base checker's generic nearest-to-"expiry"-label search then grabs
+  // CPR's own (shorter-lived) date and reports it as the WHOLE
+  // certificate's expiry. Confirmed on a real certificate: Beant Kaur's
+  // actual First Aid expiry is 13/05/2026, but the generic extractor
+  // returned 13/05/2024 (her CPR date) instead. Anchoring specifically to
+  // the HLTAID011/012 unit line avoids this regardless of row order.
+  const firstAidOwnExpiry = findDateAfterLabel(text, FIRST_AID_UNIT_LABEL_PATTERN);
+  if (firstAidOwnExpiry) {
+    result.extracted.expiryDate = firstAidOwnExpiry.toISOString().slice(0, 10);
+  }
+
+  const cprExpiry = findDateAfterLabel(text, CPR_LABEL_PATTERN);
+  result.extracted.cprExpiryDate = cprExpiry ? cprExpiry.toISOString().slice(0, 10) : null;
+
+  // Re-derive 'expired'/'cpr_expired' from scratch against whichever dates
+  // are now actually being trusted, rather than layering more flags on top
+  // of ones the base checker may have already set against the wrong date.
+  result.flags = result.flags.filter(f => f !== 'expired');
+  result.reasons = result.reasons.filter(r => !r.startsWith('Expired '));
+  const finalExpiry = firstAidOwnExpiry || (result.extracted.expiryDate ? new Date(result.extracted.expiryDate) : null);
+  if (finalExpiry && finalExpiry < new Date()) {
+    result.reasons.push(`Expired ${finalExpiry.toLocaleDateString('en-AU', { timeZone: 'UTC' })}.`);
+    result.flags.push('expired');
+  }
+  if (cprExpiry && cprExpiry < new Date()) {
+    result.reasons.push(`CPR component (HLTAID009) expired ${cprExpiry.toLocaleDateString('en-AU', { timeZone: 'UTC' })} — this is separate from the overall First Aid certificate's own expiry and needs annual renewal even while the rest of the certificate is still current.`);
+    result.flags.push('cpr_expired');
+  }
+
+  // Same outcome rule as makeExpiringDocumentChecker itself, recomputed
+  // fresh now that flags may have changed above — a lapsed CPR component
+  // is a genuine compliance gap on its own, same severity as the overall
+  // certificate being expired, not softened to needs_review.
+  if (result.flags.includes('wrong_document_type') || result.flags.includes('expired') || result.flags.includes('cpr_expired')) {
+    result.outcome = 'invalid';
+  } else if (result.flags.length > 0) {
+    result.outcome = 'needs_review';
+  } else {
+    result.outcome = 'valid';
+  }
+  return result;
+}
 
 // makeExpiringDocumentChecker (above) already fully handles
 // expiry_source='no_expiry' as one of its three branches, making it a

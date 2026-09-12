@@ -12891,6 +12891,7 @@
             <div><span style="color:var(--text-muted)">Issuing authority:</span> ${escHtml(e.issuingAuthority || '—')}</div>
             <div><span style="color:var(--text-muted)">Issue date:</span> ${escHtml(e.issueDate || '—')}</div>
             <div><span style="color:var(--text-muted)">Expiry (12mo policy):</span> ${escHtml(e.expiryDate || '—')}</div>
+            ${e.cprExpiryDate ? `<div><span style="color:var(--text-muted)">CPR component expiry (HLTAID009):</span> ${escHtml(e.cprExpiryDate)}${(check.flags || []).includes('cpr_expired') ? ' <span style="color:#c0392b;font-weight:700">⚠️ Expired</span>' : ''}</div>` : ''}
             <div><span style="color:var(--text-muted)">Name on document:</span> ${escHtml(e.applicantName || '—')}</div>
             <div><span style="color:var(--text-muted)">Name matches candidate:</span> ${e.nameMatchesCandidate === null ? '—' : (e.nameMatchesCandidate ? 'Yes' : 'No')}</div>
             ${e.qualificationCode ? `<div><span style="color:var(--text-muted)">Qualification code:</span> ${escHtml(e.qualificationCode)}</div>
