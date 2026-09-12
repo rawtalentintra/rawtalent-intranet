@@ -2017,7 +2017,12 @@
             <div class="meta">${e.bookingCount} shift${e.bookingCount === 1 ? '' : 's'}</div>
             ${isKnown ? `<span class="tag-chip known">Known to Centre</span>` : ''}
           </div>
-          ${e.isActive != null ? `<span class="badge inline ${e.isActive ? 'good' : 'neutral'}">${e.isActive ? 'Active' : 'Not yet active'}</span>` : ''}
+          <!-- "Enabled"/"Disabled", not "Active"/"Not yet active" — this is RT's
+               account-disabled toggle (isActive), a different concept from RT's
+               separate vetting-pipeline status. "Not yet active" specifically
+               implied onboarding-in-progress, which isn't necessarily true — a
+               disabled educator may simply no longer be with RT. -->
+          ${e.isActive != null ? `<span class="badge inline ${e.isActive ? 'good' : 'neutral'}">${e.isActive ? 'Enabled' : 'Disabled'}</span>` : ''}
         </div>
       `;
     }

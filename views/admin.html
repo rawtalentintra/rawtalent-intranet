@@ -12624,7 +12624,7 @@
         }
         box.innerHTML = `<div style="border:1px solid var(--gray-200);border-radius:var(--radius);overflow:hidden">` + results.map((c, i) => `
           <div style="padding:10px 16px;cursor:pointer;${i < results.length - 1 ? 'border-bottom:1px solid var(--gray-100)' : ''}" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''" onclick="selectDocCheckCandidate(${c.userId})">
-            <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml([c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed candidate')} ${!c.isActive ? '<span style="font-size:10px;color:var(--text-muted)">(inactive)</span>' : ''}</div>
+            <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml([c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed candidate')} ${!c.isActive ? '<span style="font-size:10px;color:var(--text-muted)">(disabled)</span>' : ''}</div>
             <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(c.email || '—')}${c.contactNo ? ` · ${escHtml(c.contactNo)}` : ''}</div>
           </div>`).join('') + `</div>`;
       } catch {
@@ -14159,7 +14159,10 @@
             { header: 'Quals', render: r => String((r.qualifications || []).length) },
             { header: 'Compliance', render: r => candidateExpiringDocsCount(r) > 0 ? `⚠️ ${candidateExpiringDocsCount(r)} expiring/expired` : '✅ OK' },
             { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
-            { header: 'Active', render: r => r.isActive ? '✅' : '—' }
+            // "Enabled", not "Active" — this is RT's account-disabled toggle,
+            // a different concept from the Status column/filter above (see
+            // candidateDetailHtml's own comment on this same distinction).
+            { header: 'Enabled', render: r => r.isActive ? '✅' : '—' }
           ],
           detailTitle: r => [r.firstName, r.lastName].filter(Boolean).join(' ') || r.userName || 'Candidate Details',
           renderDetail: candidateDetailHtml
@@ -14171,9 +14174,14 @@
           const activeNotEngaged = rows.filter(r => r.engagementStatus === 'active_not_engaged').length;
           return [
             { label: 'Total Candidates', value: rows.length, hint: 'Matching current filters' },
-            { label: 'Active', value: active, hint: `${pct(active, rows.length)}% of total` },
-            { label: 'Actively Engaged', value: activelyEngaged, hint: `Shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activelyEngaged, active)}% of active` },
-            { label: 'Active — Not Engaged', value: activeNotEngaged, hint: `No shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activeNotEngaged, active)}% of active` },
+            // "Enabled" — RT's account-disabled toggle, not the vetting
+            // Status field (see candidateDetailHtml's comment). "Actively
+            // Engaged"/"Active — Not Engaged" below are a separate,
+            // pre-existing engagementStatus vocabulary (educatorEngagementService.js)
+            // built on top of this same enabled pool, left as-is.
+            { label: 'Enabled', value: active, hint: `${pct(active, rows.length)}% of total` },
+            { label: 'Actively Engaged', value: activelyEngaged, hint: `Shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activelyEngaged, active)}% of enabled` },
+            { label: 'Active — Not Engaged', value: activeNotEngaged, hint: `No shift in the last ${ENGAGEMENT_LOOKBACK_MONTHS}mo · ${pct(activeNotEngaged, active)}% of enabled` },
             { label: 'Missing Contact Info', value: missingContact, hint: 'No email or phone on file' },
             { label: 'Distinct Roles', value: new Set(rows.map(r => r.userRoleId)).size, hint: 'Raw role codes in this set' }
           ];
@@ -14191,7 +14199,7 @@
           { header: 'Role', render: r => escHtml(r.userRoleId ?? '—') },
           { header: 'Status', render: r => escHtml(r.status ?? '—') },
           { header: 'Engagement', render: r => engagementBadge(r.engagementStatus) },
-          { header: 'Active', render: r => r.isActive ? '✅' : '—' },
+          { header: 'Enabled', render: r => r.isActive ? '✅' : '—' },
           { header: 'Created', render: r => fmtDate(r.createdDate) }
         ]
       },
@@ -15782,7 +15790,19 @@
             ['Title', candidate.title || '—'],
             ['Email', candidate.email || '—'],
             ['Contact No', candidate.contactNo || '—'],
-            ['Active', candidate.isActive ? '✅ Active' : '❌ Inactive'],
+            // Deliberately labeled "Enabled/Disabled", not "Active/Inactive" —
+            // this is RT's own account-disabled toggle (isActive/isDeleted
+            // are near-perfect inverses of each other, confirmed 2026-09-13
+            // against the full rt_candidates_cache table), a completely
+            // separate RT concept from the vetting-pipeline `status` field
+            // shown right below it. The two can and regularly do disagree
+            // (2,962 real candidates are `status=1` "Active" AND disabled
+            // simultaneously) — showing both as "Active"/"Inactive" made a
+            // real educator look self-contradictory (RT Portal shows
+            // "Disabled" + "Active" together on the same profile; this app
+            // showed "Inactive" for the same thing, which is correct for the
+            // disabled-toggle concept but reads like it disagrees with RT).
+            ['Enabled', candidate.isActive ? '✅ Enabled' : '❌ Disabled'],
             ['User Type', candidate.userTypeId ?? '—'],
             ['Role', candidate.userRoleId ?? '—'],
             ['Status', candidate.status === null || candidate.status === undefined ? '—' : (CANDIDATE_STATUS_LABELS[candidate.status] ? `${CANDIDATE_STATUS_LABELS[candidate.status]} (${candidate.status})` : candidate.status)],
