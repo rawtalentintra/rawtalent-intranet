@@ -1567,8 +1567,8 @@
              real automated equivalent instead. Sync Now is super_admin-only,
              same reasoning as Bulk Compliance Sweep above. -->
         <div class="admin-table-card" style="padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <div style="font-size:12.5px;color:var(--text-muted)">ACECQA approved-qualifications list: <span id="acecqaSyncStatus">…</span></div>
-          <button class="btn-secondary super-admin-only" id="acecqaSyncBtn" style="display:none;padding:5px 12px;font-size:12px" onclick="triggerAcecqaSync()">🔄 Sync Now</button>
+          <div style="font-size:12.5px;color:var(--text-muted);min-width:0;overflow-wrap:break-word">ACECQA approved-qualifications list: <span id="acecqaSyncStatus">…</span></div>
+          <button class="btn-secondary super-admin-only" id="acecqaSyncBtn" style="display:none;padding:5px 12px;font-size:12px;flex-shrink:0" onclick="triggerAcecqaSync()">🔄 Sync Now</button>
         </div>
 
         <!-- Search screen: find-a-candidate + audit log. Selecting a result
@@ -12343,7 +12343,18 @@
         }
         if (acecqaSyncPollTimer) { clearInterval(acecqaSyncPollTimer); acecqaSyncPollTimer = null; }
         if (state?.status === 'failed') {
-          el.innerHTML = `<span style="color:#c0392b">⚠️ Last sync failed (${escHtml(fmtRelativeTime(state.finished_at) || '')}) — ${escHtml(state.error_message || 'unknown error')}</span>`;
+          // Real bug (2026-09-13, Joy): a Playwright launch failure's
+          // error_message includes Chromium's ENTIRE launch command line
+          // (its "Browser logs:" section — hundreds of characters, no
+          // natural line breaks) — dumped verbatim, this overflowed the
+          // flex row wide enough to push the Sync Now button completely
+          // off the right edge of the screen, not just visually messy.
+          // Only the first line (before "Browser logs:", if present) is
+          // ever the actually meaningful part for a human reading this
+          // status line; the full message is still in acecqa_sync_state
+          // for anyone who needs to actually debug it.
+          const shortError = (state.error_message || 'unknown error').split('\nBrowser logs:')[0].slice(0, 200);
+          el.innerHTML = `<span style="color:#c0392b">⚠️ Last sync failed (${escHtml(fmtRelativeTime(state.finished_at) || '')}) — ${escHtml(shortError)}</span>`;
         } else if (state?.status === 'success' && state.finished_at) {
           el.textContent = `Last synced ${fmtRelativeTime(state.finished_at)} · ${state.row_count ?? '—'} qualifications`;
         } else {
