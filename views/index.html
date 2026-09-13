@@ -1356,6 +1356,7 @@
         const nameEl = document.getElementById('navName');
         nameEl.textContent = me.name || me.email.split('@')[0];
         nameEl.style.display = '';
+        loadNavAvatarPhoto(me.email);
         if (me.role === 'admin' || me.role === 'super_admin' || me.role === 'qa_view' || me.role === 'workforce_partner') {
           const btn = document.getElementById('adminNavBtn');
           btn.style.display = 'inline-flex';
@@ -4733,6 +4734,25 @@
     }
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    // Sidebar avatar → real Our Team photo, not just an initial (same
+    // treatment as views/admin.html's sidebar, 2026-09-13). GET /api/team
+    // is viewable by any signed-in user regardless of role (routes/team.js's
+    // own comment — only editing is super_admin-gated). Matched by email
+    // (team_members has no real FK to users, same convention used
+    // elsewhere) — leaves the plain initial-letter avatar alone for anyone
+    // with no team_members row or no photo on file, rather than showing a
+    // broken image.
+    async function loadNavAvatarPhoto(email) {
+      if (!email) return;
+      try {
+        const members = await fetch('/api/team').then(r => r.json());
+        const match = members.find(m => (m.email || '').toLowerCase() === email.toLowerCase());
+        if (!match || !match.photo) return;
+        const avatar = document.getElementById('navAvatar');
+        avatar.textContent = '';
+        avatar.innerHTML = `<img src="${escHtml(match.photo)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+      } catch { /* leave the initial-letter avatar as-is */ }
     }
     function toast(msg, type = '') {
       const tc = document.getElementById('toastContainer');
