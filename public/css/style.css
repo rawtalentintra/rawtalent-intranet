@@ -1152,6 +1152,14 @@ body:has(> .navbar) { padding-top: 64px; }
    and the wrapping div's overflow-x:auto picks up the rest as a scroll. */
 .data-table-compact th { padding: 6px 14px; font-size: 10px; white-space: nowrap; }
 .data-table-compact td { padding: 4px 14px; font-size: 12.5px; white-space: nowrap; }
+/* Tasks' own List view (2026-09-13, Joy: rows were too tall/text too
+   large) — can't reuse .data-table-compact as-is, since that forces
+   white-space:nowrap on every cell, and the Task column genuinely needs
+   to wrap (title + classification + linked-educator badges stack inside
+   one cell). Same tighter padding/font-size as compact, wrapping left on
+   for every cell so long values don't force the whole table wider. */
+.task-list-table th { padding: 6px 14px; font-size: 10px; }
+.task-list-table td { padding: 5px 14px; font-size: 12px; }
 .td-truncate {
   max-width: 200px;
   overflow: hidden;
@@ -2146,7 +2154,7 @@ body:has(> .navbar) { padding-top: 64px; }
    metadata (creator) — reported live, 2026-08-28. This pill is
    deliberately the one warm/colored element low on the card (besides the
    due-date state colors) so the eye lands on it first. */
-.task-card-assignee { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--navy); background: #fff7ed; border: 1px solid #fed7aa; padding: 3px 10px; border-radius: 50px; font-size: 11px; }
+.task-card-assignee { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--navy); background: #fff7ed; border: 1px solid #fed7aa; padding: 2px 8px; border-radius: 50px; font-size: 10px; }
 /* No one owns this yet — that's worth flagging red, not the same warm
    "someone's on it" orange every other pill uses. */
 .task-card-assignee--unassigned { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }

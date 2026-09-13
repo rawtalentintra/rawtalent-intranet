@@ -2637,7 +2637,7 @@
             <td><span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span></td>
             <td>
               <div style="font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
-              ${t.classification_name ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
+              ${t.classification_name ? `<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
               ${taskLinkedBadgesHtml(t, 'margin-top:4px')}
             </td>
             <td>${escHtml(t.created_by_name || t.created_by)}</td>
@@ -2650,7 +2650,7 @@
       }).join('');
       return `
         <div style="overflow-x:auto">
-          <table class="data-table" style="width:100%">
+          <table class="data-table task-list-table" style="width:100%">
             <thead><tr><th>Department</th><th>Task</th><th>Created by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
