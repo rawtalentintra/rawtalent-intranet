@@ -840,6 +840,45 @@ body:has(> .navbar) { padding-top: 64px; }
   padding: 0 16px;
   margin-bottom: 9px;
 }
+/* #adminSidebarAccount's own look (2026-09-13, Joy: match
+   views/index.html's sidebar-footer) — that page's equivalent classes
+   (.sidebar-footer/.sidebar-user/.sidebar-signout-btn) are hardcoded for
+   its light sidebar background in its own inline <style>, not reachable
+   from here, so this is a separate dark-background version rather than a
+   shared class rename. */
+#adminSidebarAccount {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255,255,255,.1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.admin-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.admin-sidebar-user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255,255,255,.8);
+}
+.admin-sidebar-signout-btn {
+  width: 100%;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid rgba(255,255,255,.12);
+  background: white;
+  color: var(--navy);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.admin-sidebar-signout-btn:hover { background: var(--gray-100); }
 .admin-nav-label {
   font-size: 10px;
   font-weight: 700;

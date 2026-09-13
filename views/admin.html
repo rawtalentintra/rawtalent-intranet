@@ -470,13 +470,18 @@
            (own rule right under .admin-nav-section's in style.css) keeps
            the identical padding/spacing without that class ever being
            matched by the accordion JS, so this always just stays put. -->
+      <!-- Restyled 2026-09-13 (Joy: make this look like views/index.html's
+           own sidebar-footer — name+avatar row, then a clear pill Sign Out
+           button, both below a separator line) — same #navAvatar id and
+           openPasswordModal()/logout() calls as before, just different
+           markup/classes so the shared nav-item hover style doesn't apply
+           here. -->
       <div class="admin-nav-static-section" id="adminSidebarAccount">
-        <div class="admin-nav-item" onclick="openPasswordModal()" title="Change your password">
-          <div class="nav-avatar" id="navAvatar" style="width:20px;height:20px;font-size:10px">?</div> Settings
+        <div class="admin-sidebar-user" onclick="openPasswordModal()" title="Change your password">
+          <div class="nav-avatar" id="navAvatar" style="width:34px;height:34px;font-size:14px">?</div>
+          <span class="admin-sidebar-user-name" id="adminSidebarUserName"></span>
         </div>
-        <div class="admin-nav-item" onclick="logout()">
-          <span class="admin-nav-icon">🚪</span> Sign Out
-        </div>
+        <button class="admin-sidebar-signout-btn" onclick="logout()">Sign Out</button>
       </div>
     </aside>
     <script>
@@ -4732,6 +4737,7 @@
         currentUserWfpLabel = me.wfpLabel || null;
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
+        document.getElementById('adminSidebarUserName').textContent = me.name || me.email;
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
         currentUserFirstName = firstName;
         if (me.impersonating) {
