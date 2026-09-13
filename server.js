@@ -193,6 +193,7 @@ app.use('/api/route-planner', require('./routes/routePlanner'));
 app.use('/api/document-checker', require('./routes/documentChecker'));
 app.use('/api/vevo-check', require('./routes/vevoCheck'));
 app.use('/api/vic-wwcc-export', require('./routes/vicWwccExport'));
+app.use('/api/data-accuracy-check', require('./routes/dataAccuracyCheck'));
 app.use('/api/outreach-lists', require('./routes/outreachLists'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/jobadder', require('./routes/jobadderCandidates'));

@@ -334,6 +334,9 @@
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
         </div>
+        <div class="admin-nav-item" onclick="showSection('data-accuracy-check', this)">
+          <span class="admin-nav-icon">🔍</span> HB vs RT Data Check
+        </div>
         <div class="admin-nav-item" onclick="showSection('educator-outreach', this)">
           <span class="admin-nav-icon">📤</span> Educator Outreach
         </div>
@@ -1694,6 +1697,39 @@
           </div>
           <div class="modal-body" id="vicWwccExportModalBody" style="max-height:75vh;overflow-y:auto"></div>
         </div>
+      </div>
+      </template>
+
+      <!-- HB vs RT Data Check (2026-09-13, Joy: "I need an actual section
+           checking if our HB data matches what's on the portal") — compares
+           rt_candidates_cache (nightly-synced, what almost every list/
+           search/bulk tool in this app reads) against a fresh live pull
+           straight from RT's own API for one candidate at a time. See
+           services/dataAccuracyCheckService.js's own header for why this
+           checks RT's live API, not a scrape of RT Portal's own rendered
+           page (confirmed directly with Joy) — same underlying data,
+           without needing her RT Portal login or anything fragile to
+           screen-scrape. Read-only, same as everything else in this app
+           that touches RT data — never writes back to either side. -->
+      <template id="__lazy_data_accuracy_check">
+      <div class="admin-section" id="section-data-accuracy-check">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">🔍 HB vs RT Data Check</div>
+            <div class="admin-page-sub">Compares our cached educator data against a fresh, live pull straight from RT's own API right now — catches whatever's changed in RT since our last nightly sync.</div>
+          </div>
+        </div>
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <label class="form-label-modal">Find a Candidate</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="dataAccuracyCandidateSearch" class="form-control" placeholder="Search by name, email, or phone…" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();runDataAccuracyCandidateSearch();}">
+            <button class="btn-add" style="padding:0 20px;white-space:nowrap" onclick="runDataAccuracyCandidateSearch()">🔍 Search</button>
+          </div>
+          <div id="dataAccuracyCandidateResults" style="display:none;margin-top:14px"></div>
+        </div>
+
+        <div id="dataAccuracyResultWrap"></div>
       </div>
       </template>
 
@@ -12836,6 +12872,113 @@
       } catch {
         box.innerHTML = '<div style="font-size:12.5px;color:#c0392b">Search failed — try again.</div>';
       }
+    }
+
+    // ── HB vs RT Data Check (2026-09-13) ─────────────────────────────
+    // Same candidate-search endpoint Document Checker uses (/api/reports/
+    // candidates-search) — same dataset, just a different next action per
+    // result. See services/dataAccuracyCheckService.js for the actual
+    // comparison logic.
+    async function runDataAccuracyCandidateSearch() {
+      const q = document.getElementById('dataAccuracyCandidateSearch').value.trim();
+      const box = document.getElementById('dataAccuracyCandidateResults');
+      if (q.length < 2) {
+        box.style.display = 'block';
+        box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">Type at least 2 characters, then press Search.</div>';
+        return;
+      }
+      box.style.display = 'block';
+      box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const results = await fetch(`/api/reports/candidates-search?q=${encodeURIComponent(q)}`).then(r => r.json());
+        if (!results.length) {
+          box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">No candidates found.</div>';
+          return;
+        }
+        box.innerHTML = `<div style="border:1px solid var(--gray-200);border-radius:var(--radius);overflow:hidden">` + results.map((c, i) => `
+          <div style="padding:10px 16px;cursor:pointer;${i < results.length - 1 ? 'border-bottom:1px solid var(--gray-100)' : ''}" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''" onclick="runDataAccuracyCheck(${c.userId})">
+            <div style="font-weight:600;color:var(--navy);font-size:13px">${escHtml([c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed candidate')}</div>
+            <div style="font-size:11.5px;color:var(--text-muted)">${escHtml(c.email || '—')}${c.contactNo ? ` · ${escHtml(c.contactNo)}` : ''}</div>
+          </div>`).join('') + `</div>`;
+      } catch {
+        box.innerHTML = '<div style="font-size:12.5px;color:#c0392b">Search failed — try again.</div>';
+      }
+    }
+
+    async function runDataAccuracyCheck(userId) {
+      const wrap = document.getElementById('dataAccuracyResultWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      window.scrollTo({ top: 0 });
+      try {
+        const r = await fetch(`/api/data-accuracy-check/${userId}`).then(res => res.json());
+        if (r.error) { wrap.innerHTML = `<div style="color:#c0392b;font-size:12.5px">${escHtml(r.error)}</div>`; return; }
+        wrap.innerHTML = dataAccuracyResultHtml(r);
+      } catch {
+        wrap.innerHTML = '<div style="color:#c0392b;font-size:12.5px">Failed to run the check — try again.</div>';
+      }
+    }
+
+    function dataAccuracyResultHtml(r) {
+      const rtLink = `https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${r.userId}`;
+      if (!r.inCache) {
+        return `
+          <div class="admin-table-card" style="padding:16px 20px;background:#fffbeb;border:1px solid #fde68a">
+            <div style="font-weight:700;color:#92400e;margin-bottom:4px">⚠️ Not in our cache yet</div>
+            <div style="font-size:12.5px;color:#92400e">RT has this candidate (confirmed live), but they haven't shown up in a nightly sync yet — probably a very recent addition. Nothing to compare against until the next sync runs.</div>
+          </div>`;
+      }
+      const syncedAgo = r.cacheSyncedAt ? fmtRelativeTime(r.cacheSyncedAt) : 'unknown';
+      const verdictCard = r.matches
+        ? `<div class="admin-table-card" style="padding:16px 20px;background:#f0fdf4;border:1px solid #bbf7d0">
+             <div style="font-weight:700;color:#15803d">✅ Matches — our cached data is identical to RT's live data right now.</div>
+           </div>`
+        : `<div class="admin-table-card" style="padding:16px 20px;background:#fef2f2;border:1px solid #fecaca">
+             <div style="font-weight:700;color:#991b1b">⚠️ ${r.totalDifferences} difference${r.totalDifferences === 1 ? '' : 's'} found between our cache and RT's live data.</div>
+           </div>`;
+
+      const scalarRows = r.scalarMismatches.map(d => `
+        <tr><td>${escHtml(d.field)}</td><td>${escHtml(String(d.cachedValue ?? '—'))}</td><td>${escHtml(String(d.liveValue ?? '—'))}</td></tr>
+      `).join('');
+      const reqRows = r.requirementMismatches.map(d => `
+        <tr><td>${escHtml(d.requirementName || '—')} <span style="color:var(--text-muted)">(${escHtml(d.field)})</span></td><td>${escHtml(String(d.cachedValue ?? '—'))}</td><td>${escHtml(String(d.liveValue ?? '—'))}</td></tr>
+      `).join('');
+      const onlyCacheRows = r.requirementsOnlyInCache.map(x => `<li>${escHtml(x.requirementName || 'Unnamed requirement')}</li>`).join('');
+      const onlyLiveRows = r.requirementsOnlyInLive.map(x => `<li>${escHtml(x.requirementName || 'Unnamed requirement')}</li>`).join('');
+
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-weight:700;color:var(--navy);font-size:16px">${escHtml(r.name)}</div>
+          <a href="${escHtml(rtLink)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;font-weight:700;color:var(--orange)">View in RT Portal →</a>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">Our cache was last synced from RT ${escHtml(syncedAgo)}. RT's data below was fetched live, right now.</div>
+        ${verdictCard}
+        ${scalarRows ? `
+          <div class="admin-table-card" style="margin-top:16px">
+            <div style="padding:14px 20px 0;font-weight:700;color:var(--navy);font-size:13px">Profile field differences</div>
+            <div style="overflow-x:auto"><table class="data-table" style="width:100%">
+              <thead><tr><th>Field</th><th>Our cache</th><th>RT live</th></tr></thead>
+              <tbody>${scalarRows}</tbody>
+            </table></div>
+          </div>` : ''}
+        ${reqRows ? `
+          <div class="admin-table-card" style="margin-top:16px">
+            <div style="padding:14px 20px 0;font-weight:700;color:var(--navy);font-size:13px">Compliance document differences</div>
+            <div style="overflow-x:auto"><table class="data-table" style="width:100%">
+              <thead><tr><th>Requirement (field)</th><th>Our cache</th><th>RT live</th></tr></thead>
+              <tbody>${reqRows}</tbody>
+            </table></div>
+          </div>` : ''}
+        ${onlyCacheRows ? `
+          <div class="admin-table-card" style="padding:14px 20px;margin-top:16px">
+            <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px">Only in our cache (no longer on RT, or removed)</div>
+            <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text)">${onlyCacheRows}</ul>
+          </div>` : ''}
+        ${onlyLiveRows ? `
+          <div class="admin-table-card" style="padding:14px 20px;margin-top:16px">
+            <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:6px">Only in RT's live data (added since our last sync)</div>
+            <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text)">${onlyLiveRows}</ul>
+          </div>` : ''}
+      `;
     }
 
     // At-a-glance educator info for the Document Checker (Joy, 2026-09-13:
