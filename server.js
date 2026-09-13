@@ -142,7 +142,22 @@ app.get('/documentation/terms-of-service', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'documentation-terms-of-service.html'));
 });
 
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+// CSS/JS get 'no-cache' (not 'no-store') — every load still revalidates
+// with the server (a fast 304 when unchanged), but a real style.css/app.js
+// change is picked up on the very next normal reload instead of silently
+// serving a stale cached copy until the user thinks to hard-refresh.
+// Real live bug (Joy, 2026-09-13): a shipped CSS change was confirmed live
+// on the server (curled directly) but her browser kept rendering the old
+// styling — no explicit Cache-Control here left the browser free to reuse
+// its own default heuristic caching instead of checking back in.
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.css') || filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 
 app.use('/auth/login', loginLimiter);
 app.use('/auth', require('./routes/auth'));

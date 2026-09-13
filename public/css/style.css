@@ -1158,8 +1158,8 @@ body:has(> .navbar) { padding-top: 64px; }
    to wrap (title + classification + linked-educator badges stack inside
    one cell). Same tighter padding/font-size as compact, wrapping left on
    for every cell so long values don't force the whole table wider. */
-.task-list-table th { padding: 6px 14px; font-size: 10px; }
-.task-list-table td { padding: 5px 14px; font-size: 12px; }
+.task-list-table th { padding: 5px 12px; font-size: 9.5px; }
+.task-list-table td { padding: 4px 12px; font-size: 11.5px; line-height: 1.35; }
 .td-truncate {
   max-width: 200px;
   overflow: hidden;
