@@ -4738,6 +4738,7 @@
         document.getElementById('newAnnouncementBtn').style.display = 'inline-block';
         document.getElementById('navAvatar').textContent = (me.name || me.email)[0].toUpperCase();
         document.getElementById('adminSidebarUserName').textContent = me.name || me.email;
+        loadNavAvatarPhoto(me.email);
         const firstName = (me.name || me.email.split('@')[0]).split(' ')[0];
         currentUserFirstName = firstName;
         if (me.impersonating) {
@@ -5736,6 +5737,28 @@
     function leavePersonColor(key) {
       const firstName = key.split(' ')[0];
       return (leaveColorMap && leaveColorMap[firstName]) || hashPersonColor(key);
+    }
+
+    // Sidebar avatar → real photo, not just an initial (Joy, 2026-09-13:
+    // "the photo of the person saved under Our Team"). GET /api/team is
+    // viewable by any signed-in user regardless of role (see routes/team.js's
+    // own comment — editing is super_admin only, reading isn't), so this is
+    // safe to call for every logged-in admin/qa_view user, not just Joy.
+    // Matched by email (team_members has no real FK to users, same
+    // convention as other email-matched joins in this app) — falls back to
+    // leaving the plain initial-letter avatar alone (already set by the
+    // caller) for anyone with no team_members row or no photo uploaded,
+    // rather than showing a broken image.
+    async function loadNavAvatarPhoto(email) {
+      if (!email) return;
+      try {
+        const members = await fetch('/api/team').then(r => r.json());
+        const match = members.find(m => (m.email || '').toLowerCase() === email.toLowerCase());
+        if (!match || !match.photo) return;
+        const avatar = document.getElementById('navAvatar');
+        avatar.textContent = '';
+        avatar.innerHTML = `<img src="${escHtml(match.photo)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+      } catch { /* leave the initial-letter avatar as-is */ }
     }
 
     async function loadOurTeam() {
