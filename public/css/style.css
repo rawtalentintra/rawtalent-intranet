@@ -759,20 +759,36 @@ body:has(> .navbar) { padding-top: 64px; }
      only a fraction of its rows, right as this sidebar toggled — all
      symptoms of the same Chrome sticky+contain:paint corruption, not
      separate bugs. This element already spans the full remaining viewport
-     height with its own internal scroll (overflow-y:auto), so it never
-     actually needed sticky's "stick after scrolling past" behavior —
-     fixed was always the more accurate choice. */
+     height, so it never actually needed sticky's "stick after scrolling
+     past" behavior — fixed was always the more accurate choice. */
   position: fixed;
   top: 64px;
   left: 0;
   width: 244px;
   height: calc(100vh - 64px);
-  overflow-y: auto;
+  /* flex column, not a single overflow-y:auto box (Joy, 2026-09-13: the
+     account block/Sign Out should sit fixed at the bottom like
+     views/index.html's own sidebar-footer, not scroll away with the nav
+     list) — #adminSidebarItems (flex:1, its own overflow-y:auto below)
+     scrolls internally when there are enough expanded sections to
+     overflow, while #adminSidebarAccount sits right after it as a normal,
+     non-scrolling flex sibling, always visible at the bottom of the
+     viewport regardless of how much nav content is above it. */
+  display: flex;
+  flex-direction: column;
   /* Same GPU-layer isolation as .navbar, see that comment — position:fixed
      is itself one of the properties that triggers Chrome's layer
      splitting, and this is the other fixed element on the page. */
   contain: paint;
   transform-style: flat;
+}
+.admin-sidebar-items {
+  flex: 1;
+  overflow-y: auto;
+  /* Without this, a flex child won't shrink below its own content's
+     intrinsic height, so overflow-y:auto never actually engages — same
+     min-height/min-width:0 flex quirk documented elsewhere in this file. */
+  min-height: 0;
 }
 
 /* Collapse/expand toggle — a sibling of .admin-sidebar (not a descendant),
@@ -850,7 +866,10 @@ body:has(> .navbar) { padding-top: 64px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 3px 12px;
+  /* Extra left padding vs. .admin-nav-label's own 12px (Joy, 2026-09-13) —
+     a small indent so an expanded section's items read as nested under
+     their label instead of sitting flush with it at the same depth. */
+  padding: 3px 12px 3px 20px;
   border-radius: var(--radius);
   font-size: 12.5px;
   font-weight: 500;
