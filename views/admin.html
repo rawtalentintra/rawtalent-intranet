@@ -5758,26 +5758,40 @@
     }
     // Cached per browser session (sessionStorage, not localStorage — Joy,
     // 2026-09-13: "remember it per login, no need to have that photo keep
-    // refreshing" — a plain reload was flashing back to the initial letter
-    // every time while GET /api/team re-resolved it). Applying the cached
-    // photo immediately, synchronously, before the fetch even starts is
-    // what actually kills the flash; the fetch below still always runs in
-    // the background afterward so a changed photo (or the first-ever load,
-    // with nothing cached yet) still gets picked up, and so the cache stays
-    // fresh for next time — the real signed URL expires after a while
-    // (Supabase storage signed URLs, ~1hr), so this can't just cache once
-    // and stop checking, only stop VISIBLY re-checking.
+    // refreshing"). First attempt only cached the remote signed URL, which
+    // wasn't actually enough — Joy still saw it flash on every reload,
+    // because the browser still had to fetch the real image BYTES over the
+    // network again each time even with the URL itself cached. Now the
+    // actual image is converted to a data: URI once and that's what's
+    // cached, so a later load in the same session renders it instantly
+    // with zero network dependency at all — not just a cached URL pointing
+    // at a network fetch that still has to happen. The real fetch below
+    // still always runs in the background afterward (needed both to catch
+    // a changed/newly-added photo and because the real signed URL expires
+    // after a while, ~1hr), it just never visibly re-flickers an avatar
+    // that's already rendered from cache.
     async function loadNavAvatarPhoto(email) {
       if (!email) return;
       let cached = null;
       try { cached = JSON.parse(sessionStorage.getItem(AVATAR_PHOTO_CACHE_KEY) || 'null'); } catch {}
-      if (cached && cached.email === email.toLowerCase() && cached.photo) applyNavAvatarPhoto(cached.photo);
+      if (cached && cached.email === email.toLowerCase() && cached.dataUrl) applyNavAvatarPhoto(cached.dataUrl);
       try {
         const members = await fetch('/api/team').then(r => r.json());
         const match = members.find(m => (m.email || '').toLowerCase() === email.toLowerCase());
         if (!match || !match.photo) return;
-        applyNavAvatarPhoto(match.photo);
-        try { sessionStorage.setItem(AVATAR_PHOTO_CACHE_KEY, JSON.stringify({ email: email.toLowerCase(), photo: match.photo })); } catch {}
+        // Same-origin proxy, not match.photo (a cross-origin Supabase
+        // signed URL) — a plain <img src> can load that fine, but fetch()
+        // reading its bytes is blocked by CORS (confirmed live: "Failed to
+        // fetch"). See routes/team.js's own comment on this route.
+        const blob = await fetch(`/api/team/${match.id}/photo`).then(r => r.blob());
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        applyNavAvatarPhoto(dataUrl);
+        try { sessionStorage.setItem(AVATAR_PHOTO_CACHE_KEY, JSON.stringify({ email: email.toLowerCase(), dataUrl })); } catch {}
       } catch { /* leave whatever's already showing (cached photo or initial letter) as-is */ }
     }
 

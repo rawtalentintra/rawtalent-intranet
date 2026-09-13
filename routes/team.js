@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { logActivity } = require('../services/activityLog');
-const { BUCKETS, uploadBase64, getSignedUrl, parseDataUri, extForMimetype } = require('../services/storageService');
+const { BUCKETS, uploadBase64, downloadAsBuffer, getSignedUrl, parseDataUri, extForMimetype, setFileResponseHeaders } = require('../services/storageService');
 
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -40,6 +40,30 @@ router.get('/', async (req, res) => {
       return { ...r, photo, backup_types: r.backup_types || [] };
     }));
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Same-origin proxy for a team member's own photo bytes (2026-09-13) — the
+// `photo` field above is a cross-origin Supabase signed URL, fine for a
+// plain <img src>, but the sidebar avatar's own sessionStorage caching
+// needs to fetch() the actual bytes to convert them to a data: URI, and a
+// cross-origin fetch() against a Supabase storage URL is blocked by CORS
+// (confirmed live: "TypeError: Failed to fetch" — an <img> tag can display
+// the same URL fine since loading pixels for paint isn't subject to the
+// same-origin read restriction fetch() enforces). Viewable by any signed-in
+// user, same as GET / above.
+router.get('/:id/photo', async (req, res) => {
+  try {
+    const row = (await getDb().execute({ sql: 'SELECT photo_storage_path FROM team_members WHERE id = ?', args: [req.params.id] })).rows[0];
+    if (!row || !row.photo_storage_path) return res.status(404).json({ error: 'No photo on file' });
+    const ext = (row.photo_storage_path.split('.').pop() || '').toLowerCase();
+    const mimetype = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext] || 'application/octet-stream';
+    const buffer = await downloadAsBuffer(BUCKETS.teamPhotos, row.photo_storage_path);
+    setFileResponseHeaders(res, { mimetype, filename: `photo.${ext}`, wantInline: true });
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
