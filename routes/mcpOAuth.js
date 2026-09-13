@@ -69,7 +69,7 @@ function renderConsentPage({ clientName, userEmail, params }) {
   <div class="login-bg"></div>
   <div class="login-card">
     <div class="login-logo">
-      <img src="/images/logo-dark-bg.png" alt="RawTalent" height="36" style="display:block;margin:0 auto 8px">
+      <img src="/images/logo-transparent.png" alt="RawTalent" height="36" style="display:block;margin:0 auto 8px">
       <div class="login-logo-sub">HeartBeat</div>
     </div>
     <div style="text-align:center;color:white;font-size:15px;font-weight:700;margin-bottom:8px">Connect ${escHtml(clientName || 'this app')} to HeartBeat?</div>

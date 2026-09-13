@@ -2110,12 +2110,20 @@ body:has(> .navbar) { padding-top: 64px; }
 .task-pill.active { background: var(--pill-color); border-color: var(--pill-color); color: white; }
 .task-pill.active .task-pill-count { background: rgba(255,255,255,.25); color: white; }
 .task-pill-count { background: var(--gray-100); color: var(--text-muted); font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 50px; }
-/* auto-fit, not a fixed column count — the board can show 4 or 5 columns
-   depending on whether Requested Bookings is showing (Bookings-department-
-   only), and a fixed count left an empty trailing gap whenever fewer
-   columns than that were actually rendered. */
-.task-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; }
-.task-column { background: var(--offwhite); border-radius: var(--radius-lg); padding: 10px; min-width: 0; border: 2px solid transparent; transition: background-color .12s, border-color .12s; }
+/* Flex, not CSS Grid's repeat(auto-fit, minmax(...)) — that produced a
+   real bug (Joy, 2026-09-13): on a wide screen, auto-fit computes far more
+   potential column tracks than the board actually has columns (4 or 5,
+   depending on whether Requested Bookings is showing — Bookings-department
+   -only), and the empty extra tracks didn't collapse cleanly alongside
+   overflow-x:auto — real columns ended up spread apart with dead space
+   between them instead of filling the row. Flex naturally handles however
+   many .task-column children actually exist (no fixed count to get stale),
+   stretching them to evenly fill the full width on a wide screen and
+   shrinking to each one's min-width (then horizontally scrolling) only
+   once the viewport is too narrow to fit them all — exactly the "adjust to
+   screen width" behaviour a fixed grid track count never gave either. */
+.task-board { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+.task-column { flex: 1 1 240px; min-width: 220px; background: var(--offwhite); border-radius: var(--radius-lg); padding: 10px; border: 2px solid transparent; transition: background-color .12s, border-color .12s; }
 .task-column.drag-over { background: rgba(61,111,255,.08); border-color: var(--orange); }
 .task-column-header { font-size: 12px; font-weight: 800; padding: 8px 10px; border-radius: 8px; border: 1px solid; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
 .task-column-body { display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
@@ -2181,6 +2189,21 @@ body:has(> .navbar) { padding-top: 64px; }
   font-size: 14px;
   font-family: inherit;
   line-height: 1.4;
+  /* Real bug (Joy, 2026-09-13): "the cursor looks one space away from what
+     I'm typing". body has its own letter-spacing (a global typographic
+     tightening) that a plain div like this one inherits — but a <textarea>
+     is a form control, and form controls do NOT inherit letter-spacing
+     from ancestors by default (same long-standing browser behaviour as
+     form controls not inheriting font styles generally), so the real
+     textarea sitting on top stayed at the browser's own 'normal' the whole
+     time. That mismatch compounds per character: by the end of a longer
+     note the invisible real text (and the real caret, which follows the
+     textarea's own layout) had drifted several pixels away from the
+     backdrop's visible copy underneath it. Pinning this to the textarea's
+     own actual value, not just "whatever the page happens to inherit",
+     keeps them character-for-character aligned regardless of body's own
+     styling.  */
+  letter-spacing: normal;
   color: var(--text);
   background: white;
 }
