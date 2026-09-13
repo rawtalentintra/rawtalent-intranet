@@ -5749,16 +5749,36 @@
     // leaving the plain initial-letter avatar alone (already set by the
     // caller) for anyone with no team_members row or no photo uploaded,
     // rather than showing a broken image.
+    const AVATAR_PHOTO_CACHE_KEY = 'hbAvatarPhotoCache';
+    function applyNavAvatarPhoto(url) {
+      const avatar = document.getElementById('navAvatar');
+      if (!avatar) return;
+      avatar.textContent = '';
+      avatar.innerHTML = `<img src="${escHtml(url)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+    }
+    // Cached per browser session (sessionStorage, not localStorage — Joy,
+    // 2026-09-13: "remember it per login, no need to have that photo keep
+    // refreshing" — a plain reload was flashing back to the initial letter
+    // every time while GET /api/team re-resolved it). Applying the cached
+    // photo immediately, synchronously, before the fetch even starts is
+    // what actually kills the flash; the fetch below still always runs in
+    // the background afterward so a changed photo (or the first-ever load,
+    // with nothing cached yet) still gets picked up, and so the cache stays
+    // fresh for next time — the real signed URL expires after a while
+    // (Supabase storage signed URLs, ~1hr), so this can't just cache once
+    // and stop checking, only stop VISIBLY re-checking.
     async function loadNavAvatarPhoto(email) {
       if (!email) return;
+      let cached = null;
+      try { cached = JSON.parse(sessionStorage.getItem(AVATAR_PHOTO_CACHE_KEY) || 'null'); } catch {}
+      if (cached && cached.email === email.toLowerCase() && cached.photo) applyNavAvatarPhoto(cached.photo);
       try {
         const members = await fetch('/api/team').then(r => r.json());
         const match = members.find(m => (m.email || '').toLowerCase() === email.toLowerCase());
         if (!match || !match.photo) return;
-        const avatar = document.getElementById('navAvatar');
-        avatar.textContent = '';
-        avatar.innerHTML = `<img src="${escHtml(match.photo)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
-      } catch { /* leave the initial-letter avatar as-is */ }
+        applyNavAvatarPhoto(match.photo);
+        try { sessionStorage.setItem(AVATAR_PHOTO_CACHE_KEY, JSON.stringify({ email: email.toLowerCase(), photo: match.photo })); } catch {}
+      } catch { /* leave whatever's already showing (cached photo or initial letter) as-is */ }
     }
 
     async function loadOurTeam() {
