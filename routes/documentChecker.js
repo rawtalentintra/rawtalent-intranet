@@ -538,7 +538,7 @@ router.get('/flagged', async (req, res) => {
   }
 });
 
-// WWCC bulk-verification CSV export (2026-09-10) — researched live whether
+// WWCC bulk-verification CSV export — researched live (2026-09-10) whether
 // VIC/SA expose a public API for automated WWCC status cross-checking:
 // neither does. Confirmed for SA via a real third-party verification-
 // automation vendor's own documentation ("South Australia needs your
@@ -551,45 +551,22 @@ router.get('/flagged', async (req, res) => {
 // columns: "family name" and "card number") — a genuine, sanctioned way to
 // make the SOP's existing manual "verify through the state portal" step
 // far less painful than one-by-one, even though it's still a human
-// uploading a file and reading results back, not a live automated
-// cross-check. This endpoint generates that exact CSV from whichever real
-// WWCC registration numbers the checker has already extracted and
-// confirmed the format of (see documentCheckerService.js's
-// checkWwccNumberFormat) — nothing here is invented, only real captured
-// numbers from real checks already on file.
-router.get('/export-wwcc-csv', async (req, res) => {
-  const state = (req.query.state || 'VIC').toUpperCase();
-  try {
-    const result = await getDb().execute({
-      sql: `WITH latest AS (
-              SELECT DISTINCT ON (candidate_id, user_document_detail_id) *
-              FROM document_checks
-              WHERE candidate_id IS NOT NULL AND document_type = 'wwcc'
-              ORDER BY candidate_id, user_document_detail_id, created_at DESC
-            )
-            SELECT c.last_name, l.extracted_fields->>'wwccRegistrationNumber' AS card_number
-            FROM latest l
-            JOIN rt_candidates_cache c ON c.user_id = l.candidate_id
-            WHERE l.extracted_fields->>'wwccRegistrationNumber' IS NOT NULL
-              AND l.extracted_fields->>'stateUsed' = ?
-              AND (c.is_deleted IS NOT TRUE)
-            ORDER BY c.last_name`,
-      args: [state]
-    });
-    // CSV-escape each field per RFC 4180 (wrap in quotes, double any
-    // embedded quote) — a family name with a comma or quote in it would
-    // otherwise silently corrupt the column alignment VIC's own bulk tool
-    // expects.
-    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['family name', 'card number'], ...result.rows.map(r => [r.last_name, r.card_number])];
-    const csv = rows.map(row => row.map(esc).join(',')).join('\r\n');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="wwcc-bulk-check-${state}.csv"`);
-    res.send(csv);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// uploading a file and reading results back (a real reCAPTCHA guards the
+// actual submit step, confirmed live 2026-09-13 — this app will never
+// build anything that bypasses or solves one).
+//
+// This used to be its own endpoint here, generating the CSV from whichever
+// WWCC numbers document_checks happened to already have on file — but that
+// table only has an entry for a candidate whose WWCC document someone had
+// already individually run through THIS checker first, a small, incidental
+// subset with no relation to "every VIC educator RT actually has a WWCC
+// number for." Replaced 2026-09-13 by services/vicWwccExportService.js
+// (routes/vicWwccExport.js), which reads every active VIC educator's own
+// WWCC number straight from rt_candidates_cache — the same nightly RT sync
+// every other compliance feature already relies on — matching the real
+// "SOP: VIC WWCC - Bulk Check" document's actual data source, and
+// surfacing blanks/malformed numbers/duplicates/multiple-records on screen
+// before anything is exported, rather than a single opaque CSV download.
 
 // Deleting the audit record outright (not just archiving) is kept to
 // super_admin, same as the other hard-delete actions in this app.

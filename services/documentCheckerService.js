@@ -1420,5 +1420,9 @@ async function runCheck(documentType, text, options) {
 
 module.exports = {
   extractText, runCheck, getComplianceRequirement, invalidateRequirementCache,
-  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining, checkQualification, checkPassport
+  checkPoliceCheck, checkWwcc, checkBlueCard, checkFirstAid, checkChildSafetyTraining, checkProtectingChildrenTraining, checkRanTraining, checkQualification, checkPassport,
+  // Exported so other features needing the exact same VIC/SA registration-
+  // number format (e.g. vicWwccExportService.js's bulk-check CSV prep) read
+  // it from this one verified source rather than re-typing the regex.
+  WWCC_NUMBER_PATTERNS
 };

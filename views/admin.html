@@ -1556,7 +1556,7 @@
             <div class="admin-page-sub">Find a candidate, then check their compliance documents — no AI credits used, just OCR (free, self-hosted) plus rules derived from our Articles.</div>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn-secondary" onclick="exportVicWwccCsv()" title="Neither VIC nor SA has a public API for WWCC status checking (checked live 2026-09-10) — VIC does offer a real bulk-upload tool though (up to 1500 at once). This downloads a CSV in exactly the 2-column format that tool expects, built from real WWCC numbers already extracted and confirmed by this Document Checker.">Export VIC WWCC CSV</button>
+            <button class="btn-secondary" onclick="openVicWwccExportModal()">VIC WWCC Bulk Check</button>
             <button class="btn-secondary super-admin-only" style="display:none" onclick="openBulkSweepModal()">Bulk Compliance Sweep</button>
             <button class="btn-secondary" onclick="openComplianceRequirementsModal()">Compliance Rules</button>
           </div>
@@ -1670,6 +1670,23 @@
             <button class="modal-close" onclick="closeVevoCheckModal()">×</button>
           </div>
           <div class="modal-body" id="vevoCheckModalBody"></div>
+        </div>
+      </div>
+
+      <!-- VIC WWCC Bulk Check export (2026-09-13) — automates steps 2-6 of
+           Sophia's real "SOP: VIC WWCC - Bulk Check" (get the report,
+           review it, reformat the number, quality-check it, finalise the
+           file). Steps 7-8 (upload to Service Victoria, read the results)
+           stay manual — that page has a live reCAPTCHA, and this app will
+           never build anything that bypasses or solves one. See
+           services/vicWwccExportService.js for the full reasoning. -->
+      <div class="modal-overlay" id="vicWwccExportModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeVicWwccExportModal()">
+        <div class="modal" style="max-width:640px">
+          <div class="modal-header">
+            <div class="modal-title">📋 VIC WWCC Bulk Check</div>
+            <button class="modal-close" onclick="closeVicWwccExportModal()">×</button>
+          </div>
+          <div class="modal-body" id="vicWwccExportModalBody" style="max-height:75vh;overflow-y:auto"></div>
         </div>
       </div>
       </template>
@@ -12374,17 +12391,80 @@
       } catch { toast('Network error', 'error'); }
     }
 
-    // ── VIC WWCC bulk-verification CSV export (2026-09-10) ──────────
-    // See routes/documentChecker.js's own comment on /export-wwcc-csv for
-    // the full research behind this — no public API exists for VIC or SA
-    // WWCC status checking, confirmed live; VIC's real status-checker tool
-    // does have an official bulk-CSV upload (family name + card number, up
-    // to 1500 at once) though, which this feeds directly. A plain anchor
-    // click rather than fetch+blob — this is a real authenticated download
-    // from the live app, not something rendered inside an Artifact-style
-    // sandbox that blocks script-driven saves.
-    function exportVicWwccCsv() {
-      window.open('/api/document-checker/export-wwcc-csv?state=VIC', '_blank');
+    // ── VIC WWCC Bulk Check export (2026-09-13) ──────────────────────
+    // Automates steps 2-6 of Sophia's real "SOP: VIC WWCC - Bulk Check" —
+    // see services/vicWwccExportService.js's own header for the full
+    // reasoning (why steps 7-8, the actual government submission, stay
+    // manual — a real reCAPTCHA guards that page). Every step is shown on
+    // screen before any file is downloaded, per Joy's explicit ask
+    // (2026-09-13) to make clear exactly what's being done and why, rather
+    // than a single opaque "Export CSV" button.
+    function vicWwccBucketHtml(title, hint, rows, renderRow) {
+      if (!rows.length) return '';
+      return `
+        <div style="margin-top:10px">
+          <div style="font-weight:700;font-size:12.5px;color:var(--navy)">${escHtml(title)} (${rows.length})</div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">${escHtml(hint)}</div>
+          <div style="max-height:120px;overflow-y:auto;border:1px solid var(--gray-100);border-radius:var(--radius);padding:8px 10px">
+            ${rows.map(renderRow).join('')}
+          </div>
+        </div>`;
+    }
+
+    async function openVicWwccExportModal() {
+      const body = document.getElementById('vicWwccExportModalBody');
+      document.getElementById('vicWwccExportModal').classList.add('open');
+      body.innerHTML = `
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">
+          Automates <strong>steps 2–6</strong> of the real "SOP: VIC WWCC - Bulk Check" — pulling every active VIC educator's WWCC number straight from RT (skipping the wait on IT's daily report), reformatting it into the government tool's expected format, and quality-checking it, exactly like the SOP's own review step.
+          <br><br>
+          It does <strong>not</strong> submit anything to Service Victoria — that page requires solving a reCAPTCHA, which this app will never automate. You'll still upload the file yourself (SOP step 7) and read the results back in (step 8).
+        </div>
+        <div class="loading-spinner"><div class="spinner"></div></div>`;
+      try {
+        const report = await fetch('/api/vic-wwcc-export/report').then(r => r.json());
+        renderVicWwccExportReport(report);
+      } catch {
+        body.innerHTML += `<div style="color:#c0392b;font-size:12.5px">Failed to load — try again.</div>`;
+      }
+    }
+
+    function closeVicWwccExportModal() {
+      document.getElementById('vicWwccExportModal').classList.remove('open');
+    }
+
+    function renderVicWwccExportReport(r) {
+      const body = document.getElementById('vicWwccExportModalBody');
+      const rowLine = (row, extra) => `<div style="padding:3px 0;border-bottom:1px solid var(--gray-100);font-size:12px">${escHtml(row.name)}${row.email ? ` · ${escHtml(row.email)}` : ''}${extra ? ` · ${extra}` : ''}</div>`;
+
+      body.innerHTML = `
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">
+          Automates <strong>steps 2–6</strong> of the real "SOP: VIC WWCC - Bulk Check" — pulling every active VIC educator's WWCC number straight from RT, reformatting it, and quality-checking it. It does <strong>not</strong> submit anything to Service Victoria (reCAPTCHA-guarded) — you'll still do steps 7–8 by hand.
+        </div>
+
+        <div style="background:var(--gray-50);border-radius:var(--radius);padding:12px 14px;font-size:12.5px;margin-bottom:6px">
+          <strong>Step 2 — Pulled the data.</strong> ${r.totalVicEducators} active VIC educators found (synced nightly from RT); ${r.withWwccRequirement} have a WWCC record on file.
+        </div>
+        <div style="background:var(--gray-50);border-radius:var(--radius);padding:12px 14px;font-size:12.5px;margin-bottom:6px">
+          <strong>Step 4 — Reformatted the numbers.</strong> ${r.ready.length + r.duplicateNumbers.length} numbers converted from RT's format (e.g. <code>1234567A-01</code>) to the bulk-check format (<code>1234567A</code>) — same transformation as the SOP's own spreadsheet formula.
+        </div>
+        <div style="background:var(--gray-50);border-radius:var(--radius);padding:12px 14px;font-size:12.5px;margin-bottom:10px">
+          <strong>Step 5 — Quality checked.</strong> Anything blank, malformed, ambiguous (more than one WWCC record), or duplicated against another educator is excluded from the file below and listed here instead — none of it is guessed or silently fixed.
+        </div>
+
+        ${vicWwccBucketHtml('⚠️ Blank WWCC number', 'Has a WWCC record on file, but no number entered — follow up before this educator can be checked.', r.blank, row => rowLine(row))}
+        ${vicWwccBucketHtml('⚠️ Unexpected format', 'Doesn\'t match VIC\'s known format (7 digits + letter + dash + 2 digits) — could be a data-entry issue, or a different state\'s card entered under VIC.', r.malformed, row => rowLine(row, `on file as "${escHtml(row.rawNumber)}"`))}
+        ${vicWwccBucketHtml('⚠️ Multiple WWCC records', 'More than one WWCC entry on this profile — needs a human to pick the current one before this educator can be included.', r.multipleRecords, row => rowLine(row, `${row.recordCount} records`))}
+        ${vicWwccBucketHtml('⚠️ Duplicate number across educators', 'The same reformatted number is on file for more than one different educator — almost certainly a data-entry mistake, not submitted until resolved.', r.duplicateNumbers, row => rowLine(row, `card ${escHtml(row.cardNumber)}`))}
+
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius);padding:12px 14px;margin-top:14px;font-size:12.5px;color:#15803d">
+          <strong>Step 6 — Ready to finalise.</strong> ${r.ready.length} educator${r.ready.length === 1 ? '' : 's'} clean and ready to export.
+        </div>
+
+        <div style="margin-top:14px;text-align:right">
+          <button class="btn-add" ${r.ready.length ? '' : 'disabled'} onclick="window.open('/api/vic-wwcc-export/csv', '_blank')">⬇️ Download CSV (${r.ready.length})</button>
+        </div>
+      `;
     }
 
     // ── ACECQA live sync status + Sync Now (2026-09-12) ──────────────
