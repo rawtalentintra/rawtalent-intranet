@@ -2650,7 +2650,16 @@
       }).join('');
       return `
         <div style="overflow-x:auto">
-          <table class="data-table task-list-table" style="width:100%">
+          <table class="data-table task-list-table" style="width:100%;table-layout:fixed">
+            <colgroup>
+              <col style="width:12%">
+              <col style="width:29%">
+              <col style="width:12%">
+              <col style="width:17%">
+              <col style="width:10%">
+              <col style="width:8%">
+              <col style="width:12%">
+            </colgroup>
             <thead><tr><th>Department</th><th>Task</th><th>Created by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
