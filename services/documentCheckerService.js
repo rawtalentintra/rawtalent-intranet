@@ -114,7 +114,21 @@ const ISSUING_AUTHORITY_PATTERN = /victoria\s+police|nsw\s+police|new\s+south\s+
 // date. Real dates never mix "/" and "-" within the same value; addresses
 // with a unit-of-range format do, so requiring one consistent separator
 // throughout rules out that whole class of false positive.
-const DATE_PATTERN = /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})|(\d{1,2}\/\d{1,2}\/\d{2,4})|(\d{1,2}-\d{1,2}-\d{2,4})|((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi;
+//
+// Real bug (found 2026-09-13, Joy — a genuine "check manually" false
+// positive on an otherwise crystal-clear certificate): the day-first
+// alternative had no `,?` before the year, only the month-first one did
+// ("January 12, 2026" matched; "12 January, 2026" did not, zero matches at
+// all). A real Victorian Dept. of Education "Protecting Children" template
+// prints its date exactly as "29 June, 2026" — day-first WITH a comma
+// before the year — which silently produced zero date matches at all in
+// the whole document, not just a wrong one, so extractIssueDate correctly
+// reported "no issue date found" for a document that had one printed in
+// plain, unambiguous text (confirmed via OCR confidence 95%, no garbling —
+// this was a real regex gap, not an OCR problem). Mirrors the exact same
+// optional comma the month-first alternative already had, just on the
+// other side of the month name.
+const DATE_PATTERN = /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*,?\s+\d{4})|(\d{1,2}\/\d{1,2}\/\d{2,4})|(\d{1,2}-\d{1,2}-\d{2,4})|((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi;
 
 const MONTH_INDEX = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
