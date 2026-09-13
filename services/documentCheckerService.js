@@ -634,17 +634,23 @@ function makeExpiringDocumentChecker(documentType, typePattern, wrongTypeMessage
 // manual portal verification:
 //   Victoria (VIC): 1111111A-01  (7 digits, 1 letter, dash, 2 digits)
 //   South Australia (SA): SRN1111-1111  (SRN, 4 digits, dash, 4 digits)
-// NOT independently verified against a real production VIC/SA document,
-// unlike most other patterns in this file — every real WWCC-labelled
-// document currently on file in this dataset turned out to be WA's, and
-// zero real SA-labelled ones have a file attached at all (checked
-// directly, 2026-09-10). Built straight from the SOP's own literal stated
-// examples instead, and flagged accordingly in its own reason text so a
-// reviewer knows this specific check hasn't been confirmed against a real
-// card yet. Only checked when the candidate's state IS VIC or SA (no
-// format is stated for any other state) and only ever a soft,
-// needs_review-level signal — an OCR misread or an unanticipated card
-// layout variation shouldn't be treated as a confirmed problem.
+// VIC's pattern independently confirmed 2026-09-13 against real production
+// data (not just the SOP's stated example): sampled 10 real active VIC
+// candidates' own attachedRequirements.documentNumber values directly from
+// rt_candidates_cache — 8 of 10 matched this exact `1234567A-01` format;
+// the 2 exceptions ("WWC2814379E", "02677151-04") look like genuine data-
+// entry variance rather than a wrong pattern. SA's pattern is STILL not
+// independently verified against a real production document — every real
+// WWCC-labelled document currently on file in this dataset turned out to
+// be WA's, and zero real SA-labelled ones have a file attached at all
+// (checked directly, 2026-09-10). Built straight from the SOP's own
+// literal stated examples instead, and flagged accordingly in its own
+// reason text so a reviewer knows this specific check hasn't been
+// confirmed against a real SA card yet. Only checked when the candidate's
+// state IS VIC or SA (no format is stated for any other state) and only
+// ever a soft, needs_review-level signal — an OCR misread or an
+// unanticipated card layout variation shouldn't be treated as a confirmed
+// problem.
 const WWCC_NUMBER_PATTERNS = {
   VIC: { pattern: /\b\d{7}[A-Z]-\d{2}\b/i, example: '1111111A-01' },
   SA: { pattern: /\bSRN\d{4}-\d{4}\b/i, example: 'SRN1111-1111' }
