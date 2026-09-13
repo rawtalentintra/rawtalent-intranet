@@ -1157,9 +1157,27 @@ body:has(> .navbar) { padding-top: 64px; }
    white-space:nowrap on every cell, and the Task column genuinely needs
    to wrap (title + classification + linked-educator badges stack inside
    one cell). Same tighter padding/font-size as compact, wrapping left on
-   for every cell so long values don't force the whole table wider. */
-.task-list-table th { padding: 5px 12px; font-size: 9.5px; }
-.task-list-table td { padding: 4px 12px; font-size: 11.5px; line-height: 1.35; }
+   for every cell so long values don't force the whole table wider.
+   Selectors are doubled up (.data-table.task-list-table, not just
+   .task-list-table) — a real bug otherwise: this table always carries
+   BOTH classes together, and a single-class selector here has the exact
+   same specificity as plain .data-table's own th/td rules further down
+   this file, so which one wins depends on source order alone (.data-table
+   happens to be declared later, so it silently won for any cell with no
+   inner span/div of its own — Created By/Assigned To/Due all rendered at
+   .data-table's 14px, not this rule's 11px, even though this rule LOOKS
+   like it should apply). Doubling the class makes this one unambiguously
+   more specific, regardless of where either rule sits in the file. */
+.data-table.task-list-table th { padding: 5px 12px; font-size: 9.5px; }
+.data-table.task-list-table td { padding: 4px 12px; font-size: 11px; line-height: 1.35; }
+/* Department/Priority/Status chips reuse the shared .task-chip class (also
+   used by Board cards, which Joy said already "look perfect" — so this is
+   scoped to List only, not a change to .task-chip itself). Bumped from its
+   normal 10.5px to match this table's own unified 11px main-text size
+   exactly (Joy, 2026-09-13: "all the same size for the main fonts"),
+   rather than reintroducing a visible size mismatch between chips and
+   everything else in the row. */
+.task-list-table .task-chip { font-size: 11px; }
 .td-truncate {
   max-width: 200px;
   overflow: hidden;

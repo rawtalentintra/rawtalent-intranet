@@ -2636,7 +2636,7 @@
           <tr onclick="openTaskDetail('${t.id}')" style="cursor:pointer">
             <td><span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span></td>
             <td>
-              <div style="font-size:12px;font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
+              <div style="font-size:11px;font-weight:600;color:var(--navy)">${escHtml(t.title)}</div>
               ${t.classification_name ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
               ${taskLinkedBadgesHtml(t, 'margin-top:3px')}
             </td>
