@@ -2257,8 +2257,19 @@ body:has(> .navbar) { padding-top: 64px; }
    the backdrop's colored copy is what's visible. See syncMentionBackdrop()
    in views/index.html — border/padding/line-height here are set to match
    .form-control's exactly so the invisible real text still lines up
-   character-for-character with what's drawn underneath it. */
-.task-mention-live { color: #0d9488; font-weight: 800; }
+   character-for-character with what's drawn underneath it.
+   Real bug (Joy, 2026-09-15): "cursor looks messed up as soon as someone is
+   tagged" — everything typed after a mention landed one or more characters
+   away from the real caret. The font-weight: 800 this comment describes
+   broke the very alignment it claims to preserve: bold glyphs are measurably
+   WIDER than the textarea's actual (normal-weight) text, even with border/
+   padding/line-height matched exactly, so the backdrop's highlighted name
+   rendered wider than the invisible real text sitting under it — every
+   character after the mention was then visibly offset from where the real,
+   correctly-positioned caret actually was. Dropped to normal weight; the
+   color alone still reads clearly as "this got tagged" without changing
+   glyph width. */
+.task-mention-live { color: #0d9488; font-weight: normal; }
 .task-mention-backdrop {
   position: absolute;
   inset: 0;
