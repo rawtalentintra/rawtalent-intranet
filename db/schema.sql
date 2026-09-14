@@ -1871,13 +1871,20 @@ ON CONFLICT (state, document_type) DO NOTHING;
 -- production data: 500+ real candidates hold this exact document
 -- (overwhelmingly SA, a handful in VIC/QLD too — a genuinely national
 -- training module, just delivered here via an SA-based provider).
--- state='ALL' since real holders aren't limited to one state. verified=true
--- since the expiry rule itself is directly read off the certificate, not
--- an assumption — 2 real certificates checked both print an explicit
--- "Expiry date: 31 December 2027".
+-- verified=true since the expiry rule itself is directly read off the
+-- certificate, not an assumption — 2 real certificates checked both print
+-- an explicit "Expiry date: 31 December 2027".
+-- state='SA' (2026-09-14, was 'ALL') — Joy confirmed RAN is only a REQUIRED
+-- document for SA educators, not VIC or other states, even though holders
+-- exist elsewhere too (see above). state='ALL' was wrongly flagging it as
+-- a missing/required document for every candidate regardless of state —
+-- e.g. it showed up as "Missing for VIC" on a real VIC candidate who has
+-- no reason to hold it. Narrowing to state='SA' stops that false flag
+-- everywhere else while still checking it properly for SA candidates who
+-- do have one on file.
 INSERT INTO compliance_requirements (id, state, document_type, display_name, required, expiry_source, validity_days, verified, source_note) VALUES
-  ('cr-all-ran-training', 'ALL', 'ran_training', 'RAN Training Certificate (Responding to Risks of Harm, Abuse and Neglect)', true, 'printed_on_document', NULL, true,
-   'Confirmed 2026-09-10 against 2 real Educators SA/Plink-issued certificates — both print an explicit "Expiry date: ..." directly, extracted the same way as WWCC/Blue Card/First Aid. Named in Raw Talent''s own internal QA SOP ("SOP: Educator Profile Screening Process", Step 7: RAN Training Certificate — "College Name is entered as: Plink").')
+  ('cr-sa-ran-training', 'SA', 'ran_training', 'RAN Training Certificate (Responding to Risks of Harm, Abuse and Neglect)', true, 'printed_on_document', NULL, true,
+   'Confirmed 2026-09-10 against 2 real Educators SA/Plink-issued certificates — both print an explicit "Expiry date: ..." directly, extracted the same way as WWCC/Blue Card/First Aid. Named in Raw Talent''s own internal QA SOP ("SOP: Educator Profile Screening Process", Step 7: RAN Training Certificate — "College Name is entered as: Plink"). Narrowed from state=ALL to state=SA on 2026-09-14 — see comment above.')
 ON CONFLICT (state, document_type) DO NOTHING;
 
 -- Qualification/Course of Study (2026-09-10) — expiry_source='no_expiry'

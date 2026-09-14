@@ -918,7 +918,7 @@ async function checkProtectingChildrenTraining(text, options = {}) {
   return result;
 }
 // expiry_source='printed_on_document' (see compliance_requirements' own
-// cr-all-ran-training row) — both real certificates checked print an
+// cr-sa-ran-training row) — both real certificates checked print an
 // explicit "Expiry date: 31 December 2027" directly, extractExpiryDate's
 // existing "expiry date" label already catches it with no new pattern
 // needed.
