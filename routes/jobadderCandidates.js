@@ -1,16 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const jobAdderService = require('../services/jobAdderService');
 const candidateService = require('../services/jobAdderCandidateService');
 const resumePreviewService = require('../services/resumePreviewService');
 
-router.use(requireAdmin);
+// Was router.use(requireAdmin) for the whole file — but the resume-
+// attachment route below is what "Resume Link" columns in outreach
+// sheets point at, and those sheets get worked by recruiters (regular
+// logins, not admin). 2026-09-14: admin-gating that route locked them
+// out with "Admin access required" on every click. Search/discovery
+// stays admin-only (below); the attachment routes only need a real
+// login, same as the team photo proxy (routes/team.js).
+router.use(requireAuth);
 
 // The 10 quick-pick centres (with real, resolved lat/lng) plus the
 // default qualification keywords — everything the "Find Applicants Near
 // Centres" section needs to render its picker before a first search runs.
-router.get('/target-centres', async (req, res) => {
+router.get('/target-centres', requireAdmin, async (req, res) => {
   try {
     const centres = await candidateService.resolveQuickPickCentres();
     res.json({ centres, defaultKeywords: candidateService.DEFAULT_KEYWORDS });
@@ -22,7 +29,7 @@ router.get('/target-centres', async (req, res) => {
 // General "add another centre" picker — any RT centre, not just the 10
 // quick-picks, same "type at least 2 characters" shape as other search-
 // as-you-type inputs in this app.
-router.get('/centres/search', async (req, res) => {
+router.get('/centres/search', requireAdmin, async (req, res) => {
   try {
     res.json(await candidateService.searchAllCentres(req.query.q));
   } catch (err) {
@@ -30,7 +37,7 @@ router.get('/centres/search', async (req, res) => {
   }
 });
 
-router.get('/search-candidates', async (req, res) => {
+router.get('/search-candidates', requireAdmin, async (req, res) => {
   try {
     const centreKeys = (req.query.centreKeys || '').split(',').map(s => s.trim()).filter(Boolean);
     const radiusKm = Number(req.query.radiusKm) || 15;
@@ -46,7 +53,7 @@ router.get('/search-candidates', async (req, res) => {
 
 // Full candidate detail (education/employment history/etc.) — for the
 // "see... all their info" drill-down, not shown in the compact list table.
-router.get('/candidates/:id', async (req, res) => {
+router.get('/candidates/:id', requireAdmin, async (req, res) => {
   try {
     const token = await jobAdderService.getValidAccessToken();
     if (!token) return res.status(400).json({ error: 'JobAdder is not connected.' });
@@ -63,7 +70,7 @@ router.get('/candidates/:id', async (req, res) => {
   }
 });
 
-router.get('/candidates/:id/attachments', async (req, res) => {
+router.get('/candidates/:id/attachments', requireAdmin, async (req, res) => {
   try {
     const token = await jobAdderService.getValidAccessToken();
     if (!token) return res.status(400).json({ error: 'JobAdder is not connected.' });
