@@ -428,15 +428,18 @@
     // pre-selected for them... for their own territories, they should
     // only see automatically filtered for their OWN territories only. For
     // Liam, Justine, and Gwen." — no per-account override, ever, even one
-    // they personally hold. The ONE thing that decides which bar shows is
-    // whether the account has a wfp_label at all:
-    //  - NO wfp_label (Joy, or any other admin not personally tied to a
-    //    territory) — "we should be able to see all their filters... so
-    //    we can check accordingly per territory" — the full admin-style
-    //    picker across every territory.
-    //  - HAS a wfp_label — locked to just their own (+ additionalTerritories
-    //    if set, e.g. Gwen: SA + QLD — still "their own", just two of
-    //    them) — no cross-territory picker, full stop.
+    // they personally hold. That lockdown is REVERSED as of 2026-09-15:
+    // Liam asked for the filter buttons back "so everyone can view them
+    // on both Heartbeat desktop and PWA," and Joy confirmed she means full
+    // functional parity, not a cosmetic-only bar — matching what Desktop
+    // already allowed the whole time (its own wfpStateFilter in
+    // admin.html was never scoped to "own territory only," it just
+    // filters the full unfiltered list client-side). So every account now
+    // gets the full cross-territory picker on /wfp too, regardless of
+    // whether it carries its own wfp_label — see canUsePartnerLabel() in
+    // routes/leads.js and routes/centres.js for the matching backend
+    // change (this bar is purely cosmetic without that; the old
+    // territory-only enforcement lived server-side, not here).
     const WFP_FILTER_OPTIONS = [
       { key: '', label: 'All States', bg: '#0b1d3e' },
       { key: 'Liam Baxter (VIC)', label: 'Liam - VIC', bg: '#2563eb' },
@@ -444,16 +447,11 @@
       { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' },
       { key: 'Gwen Stocks (QLD)', label: 'Gwen - QLD', bg: '#f97316' }
     ];
-    function shortFilterLabel(fullLabel) {
-      const known = WFP_FILTER_OPTIONS.find(o => o.key === fullLabel);
-      return known ? known.label : fullLabel;
-    }
-    // A no-wfp_label account (Joy, or any other admin — but NOT Liam,
-    // Justine or Gwen, who are each locked to their own real territory
-    // with no picker at all, 2026-09-06) gets the full real-territory
-    // list PLUS a synthetic "You - Test" option. It resolves to a made-up
-    // label unique to the logged-in admin (never matches any real
-    // suburb/state assignment), so tapping it is a safe, isolated
+    // A no-wfp_label account (Joy, or any other admin) still gets a
+    // synthetic "You - Test" option too, on top of the same real-territory
+    // list everyone gets since the 2026-09-15 reversal above. It resolves
+    // to a made-up label unique to the logged-in admin (never matches any
+    // real suburb/state assignment), so tapping it is a safe, isolated
     // sandbox — no real centre, lead or route ever lands there, and two
     // different admins testing at once don't collide with each other.
     function testTerritoryLabel() {
@@ -463,12 +461,7 @@
       if (!currentUser.wfpLabel) {
         return [...WFP_FILTER_OPTIONS, { key: testTerritoryLabel(), label: 'You - Test', bg: '#6b7280' }];
       }
-      if (currentUser.additionalTerritories?.length) {
-        const own = WFP_FILTER_OPTIONS.find(o => o.key === currentUser.wfpLabel) || { key: currentUser.wfpLabel, label: shortFilterLabel(currentUser.wfpLabel), bg: '#0b1d3e' };
-        const extra = currentUser.additionalTerritories.map(label => WFP_FILTER_OPTIONS.find(o => o.key === label) || { key: label, label: shortFilterLabel(label), bg: '#6b7590' });
-        return [own, ...extra];
-      }
-      return null;
+      return WFP_FILTER_OPTIONS;
     }
     function wfpFilterBarHtml() {
       const options = wfpFilterOptionsForCurrentUser();
@@ -2437,11 +2430,11 @@
       // Liam, 2026-09-03 (live on a call, testing this exact screen): "when
       // a workforce partner logs in on the mobile, they should just see
       // their territory" — a wfp_label'd account (Liam/Justine/Gwen)
-      // otherwise defaulted to unfiltered/"All States" here. For Gwen
-      // (additionalTerritories set) the picker still renders across her
-      // own two territories and is still switchable between them — this
-      // only changes what's selected before she taps anything. Liam/
-      // Justine get no picker at all (see wfpFilterOptionsForCurrentUser).
+      // otherwise defaulted to unfiltered/"All States" here. Still true
+      // post-2026-09-15 reversal: everyone gets the full cross-territory
+      // picker now (see wfpFilterOptionsForCurrentUser), but this only
+      // sets what's selected before anyone taps a different button — a
+      // Workforce Partner should still land on their own territory first.
       if (currentUser.wfpLabel) wfpFilterLabel = currentUser.wfpLabel;
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});

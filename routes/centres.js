@@ -415,17 +415,15 @@ const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)', QLD: 'Gwen Stocks (QLD
 // second territory (2026-09-03) — same small duplicated-per-file helper
 // as routes/leads.js's own copy.
 //
-// Joy, 2026-09-04, correcting an earlier design: Liam/Justine/Gwen (any
-// account with its own wfp_label) must ALWAYS be locked to their own
-// territory/territories on /wfp — no per-account override. Only an
-// account with NO wfp_label of its own (Joy, or any other admin) gets to
-// check any/all of them. Replaces the old can_view_all_wfp_territories
-// flag check — see db/schema.sql's column comment.
+// Joy, 2026-09-04, then reversed 2026-09-15: see routes/leads.js's own
+// copy of this function for the full history. Short version — the 09-04
+// lockdown never matched Desktop (which already let a workforce_partner
+// filter into any territory via wfpStateFilter/views/admin.html), and Joy
+// confirmed she wants full functional parity restored on mobile too, not
+// just the buttons redrawn cosmetically. Any authenticated caller who can
+// reach this route may now request any real territory label.
 function canUsePartnerLabel(user, label) {
-  if (!label) return true;
-  if (!user.wfp_label) return true;
-  if (user.wfp_label === label) return true;
-  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
+  return true;
 }
 
 // The full My Centres portfolio — matches the pattern of other full-

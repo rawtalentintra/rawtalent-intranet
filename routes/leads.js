@@ -52,20 +52,22 @@ function autoAssignWorkforcePartner(suburb, state) {
 // the same duplicated-per-file small-helper pattern STATE_WORKFORCE_PARTNER
 // itself already uses (see routes/centres.js's own copy).
 //
-// Joy, 2026-09-04, correcting an earlier design: Liam/Justine/Gwen (any
-// account with its own wfp_label) must ALWAYS be locked to their own
-// territory/territories on /wfp, full stop — no per-account "full access"
-// override, even one they hold. Only an account with NO wfp_label of its
-// own (Joy, or any other admin not personally tied to a territory) gets
-// to check any/all of them — "we should be able to see all their filters
-// ... so we can check accordingly per territory." Replaces the old
-// can_view_all_wfp_territories flag-based check, which is no longer read
-// anywhere (see db/schema.sql's column comment).
+// Joy, 2026-09-04, then reversed 2026-09-15: the 09-04 design locked
+// Liam/Justine/Gwen to only their own territory/territories on /wfp, no
+// picker into anyone else's. Desktop's own Leads/Centres/WFP Dashboard
+// never had that restriction — a workforce_partner logged into /partners
+// there could already filter into any territory via wfpStateFilter (see
+// views/admin.html), since that route just fetches the full unfiltered
+// list and filters client-side. Joy asked (via Liam) to bring the mobile
+// filter buttons back for everyone on both Desktop and PWA, and confirmed
+// explicitly that means full functional parity, not a cosmetic-only bar —
+// so this now matches what Desktop already allowed: any authenticated
+// caller who can reach this route may request any real territory label,
+// not just their own. Kept as a real function (not inlined away) so the
+// label is still validated against something, and so this decision has
+// one obvious place to revisit if it needs tightening again.
 function canUsePartnerLabel(user, label) {
-  if (!label) return true;
-  if (!user.wfp_label) return true;
-  if (user.wfp_label === label) return true;
-  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
+  return true;
 }
 
 // Strips label noise that's been landing in street_address — "Address: 39
