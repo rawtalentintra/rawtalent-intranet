@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAdmin } = require('../middleware/authMiddleware');
 const jobAdderService = require('../services/jobAdderService');
 const candidateService = require('../services/jobAdderCandidateService');
+const resumePreviewService = require('../services/resumePreviewService');
 
 router.use(requireAdmin);
 
@@ -89,18 +90,31 @@ router.get('/candidates/:id/attachments/:attachmentId', async (req, res) => {
       headers: { Authorization: `Bearer ${token.accessToken}` }
     });
     if (!apiRes.ok) return res.status(apiRes.status === 404 ? 404 : 502).send('Failed to load attachment');
-    res.setHeader('Content-Type', apiRes.headers.get('content-type') || 'application/octet-stream');
     const filename = req.query.filename ? String(req.query.filename).replace(/["\r\n]/g, '') : 'attachment';
+    const disposition = req.query.download ? 'attachment' : 'inline';
+    let buf = Buffer.from(await apiRes.arrayBuffer());
+    let contentType = apiRes.headers.get('content-type') || 'application/octet-stream';
+
     // Joy, 2026-09-11: wants an explicit View (opens in a new tab) AND a
     // Download option per file, not just one link. `inline` is what makes
-    // a PDF actually render in the new tab instead of prompting to save —
-    // `attachment` (only when ?download=1 is passed) forces the save
-    // dialog instead. A format the browser has no native viewer for (e.g.
-    // .docx) still ends up downloading either way once clicked — that's a
-    // browser limitation, not something this header controls.
-    const disposition = req.query.download ? 'attachment' : 'inline';
-    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
-    const buf = Buffer.from(await apiRes.arrayBuffer());
+    // a PDF actually render in the new tab instead of prompting to save.
+    // Joy, 2026-09-14: browsers have no built-in viewer for Word docs, so a
+    // .docx always downloaded regardless of this header — most resumes are
+    // .docx. When viewing (not explicitly downloading), render it to a PDF
+    // on the fly so it opens inline like any other PDF. Legacy .doc (binary
+    // OLE format) isn't supported by the docx->HTML converter this uses —
+    // falls back to serving the original file (still a download) for those.
+    if (!req.query.download && /\.docx$/i.test(filename)) {
+      try {
+        buf = await resumePreviewService.convertDocxToPdf(buf);
+        contentType = 'application/pdf';
+      } catch (convertErr) {
+        console.error('docx->PDF preview conversion failed, serving original file:', convertErr.message);
+      }
+    }
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename.replace(/\.docx$/i, contentType === 'application/pdf' ? '.pdf' : '.docx')}"`);
     res.send(buf);
   } catch (err) {
     res.status(500).send(err.message);
