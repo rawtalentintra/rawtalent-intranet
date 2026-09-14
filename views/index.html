@@ -2479,6 +2479,27 @@
       return emails.map(taskUserLabel).join(', ');
     }
 
+    // Colored-initial avatar for an educator, in place of the generic 🎓
+    // icon (Joy, 2026-09-14: "It would be helpful if we see the educator's
+    // profile photos so we know who to link / add... are these things we
+    // can pull from RT API?"). Confirmed directly against live RT data
+    // (2026-09-13, re-checked against all 24,949 real candidates): RT's
+    // own API has no photo/image/avatar field anywhere — 22 real keys
+    // total on a candidate record, none of them a picture. Nothing on our
+    // end can surface a photo RT itself never sends, so a real photo isn't
+    // possible here (unlike "Our Team" staff, whose photos are ours, not
+    // RT's). This is the honest next-best thing: the same deterministic
+    // colored-circle-by-name treatment already used for Leave's own
+    // person-coding (hashPersonColor/LEAVE_PERSON_COLORS) — the same
+    // educator gets the same color everywhere, genuinely easier to tell
+    // two same-named people apart at a glance than a plain generic icon,
+    // without fabricating a photo that doesn't exist.
+    function personAvatarHtml(name, size) {
+      const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
+      const c = hashPersonColor(name || '?');
+      return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;min-width:${size}px;border-radius:50%;background:${c.bg};color:${c.text};font-weight:800;font-size:${Math.round(size * 0.45)}px;flex-shrink:0">${escHtml(initial)}</span>`;
+    }
+
     // Shared by the board card and the list row — a task can now link
     // several educators (a centre often requests more than one for the
     // same booking) plus at most one centre/client, so this renders one
@@ -2486,7 +2507,7 @@
     // the old either/or ternary that only ever showed a single link.
     function taskLinkedBadgesHtml(t, extraStyle = '') {
       const candidateBadges = (Array.isArray(t.linked_candidates) ? t.linked_candidates : [])
-        .map(c => `<div class="task-card-linked" style="${extraStyle}" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(c.userId)}')">🎓 ${escHtml(c.name || 'Educator')} ↗</div>`)
+        .map(c => `<div class="task-card-linked" style="${extraStyle};display:inline-flex;align-items:center;gap:5px" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(c.userId)}')">${personAvatarHtml(c.name, 16)} ${escHtml(c.name || 'Educator')} ↗</div>`)
         .join('');
       const clientBadge = t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="${extraStyle}">🏢 ${escHtml(t.linked_client_name)}</div>` : '';
       return candidateBadges + clientBadge;
@@ -3275,7 +3296,7 @@
       return `
         <div class="task-person-chip">
           <div class="task-person-chip-main" ${onClick ? `onclick="${onClick}"` : ''} style="${onClick ? 'cursor:pointer' : ''}">
-            <span>${kind === 'candidate' ? '🎓' : '🏢'}</span>
+            ${kind === 'candidate' ? personAvatarHtml(label, 32) : '<span>🏢</span>'}
             <div>
               <div class="task-person-chip-name">${escHtml(label)}${onClick ? ' <span class="task-person-chip-link">View Profile ↗</span>' : ''}</div>
               ${sub ? `<div class="task-person-chip-sub">${escHtml(sub)}</div>` : ''}
@@ -3333,7 +3354,7 @@
           window.__taskAddCandidateResults = results;
           dropdown.style.display = 'block';
           dropdown.innerHTML = results.map((c, i) => `
-            <button type="button" class="task-person-suggestion" style="display:block;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCandidateResult(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</button>
+            <button type="button" class="task-person-suggestion" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCandidateResult(${i})">${personAvatarHtml(c.name, 22)} <span>${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</span></button>
           `).join('');
         } catch { /* best-effort */ }
       }, 400);
@@ -3379,7 +3400,7 @@
             // right before committing to a pick.
             sections.push(`<div class="task-person-suggestions">${pickable.map((c, i) => `
               <span class="task-person-suggestion-row">
-                <button type="button" class="task-person-suggestion" onclick="selectTaskCandidateByIndex(${i})">${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</button>
+                <button type="button" class="task-person-suggestion" style="display:inline-flex;align-items:center;gap:6px" onclick="selectTaskCandidateByIndex(${i})">${personAvatarHtml(c.name, 20)} <span>${escHtml(c.name)}${c.phone ? ` · ${escHtml(c.phone)}` : (c.email ? ` · ${escHtml(c.email)}` : '')}</span></button>
                 <button type="button" class="task-person-suggestion-view" onclick="event.stopPropagation();openCandidatePortal('${c.portalUrl}')" title="View profile">↗</button>
               </span>
             `).join('')}</div>`);
