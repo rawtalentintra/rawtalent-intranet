@@ -78,6 +78,20 @@ function requirePwaAccess(req, res, next) {
   next();
 }
 
+// Article "Announce Changes" flow — same per-person pattern as
+// requireTrainingBuilder/requireOutreachListBuilder (Joy, 2026-09-15:
+// "Allow Lorie and Adzi to announce changes in articles"). Deliberately
+// its own flag rather than reusing requireAdmin on that route, so it
+// doesn't also open the general "Send Announcement" broadcast composer
+// (POST /api/notifications/announcements), which stays admin-only.
+function requireArticleAnnounceAccess(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (req.user.role !== 'admin' && req.user.role !== 'super_admin' && !req.user.can_announce_article_changes) {
+    return res.status(403).json({ error: 'You do not have access to this' });
+  }
+  next();
+}
+
 // Calibration panel (Sophia/Lorie/Adzi/Vicky), same per-person pattern as
 // requireTrainingBuilder — super_admin (Joy) always has it, everyone else
 // needs the grant regardless of role (an admin like Liam/Prince/Yuvraj, or
@@ -90,4 +104,4 @@ function requireCalibrationAccess(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder, requirePwaAccess, requireCalibrationAccess };
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, requireRole, requireTrainingBuilder, requireOutreachListBuilder, requirePwaAccess, requireCalibrationAccess, requireArticleAnnounceAccess };

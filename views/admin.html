@@ -4723,6 +4723,7 @@
     let currentUserCanBuildTraining = false;
     let currentUserCanCreateOutreachLists = false;
     let currentUserCanCalibrateCalls = false;
+    let currentUserCanAnnounceArticleChanges = false;
     let currentUserIsPayrollAdmin = false;
     // Separate, wider pool than currentUserIsPayrollAdmin (Sophia/Joy) —
     // includes Lorie/Adrianne too, for the read-only Approved Timesheets
@@ -4768,6 +4769,7 @@
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
         currentUserCanCalibrateCalls = !!me.canCalibrateCalls;
+        currentUserCanAnnounceArticleChanges = !!me.canAnnounceArticleChanges;
         currentUserIsPayrollAdmin = !!me.isPayrollAdmin;
         currentUserCanViewApprovedTimesheets = !!me.canViewApprovedTimesheets;
         currentUserWfpLabel = me.wfpLabel || null;
@@ -5658,7 +5660,7 @@
       if (postBtn.disabled) return;
       postBtn.disabled = true;
       try {
-        const res = await fetch('/api/notifications/announcements', {
+        const res = await fetch(`/api/admin/articles/${lastSavedChangeContext.articleId}/announce-changes`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: `📝 Article Updated: ${lastSavedChangeContext.title}`, message: summary })
         });
@@ -6755,11 +6757,15 @@
           // list) so "Announce Changes" is available right where the admin
           // is looking — only offered when something actually changed, not
           // on every save (e.g. re-saving with no edits, or a brand-new
-          // article, has nothing to announce).
+          // article, has nothing to announce). Also gated on actually
+          // having access to post it (currentUserCanAnnounceArticleChanges)
+          // — otherwise a qa_view editor without the grant would see the
+          // button and hit a 403 on click, same bug Lorie ran into before
+          // requireArticleAnnounceAccess existed (see its own comment).
           const changed = originalArticleSnapshot &&
             (originalArticleSnapshot.title !== title || originalArticleSnapshot.content !== content);
           const announceBtn = document.getElementById('announceChangesBtn');
-          if (changed) {
+          if (changed && currentUserCanAnnounceArticleChanges) {
             lastSavedChangeContext = {
               articleId: id, title,
               oldTitle: originalArticleSnapshot.title, oldContent: originalArticleSnapshot.content,

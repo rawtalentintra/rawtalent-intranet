@@ -38,6 +38,16 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_build_training BOOLEAN DEFAULT fa
 -- without being promoted off qa_view. admin/super_admin always have access
 -- regardless of this flag (see requireOutreachListBuilder).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_create_outreach_lists BOOLEAN DEFAULT false;
+-- Same pattern again — posting the real staff-wide Announcement generated
+-- by an article's "Announce Changes" flow (POST /api/admin/articles/:id/
+-- announce-changes) used to require full admin, which blocked Lorie/Adzi
+-- (both qa_view, already trusted to edit articles via articleAccess) with
+-- a 403. Joy, 2026-09-15: "Allow Lorie and Adzi to announce changes in
+-- articles." Deliberately narrower than admin's general POST
+-- /api/notifications/announcements (the plain "Send Announcement"
+-- composer) — this flag only unlocks the article-change route, not
+-- broadcasting an arbitrary company-wide announcement.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_announce_article_changes BOOLEAN DEFAULT false;
 -- Ties a workforce_partner login to their existing free-text
 -- leads.assigned_workforce_partner label (e.g. 'Gwen Stocks (SA)') so My
 -- Centres/My Dashboard can default to that person's own portfolio. Not a

@@ -8,7 +8,7 @@ const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getDb } = require('../db/database');
-const { requireAdmin, requireSuperAdmin, requireRole } = require('../middleware/authMiddleware');
+const { requireAdmin, requireSuperAdmin, requireRole, requireArticleAnnounceAccess } = require('../middleware/authMiddleware');
 const { saveArticleToDrive, deleteArticleFromDrive, syncFromDrive } = require('../services/driveService');
 const { logActivity } = require('../services/activityLog');
 const { invalidateUserCache } = require('../config/passport');
@@ -226,6 +226,46 @@ router.post('/articles/:id/summarize-changes', articleAccess, async (req, res) =
   } catch (err) {
     console.error('Summarize article changes error:', err);
     res.status(500).json({ error: err.message || 'Failed to generate summary' });
+  }
+});
+
+// Actually posts the "Announce Changes" summary as a real staff-wide
+// Announcement. Its own route (not a reuse of POST /api/notifications/
+// announcements) specifically so requireArticleAnnounceAccess — granted to
+// Lorie/Adzi (qa_view) alongside admin/super_admin — only unlocks THIS
+// article-triggered flow, not the general "Send Announcement" broadcast
+// composer in admin.html, which stays requireAdmin (see that route's own
+// comment). :id isn't used for the insert itself (announcements aren't
+// tied to an article row), just kept in the URL for a clearer audit trail
+// in server logs.
+router.post('/articles/:id/announce-changes', requireArticleAnnounceAccess, async (req, res) => {
+  const { title, message } = req.body;
+  if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
+  if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
+  try {
+    const db = getDb();
+    // Same duplicate-POST guard as POST /api/notifications/announcements —
+    // see that route's own comment for why (a real double-click/retry did
+    // once create two identical broadcasts).
+    const dupe = await db.execute({
+      sql: `SELECT id FROM announcements
+            WHERE created_by_email = ? AND title = ? AND message = ?
+              AND created_at > now() - interval '15 seconds'
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [req.user.email, title.trim(), message.trim()]
+    });
+    if (dupe.rows[0]) return res.json({ success: true, id: dupe.rows[0].id });
+
+    const id = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO announcements (id, title, message, send_at, created_by_email, created_by_name)
+            VALUES (?, ?, ?, now(), ?, ?)`,
+      args: [id, title.trim(), message.trim(), req.user.email, req.user.name || req.user.email]
+    });
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('Post article-change announcement error:', err);
+    res.status(500).json({ error: err.message || 'Failed to post announcement' });
   }
 });
 
