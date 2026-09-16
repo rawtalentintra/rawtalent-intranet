@@ -84,6 +84,10 @@ router.post('/:userId/request-booking', async (req, res) => {
     const id = await createTask({
       departmentId: 'bookings', title, description,
       linkedCandidates: [{ userId: profile.user_id, name, phone: profile.contact_no || null }],
+      // centreKey now flows through to a real Linked Centre (2026-09-17 —
+      // see db/schema.sql's linked_centres comment) instead of only
+      // appearing as free text in the description above.
+      linkedCentres: centreKey ? [{ centreKey, name: centreName || null }] : [],
       createdByEmail: req.user.email, createdByName: req.user.name
     });
     res.json({ success: true, taskId: id });

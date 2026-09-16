@@ -1205,6 +1205,15 @@
           </div>
         </div>
         <div class="form-group-modal">
+          <label class="form-label-modal">Linked Centres <span class="optional">(optional)</span></label>
+          <div id="taskLinkedCentreChips"></div>
+          <span id="taskAddCentreToggle" style="cursor:pointer;font-size:12px;font-weight:700;color:var(--orange);display:inline-block" onclick="showAddCentreInput()">+ Add Linked Centre</span>
+          <div id="taskAddCentreInputWrap" style="display:none;position:relative;margin-top:6px">
+            <input type="text" id="taskAddCentreInput" class="form-control" placeholder="Centre name, phone, or suburb" autocomplete="off" oninput="handleAddCentreInput(this.value)" onblur="hideAddCentreInputIfEmpty()">
+            <div id="taskAddCentreDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:20;padding:6px"></div>
+          </div>
+        </div>
+        <div class="form-group-modal">
           <label class="form-label-modal">Description <span class="optional">(optional)</span></label>
           <div id="taskDescViewWrap" class="task-desc-highlight" style="display:none">
             <div id="taskDescViewText" class="task-desc-view"></div>
@@ -2360,19 +2369,22 @@
     // A centre often requests several educators for one booking at once —
     // linked educators are an array (2026-08-26), mirroring taskAssignees'
     // own array-of-chips shape. Each entry: { userId, name, phone }.
-    // Client/centre linking stays singular on purpose: a task is about
-    // one centre, which may request several educators.
+    // Linked centres became an array too (2026-09-17) — see db/schema.sql's
+    // linked_centres comment for why the old "stays singular on purpose"
+    // reasoning got reversed. Each entry: { centreKey, name, suburb, state, phone }.
     let taskLinkedCandidates = [];
-    let taskLinkedClient = null;    // { name, suburb, state, phone }
-    // Tracks userIds explicitly removed (✕) from the linked-educator list
-    // this modal session — stops the very next debounced title lookup
-    // from silently re-adding the same person just because it's still a
-    // confident phone match. Reset whenever the modal opens/closes or a
+    let taskLinkedCentres = [];
+    // Tracks ids explicitly removed (✕) from a linked list this modal
+    // session — stops the very next debounced title lookup from silently
+    // re-adding the same person/centre just because it's still a
+    // confident match. Reset whenever the modal opens/closes or a
     // suggestion is explicitly picked from the list.
     let taskDismissedCandidateIds = new Set();
-    let taskClientDismissed = false;
+    let taskDismissedCentreKeys = new Set();
     let taskAddCandidateTimer = null;
     let taskAddCandidateRequestId = 0;
+    let taskAddCentreTimer = null;
+    let taskAddCentreRequestId = 0;
 
     // ── Attachments (2026-08-26) ──────────────────────────────────
     // Already-saved attachments (fetched once per modal open) plus three
@@ -2509,8 +2521,10 @@
       const candidateBadges = (Array.isArray(t.linked_candidates) ? t.linked_candidates : [])
         .map(c => `<div class="task-card-linked" style="${extraStyle};display:inline-flex;align-items:center;gap:5px" onclick="event.stopPropagation();openCandidatePortal('${candidatePortalUrl(c.userId)}')">${personAvatarHtml(c.name, 16)} ${escHtml(c.name || 'Educator')} ↗</div>`)
         .join('');
-      const clientBadge = t.linked_client_name ? `<div class="task-card-linked task-card-linked--client" style="${extraStyle}">🏢 ${escHtml(t.linked_client_name)}</div>` : '';
-      return candidateBadges + clientBadge;
+      const centreBadges = (Array.isArray(t.linked_centres) ? t.linked_centres : [])
+        .map(c => `<div class="task-card-linked task-card-linked--client" style="${extraStyle}">🏢 ${escHtml(c.name || 'Centre')}</div>`)
+        .join('');
+      return candidateBadges + centreBadges;
     }
 
     function taskCardHtml(t) {
@@ -2608,10 +2622,10 @@
             // PUT /api/tasks/:id is a full-column overwrite, not a partial
             // patch (see normalizeLinkedCandidates(undefined) => [] in
             // routes/tasks.js) — omitting these here silently wiped every
-            // task's Linked Educators and linked client back to empty on
+            // task's Linked Educators and linked centres back to empty on
             // its very next drag between board columns. Always echo back
             // whatever the task already had; a drag only ever changes status.
-            linked_candidates: t.linked_candidates, linked_client_name: t.linked_client_name, linked_client_phone: t.linked_client_phone
+            linked_candidates: t.linked_candidates, linked_centres: t.linked_centres
           })
         });
         if (!res.ok) throw new Error();
@@ -3115,6 +3129,23 @@
         }
       }, 150);
     }
+    // Same show/hide-on-blur affordance as Linked Educators, for Linked Centres.
+    function showAddCentreInput() {
+      document.getElementById('taskAddCentreToggle').style.display = 'none';
+      document.getElementById('taskAddCentreInputWrap').style.display = 'block';
+      document.getElementById('taskAddCentreInput').focus();
+    }
+    function hideAddCentreInputIfEmpty() {
+      setTimeout(() => {
+        const dropdown = document.getElementById('taskAddCentreDropdown');
+        if (dropdown) dropdown.style.display = 'none';
+        const input = document.getElementById('taskAddCentreInput');
+        if (input && !input.value.trim()) {
+          document.getElementById('taskAddCentreInputWrap').style.display = 'none';
+          document.getElementById('taskAddCentreToggle').style.display = 'inline-block';
+        }
+      }, 150);
+    }
     function renderTaskDescAttachmentAreas() {
       const existing = taskAttachments.filter(a => a.note_id == null);
       const existingHtml = existing.map(savedAttachmentChipHtml).join('');
@@ -3170,7 +3201,7 @@
       clearTimeout(taskMatchTimer);
       taskMatchRequestId++; // invalidate any in-flight lookup from whatever was open before
       taskDismissedCandidateIds = new Set();
-      taskClientDismissed = false;
+      taskDismissedCentreKeys = new Set();
       pendingDescAttachments = [];
       pendingNoteAttachments = [];
       pendingNoteEditAttachments = [];
@@ -3227,7 +3258,8 @@
         loadTaskNotes(taskId);
         taskLinkedCandidates = Array.isArray(t.linked_candidates) ? [...t.linked_candidates] : [];
         renderTaskLinkedCandidateChips();
-        taskLinkedClient = t.linked_client_name ? { name: t.linked_client_name, phone: t.linked_client_phone } : null;
+        taskLinkedCentres = Array.isArray(t.linked_centres) ? [...t.linked_centres] : [];
+        renderTaskLinkedCentreChips();
         renderTaskPersonMatchPanel(null);
         // Content already exists — show it as plain text by default (not
         // an open textarea) with an explicit way to edit it; an empty
@@ -3259,7 +3291,8 @@
         document.getElementById('taskPrioritySelect').value = 'normal';
         taskLinkedCandidates = [];
         renderTaskLinkedCandidateChips();
-        taskLinkedClient = null;
+        taskLinkedCentres = [];
+        renderTaskLinkedCentreChips();
         renderTaskPersonMatchPanel(null);
         setTaskDescEditMode(true);
         setTaskTitleEditMode(true);
@@ -3334,6 +3367,32 @@
       renderTaskLinkedCandidateChips();
     }
 
+    // Same array-of-chips pattern as Linked Educators just above, keyed by
+    // centreKey instead of userId (2026-09-17).
+    function renderTaskLinkedCentreChips() {
+      const wrap = document.getElementById('taskLinkedCentreChips');
+      if (!wrap) return;
+      wrap.innerHTML = taskLinkedCentres.map(c => taskPersonChipHtml('client', c.name,
+        [c.suburb, c.phone ? `📞 ${c.phone}` : null].filter(Boolean).join(' · '),
+        null,
+        `removeTaskLinkedCentre('${String(c.centreKey).replace(/'/g, "\\'")}')`
+      )).join('');
+    }
+    function isCentreLinked(centreKey) {
+      return taskLinkedCentres.some(c => c.centreKey === centreKey);
+    }
+    function addTaskLinkedCentre(c) {
+      if (c.centreKey && isCentreLinked(c.centreKey)) return;
+      taskLinkedCentres.push({ centreKey: c.centreKey || null, name: c.name, suburb: c.suburb || null, state: c.state || null, phone: c.phone || null });
+      if (c.centreKey) taskDismissedCentreKeys.delete(c.centreKey);
+      renderTaskLinkedCentreChips();
+    }
+    function removeTaskLinkedCentre(centreKey) {
+      taskLinkedCentres = taskLinkedCentres.filter(c => c.centreKey !== centreKey);
+      taskDismissedCentreKeys.add(centreKey);
+      renderTaskLinkedCentreChips();
+    }
+
     // Free-text search for adding an educator beyond the one the title
     // auto-matched — same live-lookup endpoint as the title field (matches
     // on name, phone, or email — see taskPersonMatchService.js), just a
@@ -3366,6 +3425,41 @@
       const input = document.getElementById('taskAddCandidateInput');
       input.value = '';
       const dropdown = document.getElementById('taskAddCandidateDropdown');
+      dropdown.style.display = 'none';
+      dropdown.innerHTML = '';
+    }
+
+    // Same free-text search box as Linked Educators just above, reusing
+    // the SAME /api/tasks/match-person endpoint (it already returns both
+    // candidates and clients — see taskPersonMatchService.js — this box
+    // just reads the `clients` half instead of `candidates`).
+    function handleAddCentreInput(value) {
+      clearTimeout(taskAddCentreTimer);
+      const q = value.trim();
+      const requestId = ++taskAddCentreRequestId;
+      const dropdown = document.getElementById('taskAddCentreDropdown');
+      if (q.length < 3) { dropdown.style.display = 'none'; dropdown.innerHTML = ''; return; }
+      taskAddCentreTimer = setTimeout(async () => {
+        try {
+          const data = await fetch(`/api/tasks/match-person?q=${encodeURIComponent(q)}`).then(r => r.json());
+          if (requestId !== taskAddCentreRequestId) return;
+          const results = (data?.clients || []).filter(c => !isCentreLinked(c.centreKey));
+          if (!results.length) { dropdown.style.display = 'none'; dropdown.innerHTML = ''; return; }
+          window.__taskAddCentreResults = results;
+          dropdown.style.display = 'block';
+          dropdown.innerHTML = results.map((c, i) => `
+            <button type="button" class="task-person-suggestion" style="display:block;width:100%;text-align:left;margin-bottom:4px" onclick="pickAddCentreResult(${i})">${escHtml(c.name)}${c.suburb ? ` · ${escHtml(c.suburb)}` : ''}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+          `).join('');
+        } catch { /* best-effort */ }
+      }, 400);
+    }
+    function pickAddCentreResult(i) {
+      const c = (window.__taskAddCentreResults || [])[i];
+      if (!c) return;
+      addTaskLinkedCentre(c);
+      const input = document.getElementById('taskAddCentreInput');
+      input.value = '';
+      const dropdown = document.getElementById('taskAddCentreDropdown');
       dropdown.style.display = 'none';
       dropdown.innerHTML = '';
     }
@@ -3408,23 +3502,27 @@
         }
       }
 
-      if (taskLinkedClient) {
-        sections.push(taskPersonChipHtml('client', taskLinkedClient.name,
-          taskLinkedClient.phone ? `📞 ${taskLinkedClient.phone}` : '', null, 'clearTaskClient()'));
-      } else if (data?.clients?.length) {
+      if (data?.clients?.length) {
+        // Same auto-add-on-confident-match / dismissal-respecting pattern
+        // as the candidates section above, now array-based (2026-09-17) —
+        // a task can genuinely involve more than one centre (e.g. a
+        // network-wide issue), same reasoning as Linked Educators already
+        // supporting several people.
         const singleConfidentPhone = !data.clientDuplicates && data.clients[0].confidence === 'phone';
-        if (singleConfidentPhone && !taskClientDismissed) {
-          selectTaskClientFromData(data.clients[0]);
-          sections.push(taskPersonChipHtml('client', data.clients[0].name,
-            data.clients[0].phone ? `📞 ${data.clients[0].phone}` : '', null, 'clearTaskClient()'));
-        } else {
-          if (data.clientDuplicates) {
-            sections.push(`<div class="task-person-warning">⚠️ Possible duplicate centre records found — pick the right one:</div>`);
+        const alreadyLinked = isCentreLinked(data.clients[0].centreKey);
+        if (singleConfidentPhone && !alreadyLinked && !taskDismissedCentreKeys.has(data.clients[0].centreKey)) {
+          addTaskLinkedCentre(data.clients[0]);
+        } else if (!singleConfidentPhone) {
+          const pickable = data.clients.filter(c => !isCentreLinked(c.centreKey));
+          if (pickable.length) {
+            if (data.clientDuplicates) {
+              sections.push(`<div class="task-person-warning">⚠️ Possible duplicate centre records found — pick the right one:</div>`);
+            }
+            window.__taskClientCandidates = pickable;
+            sections.push(`<div class="task-person-suggestions">${pickable.map((c, i) => `
+              <button type="button" class="task-person-suggestion" onclick="selectTaskClientByIndex(${i})">${escHtml(c.name)}${c.suburb ? ` · ${escHtml(c.suburb)}` : ''}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
+            `).join('')}</div>`);
           }
-          window.__taskClientCandidates = data.clients;
-          sections.push(`<div class="task-person-suggestions">${data.clients.map((c, i) => `
-            <button type="button" class="task-person-suggestion" onclick="selectTaskClientByIndex(${i})">${escHtml(c.name)}${c.suburb ? ` · ${escHtml(c.suburb)}` : ''}${c.phone ? ` · ${escHtml(c.phone)}` : ''}</button>
-          `).join('')}</div>`);
         }
       }
 
@@ -3439,19 +3537,10 @@
       addTaskLinkedCandidate(c); // an explicit pick already clears any earlier dismissal for this id
       renderTaskPersonMatchPanel(null);
     }
-    function selectTaskClientFromData(c) {
-      taskLinkedClient = { name: c.name, phone: c.phone };
-    }
     function selectTaskClientByIndex(i) {
       const c = (window.__taskClientCandidates || [])[i];
       if (!c) return;
-      selectTaskClientFromData(c);
-      taskClientDismissed = false;
-      renderTaskPersonMatchPanel(null);
-    }
-    function clearTaskClient() {
-      taskLinkedClient = null;
-      taskClientDismissed = true;
+      addTaskLinkedCentre(c); // an explicit pick already clears any earlier dismissal for this centreKey
       renderTaskPersonMatchPanel(null);
     }
     function openCandidatePortal(url) {
@@ -3529,8 +3618,7 @@
         assigned_to_emails: taskAssignees,
         due_date: document.getElementById('taskDueInput').value || null,
         linked_candidates: taskLinkedCandidates,
-        linked_client_name: taskLinkedClient?.name || null,
-        linked_client_phone: taskLinkedClient?.phone || null
+        linked_centres: taskLinkedCentres
       };
       const originalLabel = saveBtn.textContent;
       saveBtn.disabled = true;

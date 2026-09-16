@@ -929,6 +929,10 @@ router.post('/:centreKey/message-team', async (req, res) => {
     const id = await createTask({
       departmentId: 'management', title, description,
       assignedToEmails: MESSAGE_TEAM_RECIPIENTS,
+      // Real Linked Centre (2026-09-17 — see db/schema.sql's linked_centres
+      // comment) now that `centre` is already resolved right here, instead
+      // of the centre only ever appearing as free text in the description.
+      linkedCentres: [{ centreKey: centre.centreKey, name: centre.name, suburb: centre.suburb, state: centre.state, phone: centre.contactNo || null }],
       createdByEmail: req.user.email, createdByName: req.user.name
     });
     res.json({ success: true, taskId: id });

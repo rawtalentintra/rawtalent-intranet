@@ -13,6 +13,7 @@
 
 const { getDb } = require('../db/database');
 const rtApi = require('./rtApiReportService');
+const { keyForLocation, keyForClient } = require('./centreKeyService');
 
 // AU numbers only need their last 9 digits compared — that's the part
 // that's actually unique once the leading '0' (domestic) or '61'
@@ -137,6 +138,12 @@ function clientResult(client, location, confidence) {
   return {
     clientId: client.clientId,
     locationId: location ? location.clientsLocationId : null,
+    // Same centreKey convention as routes/centres.js/centreKeyService.js
+    // (loc:<id> when a location exists, client:<id> as the fallback) —
+    // added 2026-09-17 so a match can become a real Linked Centre on a
+    // task (routes/tasks.js's linked_centres), not just informational
+    // match text as it was before.
+    centreKey: location ? keyForLocation(location.clientsLocationId) : keyForClient(client.clientId),
     name: client.name || client.nickName || 'Unnamed centre',
     suburb: location ? location.suburb : null,
     state: location ? location.state : null,

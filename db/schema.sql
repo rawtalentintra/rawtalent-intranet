@@ -2244,6 +2244,28 @@ UPDATE tasks SET
     ELSE '[]'::jsonb END,
   linked_candidates_migrated = true
 WHERE linked_candidates_migrated = false;
+-- Multiple linked centres (2026-09-17) — reverses the "stays singular on
+-- purpose" decision in linked_candidates' own comment above. Joy noticed
+-- Linked Educators had a real search-and-pick UI (this same 2026-08-26
+-- change) while Linked Clients never got the equivalent — matchPersonOrCentre
+-- (services/taskPersonMatchService.js) was already returning centre matches
+-- from the title, the UI just never let you add MORE than the one the
+-- title happened to auto-match, or search for one independently the way
+-- Linked Educators' own "+ Add" box already could. Same non-destructive
+-- pattern: linked_client_name/phone stay in place, just no longer written
+-- to. Migrated rows carry name/phone only (no centreKey — the old columns
+-- never captured one), so they stay "informational only, no link back to
+-- RT" same as linked_client_name's own comment always said; every centre
+-- added going forward carries a real centreKey via taskPersonMatchService's
+-- clientResult().
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_centres JSONB DEFAULT '[]';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_centres_migrated BOOLEAN DEFAULT false;
+UPDATE tasks SET
+  linked_centres = CASE WHEN linked_client_name IS NOT NULL
+    THEN jsonb_build_array(jsonb_build_object('centreKey', NULL, 'name', linked_client_name, 'phone', linked_client_phone))
+    ELSE '[]'::jsonb END,
+  linked_centres_migrated = true
+WHERE linked_centres_migrated = false;
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to_emails ON tasks USING gin(assigned_to_emails);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

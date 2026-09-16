@@ -267,12 +267,40 @@ function normalizeLinkedCandidates(list) {
   return out;
 }
 
+// Same dedupe-and-drop-junk discipline as normalizeLinkedCandidates, keyed
+// by centreKey (2026-09-17 — see db/schema.sql's linked_centres comment
+// for why this replaced the old singular linked_client_name/phone).
+// centreKey is only absent on a pre-migration legacy row (captured before
+// this existed) — those pass through unguarded against duplicates rather
+// than being dropped, since there's nothing to dedupe them by and they're
+// a one-off historical case, not something new rows will ever hit.
+function normalizeLinkedCentres(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    if (!c || typeof c !== 'object' || !c.name) continue;
+    if (c.centreKey) {
+      if (seen.has(c.centreKey)) continue;
+      seen.add(c.centreKey);
+    }
+    out.push({
+      centreKey: typeof c.centreKey === 'string' ? c.centreKey : null,
+      name: typeof c.name === 'string' ? c.name : null,
+      suburb: typeof c.suburb === 'string' ? c.suburb : null,
+      state: typeof c.state === 'string' ? c.state : null,
+      phone: typeof c.phone === 'string' ? c.phone : null
+    });
+  }
+  return out;
+}
+
 // Shared with the Workforce Partner PWA's request-booking/request-educator
 // bridge (routes/educators.js, routes/centres.js — RT has no booking-write
 // API for those to call yet, so they raise a real Task here instead of
 // faking a write RT can't accept). Kept as one insert path rather than
 // two, so a future change to the tasks schema doesn't have to be made twice.
-async function createTask({ departmentId, classificationId, title, description, status, priority, assignedToEmails, dueDate, linkedCandidates, linkedClientName, linkedClientPhone, createdByEmail, createdByName }) {
+async function createTask({ departmentId, classificationId, title, description, status, priority, assignedToEmails, dueDate, linkedCandidates, linkedCentres, createdByEmail, createdByName }) {
   const db = getDb();
   const id = uuidv4();
   const finalStatus = status || 'to_do';
@@ -280,8 +308,8 @@ async function createTask({ departmentId, classificationId, title, description, 
   await db.execute({
     sql: `INSERT INTO tasks
           (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, completed_at, mentioned_emails,
-           linked_candidates, linked_client_name, linked_client_phone)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           linked_candidates, linked_centres)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     args: [
       id, departmentId, classificationId || null, title.trim(), description || null,
       finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assignedToEmails)), dueDate || null,
@@ -289,7 +317,7 @@ async function createTask({ departmentId, classificationId, title, description, 
       finalStatus === 'done' ? new Date().toISOString() : null,
       JSON.stringify(mentioned),
       JSON.stringify(normalizeLinkedCandidates(linkedCandidates)),
-      linkedClientName || null, linkedClientPhone || null
+      JSON.stringify(normalizeLinkedCentres(linkedCentres))
     ]
   });
   return id;
@@ -298,7 +326,7 @@ async function createTask({ departmentId, classificationId, title, description, 
 router.post('/', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
-    linked_candidates, linked_client_name, linked_client_phone
+    linked_candidates, linked_centres
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -314,7 +342,7 @@ router.post('/', async (req, res) => {
     const id = await createTask({
       departmentId: department_id, classificationId: classification_id, title, description, status, priority,
       assignedToEmails: assigned_to_emails, dueDate: due_date, linkedCandidates: linked_candidates,
-      linkedClientName: linked_client_name, linkedClientPhone: linked_client_phone,
+      linkedCentres: linked_centres,
       createdByEmail: req.user.email, createdByName: req.user.name
     });
     res.json({ success: true, id });
@@ -326,7 +354,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
-    linked_candidates, linked_client_name, linked_client_phone
+    linked_candidates, linked_centres
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -358,14 +386,14 @@ router.put('/:id', async (req, res) => {
       sql: `UPDATE tasks SET
               department_id=?, classification_id=?, title=?, description=?, status=?, priority=?,
               assigned_to_emails=?, due_date=?, completed_at=?, mentioned_emails=?,
-              linked_candidates=?, linked_client_name=?, linked_client_phone=?,
+              linked_candidates=?, linked_centres=?,
               updated_at=now()
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
         priority || 'normal', JSON.stringify(newAssignees), due_date || null, completedAt, JSON.stringify(mentioned),
         JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
-        linked_client_name || null, linked_client_phone || null,
+        JSON.stringify(normalizeLinkedCentres(linked_centres)),
         req.params.id
       ]
     });
