@@ -185,15 +185,39 @@ function buildServerForUser(email) {
 
   server.registerTool('search_centres', {
     title: 'Search Centres / Clients',
-    description: 'Search RawTalent\'s active RT client centres by name or suburb. Returns each match\'s location and contact number.',
+    description: 'Search RawTalent\'s active RT client centres by name or suburb. Returns each match\'s location and contact number, plus the centreKey to pass to get_centre for full details.',
     inputSchema: { query: z.string(), limit: z.number().int().min(1).max(20).optional() }
   }, async ({ query, limit }) => {
     const { centres } = await getCentresAndBookings();
     const q = query.toLowerCase();
     const matches = centres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)).slice(0, limit || 10);
     if (!matches.length) return { content: [{ type: 'text', text: `No centres matched "${query}".` }] };
-    const text = matches.map(c => `• ${c.name}${c.suburb ? ` — ${c.suburb}${c.state ? `, ${c.state}` : ''}` : ''}${c.contactNo ? ` · ${c.contactNo}` : ''}`).join('\n');
+    const text = matches.map(c => `• ${c.name} (id ${c.centreKey})${c.suburb ? ` — ${c.suburb}${c.state ? `, ${c.state}` : ''}` : ''}${c.contactNo ? ` · ${c.contactNo}` : ''}`).join('\n');
     return { content: [{ type: 'text', text }] };
+  });
+
+  // Centres had no equivalent to get_educator until Joy asked (2026-09-16,
+  // via a call-calibration example — "Shalini from Richmond Creche") to be
+  // able to confirm a centre's actual named contact the same way an
+  // educator's profile can be confirmed. Reuses the same already-fetched
+  // `centres` array as search_centres (flattenCentres already carries
+  // contactName per location — search_centres just never surfaced it),
+  // so this adds no new RT call of its own.
+  server.registerTool('get_centre', {
+    title: 'Get Centre Details',
+    description: 'Full details for one centre by its centreKey (get it from search_centres first) — address, named contact, phone, and email on file.',
+    inputSchema: { centreKey: z.string().describe('The centre key from search_centres, e.g. "loc:12345"') }
+  }, async ({ centreKey }) => {
+    const { centres } = await getCentresAndBookings();
+    const c = centres.find(x => x.centreKey === centreKey);
+    if (!c) return { content: [{ type: 'text', text: `No centre found with key ${centreKey}.` }] };
+    const lines = [
+      `${c.name} (id ${c.centreKey})`,
+      (c.streetAddress || c.suburb) ? `Address: ${[c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ')}` : null,
+      `Contact: ${c.contactName || '—'} · ${c.contactNo || 'no phone'}${c.email ? ` · ${c.email}` : ''}`,
+      `Status: ${c.isActive ? 'Active' : 'Inactive'}`
+    ];
+    return { content: [{ type: 'text', text: lines.filter(Boolean).join('\n') }] };
   });
 
   return server;
