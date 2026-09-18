@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { requireAuth, requireSuperAdmin } = require('../middleware/authMiddleware');
 const { logActivity } = require('../services/activityLog');
+const { invalidateUserCache } = require('../config/passport');
 const { BUCKETS, uploadBase64, downloadAsBuffer, getSignedUrl, parseDataUri, extForMimetype, setFileResponseHeaders } = require('../services/storageService');
 
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -132,11 +133,32 @@ router.put('/:id', requireSuperAdmin, async (req, res) => {
 router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT name FROM team_members WHERE id = ?', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT name, email FROM team_members WHERE id = ?', args: [req.params.id] });
     await db.execute({ sql: 'DELETE FROM team_members WHERE id = ?', args: [req.params.id] });
     // Orphaned reports become top-level rather than vanishing from the chart.
     await db.execute({ sql: 'UPDATE team_members SET manager_id = NULL WHERE manager_id = ?', args: [req.params.id] });
     if (existing.rows[0]) await logActivity('team_member', existing.rows[0].name, 'deleted', `Team member "${existing.rows[0].name}" removed`, req.user.email);
+
+    // Joy, 2026-09-18: "let's completely delete someone. Their login
+    // access, etcetera all of it" — deleting the HR/org-chart entry used
+    // to leave a person's actual HeartBeat login untouched (team_members
+    // and users were never linked — see this route's own history). Now it
+    // also removes the matching login account, same real delete (and same
+    // primary-admin guard) as DELETE /api/admin/users/:id, so a departing
+    // person's directory entry and their actual access both go together.
+    // Matched by email since that's the only link between the two tables;
+    // a team_members row with no email, or no matching users row, is a
+    // silent no-op here rather than an error.
+    const email = existing.rows[0]?.email;
+    if (email) {
+      const userRes = await db.execute({ sql: 'SELECT id, email FROM users WHERE LOWER(email) = LOWER(?)', args: [email] });
+      const user = userRes.rows[0];
+      if (user && user.email.toLowerCase() !== (process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au').toLowerCase()) {
+        await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [user.id] });
+        invalidateUserCache(Number(user.id));
+        await logActivity('user', user.email, 'deleted', `User "${user.email}" removed (via Our Team delete)`, req.user.email);
+      }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
