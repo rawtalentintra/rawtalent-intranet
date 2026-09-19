@@ -88,9 +88,9 @@ async function syncAllCandidates(triggeredBy) {
     args: [startedAt.toISOString(), triggeredBy || 'schedule']
   });
 
-  let candidates;
+  let candidates, failedPages;
   try {
-    candidates = await rtApi.fetchAllPages('candidates', {});
+    ({ items: candidates, failedPages } = await rtApi.fetchAllPages('candidates', {}, { tolerateFailures: true }));
   } catch (err) {
     await db.execute({
       sql: `UPDATE rt_candidates_sync_state SET status = 'failed', finished_at = now(), error_message = ? WHERE id = 1`,
@@ -128,8 +128,16 @@ async function syncAllCandidates(triggeredBy) {
 
       // Anything not touched by this sync (still carrying the OLD
       // synced_at) no longer exists in RT's result set — remove it so the
-      // cache doesn't accumulate candidates RT has actually deleted.
-      await tx.execute({ sql: 'DELETE FROM rt_candidates_cache WHERE synced_at < ?', args: [startedAt.toISOString()] });
+      // cache doesn't accumulate candidates RT has actually deleted. Only
+      // safe when EVERY page came back — a page RT genuinely couldn't
+      // serve (see fetchAllPages' tolerateFailures) means we don't
+      // actually know the true current population, so skipping this on a
+      // partial fetch is the difference between "stale row cleanup" and
+      // wrongly deleting real, valid candidates just because their page
+      // happened to fail this run.
+      if (!failedPages.length) {
+        await tx.execute({ sql: 'DELETE FROM rt_candidates_cache WHERE synced_at < ?', args: [startedAt.toISOString()] });
+      }
     });
   } catch (err) {
     await db.execute({
@@ -139,13 +147,22 @@ async function syncAllCandidates(triggeredBy) {
     throw err;
   }
 
+  // Status still reads 'success' even with skipped pages — candidate_count
+  // is honestly the count actually synced, not a lie, and the admin UI
+  // only ever renders error_message when status is 'failed' (see
+  // views/admin.html's loadCandidatesSyncStatus). The note still lands in
+  // the DB/API response for anyone who checks directly, and every skipped
+  // page is already logged server-side (see fetchAllPages' console.error).
   const finishedAt = new Date();
+  const partialNote = failedPages.length
+    ? `Synced with ${failedPages.length} page(s) skipped (RT returned a persistent error for pages: ${failedPages.join(', ')}) — cache cleanup was skipped this run so no real candidates got dropped.`
+    : null;
   await db.execute({
-    sql: `UPDATE rt_candidates_sync_state SET status = 'success', finished_at = ?, candidate_count = ?, duration_ms = ? WHERE id = 1`,
-    args: [finishedAt.toISOString(), candidates.length, finishedAt.getTime() - startedAt.getTime()]
+    sql: `UPDATE rt_candidates_sync_state SET status = 'success', finished_at = ?, candidate_count = ?, duration_ms = ?, error_message = ? WHERE id = 1`,
+    args: [finishedAt.toISOString(), candidates.length, finishedAt.getTime() - startedAt.getTime(), partialNote]
   });
 
-  return { count: candidates.length, durationMs: finishedAt.getTime() - startedAt.getTime() };
+  return { count: candidates.length, durationMs: finishedAt.getTime() - startedAt.getTime(), failedPages };
 }
 
 module.exports = { syncAllCandidates, getSyncState, isSyncRunning };
