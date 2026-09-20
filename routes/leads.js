@@ -228,6 +228,14 @@ router.get('/', leadsViewAccess, async (req, res) => {
     if (targetLabel && !canUsePartnerLabel(req.user, targetLabel)) return res.status(403).json({ error: 'Not authorized for this territory' });
     if (targetLabel) {
       rows = rows.filter(l => (l.assigned_workforce_partner || partnerForSuburbState(l.suburb, l.state)) === targetLabel);
+    } else if (req.query.state) {
+      // `?state=<VIC|SA|QLD|NT>` (2026-09-21) — /wfp's own filter bar, now
+      // a plain state pick with no per-person division (Joy: "remove Liam
+      // and Justine's division... just say VIC SA QLD and NT"). No
+      // authorization check needed here the way partnerLabel has one —
+      // this is just "show me a state", not "show me a specific person's
+      // book", so there's nothing narrower to be locked out of.
+      rows = rows.filter(l => l.state === req.query.state);
     }
     res.json(rows);
   } catch (err) {

@@ -473,6 +473,13 @@ router.get('/', async (req, res) => {
       // before the STATE_WORKFORCE_PARTNER lookup; partnerForSuburbState
       // does its own normalizing internally already.
       visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)]) === targetLabel);
+    } else if (req.query.state) {
+      // `?state=<VIC|SA|QLD|NT>` (2026-09-21) — /wfp's own filter bar, now
+      // a plain state pick with no per-person division (Joy: "remove Liam
+      // and Justine's division... just say VIC SA QLD and NT"). Same
+      // shortState() normalization as the targetLabel branch above, no
+      // authorization check needed — this is just "show me a state".
+      visible = visible.filter(c => shortState(c.state) === req.query.state);
     }
     // Coordinates (2026-09-03, the /wfp mobile app's "nearby centres" on
     // Today) — cache/RT-coordinate-only, never triggers a live Mapbox

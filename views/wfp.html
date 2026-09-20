@@ -381,28 +381,19 @@
     }
 
     // ── Shared data load (Today/Leads/Centres all read the same two lists) ──
-    // wfpFilterLabel is always kept as "whichever territory is active right
-    // now" — defaulted to the caller's own wfpLabel at boot (init()), and
-    // only ever changed via setWfpFilterLabel — so a plain ?partnerLabel=
-    // covers every case (own territory, an admin/Liam's cross-territory
-    // pick, or one of Gwen's two) with no separate ?mine=true special case
-    // needed. Simplified 2026-09-03 while wiring up Gwen's second
-    // territory (SA + QLD) — ?mine=true and ?partnerLabel=<own label>
-    // were always equivalent server-side anyway (routes/leads.js|
-    // centres.js's own targetLabel resolution).
+    // wfpFilterLabel is always kept as "whichever state is active right
+    // now" — defaulted to the caller's own state at boot (init()), and
+    // only ever changed via setWfpFilterLabel. Sent as a plain ?state=
+    // (2026-09-21 — was ?partnerLabel=<person's real label> before Joy
+    // asked to remove the per-person VIC split; see routes/leads.js|
+    // centres.js's own targetState handling for the matching backend
+    // change). No longer needs the old test-sandbox special case either —
+    // the sandbox label was never offered as a browsing filter choice to
+    // begin with, only ever used for SAVING a test route (see
+    // activeWfpLabelForPlanning, fully decoupled from this filter now).
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
-      // "For Test filter just put all territories please" (Joy,
-      // 2026-09-06) — the You - Test sandbox label is a made-up string
-      // that deliberately matches no real centre/lead assignment (see
-      // testTerritoryLabel), so filtering the LIST by it always returned
-      // zero results, defeating the point of using it to try out Plan
-      // Route/Browse Centres & Leads. It still stays the real label used
-      // for SAVING a test route (activeWfpLabelForPlanning, unchanged) —
-      // only reading the full leads/centres list is treated as unfiltered
-      // here, same as "All States".
-      const isTestSandbox = currentUser && !currentUser.wfpLabel && wfpFilterLabel === testTerritoryLabel();
-      const q = (wfpFilterLabel && !isTestSandbox) ? '?partnerLabel=' + encodeURIComponent(wfpFilterLabel) : '';
+      const q = wfpFilterLabel ? '?state=' + encodeURIComponent(wfpFilterLabel) : '';
       try {
         const [leads, centres, matches] = await Promise.all([
           api('/api/leads' + q), api('/api/centres' + q),
@@ -424,43 +415,33 @@
     }
 
     // ── Territory filter ─────────────────────────────────────────────
-    // Corrected 2026-09-04 (Joy, direct): "their territories are already
-    // pre-selected for them... for their own territories, they should
-    // only see automatically filtered for their OWN territories only. For
-    // Liam, Justine, and Gwen." — no per-account override, ever, even one
-    // they personally hold. That lockdown is REVERSED as of 2026-09-15:
-    // Liam asked for the filter buttons back "so everyone can view them
-    // on both Heartbeat desktop and PWA," and Joy confirmed she means full
-    // functional parity, not a cosmetic-only bar — matching what Desktop
-    // already allowed the whole time (its own wfpStateFilter in
-    // admin.html was never scoped to "own territory only," it just
-    // filters the full unfiltered list client-side). So every account now
-    // gets the full cross-territory picker on /wfp too, regardless of
-    // whether it carries its own wfp_label — see canUsePartnerLabel() in
-    // routes/leads.js and routes/centres.js for the matching backend
-    // change (this bar is purely cosmetic without that; the old
-    // territory-only enforcement lived server-side, not here).
+    // Pure state filter (2026-09-21) — Joy: "remove Liam and Justine's
+    // division and we should now just say VIC SA QLD and NT... no need
+    // for the names beside them on the filters." Reverses the per-person
+    // key scheme from the 2026-09-15 full-parity change (below, kept for
+    // history): filter values are now plain state codes, shared by every
+    // account the same way, not a specific person's real wfp_label.
+    // Browsing (Leads/Centres list) reads this filter — see
+    // ensureDataLoaded — but Route Planner deliberately does NOT any more:
+    // now that VIC has two real people (Liam, Justine) sharing one filter
+    // value, "VIC" can't tell Route Planner whose route to build, so it
+    // always uses the logged-in person's own real identity instead (see
+    // activeWfpLabelForPlanning below), regardless of what's selected here.
+    //
+    // History: the 2026-09-04 lockdown ("their territories are already
+    // pre-selected for them... only see automatically filtered for their
+    // OWN territories only") was reversed 2026-09-15 for full cross-
+    // territory parity with Desktop (see canUsePartnerLabel() in
+    // routes/leads.js/centres.js) — that reversal stands; only the KEY
+    // SHAPE changes here, from a person's real label to a bare state code.
     const WFP_FILTER_OPTIONS = [
       { key: '', label: 'All States', bg: '#0b1d3e' },
-      { key: 'Liam Baxter (VIC)', label: 'Liam - VIC', bg: '#2563eb' },
-      { key: 'Justine Hardware (VIC)', label: 'Justine - VIC', bg: '#0d9488' },
-      { key: 'Gwen Stocks (SA)', label: 'Gwen - SA', bg: '#db2777' },
-      { key: 'Gwen Stocks (QLD)', label: 'Gwen - QLD', bg: '#f97316' }
+      { key: 'VIC', label: 'VIC', bg: '#2563eb' },
+      { key: 'SA', label: 'SA', bg: '#db2777' },
+      { key: 'QLD', label: 'QLD', bg: '#f97316' },
+      { key: 'NT', label: 'NT', bg: '#0d9488' }
     ];
-    // A no-wfp_label account (Joy, or any other admin) still gets a
-    // synthetic "You - Test" option too, on top of the same real-territory
-    // list everyone gets since the 2026-09-15 reversal above. It resolves
-    // to a made-up label unique to the logged-in admin (never matches any
-    // real suburb/state assignment), so tapping it is a safe, isolated
-    // sandbox — no real centre, lead or route ever lands there, and two
-    // different admins testing at once don't collide with each other.
-    function testTerritoryLabel() {
-      return `Test — ${currentUser.name || currentUser.email}`;
-    }
     function wfpFilterOptionsForCurrentUser() {
-      if (!currentUser.wfpLabel) {
-        return [...WFP_FILTER_OPTIONS, { key: testTerritoryLabel(), label: 'You - Test', bg: '#6b7280' }];
-      }
       return WFP_FILTER_OPTIONS;
     }
     function wfpFilterBarHtml() {
@@ -477,11 +458,21 @@
       await ensureDataLoaded(true);
       render(viewStack[viewStack.length - 1]);
     }
-    // Which territory a save/read of a mobile route plan is for — always
-    // just the active filter (see ensureDataLoaded's own comment on why
-    // wfpFilterLabel alone is now the single source of truth).
+    // Route Planner's own identity, fully independent of the browsing
+    // filter above (2026-09-21 — see this section's own comment for why).
+    // A real Workforce Partner always plans under their own actual
+    // wfp_label, full stop. A no-wfp_label account (Joy, or any other
+    // admin) has no real identity to plan under at all, so it resolves
+    // straight to the synthetic sandbox label instead — no picker needed,
+    // since there's only ever the one option for an admin here. Made-up,
+    // unique per logged-in admin, and matches no real centre/lead/route,
+    // so it's a safe, isolated test space (two admins testing at once
+    // don't collide with each other).
+    function testTerritoryLabel() {
+      return `Test — ${currentUser.name || currentUser.email}`;
+    }
     function activeWfpLabelForPlanning() {
-      return wfpFilterLabel || null;
+      return currentUser.wfpLabel || testTerritoryLabel();
     }
 
     // ── Lead stage (derived — no dedicated DB field, see db/schema.sql's
@@ -575,7 +566,6 @@
       if (dateStr < todayViewWeekStart || dateStr > dateStrAdd(todayViewWeekStart, 6)) todayViewWeekStart = mondayOf(dateStr);
       if (dateStr === todayDateStr()) { todayViewedRoute = plannedRoute; paintToday(); return; }
       const targetLabel = activeWfpLabelForPlanning();
-      if (!targetLabel) { todayViewedRoute = null; paintToday(); return; }
       todayViewLoading = true;
       paintToday();
       try {
@@ -794,7 +784,6 @@
       routeBuilderDate = dateStr;
       if (dateStr < planRouteWeekStart || dateStr > dateStrAdd(planRouteWeekStart, 6)) planRouteWeekStart = mondayOf(dateStr);
       const targetLabel = activeWfpLabelForPlanning();
-      if (!targetLabel) { paintPlanRoute(); return; }
       planRouteLoadingDate = true;
       paintPlanRoute();
       try {
@@ -1348,7 +1337,6 @@
       if (!routeBuilderStart.trim()) return toast('Enter a starting address', 'error');
       if (!routeBuilderStops.length) return toast('Add at least one stop', 'error');
       const targetLabel = activeWfpLabelForPlanning();
-      if (!targetLabel) return toast('Pick a territory filter above before planning a route', 'error');
       const departureTime = new Date(`${routeBuilderDate}T${routeBuilderDeparture}:00`).toISOString();
       try {
         toast('Building your route…');
@@ -1533,7 +1521,6 @@
       if (plannedRoute.stops.some(s => s.type === type && s.id === id)) { toast('Already on your route'); return; }
       if (plannedRoute.stops.length >= 10) { toast('Smart Routing supports up to 10 stops per run', 'error'); return; }
       const targetLabel = activeWfpLabelForPlanning();
-      if (!targetLabel) { toast('Pick a territory filter above first', 'error'); return; }
       const existingStops = plannedRoute.stops.map(s => s.type === 'manual' ? { type: 'manual', label: s.centre_name, address: s.centre_name } : { type: s.type, id: s.id });
       try {
         toast('Adding to your route…');
@@ -2431,11 +2418,16 @@
       // a workforce partner logs in on the mobile, they should just see
       // their territory" — a wfp_label'd account (Liam/Justine/Gwen)
       // otherwise defaulted to unfiltered/"All States" here. Still true
-      // post-2026-09-15 reversal: everyone gets the full cross-territory
-      // picker now (see wfpFilterOptionsForCurrentUser), but this only
-      // sets what's selected before anyone taps a different button — a
-      // Workforce Partner should still land on their own territory first.
-      if (currentUser.wfpLabel) wfpFilterLabel = currentUser.wfpLabel;
+      // post-2026-09-21 (pure state filter): everyone gets the same
+      // VIC/SA/QLD/NT picker now (see wfpFilterOptionsForCurrentUser), but
+      // this only sets what's selected before anyone taps a different
+      // button — a Workforce Partner should still land on their own
+      // state first. Pulls the state straight out of the trailing parens
+      // on their real wfp_label, e.g. "Liam Baxter (VIC)" -> "VIC".
+      if (currentUser.wfpLabel) {
+        const m = /\(([A-Z]+)\)\s*$/.exec(currentUser.wfpLabel);
+        if (m) wfpFilterLabel = m[1];
+      }
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
       }
