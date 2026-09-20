@@ -1247,3 +1247,10 @@ module.exports.visitsByCentreKey = visitsByCentreKey;
 // classification Centre 360 shows, never a second inconsistent definition.
 module.exports.getDueCentreStops = getDueCentreStops;
 module.exports.getCentreStopsByKeys = getCentreStopsByKeys;
+// centreReactivationService needs the exact same booking<->centre key
+// matching this file already does for dormancy (getLastBookingDates) —
+// exported rather than re-derived, so a reactivation detection can never
+// disagree with what this file's own dormancy math considers "this
+// centre's bookings".
+module.exports.indexBookingsByCentre = indexBookingsByCentre;
+module.exports.bookingsForCentre = bookingsForCentre;

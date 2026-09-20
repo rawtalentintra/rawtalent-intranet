@@ -15,6 +15,7 @@ const dubberService = require('./services/dubberService');
 const rtCandidatesSync = require('./services/rtCandidatesSyncService');
 const rtApiService = require('./services/rtApiReportService');
 const leadAutoSignService = require('./services/leadAutoSignService');
+const centreReactivationService = require('./services/centreReactivationService');
 const acecqaSync = require('./services/acecqaSyncService');
 
 const app = express();
@@ -465,6 +466,19 @@ async function start() {
       .catch(err => console.error('Lead auto-sign check error:', err.message));
     runLeadAutoSignCheck();
     setInterval(runLeadAutoSignCheck, 15 * 60 * 1000);
+
+    // WFP attribution model's reactivation rule (2026-09-21) — see
+    // centreReactivationService's own header comment for the full
+    // reasoning. Reuses routes/centres.js's already-cached
+    // centres+bookings pull (same 5-minute cache Today/My Centres/
+    // Micropods already share), so this costs nothing extra on RT; only
+    // real work is the DB reads/writes, which is why 15 minutes (same
+    // cadence as lead auto-sign) is cheap enough here too.
+    const runCentreReactivationCheck = () => centreReactivationService.detectAndCreditReactivations()
+      .then(({ detected, credited }) => { if (detected) console.log(`Centre reactivation check: ${credited} of ${detected} dormant-centre reactivations credited to a partner.`); })
+      .catch(err => console.error('Centre reactivation check error:', err.message));
+    runCentreReactivationCheck();
+    setInterval(runCentreReactivationCheck, 15 * 60 * 1000);
 
     // Warm routes/centres.js's shared centres+bookings cache on boot, not
     // just on first request — reported live 2026-09-11 as "Today's still
