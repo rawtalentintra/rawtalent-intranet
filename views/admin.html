@@ -894,6 +894,17 @@
         </div>
 
         <div style="display:flex;gap:16px;margin-bottom:20px" id="salesPartnerRow"></div>
+
+        <!-- Partner Activity (2026-09-21, Liam: "calls logged, visits made,
+             leads created per partner") — deliberately real people, not the
+             VIC/SA/QLD/NT state cards above: a partner's own activity is
+             theirs regardless of which state filter is selected elsewhere
+             on this page, so this row ignores the toggle on purpose. -->
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+          <div class="sd-card-title">Partner Activity</div>
+          <div class="sd-card-sub">Each partner's own calls, visits, and leads for the selected period — not affected by the state filter above</div>
+          <div style="display:flex;gap:16px;margin-top:14px" id="salesPartnerActivityRow"></div>
+        </div>
         </div>
       </div>
       </template>
@@ -9589,6 +9600,7 @@
       document.getElementById('salesDashboardLoading').style.display = 'none';
       document.getElementById('salesDashboardBody').style.display = 'block';
       loadClientRetention(); // fired, not awaited — dashboard renders immediately, retention panel fills in once ready
+      loadPartnerActivityVisits(); // fired, not awaited — same reasoning
     }
 
     // Split from loadSalesDashboard() so the territory filter buttons
@@ -9648,6 +9660,7 @@
       renderSalesPortfolioSnapshot();
       renderSalesFunnel(current);
       renderSalesPartnerCards(current);
+      renderSalesPartnerActivity(from, to);
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
@@ -9940,6 +9953,48 @@
       // data and need to pick up the real numbers once this arrives too,
       // not just the Client Retention list further down the page.
       renderSalesDashboard();
+    }
+
+    // Partner Activity (2026-09-21) — real people, not the VIC/SA/QLD/NT
+    // state labels used everywhere else on this page (which lists Gwen
+    // twice, once per state, for the manual centre-assignment dropdown).
+    // A distinct list on purpose: "each partner's activity" is a personal
+    // metric, not a territory one.
+    const WFP_ACTIVITY_PARTNERS = [
+      { name: 'Liam', email: 'liam@rawtalent.com.au' },
+      { name: 'Justine', email: 'justine@rawtalent.com.au' },
+      { name: 'Gwen', email: 'gwen@rawtalent.com.au' }
+    ];
+    // GET /api/centres/visits-log — same fetch-once-per-visit, cache,
+    // re-render-on-toggle pattern as clientRetentionData above. Calls and
+    // visits are both rows in centre_visits (see its own schema comment
+    // for why), distinguished by `channel`.
+    let partnerActivityVisits = [];
+    async function loadPartnerActivityVisits() {
+      try {
+        const data = await fetch('/api/centres/visits-log').then(r => r.json());
+        partnerActivityVisits = Array.isArray(data) ? data : [];
+      } catch { partnerActivityVisits = []; }
+      renderSalesDashboard();
+    }
+    function renderSalesPartnerActivity(from, to) {
+      const box = document.getElementById('salesPartnerActivityRow');
+      if (!box) return;
+      box.innerHTML = WFP_ACTIVITY_PARTNERS.map(p => {
+        const byPartner = v => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v.visit_date, from, to);
+        const calls = partnerActivityVisits.filter(v => v.channel === 'call' && byPartner(v)).length;
+        const visits = partnerActivityVisits.filter(v => v.channel === 'visit' && byPartner(v)).length;
+        const leadsCreated = allLeads.filter(l => (l.submitted_by_email || '').toLowerCase() === p.email && inDateRange(l.created_at, from, to)).length;
+        return `
+          <div class="admin-table-card" style="padding:18px 20px;flex:1">
+            <div class="sd-card-title" style="margin-bottom:12px">${escHtml(p.name)}</div>
+            <div class="partner-activity-grid">
+              <div><div class="partner-stat-value">${calls}</div><div class="partner-stat-label">Calls Logged</div></div>
+              <div><div class="partner-stat-value">${visits}</div><div class="partner-stat-label">Visits Made</div></div>
+              <div><div class="partner-stat-value">${leadsCreated}</div><div class="partner-stat-label">Leads Created</div></div>
+            </div>
+          </div>`;
+      }).join('');
     }
 
     // Signed leads bucketed by whether their matched RT centre has actually

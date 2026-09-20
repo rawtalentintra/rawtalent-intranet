@@ -506,6 +506,25 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Lightweight, dashboard-wide activity feed — every centre_visits row's
+// channel/date/logger, with NO centre_key filter, unlike every other
+// centre_visits read in this file (all scoped to one centre's own
+// history). Powers the WFP Dashboard's per-partner "Calls Logged" /
+// "Visits Made" cards (2026-09-21), which need to count across every
+// centre at once, not any one centre's timeline. Only the columns that
+// aggregation actually needs — notes/outcome/etc. stay scoped to a
+// specific centre's own visit history, not exposed dashboard-wide.
+router.get('/visits-log', async (req, res) => {
+  try {
+    const result = await getDb().execute(
+      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits ORDER BY visit_date DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // The Melbourne suburb->partner map (Liam north/west vs Justine east/
 // south-east/bayside, see melbourneTerritoryService) so the frontend's
 // display-only defaultCentrePartner() fallback can do the same suburb
