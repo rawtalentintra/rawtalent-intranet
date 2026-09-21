@@ -406,7 +406,7 @@ async function getCentreStopsByKeys(centreKeys) {
 // zero centres for Gwen — leads never showed this bug since a lead's
 // assigned_workforce_partner is set explicitly at creation time
 // (autoAssignWorkforcePartner), so this fallback rarely even runs there.
-const STATE_WORKFORCE_PARTNER = { SA: 'Gwen Stocks (SA)', QLD: 'Gwen Stocks (QLD)' }; // Gwen's second territory (Liam, 2026-09-03) — see db/schema.sql's additional_wfp_territories comment
+const STATE_WORKFORCE_PARTNER = { SA: 'Gwen', QLD: 'Gwen' }; // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
 
 // `?partnerLabel=` was previously accepted from any authenticated caller
 // with no server-side check at all — only the frontend hiding the picker

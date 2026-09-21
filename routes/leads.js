@@ -36,8 +36,8 @@ const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforc
 // east/south-east/bayside directive, 2026-08-22) via
 // melbourneTerritoryService — this map now only covers non-VIC states.
 const STATE_WORKFORCE_PARTNER = {
-  SA: 'Gwen Stocks (SA)',
-  QLD: 'Gwen Stocks (QLD)' // Gwen's second territory (Liam, 2026-09-03) — see db/schema.sql's additional_wfp_territories comment
+  SA: 'Gwen',
+  QLD: 'Gwen' // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
 };
 
 function autoAssignWorkforcePartner(suburb, state) {
@@ -662,6 +662,56 @@ router.patch('/:id/closed', requireRole('admin', 'super_admin', 'workforce_partn
     });
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk reopen/close — same effect as PATCH /:id/closed above, applied to
+// every id in one round trip. Added for the Leads table's bulk-select
+// toolbar (2026-09-21, Joy — reopen/adjust many leads at once instead of
+// one at a time now that the pipeline spans more states). `= ANY(?)` is
+// the same multi-id pattern services/webexService.js's recordStatusSince
+// already uses.
+// Path is `/bulk-closed`, not `/bulk/closed` — the latter would collide
+// with PATCH /:id/closed above (Express would match it first, with
+// id='bulk', since that route is registered earlier in this file).
+router.patch('/bulk-closed', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  const { ids, closed, reason } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids must be a non-empty array' });
+  if (typeof closed !== 'boolean') return res.status(400).json({ error: 'closed must be a boolean' });
+  try {
+    await getDb().execute({
+      sql: 'UPDATE leads SET closed_at = ?, closed_by_email = ?, closed_reason = ?, updated_at = now() WHERE id = ANY(?)',
+      args: [closed ? new Date().toISOString() : null, closed ? req.user.email : null, closed ? (reason || null) : null, ids]
+    });
+    res.json({ updated: ids.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk field adjustment — deliberately narrower than the single-lead PUT
+// above: only assignedWorkforcePartner/state, the two fields that
+// actually make sense to change across a batch of leads at once (e.g.
+// reassigning a run of leads to a different partner, or fixing a state
+// that was captured wrong on import). Admin/super_admin only, same
+// boundary the single-lead PUT already draws around these two fields
+// (ADMIN_FIELDS vs. the narrower WORKFORCE_PARTNER_FIELDS).
+router.patch('/bulk', requireRole('admin', 'super_admin'), async (req, res) => {
+  const { ids, assignedWorkforcePartner, state } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids must be a non-empty array' });
+  const sets = [];
+  const args = [];
+  if ('assignedWorkforcePartner' in req.body) { sets.push('assigned_workforce_partner = ?'); args.push(assignedWorkforcePartner || null); }
+  if ('state' in req.body) { sets.push('state = ?'); args.push(state || null); }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  try {
+    await getDb().execute({
+      sql: `UPDATE leads SET ${sets.join(', ')}, updated_at = now() WHERE id = ANY(?)`,
+      args: [...args, ids]
+    });
+    res.json({ updated: ids.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -34,11 +34,13 @@ const SYSTEM_ASSIGNER_NAME = 'Auto — Reactivation';
 // in views/admin.html's Partner Activity card, kept in sync manually
 // since one lives server-side and the other client-side (see that
 // constant's own comment for why it's a real-people list, not a
-// per-state one).
+// per-state one). Labels are bare first names (2026-09-21 — Liam/Justine/
+// Gwen can now work in any territory, matching the canonical wfp_label/
+// assigned_workforce_partner values everywhere else in the app).
 const REACTIVATION_CREDIT_PARTNERS = [
-  { email: 'liam@rawtalent.com.au', label: 'Liam Baxter (VIC)' },
-  { email: 'justine@rawtalent.com.au', label: 'Justine Hardware (VIC)' },
-  { email: 'gwen@rawtalent.com.au', label: 'Gwen Stocks (SA)' }
+  { email: 'liam@rawtalent.com.au', label: 'Liam' },
+  { email: 'justine@rawtalent.com.au', label: 'Justine' },
+  { email: 'gwen@rawtalent.com.au', label: 'Gwen' }
 ];
 
 function daysBetween(aIso, bIso) {

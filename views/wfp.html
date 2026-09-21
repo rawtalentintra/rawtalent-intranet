@@ -439,7 +439,9 @@
       { key: 'VIC', label: 'VIC', bg: '#2563eb' },
       { key: 'SA', label: 'SA', bg: '#db2777' },
       { key: 'QLD', label: 'QLD', bg: '#f97316' },
-      { key: 'NT', label: 'NT', bg: '#0d9488' }
+      { key: 'NT', label: 'NT', bg: '#0d9488' },
+      { key: 'ACT', label: 'ACT', bg: '#7c3aed' },
+      { key: 'WA', label: 'WA', bg: '#ca8a04' }
     ];
     function wfpFilterOptionsForCurrentUser() {
       return WFP_FILTER_OPTIONS;
@@ -2417,17 +2419,11 @@
       // Liam, 2026-09-03 (live on a call, testing this exact screen): "when
       // a workforce partner logs in on the mobile, they should just see
       // their territory" — a wfp_label'd account (Liam/Justine/Gwen)
-      // otherwise defaulted to unfiltered/"All States" here. Still true
-      // post-2026-09-21 (pure state filter): everyone gets the same
-      // VIC/SA/QLD/NT picker now (see wfpFilterOptionsForCurrentUser), but
-      // this only sets what's selected before anyone taps a different
-      // button — a Workforce Partner should still land on their own
-      // state first. Pulls the state straight out of the trailing parens
-      // on their real wfp_label, e.g. "Liam Baxter (VIC)" -> "VIC".
-      if (currentUser.wfpLabel) {
-        const m = /\(([A-Z]+)\)\s*$/.exec(currentUser.wfpLabel);
-        if (m) wfpFilterLabel = m[1];
-      }
+      // otherwise defaulted to unfiltered/"All States" here. Retired
+      // 2026-09-21: labels no longer carry a state at all (Joy — Liam/
+      // Justine/Gwen can now work in any territory), so there's no longer
+      // a single "home state" to derive and default to — landing on "All
+      // States" for everyone is now the correct behaviour, not a gap.
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/wfp/sw.js').catch(() => {});
       }

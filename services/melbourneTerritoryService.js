@@ -14,8 +14,12 @@
 // covered by Liam's directive at all, so they keep the pre-existing
 // default (Justine, VIC's sole partner before this split) rather than
 // being left unassigned.
-const LIAM = 'Liam Baxter (VIC)';
-const JUSTINE = 'Justine Hardware (VIC)';
+// Identity is a bare first name (2026-09-21, Joy — Liam/Justine/Gwen can
+// now work in any territory, so the label itself no longer encodes a
+// state). This suburb split is still real geography, just no longer
+// spelled out in the identity string it resolves to.
+const LIAM = 'Liam';
+const JUSTINE = 'Justine';
 
 const LIAM_SUBURBS = [
   // Yarra

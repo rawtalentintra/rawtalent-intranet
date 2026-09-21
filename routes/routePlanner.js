@@ -223,15 +223,18 @@ router.post('/optimize', async (req, res) => {
 // (2026-09-03, SA + QLD — see db/schema.sql's additional_wfp_territories).
 //
 // Joy, 2026-09-04, correcting an earlier design: Liam/Justine/Gwen must
-// ALWAYS be locked to their own territory/territories on /wfp — no
-// per-account override (the old can_view_all_wfp_territories flag is no
-// longer read anywhere). Only an account with no wfp_label of its own
-// gets to plan/check any territory.
+// ALWAYS be locked to planning only their own day on /wfp — no per-account
+// override (the old can_view_all_wfp_territories flag is no longer read
+// anywhere). Only an account with no wfp_label of its own gets to
+// plan/check for someone else.
+// additional_wfp_territories dropped from this check (2026-09-21): it only
+// ever existed so Gwen's two separate "(SA)"/"(QLD)" labels could both
+// resolve to her — now that every partner has exactly one territory-free
+// identity, there's no second label left to be "additional" to.
 function canUsePartnerLabel(user, label) {
   if (!label) return true;
   if (!user.wfp_label) return true;
-  if (user.wfp_label === label) return true;
-  return Array.isArray(user.additional_wfp_territories) && user.additional_wfp_territories.includes(label);
+  return user.wfp_label === label;
 }
 function resolveTargetWfpLabel(req) {
   const requested = (req.body && req.body.wfpLabel) || req.query.wfpLabel || null;

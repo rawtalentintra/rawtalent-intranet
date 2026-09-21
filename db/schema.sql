@@ -49,8 +49,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_create_outreach_lists BOOLEAN DEF
 -- broadcasting an arbitrary company-wide announcement.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_announce_article_changes BOOLEAN DEFAULT false;
 -- Ties a workforce_partner login to their existing free-text
--- leads.assigned_workforce_partner label (e.g. 'Gwen Stocks (SA)') so My
--- Centres/My Dashboard can default to that person's own portfolio. Not a
+-- leads.assigned_workforce_partner label (a bare first name, e.g. 'Gwen'
+-- — territory suffixes dropped 2026-09-21, Liam/Justine/Gwen can now work
+-- in any territory) so My Centres/My Dashboard can default to that
+-- person's own portfolio. Not a
 -- foreign key — assigned_workforce_partner has always been a plain label,
 -- not a users.id reference, and changing that now would touch every
 -- existing leads row; matching on the label string is the smaller change.
@@ -108,17 +110,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_wfp_pwa BOOLEAN DEFAULT false
 -- (unread, harmless) rather than dropped — no UI sets it any more.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_all_wfp_territories BOOLEAN DEFAULT false;
 
--- Gwen's account now genuinely covers two real territories — SA and QLD
--- (Liam, 2026-09-03: "she can see two, which is SA and QLD") — not one
--- WFP's own portfolio filtered by state, but two distinct wfp_label
--- values ('Gwen Stocks (SA)' / 'Gwen Stocks (QLD)', see
--- routes/leads.js|centres.js's STATE_WORKFORCE_PARTNER). A plain BOOLEAN
--- grant (can_view_all_wfp_territories' own pattern) doesn't fit here —
--- unlike Liam, Gwen should NOT see everyone's territories, only her own
--- extra one — so this is a small JSONB list of label strings she can
--- ALSO see beyond her primary wfp_label, defaulting to none. See
--- views/wfp.html's wfpFilterBarHtml() for how this renders as a small
--- (not full admin-style) filter bar.
+-- Gwen's account used to genuinely cover two real territories — SA and QLD
+-- (Liam, 2026-09-03: "she can see two, which is SA and QLD") via two
+-- distinct wfp_label values ('Gwen Stocks (SA)' / 'Gwen Stocks (QLD)').
+-- Retired 2026-09-21: Liam/Justine/Gwen can now work in any territory, so
+-- every wfp_label is a single bare-name identity (e.g. 'Gwen') with
+-- nothing left to hold a second label to. Column left in place (unread,
+-- harmless, always '[]' going forward) rather than dropped.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS additional_wfp_territories JSONB DEFAULT '[]'::jsonb;
 
 -- Self-service, not an admin grant — "that's always going to be the
