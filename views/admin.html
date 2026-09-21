@@ -8386,6 +8386,14 @@
     // WORKFORCE_PARTNER_SHORT (a full-name -> first-name display map) is
     // gone with it — full IS short now, nothing left to shorten.
     const WORKFORCE_PARTNER_OPTIONS = ['Gwen', 'Justine', 'Liam'];
+    // Real, selectable "this one's RT's, not a partner's" value (2026-09-22,
+    // Joy, per Liam — until now that state only existed implicitly as
+    // "nobody picked a partner", indistinguishable from "nobody's decided
+    // yet"). Only for assigning a LEAD/CENTRE — never for a login's own
+    // wfp_label (Our Team's userWfpLabel select deliberately keeps using
+    // the bare WORKFORCE_PARTNER_OPTIONS above; no login should ever BE
+    // "RawTalent").
+    const LEAD_CENTRE_ASSIGNEE_OPTIONS = [...WORKFORCE_PARTNER_OPTIONS, 'RawTalent'];
     // Former reps with no active account — their historical leads stay put,
     // just excluded from the "Submitted by" filter's option list.
     const LEADS_SUBMITTER_HIDDEN = new Set(['allyssa@rawtalent.com.au', 'jane@rawtalent.com.au']);
@@ -8676,7 +8684,7 @@
       }
       const partnerSelect = document.getElementById('leadsFilterPartner');
       if (partnerSelect.options.length === 1) {
-        partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+        partnerSelect.insertAdjacentHTML('beforeend', LEAD_CENTRE_ASSIGNEE_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
       }
       const stateSelect = document.getElementById('leadsFilterState');
       if (stateSelect.options.length === 1) {
@@ -8684,7 +8692,7 @@
       }
       const bulkPartnerSelect = document.getElementById('leadsBulkPartnerSelect');
       if (bulkPartnerSelect.options.length === 1) {
-        bulkPartnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+        bulkPartnerSelect.insertAdjacentHTML('beforeend', LEAD_CENTRE_ASSIGNEE_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
       }
       const bulkStateSelect = document.getElementById('leadsBulkStateSelect');
       if (bulkStateSelect.options.length === 1) {
@@ -10821,6 +10829,10 @@
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
       const effectivePartner = c.assignedWorkforcePartner || defaultCentrePartner(c.state, c.suburb);
       const healthMeta = CENTRE_HEALTH_META[c.health] || { label: c.health, bg: 'var(--gray-100)', color: 'var(--gray-600)' };
+      // Opened up from admin/super_admin-only (2026-09-22, Joy — same fix
+      // as the Leads WF Partner dropdown: a partner should be able to
+      // claim/reassign a centre themselves, not just admin).
+      const canEditCentrePartner = currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner';
       return `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px">
           <div>
@@ -10848,14 +10860,14 @@
           </div>
           <div style="margin-top:8px;font-size:12.5px;display:flex;align-items:center;gap:8px">
             <span style="color:var(--text-muted)">Workforce Partner:</span>
-            ${(currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `
+            ${canEditCentrePartner ? `
               <div style="display:flex;align-items:center;gap:8px">
                 <span id="centreAssignedPartnerReadout" style="font-weight:600;color:var(--navy)">${escHtml(effectivePartner || 'Unassigned')}</span>
                 <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:11.5px;text-decoration:underline" onclick="showCentrePartnerSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">Change</span>
               </div>
               <select id="centreAssignedPartnerSelect" class="form-control" style="display:none;width:auto;font-size:12.5px;padding:3px 8px" onchange="assignCentreWorkforcePartner('${c.centreKey}', this.value)">
                 <option value="">Unassigned</option>
-                ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${c.assignedWorkforcePartner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+                ${LEAD_CENTRE_ASSIGNEE_OPTIONS.map(p => `<option value="${escHtml(p)}" ${c.assignedWorkforcePartner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
               </select>
             ` : `<span style="font-weight:600;color:var(--navy)">${escHtml(effectivePartner || 'Unassigned')}</span>`}
           </div>
@@ -13628,7 +13640,7 @@
 
         const partnerSelect = document.getElementById('routeFilterPartner');
         if (partnerSelect.options.length === 1) {
-          partnerSelect.insertAdjacentHTML('beforeend', WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
+          partnerSelect.insertAdjacentHTML('beforeend', LEAD_CENTRE_ASSIGNEE_OPTIONS.map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join(''));
         }
 
         filterRoutePlannerLeads();
@@ -16834,7 +16846,7 @@
           ` : ''}
           <select id="leadAssigneeSelect" class="form-control" ${canEditAssignment ? '' : 'disabled'} style="${canEditAssignment && hasAssignment ? 'display:none;margin-top:8px' : ''}">
             <option value="">Unassigned</option>
-            ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+            ${LEAD_CENTRE_ASSIGNEE_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
         </div>
 

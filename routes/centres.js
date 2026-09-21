@@ -649,11 +649,13 @@ router.delete('/:centreKey', requireRole('admin', 'super_admin'), async (req, re
   }
 });
 
-// Manual per-centre Workforce Partner assignment — same admin/super_admin
-// gate Leads' own "Change Workforce Partner" control already uses. Body
-// `{ workforcePartner }` — omit/null to unassign back to "everyone sees
-// it" (My Centres' default, unfiltered-by-partner view).
-router.put('/:centreKey/assign-partner', requireRole('admin', 'super_admin'), async (req, res) => {
+// Manual per-centre Workforce Partner assignment. Opened up from admin/
+// super_admin-only to workforce_partner too (2026-09-22, Joy — same fix
+// as Leads' own "Change Workforce Partner" control: a partner should be
+// able to claim/reassign a centre themselves). Body `{ workforcePartner }`
+// — omit/null to unassign back to "everyone sees it" (My Centres' default,
+// unfiltered-by-partner view).
+router.put('/:centreKey/assign-partner', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
   try {
