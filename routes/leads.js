@@ -692,19 +692,54 @@ router.patch('/bulk-closed', requireRole('admin', 'super_admin', 'workforce_part
 });
 
 // Bulk field adjustment — deliberately narrower than the single-lead PUT
-// above: only assignedWorkforcePartner/state, the two fields that
-// actually make sense to change across a batch of leads at once (e.g.
-// reassigning a run of leads to a different partner, or fixing a state
-// that was captured wrong on import). Admin/super_admin only, same
-// boundary the single-lead PUT already draws around these two fields
-// (ADMIN_FIELDS vs. the narrower WORKFORCE_PARTNER_FIELDS).
-router.patch('/bulk', requireRole('admin', 'super_admin'), async (req, res) => {
-  const { ids, assignedWorkforcePartner, state } = req.body;
+// above: assignedWorkforcePartner/state/stage, the fields that actually
+// make sense to change across a batch of leads at once (e.g. reassigning
+// a run of leads to a different partner, fixing a state captured wrong on
+// import, or moving a batch straight to Profile Created). Role split
+// mirrors the single-lead PUT's own ADMIN_FIELDS vs. WORKFORCE_PARTNER_
+// FIELDS boundary: a workforce_partner can already edit lead_called/
+// centre_visited/signed status one lead at a time, so `stage` (which is
+// just those three, chosen together) is open to them too; assignedWork
+// forcePartner/state stay admin/super_admin only, same as always.
+//
+// `stage` is the Leads table's single combined "Stage" badge, not a real
+// column — leadStageInfo() (views/admin.html) derives it by checking
+// signed_status, then lead_called_status, then centre_visited_status in
+// that order. STAGE_FIELD_SETS is the reverse of that: the exact column
+// values that make leadStageInfo land back on the chosen label, so a bulk
+// "Set Stage" pick produces the same badge a person would see picking it
+// one lead at a time via the three separate popovers.
+const STAGE_FIELD_SETS = {
+  to_schedule: { lead_called_status: 'to_schedule', centre_visited_status: 'to_schedule', signed_status: 'pending' },
+  call_scheduled: { lead_called_status: 'scheduled', signed_status: 'pending' },
+  visit_to_schedule: { lead_called_status: 'done', centre_visited_status: 'to_schedule', signed_status: 'pending' },
+  visit_scheduled: { lead_called_status: 'done', centre_visited_status: 'scheduled', signed_status: 'pending' },
+  profile_pending: { lead_called_status: 'done', centre_visited_status: 'done', signed_status: 'pending' },
+  profile_created: { signed_status: 'signed' },
+  not_interested: { signed_status: 'not_interested' }
+};
+
+router.patch('/bulk', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  const { ids, assignedWorkforcePartner, state, stage } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids must be a non-empty array' });
+  if (('assignedWorkforcePartner' in req.body || 'state' in req.body) && req.user.role === 'workforce_partner') {
+    return res.status(403).json({ error: 'Not authorized to bulk-edit WF Partner/State' });
+  }
   const sets = [];
   const args = [];
   if ('assignedWorkforcePartner' in req.body) { sets.push('assigned_workforce_partner = ?'); args.push(assignedWorkforcePartner || null); }
   if ('state' in req.body) { sets.push('state = ?'); args.push(state || null); }
+  if ('stage' in req.body) {
+    const fields = STAGE_FIELD_SETS[stage];
+    if (!fields) return res.status(400).json({ error: 'Unrecognised stage' });
+    for (const [column, value] of Object.entries(fields)) { sets.push(`${column} = ?`); args.push(value); }
+    // Same auto-close-on-sign rule the single-lead PUT applies (see its
+    // own comment above) — only fires if nothing has closed it already.
+    if (stage === 'profile_created') {
+      sets.push('closed_at = COALESCE(closed_at, ?)', 'closed_by_email = COALESCE(closed_by_email, ?)');
+      args.push(new Date().toISOString(), req.user.email);
+    }
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   try {
     await getDb().execute({

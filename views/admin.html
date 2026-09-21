@@ -1298,6 +1298,16 @@
             <select id="leadsBulkStateSelect" style="font-size:12px" onchange="bulkAssignLeadsField('state', this.value); this.value=''">
               <option value="">Set State…</option>
             </select>
+            <select id="leadsBulkStageSelect" style="font-size:12px" onchange="bulkAssignLeadsField('stage', this.value); this.value=''">
+              <option value="">Set Stage…</option>
+              <option value="to_schedule">To Schedule</option>
+              <option value="call_scheduled">Call Scheduled</option>
+              <option value="visit_to_schedule">Visit To Schedule</option>
+              <option value="visit_scheduled">Visit Scheduled</option>
+              <option value="profile_pending">Profile Pending</option>
+              <option value="profile_created">Profile Created</option>
+              <option value="not_interested">Not Interested</option>
+            </select>
             <button type="button" class="btn-secondary" style="padding:6px 12px;font-size:12px;margin-left:auto" onclick="clearLeadsSelection()">Clear selection</button>
           </div>
           <div style="overflow-x:auto">
@@ -9082,11 +9092,21 @@
       } catch { toast('Network error', 'error'); }
     }
 
+    // Mirrors STAGE_FIELD_SETS' keys in routes/leads.js — display labels
+    // only, for the bulk confirm dialog; the select's own <option> text
+    // already shows these, this is just so the raw snake_case value isn't
+    // what the confirm() prompt echoes back.
+    const LEADS_BULK_STAGE_LABELS = {
+      to_schedule: 'To Schedule', call_scheduled: 'Call Scheduled', visit_to_schedule: 'Visit To Schedule',
+      visit_scheduled: 'Visit Scheduled', profile_pending: 'Profile Pending', profile_created: 'Profile Created',
+      not_interested: 'Not Interested'
+    };
     async function bulkAssignLeadsField(field, value) {
       const ids = [...selectedLeadIds];
       if (!ids.length || !value) return;
-      const label = field === 'assignedWorkforcePartner' ? 'WF Partner' : 'State';
-      if (!confirm(`Set ${label} to "${value}" for ${ids.length} lead${ids.length === 1 ? '' : 's'}?`)) return;
+      const label = field === 'assignedWorkforcePartner' ? 'WF Partner' : field === 'state' ? 'State' : 'Stage';
+      const displayValue = field === 'stage' ? (LEADS_BULK_STAGE_LABELS[value] || value) : value;
+      if (!confirm(`Set ${label} to "${displayValue}" for ${ids.length} lead${ids.length === 1 ? '' : 's'}?`)) return;
       try {
         const res = await fetch('/api/leads/bulk', {
           method: 'PATCH',
