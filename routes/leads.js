@@ -571,13 +571,19 @@ const WORKFORCE_PARTNER_FIELDS = {
   position: 'position', contact_first_name: 'contactFirstName', contact_last_name: 'contactLastName', contact_email: 'contactEmail',
   lead_called_status: 'leadCalledStatus', lead_called_at: 'leadCalledAt',
   centre_visited_status: 'centreVisitedStatus', centre_visited_at: 'centreVisitedAt',
-  signed_status: 'signedStatus', signed_at: 'signedAt'
+  signed_status: 'signedStatus', signed_at: 'signedAt',
+  // Opened up from admin/super_admin-only (2026-09-22, Joy, responding to
+  // Gwen: an ops-team-submitted lead with no WF Partner set yet couldn't
+  // be claimed by the partner actually working it — "I can add my notes
+  // saying I have just emailed them... but the workforce partner tab
+  // won't let me choose myself or Justine"). Any of Liam/Justine/Gwen can
+  // now assign a lead to any of the three, not just admin/super_admin.
+  assigned_workforce_partner: 'assignedWorkforcePartner'
 };
 const ADMIN_FIELDS = {
   centre_name: 'centreName', street_address: 'streetAddress', suburb: 'suburb', state: 'state', centre_phone: 'centrePhone',
   educator_name: 'educatorName', agency_name: 'agencyName', number_of_shifts: 'numberOfShifts', agency_usage: 'agencyUsage',
-  ...WORKFORCE_PARTNER_FIELDS,
-  assigned_workforce_partner: 'assignedWorkforcePartner'
+  ...WORKFORCE_PARTNER_FIELDS
 };
 
 router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
@@ -697,10 +703,11 @@ router.patch('/bulk-closed', requireRole('admin', 'super_admin', 'workforce_part
 // a run of leads to a different partner, fixing a state captured wrong on
 // import, or moving a batch straight to Profile Created). Role split
 // mirrors the single-lead PUT's own ADMIN_FIELDS vs. WORKFORCE_PARTNER_
-// FIELDS boundary: a workforce_partner can already edit lead_called/
-// centre_visited/signed status one lead at a time, so `stage` (which is
-// just those three, chosen together) is open to them too; assignedWork
-// forcePartner/state stay admin/super_admin only, same as always.
+// FIELDS boundary: a workforce_partner can edit lead_called/centre_
+// visited/signed status AND assignedWorkforcePartner one lead at a time
+// (see WORKFORCE_PARTNER_FIELDS above, opened up 2026-09-22), so both
+// `stage` and assignedWorkforcePartner are open to them here too; `state`
+// stays admin/super_admin only — nobody asked to change that boundary.
 //
 // `stage` is the Leads table's single combined "Stage" badge, not a real
 // column — leadStageInfo() (views/admin.html) derives it by checking
@@ -722,8 +729,8 @@ const STAGE_FIELD_SETS = {
 router.patch('/bulk', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
   const { ids, assignedWorkforcePartner, state, stage } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids must be a non-empty array' });
-  if (('assignedWorkforcePartner' in req.body || 'state' in req.body) && req.user.role === 'workforce_partner') {
-    return res.status(403).json({ error: 'Not authorized to bulk-edit WF Partner/State' });
+  if ('state' in req.body && req.user.role === 'workforce_partner') {
+    return res.status(403).json({ error: 'Not authorized to bulk-edit State' });
   }
   const sets = [];
   const args = [];

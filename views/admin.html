@@ -16561,8 +16561,8 @@
       // can edit them too (they're the ones actually making the calls/
       // visits, so locking them out of marking that was the wrong call —
       // confirmed with Joy 2026-08-13). Assignment (which WFP a lead
-      // belongs to) is separate and stays admin/super_admin only — see
-      // canEditStatus/leadAssigneeSelect below.
+      // belongs to) used to be admin/super_admin only but now follows the
+      // same rule — see canEditAssignment/leadAssigneeSelect below.
       const readOnly = currentUserRole !== 'admin' && currentUserRole !== 'super_admin' && currentUserRole !== 'workforce_partner';
       // Add-to-Calendar icon — Joy, 2026-09-03: only Lead Called/Centre
       // Visited have a real calendar meaning (Profile Created doesn't).
@@ -16724,10 +16724,15 @@
       // qa_view sees everything read-only. Contact fields (who the Workforce
       // Partner actually spoke to) are editable by admin/super_admin/
       // workforce_partner — they're deliberately blank at submission time
-      // now, filled in here once someone's spoken to the centre. Status/
-      // assignment stay admin/super_admin only regardless.
+      // now, filled in here once someone's spoken to the centre.
       const canEditContact = currentUserRole !== 'qa_view';
-      const canEditStatus = currentUserRole === 'admin' || currentUserRole === 'super_admin';
+      // Which WFP a lead is assigned to — used to be admin/super_admin
+      // only, opened up to workforce_partner too (2026-09-22, Joy,
+      // responding to Gwen: an ops-team-submitted lead had no WF Partner
+      // set, and the dropdown was disabled for her, so she couldn't claim
+      // it even after emailing the contact herself). Any of Liam/Justine/
+      // Gwen can now assign a lead to any of the three, same as admin.
+      const canEditAssignment = currentUserRole === 'admin' || currentUserRole === 'super_admin' || currentUserRole === 'workforce_partner';
       const hasContact = !!(lead.position || lead.contact_first_name || lead.contact_last_name || lead.contact_email);
       const hasAssignment = !!lead.assigned_workforce_partner;
 
@@ -16821,13 +16826,13 @@
 
         <div class="form-group-modal" style="margin-top:14px">
           <label class="form-label-modal">Workforce Partner</label>
-          ${canEditStatus && hasAssignment ? `
+          ${canEditAssignment && hasAssignment ? `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
               <span id="leadAssigneeReadout" style="font-weight:600;color:var(--navy);font-size:13.5px">${escHtml(lead.assigned_workforce_partner)}</span>
               <span style="cursor:pointer;color:var(--orange);font-weight:600;font-size:11.5px;text-decoration:underline" onclick="showWfpAssigneeSelect()" title="Change Workforce Partner" aria-label="Change Workforce Partner">Change</span>
             </div>
           ` : ''}
-          <select id="leadAssigneeSelect" class="form-control" ${canEditStatus ? '' : 'disabled'} style="${canEditStatus && hasAssignment ? 'display:none;margin-top:8px' : ''}">
+          <select id="leadAssigneeSelect" class="form-control" ${canEditAssignment ? '' : 'disabled'} style="${canEditAssignment && hasAssignment ? 'display:none;margin-top:8px' : ''}">
             <option value="">Unassigned</option>
             ${WORKFORCE_PARTNER_OPTIONS.map(p => `<option value="${escHtml(p)}" ${lead.assigned_workforce_partner === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
           </select>
