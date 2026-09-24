@@ -5319,6 +5319,11 @@
     let hoursWeekData = { week: {}, entries: [] };
     let hoursMyWeeks = [];
     let hoursPendingApprovals = [];
+    // Indexed by the REAL day-of-week (Date.getDay(): Sun=0...Sat=6), not
+    // by position within the week strip — the week can now start on
+    // either Sunday (before the 2026-09-26 Sat-start transition, see
+    // services/timesheetService.js) or Saturday (from then on), so
+    // "whichever day renders first" is no longer always Sunday.
     const HOURS_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     function addDaysClient(dateStr, days) {
@@ -5494,10 +5499,11 @@
       // elsewhere) so the week strip has life to it even before any hours
       // are logged — the status tint (blue/amber/green) still layers on
       // top once a day has data or the week moves through approval.
-      const dayCards = HOURS_DAY_NAMES.map((label, i) => {
+      const dayCards = Array.from({ length: 7 }, (_, i) => {
         const d = addDaysClient(hoursCurrentWeekStart, i);
         const e = entryByDate[d];
         const dateObj = new Date(`${d}T00:00:00`);
+        const label = HOURS_DAY_NAMES[dateObj.getDay()];
         const isToday = d === todayStr;
         const accent = LEAVE_PERSON_COLORS[i];
         const bg = week.status === 'approved' ? '#f0fdf4' : (week.status !== 'draft' ? '#fff7ed' : (e ? '#eff6ff' : 'white'));
