@@ -199,7 +199,13 @@ function buildPayslipPdf(payslip, profile) {
       if (showGroup) doc.text(item.groupLabel, LEFT_X + 10, rowY, { width: 145, lineBreak: false });
       if (item.label) doc.text(item.label, LEFT_X + 160, rowY, { width: 165, lineBreak: false });
       doc.text(Number(item.hours).toFixed(2), colHourX, rowY, { width: 70, align: 'right', lineBreak: false });
-      doc.text(fmtMoney(item.amount), colAmountX, rowY, { width: 75, align: 'right', lineBreak: false });
+      // amount: null (not just 0) is a reference-only row — e.g. a fixed-
+      // salary employee's "Hours Worked" lines (see FIXED_SALARY_EMPLOYEES
+      // in payslipService.js) — shown with hours but no dollar figure,
+      // since $0 next to real hours worked reads as an error, not a
+      // deliberate "this doesn't add to pay" signal. A real $0 line
+      // (amount: 0) still prints "0.00" same as always.
+      if (item.amount != null) doc.text(fmtMoney(item.amount), colAmountX, rowY, { width: 75, align: 'right', lineBreak: false });
       doc.y = rowY + ROW_H;
       prevGroup = item.groupLabel || prevGroup;
     }

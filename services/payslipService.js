@@ -174,8 +174,14 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
     // document) but carry $0 — pay itself comes from the fixed-salary and
     // excess-bonus lines further down, not from hours × a rate.
     lineItems = [
-      { groupLabel: week1Label, label: 'Hours Worked', hours: h1, rate: 0, amount: 0, source: 'timesheet' },
-      { groupLabel: week2Label, label: 'Hours Worked', hours: h2, rate: 0, amount: 0, source: 'timesheet' },
+      // amount: null (not 0) — a real dollar figure here would read as
+      // "this row pays $0", when the actual point is that pay for a
+      // fixed-salary employee doesn't come from hours at all. The PDF
+      // (payslipPdfService.js) and the generate-form (views/admin.html's
+      // renderPgLineItems/collectPgPayload) both know to print/submit
+      // this as blank rather than "0.00".
+      { groupLabel: week1Label, label: 'Hours Worked', hours: h1, rate: 0, amount: null, source: 'timesheet' },
+      { groupLabel: week2Label, label: 'Hours Worked', hours: h2, rate: 0, amount: null, source: 'timesheet' },
       // hours: 1 / rate: <dollar amount> is a deliberate reuse of the
       // hours × rate shape every other line item (and the generate-form's
       // own live recompute — see views/admin.html's updatePgLineItem) uses
@@ -192,7 +198,7 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
       // The excess-hours figure itself is already visible in the Total
       // Hour column right next to it, so it doesn't need repeating here.
       lineItems.push({
-        groupLabel: '', label: 'Excess Hours Bonus',
+        groupLabel: '', label: 'Excess Hours over 80',
         hours: excessHours, rate: fixedSalary.excessHourlyRateAud, amount: round2(excessHours * fixedSalary.excessHourlyRateAud), source: 'fixed_salary'
       });
     }

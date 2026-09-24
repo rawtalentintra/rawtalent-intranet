@@ -8278,7 +8278,7 @@
           <input type="text" placeholder="Label (e.g. a date)" value="${escHtml(li.label || '')}" onchange="updatePgLineItem(${i},'label',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
           <input type="number" step="0.01" min="0" value="${li.hours}" onchange="updatePgLineItem(${i},'hours',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
           <input type="number" step="0.01" min="0" value="${li.rate}" onchange="updatePgLineItem(${i},'rate',this.value)" style="font-size:12px;padding:5px 7px;border:1px solid var(--gray-200);border-radius:6px">
-          <div style="font-size:12px;font-weight:700;text-align:right">${(Number(li.hours || 0) * Number(li.rate || 0)).toFixed(2)}</div>
+          <div style="font-size:12px;font-weight:700;text-align:right">${li.amount === null ? '' : (Number(li.hours || 0) * Number(li.rate || 0)).toFixed(2)}</div>
           <span title="Remove" style="cursor:pointer;color:#dc2626;text-align:center" onclick="removePgLineItem(${i})">✕</span>
         </div>
       `).join('');
@@ -8287,6 +8287,12 @@
     }
     function updatePgLineItem(i, field, value) {
       pgLineItems[i][field] = (field === 'hours' || field === 'rate') ? Number(value) : value;
+      // A blank/null amount (see payslipService.js's fixed-salary "Hours
+      // Worked" rows) only means "nothing to show yet" until someone
+      // actually edits this row's hours/rate — at that point they clearly
+      // want a real, computed amount, so it graduates out of the blank
+      // state rather than staying invisible while carrying a nonzero value.
+      if (field === 'hours' || field === 'rate') pgLineItems[i].amount = Number(pgLineItems[i].hours || 0) * Number(pgLineItems[i].rate || 0);
       renderPgLineItems();
     }
     function addPgLineItem() {
@@ -8312,7 +8318,7 @@
         workedDays: Number(document.getElementById('pgWorkedDays').value),
         lineItems: pgLineItems.map(li => ({
           groupLabel: li.groupLabel, label: li.label, hours: Number(li.hours) || 0, rate: Number(li.rate) || 0,
-          amount: Math.round((Number(li.hours) || 0) * (Number(li.rate) || 0) * 100) / 100, source: li.source
+          amount: li.amount === null ? null : Math.round((Number(li.hours) || 0) * (Number(li.rate) || 0) * 100) / 100, source: li.source
         })),
         exchangeRate: pgPaysInPhp ? Number(document.getElementById('pgExchangeRate').value) : null,
         totalEarningsPhp: pgPaysInPhp ? Number(document.getElementById('pgTotalPhp').value) : null
