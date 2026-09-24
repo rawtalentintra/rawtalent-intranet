@@ -1088,6 +1088,18 @@ CREATE TABLE IF NOT EXISTS employee_payroll_profiles (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Fixed-fortnightly-salary pay type (Joy/Sophia, 2026-09-25) — an
+-- alternative to hourly_rate_aud, not an addition to it.
+-- fortnightly_rate_aud non-null is what services/payslipService.js's
+-- buildLineItemsFromTimesheets() actually branches on to decide which
+-- formula applies to a given profile; hourly_rate_aud stays untouched
+-- (and unused) for anyone switched onto this. overtime_rate_aud is the
+-- $/hr paid on hours over the (currently hardcoded, 80) fortnightly
+-- threshold — null here just means no excess-hours bonus is computed,
+-- same as if it were $0.
+ALTER TABLE employee_payroll_profiles ADD COLUMN IF NOT EXISTS fortnightly_rate_aud NUMERIC(8,2);
+ALTER TABLE employee_payroll_profiles ADD COLUMN IF NOT EXISTS overtime_rate_aud NUMERIC(8,2);
+
 -- One row per employee per pay period issued. invoice_number is a plain
 -- integer, NOT a Postgres SERIAL/sequence — the real external numbering
 -- (from before this app existed) is already in the 40s, and a DB

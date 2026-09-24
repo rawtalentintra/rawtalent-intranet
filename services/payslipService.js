@@ -12,18 +12,15 @@ function addDays(dateStr, days) {
 }
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
-// Fixed-salary payroll rule (Joy, 2026-09-25) — Sophia and Joy are paid a
-// set fortnightly salary in HeartBeat instead of hours × hourly_rate_aud;
-// their employee_payroll_profiles.hourly_rate_aud ($20) stays on file for
-// display/history but is no longer what their pay is computed from. Same
-// "these two specific people, hardcoded by email" pattern already used
-// for FINAL_APPROVERS in routes/payslips.js — reused here rather than a
-// new profile column, since the thing being granted is a whole different
-// formula, not an on/off feature.
-const FIXED_SALARY_EMPLOYEES = {
-  'sophia@rawtalent.com.au': { baseFortnightlyAud: 1650, excessThresholdHours: 80, excessHourlyRateAud: 20 },
-  'joy@rawtalent.com.au': { baseFortnightlyAud: 1650, excessThresholdHours: 80, excessHourlyRateAud: 20 }
-};
+// Fixed-fortnightly-salary pay type (Joy, 2026-09-25) — an alternative to
+// hourly_rate_aud, driven entirely by employee_payroll_profiles data
+// (fortnightly_rate_aud/overtime_rate_aud — see db/schema.sql's comment)
+// rather than a hardcoded person list, so it's assignable from the
+// Payroll Profiles UI (Edit Payroll Profile modal) to whoever needs it —
+// Sophia and Joy today, set up there rather than in code. Excess-hours
+// threshold stays a plain constant: nobody's asked to make that editable,
+// unlike the two dollar figures.
+const FIXED_SALARY_EXCESS_THRESHOLD_HOURS = 80;
 
 // pg returns DATE columns as JS Date objects built from the server's local
 // timezone — naive serialization shifts the date. Same fix as
@@ -59,28 +56,38 @@ async function getProfile(userEmail) {
 // confirmed out of scope — and are naturally excluded by the users JOIN,
 // no special-case filter needed), left-joined with whatever payroll
 // profile fields exist so far (null if not yet set up).
+//
+// Liam/Gwen/Justine excluded (Joy, 2026-09-25: "we don't process them
+// through HB") — Workforce Partners aren't paid via HeartBeat payroll at
+// all, unlike everyone else here. Filtering them out of this one shared
+// roster query removes them from every payroll surface at once (Payroll
+// Profiles, the Approvals/Generate Payslip table, buildTeamInvoiceData's
+// Team Invoice), rather than needing the same exclusion repeated at each.
+const PAYROLL_EXCLUDED_EMAILS = new Set(['liam@rawtalent.com.au', 'gwen@rawtalent.com.au', 'justine@rawtalent.com.au']);
 async function listProfiles() {
   const res = await getDb().execute(`
     SELECT tm.email AS user_email, tm.name, tm.legal_name, tm.position, tm.address,
-           epp.hourly_rate_aud, epp.pays_in_php, epp.bank_name, epp.bank_account_name, epp.bank_account_number, epp.bank_swift_code
+           epp.hourly_rate_aud, epp.fortnightly_rate_aud, epp.overtime_rate_aud,
+           epp.pays_in_php, epp.bank_name, epp.bank_account_name, epp.bank_account_number, epp.bank_swift_code
     FROM team_members tm
     JOIN users u ON LOWER(u.email) = LOWER(tm.email) AND u.active = true
     LEFT JOIN employee_payroll_profiles epp ON LOWER(epp.user_email) = LOWER(tm.email)
     WHERE tm.status = 'active'
     ORDER BY tm.name ASC
   `);
-  return res.rows;
+  return res.rows.filter(r => !PAYROLL_EXCLUDED_EMAILS.has((r.user_email || '').toLowerCase()));
 }
 
-async function upsertProfile({ userEmail, userName, hourlyRateAud, paysInPhp, bankName, bankAccountName, bankAccountNumber, bankSwiftCode, updatedBy }) {
+async function upsertProfile({ userEmail, userName, hourlyRateAud, fortnightlyRateAud, overtimeRateAud, paysInPhp, bankName, bankAccountName, bankAccountNumber, bankSwiftCode, updatedBy }) {
   await getDb().execute({
-    sql: `INSERT INTO employee_payroll_profiles (id, user_email, user_name, hourly_rate_aud, pays_in_php, bank_name, bank_account_name, bank_account_number, bank_swift_code, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO employee_payroll_profiles (id, user_email, user_name, hourly_rate_aud, fortnightly_rate_aud, overtime_rate_aud, pays_in_php, bank_name, bank_account_name, bank_account_number, bank_swift_code, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (user_email) DO UPDATE SET user_name = excluded.user_name, hourly_rate_aud = excluded.hourly_rate_aud,
+            fortnightly_rate_aud = excluded.fortnightly_rate_aud, overtime_rate_aud = excluded.overtime_rate_aud,
             pays_in_php = excluded.pays_in_php, bank_name = excluded.bank_name, bank_account_name = excluded.bank_account_name,
             bank_account_number = excluded.bank_account_number, bank_swift_code = excluded.bank_swift_code,
             updated_by = excluded.updated_by, updated_at = now()`,
-    args: [uuidv4(), userEmail, userName, hourlyRateAud, !!paysInPhp, bankName || null, bankAccountName || null, bankAccountNumber || null, bankSwiftCode || null, updatedBy]
+    args: [uuidv4(), userEmail, userName, hourlyRateAud ?? null, fortnightlyRateAud ?? null, overtimeRateAud ?? null, !!paysInPhp, bankName || null, bankAccountName || null, bankAccountNumber || null, bankSwiftCode || null, updatedBy]
   });
   return getProfile(userEmail);
 }
@@ -129,7 +136,12 @@ async function listEligibleForPeriod(payPeriodStart) {
       db.execute({ sql: 'SELECT id, published_at FROM payslips WHERE LOWER(user_email) = LOWER(?) AND pay_period_start = ?', args: [person.user_email, payPeriodStart] })
     ]);
     const bothApproved = w1.week.status === 'approved' && w2.week.status === 'approved';
-    const hasProfile = person.hourly_rate_aud != null;
+    // Either pay model counts as "has a profile" — hourly_rate_aud for
+    // the normal path, fortnightly_rate_aud for a fixed-salary employee
+    // (see buildLineItemsFromTimesheets) — never both at once in practice
+    // (savePayrollProfile in views/admin.html clears whichever model
+    // isn't selected), but this checks either rather than assuming which.
+    const hasProfile = person.hourly_rate_aud != null || person.fortnightly_rate_aud != null;
     const existing = existingRes.rows[0];
     results.push({
       // userName (legal-first) stays what the Payslips table/generate
@@ -166,9 +178,11 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
   const week1Label = `Week 1: ${fmtRangeLabel(payPeriodStart, w1.week.week_end_date)}`;
   const week2Label = `Week 2: ${fmtRangeLabel(week2Start, w2.week.week_end_date)}`;
 
-  const fixedSalary = FIXED_SALARY_EMPLOYEES[userEmail.toLowerCase()];
+  const isFixedSalary = profile?.fortnightly_rate_aud != null;
   let lineItems;
-  if (fixedSalary) {
+  if (isFixedSalary) {
+    const baseFortnightlyAud = Number(profile.fortnightly_rate_aud);
+    const excessHourlyRateAud = Number(profile.overtime_rate_aud || 0);
     // Real hours are shown per week for reference/audit (and so the
     // excess-hours threshold below is checkable against what's on the
     // document) but carry $0 — pay itself comes from the fixed-salary and
@@ -187,10 +201,10 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
       // own live recompute — see views/admin.html's updatePgLineItem) uses
       // for its amount — a fixed salary has no real "hours" of its own,
       // so this is "1 unit at $1,650", not an hours figure.
-      { groupLabel: '', label: 'Fixed Fortnightly Salary', hours: 1, rate: fixedSalary.baseFortnightlyAud, amount: fixedSalary.baseFortnightlyAud, source: 'fixed_salary' }
+      { groupLabel: '', label: 'Fixed Fortnightly Salary', hours: 1, rate: baseFortnightlyAud, amount: baseFortnightlyAud, source: 'fixed_salary' }
     ];
     const totalHours = h1 + h2;
-    const excessHours = round2(totalHours - fixedSalary.excessThresholdHours);
+    const excessHours = round2(totalHours - FIXED_SALARY_EXCESS_THRESHOLD_HOURS);
     if (excessHours > 0) {
       // Short on purpose — the label column is only ~165pt wide on the
       // PDF (see payslipPdfService.js's Shift Details table) and wraps
@@ -199,7 +213,7 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
       // Hour column right next to it, so it doesn't need repeating here.
       lineItems.push({
         groupLabel: '', label: 'Excess Hours over 80',
-        hours: excessHours, rate: fixedSalary.excessHourlyRateAud, amount: round2(excessHours * fixedSalary.excessHourlyRateAud), source: 'fixed_salary'
+        hours: excessHours, rate: excessHourlyRateAud, amount: round2(excessHours * excessHourlyRateAud), source: 'fixed_salary'
       });
     }
   } else {
@@ -247,8 +261,8 @@ async function generate({ userEmail, payPeriodStart, invoiceNumber, datePaid, wo
   if (w1.week.status !== 'approved' || w2.week.status !== 'approved') {
     throw new Error('Both weeks of this pay period must be fully approved before generating a payslip');
   }
-  if (!profile || profile.hourly_rate_aud == null) {
-    throw new Error("Set this employee's hourly rate (and bank details) before generating a payslip");
+  if (!profile || (profile.hourly_rate_aud == null && profile.fortnightly_rate_aud == null)) {
+    throw new Error("Set this employee's rate (and bank details) before generating a payslip");
   }
   if (profile.pays_in_php && (exchangeRate == null || totalEarningsPhp == null)) {
     throw new Error('Exchange rate and PHP total are required for this employee');

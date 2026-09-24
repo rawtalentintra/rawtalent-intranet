@@ -24,9 +24,9 @@ router.get('/profiles', requireFinalApprover, async (req, res) => {
 
 router.put('/profiles/:userEmail', requireFinalApprover, async (req, res) => {
   try {
-    const { userName, hourlyRateAud, paysInPhp, bankName, bankAccountName, bankAccountNumber, bankSwiftCode } = req.body;
+    const { userName, hourlyRateAud, fortnightlyRateAud, overtimeRateAud, paysInPhp, bankName, bankAccountName, bankAccountNumber, bankSwiftCode } = req.body;
     res.json(await payslip.upsertProfile({
-      userEmail: req.params.userEmail, userName, hourlyRateAud, paysInPhp,
+      userEmail: req.params.userEmail, userName, hourlyRateAud, fortnightlyRateAud, overtimeRateAud, paysInPhp,
       bankName, bankAccountName, bankAccountNumber, bankSwiftCode, updatedBy: req.user.email
     }));
   } catch (err) {

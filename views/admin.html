@@ -666,7 +666,7 @@
             <div style="overflow-x:auto">
               <table class="data-table">
                 <thead>
-                  <tr><th>Name</th><th>Position</th><th>Hourly Rate (AUD)</th><th>Pays in PHP</th><th>Bank</th><th style="width:30px"></th></tr>
+                  <tr><th>Name</th><th>Position</th><th>Rate (AUD)</th><th>Pays in PHP</th><th>Bank</th><th style="width:30px"></th></tr>
                 </thead>
                 <tbody id="payrollProfilesTableBody">
                   <tr><td colspan="6"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>
@@ -4421,8 +4421,21 @@
         <input type="hidden" id="ppEmail">
         <div style="font-weight:700;color:var(--navy);margin-bottom:14px" id="ppName"></div>
         <div class="form-group-modal">
+          <label class="form-label-modal"><input type="checkbox" id="ppFixedSalary" style="margin-right:6px" onchange="onPpPayTypeChange()">Paid a fixed fortnightly salary (not hourly)</label>
+        </div>
+        <div class="form-group-modal" id="ppHourlyRateGroup">
           <label class="form-label-modal">Hourly Rate (AUD)</label>
           <input type="number" step="0.01" min="0" id="ppRate" class="form-control">
+        </div>
+        <div class="form-row" id="ppFixedSalaryGroup" style="display:none">
+          <div class="form-group-modal">
+            <label class="form-label-modal">Fortnightly Rate (AUD)</label>
+            <input type="number" step="0.01" min="0" id="ppFortnightlyRate" class="form-control">
+          </div>
+          <div class="form-group-modal">
+            <label class="form-label-modal">Overtime Rate (AUD/hr)</label>
+            <input type="number" step="0.01" min="0" id="ppOvertimeRate" class="form-control">
+          </div>
         </div>
         <div class="form-group-modal">
           <label class="form-label-modal"><input type="checkbox" id="ppPaysInPhp" style="margin-right:6px">Pays in PHP (adds the currency conversion block to their payslip)</label>
@@ -7990,7 +8003,9 @@
           <tr>
             <td>${escHtml(r.legal_name || r.name)}</td>
             <td>${escHtml(r.position || '—')}</td>
-            <td>${r.hourly_rate_aud != null ? '$' + Number(r.hourly_rate_aud).toFixed(2) : '<span style="color:#b45309;font-weight:700">Not set</span>'}</td>
+            <td>${r.fortnightly_rate_aud != null
+              ? '$' + Number(r.fortnightly_rate_aud).toFixed(2) + '/fortnight' + (r.overtime_rate_aud != null ? ` + $${Number(r.overtime_rate_aud).toFixed(2)}/hr OT` : '')
+              : r.hourly_rate_aud != null ? '$' + Number(r.hourly_rate_aud).toFixed(2) + '/hr' : '<span style="color:#b45309;font-weight:700">Not set</span>'}</td>
             <td>${r.pays_in_php ? '✅' : '—'}</td>
             <td>${r.bank_name ? escHtml(r.bank_name) + ' · ' + escHtml(r.bank_account_number || '') : '<span style="color:#b45309;font-weight:700">Not set</span>'}</td>
             <td><span title="Edit" style="cursor:pointer" onclick="openPayrollProfileModal('${r.user_email}')">✏️</span></td>
@@ -8006,6 +8021,10 @@
       document.getElementById('ppEmail').value = email;
       document.getElementById('ppName').textContent = row.legal_name || row.name;
       document.getElementById('ppRate').value = row.hourly_rate_aud != null ? row.hourly_rate_aud : '';
+      document.getElementById('ppFixedSalary').checked = row.fortnightly_rate_aud != null;
+      document.getElementById('ppFortnightlyRate').value = row.fortnightly_rate_aud != null ? row.fortnightly_rate_aud : '';
+      document.getElementById('ppOvertimeRate').value = row.overtime_rate_aud != null ? row.overtime_rate_aud : '';
+      onPpPayTypeChange();
       document.getElementById('ppPaysInPhp').checked = !!row.pays_in_php;
       document.getElementById('ppBankName').value = row.bank_name || '';
       document.getElementById('ppBankAccountName').value = row.bank_account_name || '';
@@ -8014,16 +8033,32 @@
       document.getElementById('payrollProfileModal').classList.add('open');
     }
     function closePayrollProfileModal() { document.getElementById('payrollProfileModal').classList.remove('open'); }
+    // Toggles which rate fields show — a fixed-salary profile's pay comes
+    // entirely from Fortnightly/Overtime Rate (see payslipService.js's
+    // buildLineItemsFromTimesheets, which branches on fortnightly_rate_aud
+    // being set), so the Hourly Rate field is irrelevant for them, not
+    // just unused.
+    function onPpPayTypeChange() {
+      const isFixed = document.getElementById('ppFixedSalary').checked;
+      document.getElementById('ppHourlyRateGroup').style.display = isFixed ? 'none' : '';
+      document.getElementById('ppFixedSalaryGroup').style.display = isFixed ? 'grid' : 'none';
+    }
 
     async function savePayrollProfile() {
       const email = document.getElementById('ppEmail').value;
       const row = payrollProfilesCache.find(r => r.user_email === email);
+      const isFixed = document.getElementById('ppFixedSalary').checked;
       try {
         const res = await fetch(`/api/payslips/profiles/${encodeURIComponent(email)}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userName: row?.legal_name || row?.name || email,
-            hourlyRateAud: document.getElementById('ppRate').value === '' ? null : Number(document.getElementById('ppRate').value),
+            // Exactly one pay model's rate(s) are ever stored at a time —
+            // switching the checkbox clears out the other model's field(s)
+            // rather than leaving a stale, unused rate sitting in the data.
+            hourlyRateAud: isFixed ? null : (document.getElementById('ppRate').value === '' ? null : Number(document.getElementById('ppRate').value)),
+            fortnightlyRateAud: isFixed ? (document.getElementById('ppFortnightlyRate').value === '' ? null : Number(document.getElementById('ppFortnightlyRate').value)) : null,
+            overtimeRateAud: isFixed ? (document.getElementById('ppOvertimeRate').value === '' ? null : Number(document.getElementById('ppOvertimeRate').value)) : null,
             paysInPhp: document.getElementById('ppPaysInPhp').checked,
             bankName: document.getElementById('ppBankName').value.trim(),
             bankAccountName: document.getElementById('ppBankAccountName').value.trim(),
