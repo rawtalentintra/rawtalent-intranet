@@ -12,6 +12,19 @@ function addDays(dateStr, days) {
 }
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
+// Fixed-salary payroll rule (Joy, 2026-09-25) — Sophia and Joy are paid a
+// set fortnightly salary in HeartBeat instead of hours × hourly_rate_aud;
+// their employee_payroll_profiles.hourly_rate_aud ($20) stays on file for
+// display/history but is no longer what their pay is computed from. Same
+// "these two specific people, hardcoded by email" pattern already used
+// for FINAL_APPROVERS in routes/payslips.js — reused here rather than a
+// new profile column, since the thing being granted is a whole different
+// formula, not an on/off feature.
+const FIXED_SALARY_EMPLOYEES = {
+  'sophia@rawtalent.com.au': { baseFortnightlyAud: 1650, excessThresholdHours: 80, excessHourlyRateAud: 20 },
+  'joy@rawtalent.com.au': { baseFortnightlyAud: 1650, excessThresholdHours: 80, excessHourlyRateAud: 20 }
+};
+
 // pg returns DATE columns as JS Date objects built from the server's local
 // timezone — naive serialization shifts the date. Same fix as
 // leaveService.js/timesheetService.js's toDateOnly.
@@ -148,13 +161,48 @@ async function buildLineItemsFromTimesheets(userEmail, payPeriodStart) {
     timesheet.getWeek(userEmail, week2Start),
     getProfile(userEmail)
   ]);
-  const rate = Number(profile?.hourly_rate_aud || 0);
   const h1 = Number(w1.week.total_hours || 0);
   const h2 = Number(w2.week.total_hours || 0);
-  const lineItems = [
-    { groupLabel: `Week 1: ${fmtRangeLabel(payPeriodStart, w1.week.week_end_date)}`, label: '', hours: h1, rate, amount: round2(h1 * rate), source: 'timesheet' },
-    { groupLabel: `Week 2: ${fmtRangeLabel(week2Start, w2.week.week_end_date)}`, label: '', hours: h2, rate, amount: round2(h2 * rate), source: 'timesheet' }
-  ];
+  const week1Label = `Week 1: ${fmtRangeLabel(payPeriodStart, w1.week.week_end_date)}`;
+  const week2Label = `Week 2: ${fmtRangeLabel(week2Start, w2.week.week_end_date)}`;
+
+  const fixedSalary = FIXED_SALARY_EMPLOYEES[userEmail.toLowerCase()];
+  let lineItems;
+  if (fixedSalary) {
+    // Real hours are shown per week for reference/audit (and so the
+    // excess-hours threshold below is checkable against what's on the
+    // document) but carry $0 — pay itself comes from the fixed-salary and
+    // excess-bonus lines further down, not from hours × a rate.
+    lineItems = [
+      { groupLabel: week1Label, label: 'Hours Worked', hours: h1, rate: 0, amount: 0, source: 'timesheet' },
+      { groupLabel: week2Label, label: 'Hours Worked', hours: h2, rate: 0, amount: 0, source: 'timesheet' },
+      // hours: 1 / rate: <dollar amount> is a deliberate reuse of the
+      // hours × rate shape every other line item (and the generate-form's
+      // own live recompute — see views/admin.html's updatePgLineItem) uses
+      // for its amount — a fixed salary has no real "hours" of its own,
+      // so this is "1 unit at $1,650", not an hours figure.
+      { groupLabel: '', label: 'Fixed Fortnightly Salary', hours: 1, rate: fixedSalary.baseFortnightlyAud, amount: fixedSalary.baseFortnightlyAud, source: 'fixed_salary' }
+    ];
+    const totalHours = h1 + h2;
+    const excessHours = round2(totalHours - fixedSalary.excessThresholdHours);
+    if (excessHours > 0) {
+      // Short on purpose — the label column is only ~165pt wide on the
+      // PDF (see payslipPdfService.js's Shift Details table) and wraps
+      // onto the total-earnings divider if it's much longer than this.
+      // The excess-hours figure itself is already visible in the Total
+      // Hour column right next to it, so it doesn't need repeating here.
+      lineItems.push({
+        groupLabel: '', label: 'Excess Hours Bonus',
+        hours: excessHours, rate: fixedSalary.excessHourlyRateAud, amount: round2(excessHours * fixedSalary.excessHourlyRateAud), source: 'fixed_salary'
+      });
+    }
+  } else {
+    const rate = Number(profile?.hourly_rate_aud || 0);
+    lineItems = [
+      { groupLabel: week1Label, label: '', hours: h1, rate, amount: round2(h1 * rate), source: 'timesheet' },
+      { groupLabel: week2Label, label: '', hours: h2, rate, amount: round2(h2 * rate), source: 'timesheet' }
+    ];
+  }
   const workedDays = new Set([...w1.entries, ...w2.entries].filter(e => Number(e.hours) > 0).map(e => e.entry_date)).size;
   return { lineItems, workedDays, week1Status: w1.week.status, week2Status: w2.week.status };
 }
@@ -390,13 +438,18 @@ async function buildTeamInvoiceData(payPeriodStart, { invoiceNumber, datePaid } 
   for (const person of ready) {
     const existing = existingByEmail[person.userEmail.toLowerCase()];
     let totalHours, amount;
+    // Hours are summed from timesheet-sourced lines only — a fixed-
+    // salary employee's line items (see FIXED_SALARY_EMPLOYEES) also
+    // include pay-only lines ("Fixed Fortnightly Salary", an excess-hours
+    // bonus) tagged source:'fixed_salary' whose own `hours` field isn't a
+    // real additional hour worked and would otherwise double-count here.
     if (existing) {
-      totalHours = (existing.line_items || []).reduce((sum, li) => sum + Number(li.hours || 0), 0);
+      totalHours = (existing.line_items || []).filter(li => li.source === 'timesheet').reduce((sum, li) => sum + Number(li.hours || 0), 0);
       amount = Number(existing.total_earnings_aud);
       if (resolvedInvoiceNumber == null) resolvedInvoiceNumber = existing.invoice_number;
     } else {
       const prefill = await buildLineItemsFromTimesheets(person.userEmail, payPeriodStart);
-      totalHours = prefill.lineItems.reduce((sum, li) => sum + Number(li.hours || 0), 0);
+      totalHours = prefill.lineItems.filter(li => li.source === 'timesheet').reduce((sum, li) => sum + Number(li.hours || 0), 0);
       amount = round2(prefill.lineItems.reduce((sum, li) => sum + Number(li.amount || 0), 0));
     }
     const firstName = (person.userShortName || person.userName || person.userEmail).trim().split(/\s+/)[0];
