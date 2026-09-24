@@ -9,6 +9,19 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 
 function isStaff(role) { return role === 'admin' || role === 'super_admin'; }
 
+// A plain learner's course JSON is used only to render the question forms —
+// it never needs the answer key. Staff also fetch this same endpoint to
+// power the course editor (which DOES need it) and to preview/take a course
+// themselves, so the strip only applies to non-staff. For a free_text
+// question, correct_answer is a written-out reference answer for the human
+// reviewer — a bigger "here's the answer" leak via devtools than a bare MCQ
+// letter, which is what actually prompted adding this.
+function stripAnswerKeys(course) {
+  const strip = q => { delete q.correct_answer; };
+  course.modules?.forEach(m => m.questions?.forEach(strip));
+  course.finalAssessment?.forEach(strip);
+}
+
 // Training Dashboard (read-only: course list, detail, results) and taking a
 // course are open to every signed-in user — assigning a course to someone
 // only helps if they can actually see and take it. Building/editing/
@@ -36,7 +49,30 @@ router.get('/courses/:id', async (req, res) => {
     const course = await training.getCourseDetail(req.params.id, req.user.email);
     if (!course) return res.status(404).json({ error: 'Course not found' });
     if (course.status !== 'live' && !isStaff(req.user.role) && !course.my_assignment) return res.status(404).json({ error: 'Course not found' });
+    if (!isStaff(req.user.role)) stripAnswerKeys(course);
     res.json(course);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Every free_text answer still awaiting a human tick, across every course —
+// same admin+super_admin audience as course results (Sophia/Joy).
+router.get('/reviews', requireAdmin, async (req, res) => {
+  try {
+    res.json(await training.listPendingReviews());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/answers/:id/review', requireAdmin, async (req, res) => {
+  try {
+    const { isCorrect } = req.body;
+    if (typeof isCorrect !== 'boolean') return res.status(400).json({ error: 'isCorrect (true/false) is required' });
+    const answer = await training.reviewAnswer(req.params.id, isCorrect, req.user.email);
+    if (!answer) return res.status(404).json({ error: 'Answer not found' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -92,10 +128,26 @@ router.post('/courses/generate', requireTrainingBuilder, upload.array('documents
     }
     if (!material.trim()) return res.status(400).json({ error: 'Paste the training material or upload a document' });
 
+    // instructions/questionsPerModule/finalAssessmentMin are optional,
+    // internal-only knobs — no field for them in the New Course form. They
+    // exist so a one-off generation (e.g. a long, comprehensive reference
+    // document that genuinely needs more than the everyday default question
+    // count) can ask for more depth without changing what a normal course
+    // generation produces. questionsPerModule/finalAssessmentMin arrive as
+    // JSON strings over multipart form-data.
+    let questionsPerModule;
+    if (req.body.questionsPerModule) {
+      try { questionsPerModule = JSON.parse(req.body.questionsPerModule); } catch { /* ignore malformed, fall back to default */ }
+    }
+    const finalAssessmentMin = req.body.finalAssessmentMin ? Number(req.body.finalAssessmentMin) : undefined;
+
     const course = await training.generateCourseFromMaterial({
       title: title.trim(),
       description: description?.trim() || '',
       material,
+      instructions: req.body.instructions?.trim() || undefined,
+      questionsPerModule,
+      finalAssessmentMin,
       createdBy: req.user.email
     });
     res.json(course);

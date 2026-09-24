@@ -694,9 +694,10 @@ CREATE TABLE IF NOT EXISTS training_modules (
 CREATE INDEX IF NOT EXISTS idx_training_modules_course_id ON training_modules(course_id);
 
 -- module_id is NULL for final-assessment questions, set for a per-module
--- comprehension check. question_type is fixed to 'multiple_choice' for now
--- (options/correct_answer only make sense for that) — a future
--- 'short_answer'/AI-graded type can reuse this table without a schema change.
+-- comprehension check. question_type is 'multiple_choice' (options +
+-- correct_answer, auto-graded) or 'free_text' (options NULL; correct_answer
+-- holds a reference/model answer for a human reviewer, not shown to the
+-- learner and never auto-graded — see training_answers.reviewed_by).
 CREATE TABLE IF NOT EXISTS training_questions (
   id TEXT PRIMARY KEY,
   course_id TEXT NOT NULL,
@@ -716,7 +717,7 @@ CREATE TABLE IF NOT EXISTS training_attempts (
   id TEXT PRIMARY KEY,
   course_id TEXT NOT NULL,
   user_email TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'in_progress', -- 'in_progress' | 'completed'
+  status TEXT NOT NULL DEFAULT 'in_progress', -- 'in_progress' | 'pending_review' | 'completed'
   current_module_index INTEGER NOT NULL DEFAULT 0,
   module_results JSONB DEFAULT '[]',
   final_score REAL,
@@ -727,12 +728,18 @@ CREATE TABLE IF NOT EXISTS training_attempts (
 CREATE INDEX IF NOT EXISTS idx_training_attempts_course_id ON training_attempts(course_id);
 CREATE INDEX IF NOT EXISTS idx_training_attempts_user_email ON training_attempts(user_email);
 
+-- is_correct is NULL for a free_text answer until a reviewer ticks it (see
+-- reviewed_by/reviewed_at) — that's what marks it "pending review" rather
+-- than "wrong". multiple_choice answers are graded immediately and never
+-- go through reviewed_by/reviewed_at.
 CREATE TABLE IF NOT EXISTS training_answers (
   id TEXT PRIMARY KEY,
   attempt_id TEXT NOT NULL,
   question_id TEXT NOT NULL,
   selected_answer TEXT,
   is_correct BOOLEAN,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
   answered_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_training_answers_attempt_id ON training_answers(attempt_id);

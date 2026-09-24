@@ -78,15 +78,23 @@ async function gatherCourseContext(db, title, description) {
 // comprehension check, plus a final graded assessment drawing across all of
 // them — submitted as a single tool call so the whole structure comes back
 // well-formed in one shot rather than free-text JSON that can fail to parse.
-function buildGenerationTool() {
+function buildGenerationTool({ questionsPerModule = { min: 1, max: 3 }, finalAssessmentMin = 5 } = {}) {
   const question = {
     type: 'object',
     properties: {
+      questionType: {
+        type: 'string',
+        enum: ['multiple_choice', 'free_text'],
+        description: 'multiple_choice: a question with 3-5 plausible options and one exactly-correct answer, auto-graded. free_text: the learner types their own answer (a one-word answer, a short phrase, or a brief explanation) — a human reviews it afterwards, so use this whenever real understanding is better checked by an explanation than by picking an option.'
+      },
       questionText: { type: 'string' },
-      options: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 5 },
-      correctAnswer: { type: 'string', description: 'Must exactly match one of the strings in options.' }
+      options: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 5, description: 'Required for multiple_choice. Omit entirely for free_text.' },
+      correctAnswer: {
+        type: 'string',
+        description: 'For multiple_choice: must exactly match one of the strings in options. For free_text: a reference/model answer describing what a correct response should contain — this is shown only to the human reviewer scoring the answer afterwards, never to the learner.'
+      }
     },
-    required: ['questionText', 'options', 'correctAnswer']
+    required: ['questionType', 'questionText', 'correctAnswer']
   };
   return {
     name: 'submit_course',
@@ -102,16 +110,16 @@ function buildGenerationTool() {
             properties: {
               title: { type: 'string' },
               content: { type: 'string', description: 'Clean HTML (headings, paragraphs, lists, bold) covering this module\'s slice of the material — study content a learner reads, not a summary.' },
-              questions: { type: 'array', minItems: 1, maxItems: 3, items: question, description: 'Comprehension check questions asked right after this module.' }
+              questions: { type: 'array', minItems: questionsPerModule.min, maxItems: questionsPerModule.max, items: question, description: 'Comprehension check questions asked right after this module — mix multiple_choice and free_text rather than defaulting to all multiple_choice.' }
             },
             required: ['title', 'content', 'questions']
           }
         },
         finalAssessment: {
           type: 'array',
-          minItems: 5,
+          minItems: finalAssessmentMin,
           items: question,
-          description: 'Graded assessment questions drawn across all modules, testing retention of the material as a whole.'
+          description: 'Graded assessment questions drawn across all modules, testing retention of the material as a whole — mix multiple_choice and free_text rather than defaulting to all multiple_choice.'
         }
       },
       required: ['modules', 'finalAssessment']
@@ -119,7 +127,14 @@ function buildGenerationTool() {
   };
 }
 
-async function generateCourseFromMaterial({ title, description, material, createdBy }) {
+// instructions is optional extra per-generation guidance (e.g. "cover every
+// state thoroughly, one question per key step") folded into the user
+// message rather than the system prompt, since it's specific to this one
+// course, not a standing rule for every future course generated.
+// questionsPerModule/finalAssessmentMin let a single generation ask for more
+// than the everyday default (e.g. a long, comprehensive reference document)
+// without changing what a normal course generation produces.
+async function generateCourseFromMaterial({ title, description, material, createdBy, instructions, questionsPerModule, finalAssessmentMin }) {
   const client = getClient();
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
   if (!material?.trim()) throw new Error('Source material is required to generate a course.');
@@ -127,12 +142,12 @@ async function generateCourseFromMaterial({ title, description, material, create
   const db = getDb();
   const contextBlock = await gatherCourseContext(db, title, description);
 
-  const tool = buildGenerationTool();
+  const tool = buildGenerationTool({ questionsPerModule, finalAssessmentMin });
   const system = `You are building internal staff training for RawTalent, an Australian childcare staffing agency. Given raw source material (a process doc, SOP, or reference sheet) plus supplementary context pulled from RawTalent's own knowledge base (internal articles, AI sources, FAQs, glossary, and real call-evaluation/calibration data), break the material into a logical sequence of study modules a new consultant can work through — each module should cover one coherent chunk of the material (e.g. one process, one concept area), not an arbitrary page split.
 
 The uploaded/pasted source material is the SPINE of the course — build modules from it directly. Use the supplementary context to enrich and correct that content: apply glossary terms precisely wherever they're relevant, fold in directly relevant detail from related articles/FAQs/AI sources where it fills a gap the source material leaves open, and — where the call-evaluation themes or calibration notes surface a common real mistake related to this topic — make sure a module or question addresses it. Don't force in unrelated context just because it was provided; only use what's actually relevant to this course's material.
 
-After each module, write 1-3 multiple-choice comprehension questions that check whether the learner actually understood THAT module's content — plausible wrong answers, not trick questions. Then write a final assessment of at least 5 multiple-choice questions drawing across the whole course, testing real retention. Write everything in clear, formal Australian English. Call submit_course exactly once.`;
+After each module, write comprehension questions that check whether the learner actually understood THAT module's content, using a genuine MIX of both question types available: multiple_choice (plausible wrong answers, not trick questions) and free_text (a one-word answer, a short phrase, or a brief explanation typed by the learner). Reach for free_text whenever real understanding is better shown by explaining something in the learner's own words, or naming a specific fact, than by picking from a list — don't default everything to multiple_choice. Then write a final assessment drawing across the whole course, testing real retention, with the same genuine mix of both types. Write everything in clear, formal Australian English. Call submit_course exactly once.`;
 
   // Streamed (not a plain create()) because a multi-module course with rich
   // per-module HTML, comprehension questions, and a final assessment can
@@ -144,7 +159,7 @@ After each module, write 1-3 multiple-choice comprehension questions that check 
     system,
     tools: [tool],
     tool_choice: { type: 'tool', name: 'submit_course' },
-    messages: [{ role: 'user', content: `Course title: ${title}\n${description ? `Course description: ${description}\n` : ''}\nSource material:\n${material.slice(0, 30000)}${contextBlock ? `\n\n---\n# Supplementary RawTalent Knowledge Base Context\n${contextBlock.slice(0, 15000)}` : ''}` }]
+    messages: [{ role: 'user', content: `Course title: ${title}\n${description ? `Course description: ${description}\n` : ''}${instructions ? `\n${instructions}\n` : ''}\nSource material:\n${material.slice(0, 30000)}${contextBlock ? `\n\n---\n# Supplementary RawTalent Knowledge Base Context\n${contextBlock.slice(0, 15000)}` : ''}` }]
   });
   const response = await stream.finalMessage();
 
@@ -175,20 +190,22 @@ async function saveCourse({ title, description, material, generated, createdBy }
     });
     for (let qi = 0; qi < (m.questions || []).length; qi++) {
       const q = m.questions[qi];
+      const questionType = q.questionType === 'free_text' ? 'free_text' : 'multiple_choice';
       await db.execute({
-        sql: `INSERT INTO training_questions (id, course_id, module_id, question_text, options, correct_answer, order_index)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: [uuidv4(), courseId, moduleId, q.questionText, JSON.stringify(q.options), q.correctAnswer, qi]
+        sql: `INSERT INTO training_questions (id, course_id, module_id, question_type, question_text, options, correct_answer, order_index)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [uuidv4(), courseId, moduleId, questionType, q.questionText, questionType === 'free_text' ? null : JSON.stringify(q.options), q.correctAnswer, qi]
       });
     }
   }
 
   for (let qi = 0; qi < generated.finalAssessment.length; qi++) {
     const q = generated.finalAssessment[qi];
+    const questionType = q.questionType === 'free_text' ? 'free_text' : 'multiple_choice';
     await db.execute({
-      sql: `INSERT INTO training_questions (id, course_id, module_id, question_text, options, correct_answer, order_index)
-            VALUES (?, ?, NULL, ?, ?, ?, ?)`,
-      args: [uuidv4(), courseId, q.questionText, JSON.stringify(q.options), q.correctAnswer, qi]
+      sql: `INSERT INTO training_questions (id, course_id, module_id, question_type, question_text, options, correct_answer, order_index)
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
+      args: [uuidv4(), courseId, questionType, q.questionText, questionType === 'free_text' ? null : JSON.stringify(q.options), q.correctAnswer, qi]
     });
   }
 
@@ -296,13 +313,14 @@ async function updateModule(moduleId, { title, content }) {
   await db.execute({ sql: `UPDATE training_modules SET ${fields.join(', ')} WHERE id = ?`, args });
 }
 
-async function updateQuestion(questionId, { questionText, options, correctAnswer }) {
+async function updateQuestion(questionId, { questionText, options, correctAnswer, questionType }) {
   const db = getDb();
   const fields = [];
   const args = [];
   if (questionText !== undefined) { fields.push('question_text = ?'); args.push(questionText); }
   if (options !== undefined) { fields.push('options = ?'); args.push(JSON.stringify(options)); }
   if (correctAnswer !== undefined) { fields.push('correct_answer = ?'); args.push(correctAnswer); }
+  if (questionType !== undefined) { fields.push('question_type = ?'); args.push(questionType); }
   if (!fields.length) return;
   fields.push('updated_at = now()');
   args.push(questionId);
@@ -345,6 +363,14 @@ async function startAttempt(courseId, userEmail) {
     return mostRecent.rows[0];
   }
 
+  // Same reasoning as the just-passed check above, one status earlier: a
+  // pending_review attempt is "done" from the learner's side (they can't
+  // add or change anything until it's reviewed) — resuming it should show
+  // where it's at, not silently spawn a second attempt that shadows it.
+  if (mostRecent.rows[0]?.status === 'pending_review') {
+    return mostRecent.rows[0];
+  }
+
   const id = uuidv4();
   await db.execute({
     sql: `INSERT INTO training_attempts (id, course_id, user_email) VALUES (?, ?, ?)`,
@@ -359,15 +385,27 @@ async function getAttempt(attemptId) {
   return res.rows[0] || null;
 }
 
+// multiple_choice grades immediately (exact match). free_text is never
+// auto-graded — correct stays null ("pending") until a human reviewer ticks
+// it via reviewAnswer(). correct/total below only ever count multiple_choice
+// questions, so a course's "you got X of Y correct" line never silently
+// counts an unreviewed free_text answer as wrong.
 function gradeAnswers(questions, submittedAnswers) {
   let correct = 0;
+  let total = 0;
+  let pendingReview = 0;
   const results = questions.map(q => {
     const given = submittedAnswers[q.id];
+    if (q.question_type === 'free_text') {
+      pendingReview++;
+      return { questionId: q.id, given, correct: null, questionType: 'free_text' };
+    }
+    total++;
     const isCorrect = given === q.correct_answer;
     if (isCorrect) correct++;
-    return { questionId: q.id, given, correct: isCorrect };
+    return { questionId: q.id, given, correct: isCorrect, questionType: 'multiple_choice' };
   });
-  return { correct, total: questions.length, results };
+  return { correct, total, pendingReview, results };
 }
 
 async function submitModuleAnswers(attemptId, moduleId, answers) {
@@ -376,7 +414,7 @@ async function submitModuleAnswers(attemptId, moduleId, answers) {
   if (!attempt) throw new Error('Attempt not found');
 
   const questionsRes = await db.execute({ sql: 'SELECT * FROM training_questions WHERE module_id = ? ORDER BY order_index ASC', args: [moduleId] });
-  const { correct, total, results } = gradeAnswers(questionsRes.rows, answers);
+  const { correct, total, pendingReview, results } = gradeAnswers(questionsRes.rows, answers);
 
   for (const r of results) {
     await db.execute({
@@ -386,15 +424,22 @@ async function submitModuleAnswers(attemptId, moduleId, answers) {
   }
 
   const moduleResults = Array.isArray(attempt.module_results) ? attempt.module_results : [];
-  moduleResults.push({ moduleId, correct, total });
+  moduleResults.push({ moduleId, correct, total, pendingReview });
   await db.execute({
     sql: `UPDATE training_attempts SET module_results = ?, current_module_index = current_module_index + 1 WHERE id = ?`,
     args: [JSON.stringify(moduleResults), attemptId]
   });
 
-  return { correct, total, results };
+  return { correct, total, pendingReview, results };
 }
 
+// If the final assessment has any free_text questions, the real
+// final_score/final_passed can't be known yet — the attempt goes to
+// 'pending_review' with those fields left null, and only gets finalized once
+// every free_text answer on it has been reviewed (see maybeFinalizeAttempt,
+// called from reviewAnswer). correct/total here are multiple_choice-only, so
+// the learner's immediate feedback never implies a free_text answer was
+// marked right or wrong before a human actually looked at it.
 async function submitFinalAssessment(attemptId, answers) {
   const db = getDb();
   const attempt = await getAttempt(attemptId);
@@ -403,13 +448,18 @@ async function submitFinalAssessment(attemptId, answers) {
   const course = courseRes.rows[0];
 
   const questionsRes = await db.execute({ sql: 'SELECT * FROM training_questions WHERE course_id = ? AND module_id IS NULL ORDER BY order_index ASC', args: [attempt.course_id] });
-  const { correct, total, results } = gradeAnswers(questionsRes.rows, answers);
+  const { correct, total, pendingReview, results } = gradeAnswers(questionsRes.rows, answers);
 
   for (const r of results) {
     await db.execute({
       sql: `INSERT INTO training_answers (id, attempt_id, question_id, selected_answer, is_correct) VALUES (?, ?, ?, ?, ?)`,
       args: [uuidv4(), attemptId, r.questionId, r.given ?? null, r.correct]
     });
+  }
+
+  if (pendingReview > 0) {
+    await db.execute({ sql: `UPDATE training_attempts SET status = 'pending_review' WHERE id = ?`, args: [attemptId] });
+    return { correct, total, pendingReview, status: 'pending_review', score: null, passed: null };
   }
 
   const score = total ? Math.round((correct / total) * 1000) / 10 : 0;
@@ -419,7 +469,71 @@ async function submitFinalAssessment(attemptId, answers) {
     args: [score, passed, attemptId]
   });
 
-  return { correct, total, score, passed };
+  return { correct, total, pendingReview, status: 'completed', score, passed };
+}
+
+// Every free_text answer still awaiting a human tick, across every course
+// and learner, oldest-answered first within each person — grouped in the
+// frontend by attempt_id so a reviewer works through one person's
+// submission at a time instead of a flat, context-less list.
+async function listPendingReviews() {
+  const db = getDb();
+  const res = await db.execute(`
+    SELECT ta.id AS answer_id, ta.attempt_id, ta.selected_answer, ta.answered_at,
+           tq.question_text, tq.correct_answer AS reference_answer, tq.module_id,
+           att.user_email, att.course_id, att.status AS attempt_status,
+           tc.title AS course_title, tm.title AS module_title
+    FROM training_answers ta
+    JOIN training_questions tq ON tq.id = ta.question_id
+    JOIN training_attempts att ON att.id = ta.attempt_id
+    JOIN training_courses tc ON tc.id = att.course_id
+    LEFT JOIN training_modules tm ON tm.id = tq.module_id
+    WHERE tq.question_type = 'free_text' AND ta.is_correct IS NULL
+    ORDER BY att.user_email ASC, ta.answered_at ASC
+  `);
+  return res.rows;
+}
+
+// Sophia/Joy ticking one free_text answer correct or incorrect. Once that
+// clears every free_text answer on the FINAL ASSESSMENT of a pending_review
+// attempt (module-level free_text answers don't gate this — they're
+// practice feedback, same as module multiple_choice, and never fed
+// final_score even before this feature existed), the real score gets
+// computed and the attempt flips to completed.
+async function reviewAnswer(answerId, isCorrect, reviewerEmail) {
+  const db = getDb();
+  await db.execute({
+    sql: `UPDATE training_answers SET is_correct = ?, reviewed_by = ?, reviewed_at = now() WHERE id = ?`,
+    args: [!!isCorrect, reviewerEmail, answerId]
+  });
+  const answerRes = await db.execute({ sql: 'SELECT * FROM training_answers WHERE id = ?', args: [answerId] });
+  const answer = answerRes.rows[0];
+  if (!answer) return null;
+  await maybeFinalizeAttempt(answer.attempt_id);
+  return answer;
+}
+
+async function maybeFinalizeAttempt(attemptId) {
+  const db = getDb();
+  const attempt = await getAttempt(attemptId);
+  if (!attempt || attempt.status !== 'pending_review') return;
+
+  const questionsRes = await db.execute({ sql: 'SELECT id FROM training_questions WHERE course_id = ? AND module_id IS NULL', args: [attempt.course_id] });
+  const answersRes = await db.execute({ sql: 'SELECT * FROM training_answers WHERE attempt_id = ?', args: [attemptId] });
+  const finalQuestionIds = new Set(questionsRes.rows.map(q => q.id));
+  const finalAnswers = answersRes.rows.filter(a => finalQuestionIds.has(a.question_id));
+  if (finalAnswers.some(a => a.is_correct === null)) return; // still someone left to review
+
+  const courseRes = await db.execute({ sql: 'SELECT * FROM training_courses WHERE id = ?', args: [attempt.course_id] });
+  const course = courseRes.rows[0];
+  const correct = finalAnswers.filter(a => a.is_correct).length;
+  const total = finalAnswers.length;
+  const score = total ? Math.round((correct / total) * 1000) / 10 : 0;
+  const passed = score >= (course?.pass_threshold ?? 80);
+  await db.execute({
+    sql: `UPDATE training_attempts SET status = 'completed', final_score = ?, final_passed = ?, completed_at = now() WHERE id = ?`,
+    args: [score, passed, attemptId]
+  });
 }
 
 // Merges assignments and attempts by user so someone who's been assigned
@@ -476,9 +590,14 @@ async function getAttemptDetail(attemptId) {
   function withAnswers(questions) {
     return questions.map(q => {
       const a = answerByQuestionId.get(q.id);
+      // is_correct stays null (not false) for a free_text answer nobody's
+      // reviewed yet — collapsing it to false would show an honestly-pending
+      // answer as wrong.
+      const isCorrect = a ? a.is_correct : false;
       return {
-        question_text: q.question_text, options: q.options, correct_answer: q.correct_answer,
-        selected_answer: a?.selected_answer ?? null, is_correct: a?.is_correct ?? false, answered: !!a
+        question_text: q.question_text, question_type: q.question_type, options: q.options, correct_answer: q.correct_answer,
+        selected_answer: a?.selected_answer ?? null, is_correct: isCorrect, answered: !!a,
+        pending_review: !!a && q.question_type === 'free_text' && a.is_correct === null
       };
     });
   }
@@ -557,5 +676,7 @@ module.exports = {
   deleteAttempt,
   resetUserAttempts,
   assignCourse,
-  getAttemptDetail
+  getAttemptDetail,
+  listPendingReviews,
+  reviewAnswer
 };

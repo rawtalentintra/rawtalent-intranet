@@ -424,6 +424,9 @@
         <div class="admin-nav-item" id="navTrainingBuild" style="display:none" onclick="showSection('training-build', this)">
           <span class="admin-nav-icon">🛠️</span> Build Training
         </div>
+        <div class="admin-nav-item" id="navTrainingReview" style="display:none" onclick="showSection('training-review', this)">
+          <span class="admin-nav-icon">✅</span> Review Answers
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Insights</div>
@@ -3255,6 +3258,22 @@
       </div>
       </template>
 
+      <!-- Review Answers (free-text training answers awaiting a manual tick) -->
+      <template id="__lazy_training_review">
+      <div class="admin-section" id="section-training-review">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Review Answers</div>
+            <div class="admin-page-sub">Free-text training answers waiting on a correct/incorrect tick before a learner's score finalises</div>
+          </div>
+          <button class="btn-secondary" onclick="loadTrainingReview()">🔄 Refresh</button>
+        </div>
+        <div id="trainingReviewBody">
+          <div class="loading-spinner"><div class="spinner"></div></div>
+        </div>
+      </div>
+      </template>
+
       <!-- Feedback -->
       <template id="__lazy_feedback">
       <div class="admin-section" id="section-feedback">
@@ -5054,6 +5073,12 @@
         const navTrainingBuild = document.getElementById('navTrainingBuild');
         if (navTrainingBuild) navTrainingBuild.style.display = '';
       }
+      // Reviewing free_text answers — same admin+super_admin pool as course
+      // results (Sophia/Joy), not the can_build_training grant above.
+      if (currentUserRole === 'admin' || currentUserRole === 'super_admin') {
+        const navTrainingReview = document.getElementById('navTrainingReview');
+        if (navTrainingReview) navTrainingReview.style.display = '';
+      }
       // Payroll — not a role (Sophia is plain 'admin'; Liam/Prince/Yuvraj
       // also hold admin/super_admin but aren't payroll admins) — gated to
       // the same fixed Sophia/Joy pool the server checks via isFinalApprover.
@@ -6549,6 +6574,7 @@
       else stopWorkforceStatusPolling();
       if (id === 'training-dashboard') loadTrainingDashboard();
       if (id === 'training-build') loadTrainingBuildList();
+      if (id === 'training-review') loadTrainingReview();
       closeMobileSidebar();
     }
 
@@ -18622,7 +18648,7 @@
           body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted)">Nobody has been assigned or started this course yet.</div>`;
           return;
         }
-        const statusLabel = { completed: 'Completed', in_progress: 'In progress', not_started: 'Not started' };
+        const statusLabel = { completed: 'Completed', pending_review: 'Pending review', in_progress: 'In progress', not_started: 'Not started' };
         body.innerHTML = `
           <table class="data-table">
             <thead><tr><th>User</th><th>Status</th><th>Due</th><th>Score</th><th>Result</th><th>Started</th><th></th></tr></thead>
@@ -18636,7 +18662,7 @@
                     ${r.is_assigned && currentUserRole === 'super_admin' ? `<button class="action-btn edit" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="openEditDueDate('${courseId}','${escHtml(title)}','${escHtml(r.user_email)}',${r.due_date ? `'${new Date(r.due_date).toISOString().slice(0,10)}'` : 'null'})">✎</button>` : ''}
                   </td>
                   <td>${r.final_score != null ? r.final_score + '%' : '—'}</td>
-                  <td>${r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>')}</td>
+                  <td>${r.status === 'pending_review' ? '<span class="badge" style="background:#fef9c3;color:#92400e">Pending Review</span>' : (r.final_passed == null ? '—' : (r.final_passed ? '<span class="badge badge-published">Passed</span>' : '<span class="badge" style="background:#fef2f2;color:#c0392b">Failed</span>'))}</td>
                   <td style="font-size:12.5px;color:var(--text-muted)">${r.started_at ? fmtDate(r.started_at) : '—'}</td>
                   <td style="white-space:nowrap">
                     ${r.attempt_id ? `<button class="action-btn edit" onclick="openAttemptDetail('${r.attempt_id}')">Detail</button>` : ''}
@@ -18665,8 +18691,8 @@
     }
 
     function attemptDetailQuestionHtml(q, i) {
-      const color = q.answered ? (q.is_correct ? '#15803d' : '#c0392b') : 'var(--text-muted)';
-      const mark = q.answered ? (q.is_correct ? '✓' : '✕') : '—';
+      const color = !q.answered ? 'var(--text-muted)' : q.pending_review ? '#b45309' : (q.is_correct ? '#15803d' : '#c0392b');
+      const mark = !q.answered ? '—' : q.pending_review ? '⏳' : (q.is_correct ? '✓' : '✕');
       return `
         <div style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
           <div style="display:flex;gap:8px;align-items:baseline">
@@ -18675,7 +18701,7 @@
           </div>
           <div style="font-size:12px;color:var(--text-muted);margin-left:20px;margin-top:2px">
             ${q.answered ? `Answered: ${escHtml(q.selected_answer || '(blank)')}` : 'Not answered'}
-            ${!q.is_correct ? ` · Correct: ${escHtml(q.correct_answer)}` : ''}
+            ${q.pending_review ? ' · Pending review' : (q.answered && !q.is_correct ? ` · Correct: ${escHtml(q.correct_answer)}` : '')}
           </div>
         </div>`;
     }
@@ -18696,12 +18722,63 @@
             </div>
           `).join('')}
           <div style="margin-top:8px">
-            <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:6px">Final Assessment — ${d.final_score != null ? `${d.final_score}%` : 'not attempted'}</div>
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:6px">Final Assessment — ${d.status === 'pending_review' ? 'Pending review' : (d.final_score != null ? `${d.final_score}%` : 'not attempted')}</div>
             ${d.finalAssessment.map(attemptDetailQuestionHtml).join('') || '<div style="font-size:12px;color:var(--text-muted)">Not reached yet.</div>'}
           </div>`;
       } catch { body.innerHTML = `<div style="padding:24px;text-align:center;color:#c0392b">Failed to load attempt detail.</div>`; }
     }
     function closeAttemptDetailModal() { document.getElementById('attemptDetailModal').classList.remove('open'); }
+
+    // ── Review Answers — free_text answers awaiting a correct/incorrect tick ──
+    async function loadTrainingReview() {
+      const body = document.getElementById('trainingReviewBody');
+      body.innerHTML = `<div class="loading-spinner"><div class="spinner"></div></div>`;
+      try {
+        const items = await fetch('/api/training/reviews').then(r => r.json());
+        if (!items.length) {
+          body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Nothing waiting on review right now.</div>`;
+          return;
+        }
+        const byAttempt = new Map();
+        for (const it of items) {
+          if (!byAttempt.has(it.attempt_id)) byAttempt.set(it.attempt_id, { user_email: it.user_email, course_title: it.course_title, items: [] });
+          byAttempt.get(it.attempt_id).items.push(it);
+        }
+        body.innerHTML = Array.from(byAttempt.values()).map(group => `
+          <div style="border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:16px 20px;margin-bottom:16px">
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${escHtml(group.user_email)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(group.course_title)}</div>
+            ${group.items.map(reviewItemHtml).join('')}
+          </div>
+        `).join('');
+      } catch { body.innerHTML = `<div style="padding:32px;text-align:center;color:#c0392b">Failed to load pending reviews.</div>`; }
+    }
+
+    function reviewItemHtml(it) {
+      return `
+        <div style="padding:10px 0;border-top:1px solid var(--gray-100)" data-answer-id="${it.answer_id}">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:2px">${it.module_title ? escHtml(it.module_title) : 'Final Assessment'}</div>
+          <div style="font-weight:600;color:var(--navy);font-size:13.5px;margin-bottom:6px">${escHtml(it.question_text)}</div>
+          <div style="background:var(--gray-100);border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:6px;white-space:pre-wrap">${escHtml(it.selected_answer || '(left blank)')}</div>
+          ${it.reference_answer ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px"><strong>Reference:</strong> ${escHtml(it.reference_answer)}</div>` : ''}
+          <div style="display:flex;gap:8px">
+            <button class="action-btn view" onclick="submitAnswerReview('${it.answer_id}', true)">✓ Correct</button>
+            <button class="action-btn delete" onclick="submitAnswerReview('${it.answer_id}', false)">✕ Incorrect</button>
+          </div>
+        </div>`;
+    }
+
+    async function submitAnswerReview(answerId, isCorrect) {
+      try {
+        const res = await fetch(`/api/training/answers/${answerId}/review`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isCorrect })
+        });
+        if (!res.ok) { toast('Failed to save review', 'error'); return; }
+        toast(isCorrect ? 'Marked correct' : 'Marked incorrect', 'success');
+        await loadTrainingReview();
+      } catch { toast('Network error', 'error'); }
+    }
 
     // ── Build Training — course list ──
     async function loadTrainingBuildList() {
@@ -18774,6 +18851,23 @@
     function closeCourseEditor() { document.getElementById('courseEditorModal').classList.remove('open'); currentCourseEditor = null; }
 
     function questionEditorHtml(q, idx) {
+      const typeBadge = q.question_type === 'free_text'
+        ? `<span class="badge" style="background:#eef2ff;color:#4338ca;flex-shrink:0;margin-top:4px">Free Text</span>`
+        : `<span class="badge" style="background:var(--gray-100);color:var(--text-muted);flex-shrink:0;margin-top:4px">Multiple Choice</span>`;
+      const textBlock = `
+          <div style="display:flex;justify-content:space-between;gap:8px">
+            ${typeBadge}
+            <textarea class="form-control" style="font-size:13px;min-height:44px;flex:1" data-question-text="${q.id}" oninput="markQuestionTextDirty('${q.id}', this.value)">${escHtml(q.question_text)}</textarea>
+            <button class="action-btn delete" style="height:fit-content" onclick="deleteQuestionConfirm('${q.id}')">✕</button>
+          </div>`;
+      if (q.question_type === 'free_text') {
+        return `
+        <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;margin-top:8px" data-question-block="${q.id}">
+          ${textBlock}
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Reference answer — for whoever reviews it, never shown to the learner:</div>
+          <textarea class="form-control" style="font-size:12.5px;min-height:44px;margin-top:4px" data-question-correct="${q.id}" oninput="markQuestionCorrectDirty('${q.id}', this.value)">${escHtml(q.correct_answer || '')}</textarea>
+        </div>`;
+      }
       const opts = (q.options || []).map((o, oi) => `
         <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
           <input type="radio" name="correct-${q.id}" ${o === q.correct_answer ? 'checked' : ''} onchange="setQuestionCorrectAnswer('${q.id}', ${oi})">
@@ -18782,10 +18876,7 @@
       `).join('');
       return `
         <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;margin-top:8px" data-question-block="${q.id}">
-          <div style="display:flex;justify-content:space-between;gap:8px">
-            <textarea class="form-control" style="font-size:13px;min-height:44px;flex:1" data-question-text="${q.id}" oninput="markQuestionTextDirty('${q.id}', this.value)">${escHtml(q.question_text)}</textarea>
-            <button class="action-btn delete" style="height:fit-content" onclick="deleteQuestionConfirm('${q.id}')">✕</button>
-          </div>
+          ${textBlock}
           <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Select the correct option:</div>
           ${opts}
         </div>`;
@@ -18836,6 +18927,7 @@
     function markQuestionTextDirty(id, value) { findQuestion(id).question_text = value; }
     function markQuestionOptionDirty(id, idx, value) { findQuestion(id).options[idx] = value; }
     function setQuestionCorrectAnswer(id, idx) { const q = findQuestion(id); q.correct_answer = q.options[idx]; }
+    function markQuestionCorrectDirty(id, value) { findQuestion(id).correct_answer = value; }
     function markModuleTitleDirty(id, value) { currentCourseEditor.modules.find(m => m.id === id).title = value; }
     function markModuleContentDirty(id, value) { currentCourseEditor.modules.find(m => m.id === id).content = value; }
 
@@ -18989,8 +19081,23 @@
         const attempt = await fetch(`/api/training/courses/${courseId}/attempts`, { method: 'POST' }).then(r => r.json());
         currentTakeCourse = { course, attempt, moduleIndex: attempt.current_module_index || 0 };
         document.getElementById('takeCourseTitle').textContent = course.title;
+        if (attempt.status === 'pending_review') { renderPendingReviewStatus(); return; }
         renderTakeCourseStep();
       } catch { body.innerHTML = `<div style="padding:24px;text-align:center;color:#c0392b">Failed to start this course.</div>`; }
+    }
+
+    // Every multiple_choice question on the final assessment is already
+    // graded at this point — only the free_text ones are why the attempt
+    // isn't 'completed' yet (see submitFinalAssessment/reviewAnswer).
+    function renderPendingReviewStatus() {
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = `
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:40px">📝</div>
+          <div style="font-weight:700;font-size:18px;color:var(--navy);margin-top:8px">Submitted — pending review</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:8px;max-width:360px;margin-left:auto;margin-right:auto">Some of the answers need a quick manual review before the final score is ready. Check back on this course to see the result once it's been reviewed.</div>
+          <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+        </div>`;
     }
 
     function closeTakeCourse() { document.getElementById('takeCourseModal').classList.remove('open'); currentTakeCourse = null; }
@@ -19008,6 +19115,13 @@
     }
 
     function questionFormHtml(q, i) {
+      if (q.question_type === 'free_text') {
+        return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600;color:var(--navy);margin-bottom:6px">${i + 1}. ${escHtml(q.question_text)} <span style="font-size:11px;font-weight:500;color:var(--text-muted)">(type your answer — a word, a short phrase, or a couple of sentences)</span></div>
+          <textarea class="form-control" name="q-${q.id}" style="min-height:60px" placeholder="Type your answer…"></textarea>
+        </div>`;
+      }
       return `
         <div style="margin-bottom:16px">
           <div style="font-weight:600;color:var(--navy);margin-bottom:6px">${i + 1}. ${escHtml(q.question_text)}</div>
@@ -19017,6 +19131,20 @@
             </label>
           `).join('')}
         </div>`;
+    }
+
+    function collectQuestionAnswers(questions) {
+      const answers = {};
+      questions.forEach(q => {
+        if (q.question_type === 'free_text') {
+          const el = document.querySelector(`textarea[name="q-${q.id}"]`);
+          if (el && el.value.trim()) answers[q.id] = el.value.trim();
+        } else {
+          const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+          if (checked) answers[q.id] = checked.value;
+        }
+      });
+      return answers;
     }
 
     function renderModuleQuiz() {
@@ -19032,11 +19160,7 @@
     async function submitModuleQuiz() {
       const { course, attempt, moduleIndex } = currentTakeCourse;
       const m = course.modules[moduleIndex];
-      const answers = {};
-      m.questions.forEach(q => {
-        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
-        if (checked) answers[q.id] = checked.value;
-      });
+      const answers = collectQuestionAnswers(m.questions);
       try {
         const result = await fetch(`/api/training/attempts/${attempt.id}/modules/${m.id}/answers`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -19044,7 +19168,7 @@
         }).then(r => r.json());
         const body = document.getElementById('takeCourseBody');
         body.innerHTML = `
-          <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">You got ${result.correct} of ${result.total} correct</div>
+          <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">You got ${result.correct} of ${result.total} multiple-choice correct${result.pendingReview ? ` · ${result.pendingReview} answer${result.pendingReview === 1 ? '' : 's'} pending review` : ''}</div>
           <button class="btn-add" onclick="advanceModule()">${moduleIndex + 1 >= course.modules.length ? 'Continue to Final Assessment →' : 'Next Module →'}</button>`;
       } catch { toast('Failed to submit answers', 'error'); }
     }
@@ -19066,17 +19190,23 @@
 
     async function submitFinalQuiz() {
       const { course, attempt } = currentTakeCourse;
-      const answers = {};
-      course.finalAssessment.forEach(q => {
-        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
-        if (checked) answers[q.id] = checked.value;
-      });
+      const answers = collectQuestionAnswers(course.finalAssessment);
       try {
         const result = await fetch(`/api/training/attempts/${attempt.id}/final`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ answers })
         }).then(r => r.json());
         const body = document.getElementById('takeCourseBody');
+        if (result.status === 'pending_review') {
+          body.innerHTML = `
+            <div style="text-align:center;padding:20px 0">
+              <div style="font-size:40px">📝</div>
+              <div style="font-weight:700;font-size:18px;color:var(--navy);margin-top:8px">Submitted — pending review</div>
+              <div style="font-size:13px;color:var(--text-muted);margin-top:8px;max-width:360px;margin-left:auto;margin-right:auto">You got ${result.correct} of ${result.total} multiple-choice questions correct. ${result.pendingReview} answer${result.pendingReview === 1 ? '' : 's'} still need${result.pendingReview === 1 ? 's' : ''} a quick review before your final score is ready — check back on this course once it's been reviewed.</div>
+              <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+            </div>`;
+          return;
+        }
         body.innerHTML = `
           <div style="text-align:center;padding:20px 0">
             <div style="font-size:40px">${result.passed ? '🎉' : '📘'}</div>

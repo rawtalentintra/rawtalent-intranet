@@ -4168,6 +4168,7 @@
       const passed = c.my_attempt?.final_passed;
       let actionLabel = 'Start Course →';
       if (status === 'in_progress') actionLabel = 'Continue Course →';
+      else if (status === 'pending_review') actionLabel = 'Pending Review →';
       else if (status === 'completed') actionLabel = passed ? 'Review (Passed) ↻' : 'Retake Course ↻';
       const dueBadge = c.my_assignment?.due_date
         ? `<span style="font-size:11px;color:var(--orange);font-weight:700">Due ${fmtDate(c.my_assignment.due_date)}</span>` : '';
@@ -4207,10 +4208,26 @@
         // actual result, not a quiz form pretending it hasn't been done.
         if (attempt.status === 'completed' && attempt.final_passed) {
           renderCompletedReview();
+        } else if (attempt.status === 'pending_review') {
+          renderPendingReviewStatus();
         } else {
           renderTakeCourseStep();
         }
       } catch { body.innerHTML = '<div style="padding:24px;text-align:center;color:#c0392b">Failed to start this course.</div>'; }
+    }
+
+    // Every multiple_choice question on the final assessment is already
+    // graded at this point — only the free_text ones are why the attempt
+    // isn't 'completed' yet (see submitFinalAssessment/reviewAnswer).
+    function renderPendingReviewStatus() {
+      const body = document.getElementById('takeCourseBody');
+      body.innerHTML = `
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:40px">📝</div>
+          <div style="font-weight:700;font-size:18px;color:var(--navy);margin-top:8px">Submitted — pending review</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:8px;max-width:360px;margin-left:auto;margin-right:auto">Some of your answers need a quick manual review before your final score is ready. Check back on this course to see your result once it's been reviewed.</div>
+          <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+        </div>`;
     }
 
     function renderCompletedReview() {
@@ -4268,6 +4285,13 @@
     }
 
     function trainingQuestionFormHtml(q, i) {
+      if (q.question_type === 'free_text') {
+        return `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600;color:var(--navy);margin-bottom:6px">${i + 1}. ${escHtml(q.question_text)} <span style="font-size:11px;font-weight:500;color:var(--text-muted)">(type your answer — a word, a short phrase, or a couple of sentences)</span></div>
+          <textarea class="form-control" name="q-${q.id}" style="min-height:60px" placeholder="Type your answer…"></textarea>
+        </div>`;
+      }
       return `
         <div style="margin-bottom:16px">
           <div style="font-weight:600;color:var(--navy);margin-bottom:6px">${i + 1}. ${escHtml(q.question_text)}</div>
@@ -4277,6 +4301,20 @@
             </label>
           `).join('')}
         </div>`;
+    }
+
+    function collectQuestionAnswers(questions) {
+      const answers = {};
+      questions.forEach(q => {
+        if (q.question_type === 'free_text') {
+          const el = document.querySelector(`textarea[name="q-${q.id}"]`);
+          if (el && el.value.trim()) answers[q.id] = el.value.trim();
+        } else {
+          const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+          if (checked) answers[q.id] = checked.value;
+        }
+      });
+      return answers;
     }
 
     function renderModuleQuiz() {
@@ -4292,11 +4330,7 @@
     async function submitModuleQuiz() {
       const { course, attempt, moduleIndex } = currentTakeCourse;
       const m = course.modules[moduleIndex];
-      const answers = {};
-      m.questions.forEach(q => {
-        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
-        if (checked) answers[q.id] = checked.value;
-      });
+      const answers = collectQuestionAnswers(m.questions);
       try {
         const result = await fetch(`/api/training/attempts/${attempt.id}/modules/${m.id}/answers`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4304,7 +4338,7 @@
         }).then(r => r.json());
         const body = document.getElementById('takeCourseBody');
         body.innerHTML = `
-          <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">You got ${result.correct} of ${result.total} correct</div>
+          <div style="font-weight:700;font-size:16px;color:var(--navy);margin-bottom:10px">You got ${result.correct} of ${result.total} multiple-choice correct${result.pendingReview ? ` · ${result.pendingReview} answer${result.pendingReview === 1 ? '' : 's'} pending review` : ''}</div>
           <button class="btn-add" onclick="advanceModule()">${moduleIndex + 1 >= course.modules.length ? 'Continue to Final Assessment →' : 'Next Module →'}</button>`;
       } catch { toast('Failed to submit answers', 'error'); }
     }
@@ -4326,17 +4360,23 @@
 
     async function submitFinalQuiz() {
       const { course, attempt } = currentTakeCourse;
-      const answers = {};
-      course.finalAssessment.forEach(q => {
-        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
-        if (checked) answers[q.id] = checked.value;
-      });
+      const answers = collectQuestionAnswers(course.finalAssessment);
       try {
         const result = await fetch(`/api/training/attempts/${attempt.id}/final`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ answers })
         }).then(r => r.json());
         const body = document.getElementById('takeCourseBody');
+        if (result.status === 'pending_review') {
+          body.innerHTML = `
+            <div style="text-align:center;padding:20px 0">
+              <div style="font-size:40px">📝</div>
+              <div style="font-weight:700;font-size:18px;color:var(--navy);margin-top:8px">Submitted — pending review</div>
+              <div style="font-size:13px;color:var(--text-muted);margin-top:8px;max-width:360px;margin-left:auto;margin-right:auto">You got ${result.correct} of ${result.total} multiple-choice questions correct. ${result.pendingReview} answer${result.pendingReview === 1 ? '' : 's'} still need${result.pendingReview === 1 ? 's' : ''} a quick review before your final score is ready — check back on this course once it's been reviewed.</div>
+              <button class="btn-secondary" style="margin-top:16px" onclick="closeTakeCourse()">Close</button>
+            </div>`;
+          return;
+        }
         body.innerHTML = `
           <div style="text-align:center;padding:20px 0">
             <div style="font-size:40px">${result.passed ? '🎉' : '📘'}</div>
