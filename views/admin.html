@@ -4468,6 +4468,37 @@
     </div>
   </div>
 
+  <!-- Correct Hours Modal — picks a real day within the week to correct
+       (see services/timesheetService.js's adminAdjustDayHours), rather
+       than typing a new week total blind and leaving no trace of which
+       day it belongs to. -->
+  <div class="modal-overlay" id="editHoursModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeEditHoursModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title">Correct Hours</div>
+        <button class="modal-close" onclick="closeEditHoursModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ehUserEmail">
+        <input type="hidden" id="ehUserName">
+        <input type="hidden" id="ehWeekStartDate">
+        <div style="font-weight:700;color:var(--navy);margin-bottom:14px" id="ehPersonWeek"></div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Day</label>
+          <select id="ehDaySelect" class="form-control" onchange="onEhDayChange()"></select>
+        </div>
+        <div class="form-group-modal">
+          <label class="form-label-modal">Hours for this day</label>
+          <input type="number" step="0.25" min="0" max="24" id="ehHours" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeEditHoursModal()">Cancel</button>
+        <button class="btn-add" onclick="saveEditHours()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Generate Payslip Modal -->
   <div class="modal-overlay" id="payrollGenerateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closePayrollGenerateModal()">
     <div class="modal" style="max-width:720px">
@@ -8096,8 +8127,15 @@
       window.open(`/api/payslips/admin/team-invoice?${params}`, '_blank');
     }
 
-    function changePayrollPeriod(deltaPeriods) {
-      payrollPeriodStart = addDaysAdmin(payrollPeriodStart, deltaPeriods * 14);
+    // Server-derived, not a blind ±14-day shift — see routes/timesheets.js's
+    // /pay-period-nav for why (the one-time Sat-start transition makes a
+    // plain +14 land wrong right at that seam).
+    async function changePayrollPeriod(deltaPeriods) {
+      const direction = deltaPeriods > 0 ? 'next' : 'prev';
+      try {
+        const data = await fetch(`/api/timesheets/pay-period-nav?from=${payrollPeriodStart}&direction=${direction}`).then(r => r.json());
+        payrollPeriodStart = data.payPeriodStart;
+      } catch { toast('Failed to change pay period', 'error'); return; }
       // Date Paid and Invoice Number are both specific to one pay run —
       // a new period is a new run, so both reset to a fresh default for
       // it. Exchange Rate deliberately carries over across period
@@ -8171,12 +8209,13 @@
         body.innerHTML = rows.map(r => {
           // Shows the actual hours, not just the status — and doubles as
           // the edit trigger (Sophia/Joy only, but this whole page
-          // already is): click either week to correct its total hours
-          // directly, on any status including already-Approved, without
-          // forcing a fresh approval cycle. See adminSetTotalHours's own
-          // comment for why this doesn't touch the employee's daily log.
+          // already is): click either week to open the Correct Hours
+          // modal and fix a specific day, on any status including
+          // already-Approved, without forcing a fresh approval cycle. See
+          // adminAdjustDayHours's own comment for why this corrects a
+          // real day rather than the week total in isolation.
           const weekPill = (s, hours, weekNum) => `
-            <span style="cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="editPayrollWeekHours('${r.userEmail}',${weekNum})" title="Click to correct this week's total hours">
+            <span style="cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="editPayrollWeekHours('${r.userEmail}',${weekNum})" title="Click to correct a day's hours">
               <span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${Number(hours).toFixed(2)} hrs${s !== 'draft' ? ` · ${s === 'approved' ? 'Approved' : s.replace('_', ' ')}` : ''}</span>
               <span style="font-size:10px;color:var(--gray-400)">✏️</span>
             </span>`;
@@ -8217,23 +8256,54 @@
       }
     }
 
+    // Which real day within the week a correction applies to — populated
+    // fresh each time the modal opens, read back by onEhDayChange/
+    // saveEditHours rather than re-fetched on every keystroke.
+    let ehWeekEntries = [];
     async function editPayrollWeekHours(userEmail, weekNum) {
       const r = payrollEligibleRows.find(x => x.userEmail === userEmail);
       if (!r) return;
-      const currentHours = weekNum === 1 ? r.week1Hours : r.week2Hours;
       const weekStartDate = weekNum === 1 ? r.week1Start : r.week2Start;
-      const input = prompt(`${r.userName} — Week ${weekNum} total hours:`, Number(currentHours).toFixed(2));
-      if (input == null) return; // cancelled
-      const hours = Number(input);
-      if (!Number.isFinite(hours) || hours < 0) { toast('Enter a valid number of hours', 'error'); return; }
+      document.getElementById('ehUserEmail').value = userEmail;
+      document.getElementById('ehUserName').value = r.userName;
+      document.getElementById('ehWeekStartDate').value = weekStartDate;
+      document.getElementById('ehPersonWeek').textContent = `${r.userName} — Week ${weekNum}`;
       try {
-        const res = await fetch('/api/timesheets/admin/weeks/set-hours', {
+        const data = await fetch(`/api/timesheets/admin/week?userEmail=${encodeURIComponent(userEmail)}&weekStartDate=${weekStartDate}`).then(res => res.json());
+        ehWeekEntries = data.entries || [];
+      } catch { ehWeekEntries = []; }
+      const daySelect = document.getElementById('ehDaySelect');
+      const days = Array.from({ length: 7 }, (_, i) => addDaysAdmin(weekStartDate, i));
+      daySelect.innerHTML = days.map(d => {
+        const entry = ehWeekEntries.find(e => e.entry_date === d);
+        const hoursLabel = entry ? Number(entry.hours).toFixed(2) + ' hrs' : 'no entry';
+        return `<option value="${d}">${fmtDate(d)} (${hoursLabel})</option>`;
+      }).join('');
+      onEhDayChange();
+      document.getElementById('editHoursModal').classList.add('open');
+    }
+    function onEhDayChange() {
+      const d = document.getElementById('ehDaySelect').value;
+      const entry = ehWeekEntries.find(e => e.entry_date === d);
+      document.getElementById('ehHours').value = entry ? Number(entry.hours) : '';
+    }
+    function closeEditHoursModal() { document.getElementById('editHoursModal').classList.remove('open'); }
+    async function saveEditHours() {
+      const userEmail = document.getElementById('ehUserEmail').value;
+      const userName = document.getElementById('ehUserName').value;
+      const weekStartDate = document.getElementById('ehWeekStartDate').value;
+      const entryDate = document.getElementById('ehDaySelect').value;
+      const hours = Number(document.getElementById('ehHours').value);
+      if (!Number.isFinite(hours) || hours <= 0) { toast('Enter a valid number of hours', 'error'); return; }
+      try {
+        const res = await fetch('/api/timesheets/admin/weeks/adjust-day', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userEmail, userName: r.userName, weekStartDate, totalHours: hours })
+          body: JSON.stringify({ userEmail, userName, weekStartDate, entryDate, hours })
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to update hours', 'error'); return; }
         toast('Hours updated', 'success');
+        closeEditHoursModal();
         loadPayrollEligible();
       } catch { toast('Network error', 'error'); }
     }

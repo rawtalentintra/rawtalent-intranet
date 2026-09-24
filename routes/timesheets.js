@@ -154,18 +154,54 @@ router.post('/weeks/:id/reject', async (req, res) => {
   }
 });
 
+// So the Payroll admin table's hours-correction modal can show what's
+// really logged for each day of someone else's week before picking one
+// to correct — GET /week (below) is self-only (no userEmail param),
+// which is right for the normal Log My Hours screen but not usable here.
+router.get('/admin/week', requireFinalApprover, async (req, res) => {
+  try {
+    const { userEmail, weekStartDate } = req.query;
+    if (!userEmail || !weekStartDate) return res.status(400).json({ error: 'userEmail and weekStartDate are required' });
+    res.json(await timesheet.getWeek(userEmail, weekStartDate));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Direct payroll-level hours correction from the admin Payslips table —
 // only Sophia/Joy, works on any status (draft/pending/approved) without
 // forcing a week back through the approval chain. See
-// timesheetService.adminSetTotalHours for why this overrides the total
-// without touching the employee's own day-by-day entries.
-router.post('/admin/weeks/set-hours', requireFinalApprover, async (req, res) => {
+// timesheetService.adminAdjustDayHours for why this corrects one real
+// day's entry (and recomputes the week total from it) rather than
+// overriding the week total in isolation.
+router.post('/admin/weeks/adjust-day', requireFinalApprover, async (req, res) => {
   try {
-    const { userEmail, userName, weekStartDate, totalHours } = req.body;
-    if (!userEmail || !weekStartDate) return res.status(400).json({ error: 'userEmail and weekStartDate are required' });
-    res.json(await timesheet.adminSetTotalHours(userEmail, userName, weekStartDate, req.user.email, totalHours));
+    const { userEmail, userName, weekStartDate, entryDate, hours } = req.body;
+    if (!userEmail || !weekStartDate || !entryDate) return res.status(400).json({ error: 'userEmail, weekStartDate and entryDate are required' });
+    res.json(await timesheet.adminAdjustDayHours(userEmail, userName, weekStartDate, req.user.email, entryDate, hours));
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Adjacent pay period's start date, computed server-side rather than a
+// blind ±14-day shift in the frontend (views/admin.html's
+// changePayrollPeriod) — the two agree everywhere except right at the
+// 2026-09-26 Sat-start transition (see timesheetService.js's
+// SAT_TRANSITION_DATE), where the period immediately before it is only
+// 13 days long, not 14 — a client-side +14 would land Next on the old
+// scheme's stale boundary (2026-09-27) instead of the new one
+// (2026-09-26). Re-deriving from payPeriodEndOf/payPeriodStartOf (the
+// same functions everything else uses) makes this correct automatically,
+// including at that one irregular seam, with nothing special-cased here.
+router.get('/pay-period-nav', requireFinalApprover, async (req, res) => {
+  try {
+    const { from, direction } = req.query;
+    if (!from || !['next', 'prev'].includes(direction)) return res.status(400).json({ error: 'from and direction (next|prev) are required' });
+    const adjacentDate = direction === 'next' ? timesheet.addDays(timesheet.payPeriodEndOf(from), 1) : timesheet.addDays(from, -1);
+    res.json({ payPeriodStart: timesheet.payPeriodStartOf(adjacentDate) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

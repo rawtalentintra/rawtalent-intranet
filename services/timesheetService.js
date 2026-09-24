@@ -5,6 +5,18 @@ const { isFinalApprover, FINAL_APPROVERS } = require('./leaveService');
 const MELBOURNE_TZ = 'Australia/Melbourne';
 const WEEK_ANCHOR = '2026-08-16'; // a Sunday — pay period 1 start, weeks run Sun-Sat from here
 
+// Joy, 2026-09-25: "starting next pay period, let's start the pay period
+// on a Saturday" — the period in progress when she asked (2026-09-13 to
+// 2026-09-26, Sun-Sat) keeps running under the OLD scheme right to its
+// last day; 2026-09-26 (itself a Saturday) is both that old period's last
+// day AND the first day of the new Sat-Fri cadence she wants from here on
+// ("next pay should be Saturday 26 - Friday 9th, Oct"). Gating on the
+// date being bucketed (not "today") means this is safe to ship at any
+// time without corrupting how any already-existing week/pay-period is
+// bucketed — every date before the transition keeps computing exactly as
+// it always has; only 2026-09-26 onward uses the new anchor.
+const SAT_TRANSITION_DATE = '2026-09-26'; // also serves as pay-period-2 anchor (already a Saturday)
+
 // Scoped ONLY to AM/PM Team — deliberately not a generic team_members.manager_id
 // walk (unlike leaveService.resolveLevel1Approver), since several people
 // (Vicky, Gwen, Justine, Sophia, Joy) resolve to a manager via the org chart
@@ -38,23 +50,43 @@ function normalizeEntry(row) {
 function normalizeEntries(rows) { return rows.map(normalizeEntry); }
 
 function pad(n) { return String(n).padStart(2, '0'); }
-function toDateStr(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function toDateStr(d) { return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; }
+// UTC throughout (construct with a 'Z' suffix, read back with getUTC*) —
+// these are pure calendar-date calculations with no time-of-day meaning,
+// and a local-time Date (what this used before 2026-09-25) silently
+// loses a day across any DST transition the SERVER's own OS timezone
+// observes, not just Melbourne's: a local midnight-to-midnight span
+// across a "spring forward" is 23 real hours, and dividing by exactly
+// 86400000ms then flooring undercounts by one whole day. Found while
+// testing the new Saturday-start pay periods (below) against Melbourne
+// time, which springs forward on 2026-10-04 — squarely inside the first
+// two periods this change produces (2026-09-26–2026-10-09 and
+// 2026-10-10–2026-10-23) — but the bug was latent for every date
+// calculation in this file before that, on any server/dev machine whose
+// local zone has a DST transition anywhere near a date in play.
 function addDays(dateStr, days) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return toDateStr(d);
 }
+// Sunday-start (getUTCDay()===0) before the transition; Saturday-start
+// (getUTCDay()===6) from SAT_TRANSITION_DATE on — see that constant's own
+// comment. `(getUTCDay() + 1) % 7` is "days since the most recent
+// Saturday" (Sat→0, Sun→1, …, Fri→6), the Saturday-anchored equivalent of
+// the original `getUTCDay()` ("days since the most recent Sunday").
 function weekStartOf(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  return addDays(dateStr, -d.getDay());
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const offset = dateStr >= SAT_TRANSITION_DATE ? (d.getUTCDay() + 1) % 7 : d.getUTCDay();
+  return addDays(dateStr, -offset);
 }
 function weekEndOf(weekStartStr) { return addDays(weekStartStr, 6); }
 function payPeriodStartOf(dateStr) {
-  const anchor = new Date(`${WEEK_ANCHOR}T00:00:00`);
-  const d = new Date(`${dateStr}T00:00:00`);
-  const daysSince = Math.floor((d - anchor) / 86400000);
+  const anchor = dateStr >= SAT_TRANSITION_DATE ? SAT_TRANSITION_DATE : WEEK_ANCHOR;
+  const anchorDate = new Date(`${anchor}T00:00:00Z`);
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const daysSince = Math.round((d - anchorDate) / 86400000);
   const periodIndex = Math.floor(daysSince / 14);
-  return addDays(WEEK_ANCHOR, periodIndex * 14);
+  return addDays(anchor, periodIndex * 14);
 }
 function payPeriodEndOf(ppStartStr) { return addDays(ppStartStr, 13); }
 
@@ -124,29 +156,41 @@ async function deleteEntry(entryId, userEmail) {
   return getWeek(userEmail, toDateOnly(entry.entry_date));
 }
 
-// Sophia/Joy can directly correct a week's total hours from the Payroll
-// admin table, regardless of its current status (draft, pending either
-// stage, or already approved) — requested as a simpler alternative to a
-// separate "un-approve" step, since they're the final approval authority
-// anyway; their own correction here doesn't need to go through the chain
-// again. Status is deliberately left exactly as it was — editing an
-// already-approved week's hours keeps it 'approved' with the corrected
-// number, rather than being forced back to draft/pending.
+// Sophia/Joy can directly correct a specific day's hours from the
+// Payroll admin table, regardless of the week's current status (draft,
+// pending either stage, or already approved) — a simpler alternative to
+// a separate "un-approve" step, since they're the final approval
+// authority anyway. Status is deliberately left exactly as it was —
+// correcting an already-approved week keeps it 'approved' with the
+// corrected number, rather than being forced back to draft/pending.
 //
-// This overrides timesheet_weeks.total_hours directly WITHOUT touching
-// the underlying timesheet_entries rows, which stay exactly as the
-// employee logged them day-by-day — this is a payroll-level override of
-// the total (e.g. "this should really be 38, not 35"), not a rewrite of
-// their own daily log. Creates the week as a fresh draft first if the
-// person hasn't logged anything at all yet for this period (same lazy-
-// creation getOrCreateDraftWeek already does for a normal entry).
-async function adminSetTotalHours(userEmail, userName, weekStartDate, approverEmail, totalHours) {
+// Writes a REAL timesheet_entries row for the chosen day and recomputes
+// the week total from it (same as a normal upsertEntry, just without
+// upsertEntry's draft-only restriction) — replaces an earlier design
+// that overwrote timesheet_weeks.total_hours in isolation, which left no
+// way to tell which day (if any) a correction belonged to, and silently
+// desynced the week total from what "Log My Hours" shows day-by-day
+// (Joy, 2026-09-25: "how does it know which day..."). Recomputing from
+// real entries means the two views can't disagree again. Creates the
+// week as a fresh draft first if the person hasn't logged anything at
+// all yet for this period (same lazy-creation getOrCreateDraftWeek
+// already does for a normal entry).
+async function adminAdjustDayHours(userEmail, userName, weekStartDate, approverEmail, entryDate, hours) {
   if (!isFinalApprover(approverEmail)) throw new Error('Only Sophia or Joy can edit hours here');
-  const hours = Number(totalHours);
-  if (!Number.isFinite(hours) || hours < 0) throw new Error('Enter a valid number of hours');
+  const validHours = validateHours(hours);
   const db = getDb();
   const week = await getOrCreateDraftWeek(db, { id: uuidv4(), userEmail, userName, weekStartDate });
-  await db.execute({ sql: 'UPDATE timesheet_weeks SET total_hours = ?, updated_at = now() WHERE id = ?', args: [hours, week.id] });
+  // notes is deliberately left alone on conflict — this corrects the
+  // hours number, not whatever the employee themselves already wrote for
+  // that day (e.g. "half sick day"); only a brand-new entry gets no note.
+  await db.execute({
+    sql: `INSERT INTO timesheet_entries (id, week_id, user_email, entry_date, hours, notes)
+          VALUES (?, ?, ?, ?, ?, NULL)
+          ON CONFLICT (user_email, entry_date) DO UPDATE SET
+            hours = excluded.hours, updated_at = now()`,
+    args: [uuidv4(), week.id, userEmail, entryDate, validHours]
+  });
+  await recomputeWeekTotal(db, week.id);
   return getWeek(userEmail, weekStartDate);
 }
 
@@ -439,8 +483,8 @@ async function deleteWeek(id) {
 
 module.exports = {
   MELBOURNE_TZ, WEEK_ANCHOR, TEAM_APPROVAL_CONFIG,
-  weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, validateHours, resolveTeam,
+  weekStartOf, weekEndOf, payPeriodStartOf, payPeriodEndOf, addDays, validateHours, resolveTeam,
   upsertEntry, deleteEntry, getWeek, listMyWeeks, submitWeek, recall, decide, listPendingFor,
   companyWeekSummary, companyPayPeriodSummary, companyMonthSummary, listAll, deleteWeek,
-  adminSetTotalHours, canViewApprovedList, listApprovedTimesheets
+  adminAdjustDayHours, canViewApprovedList, listApprovedTimesheets
 };
