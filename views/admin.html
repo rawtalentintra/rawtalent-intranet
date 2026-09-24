@@ -7950,9 +7950,20 @@
       payrollCompanyGranularity = g;
       loadPayrollCompany();
     }
-    function changePayrollCompanyPeriod(delta) {
-      if (payrollCompanyGranularity === 'week') payrollCompanyWeekStart = addDaysAdmin(payrollCompanyWeekStart, delta * 7);
-      else if (payrollCompanyGranularity === 'payPeriod') payrollCompanyPayPeriodStart = addDaysAdmin(payrollCompanyPayPeriodStart, delta * 14);
+    // Server-derived, not a blind ±7/±14-day shift — see routes/timesheets.js's
+    // /week-nav and /pay-period-nav for why (the one-time Sat-start
+    // transition makes a plain shift land wrong right at that seam).
+    async function changePayrollCompanyPeriod(delta) {
+      const direction = delta > 0 ? 'next' : 'prev';
+      try {
+        if (payrollCompanyGranularity === 'week') {
+          const data = await fetch(`/api/timesheets/week-nav?from=${payrollCompanyWeekStart}&direction=${direction}`).then(r => r.json());
+          payrollCompanyWeekStart = data.weekStart;
+        } else if (payrollCompanyGranularity === 'payPeriod') {
+          const data = await fetch(`/api/timesheets/pay-period-nav?from=${payrollCompanyPayPeriodStart}&direction=${direction}`).then(r => r.json());
+          payrollCompanyPayPeriodStart = data.payPeriodStart;
+        }
+      } catch { toast('Failed to change period', 'error'); return; }
       loadPayrollCompany();
     }
     function onPayrollCompanyMonthChange(el) {

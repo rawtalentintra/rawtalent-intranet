@@ -5386,8 +5386,15 @@
     async function loadHoursWeek(weekStart) {
       hoursWeekData = await fetch(`/api/timesheets/week?weekStart=${weekStart}`).then(r => r.json());
     }
+    // Server-derived, not a blind ±7-day shift — see routes/timesheets.js's
+    // /week-nav for why (the one-time Sat-start transition makes a plain
+    // +7 land wrong right at that seam).
     async function changeHoursWeek(delta) {
-      hoursCurrentWeekStart = addDaysClient(hoursCurrentWeekStart, delta * 7);
+      const direction = delta > 0 ? 'next' : 'prev';
+      try {
+        const data = await fetch(`/api/timesheets/week-nav?from=${hoursCurrentWeekStart}&direction=${direction}`).then(r => r.json());
+        hoursCurrentWeekStart = data.weekStart;
+      } catch { return; }
       await loadHoursWeek(hoursCurrentWeekStart);
       renderMyHours();
     }

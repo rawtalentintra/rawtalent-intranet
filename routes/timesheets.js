@@ -69,6 +69,26 @@ router.get('/week', async (req, res) => {
   }
 });
 
+// Adjacent WEEK's start date, server-derived — same reasoning as
+// /pay-period-nav above, one level down: Log My Hours' own Prev/Next
+// (views/index.html's changeHoursWeek) used to do a blind ±7-day shift,
+// which is correct everywhere except right at the 2026-09-26 Sat-start
+// transition (see timesheetService.js's SAT_TRANSITION_DATE) — a plain
+// +7 from the outgoing Sun20-Sat26 week lands back on 2026-09-27, the
+// old scheme's stale boundary, instead of 2026-09-26. No requireFinalApprover
+// here — every employee steps through their own weeks on this page, not
+// just Sophia/Joy.
+router.get('/week-nav', async (req, res) => {
+  try {
+    const { from, direction } = req.query;
+    if (!from || !['next', 'prev'].includes(direction)) return res.status(400).json({ error: 'from and direction (next|prev) are required' });
+    const adjacentDate = direction === 'next' ? timesheet.addDays(timesheet.weekEndOf(from), 1) : timesheet.addDays(from, -1);
+    res.json({ weekStart: timesheet.weekStartOf(adjacentDate) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/mine', async (req, res) => {
   try {
     res.json(await timesheet.listMyWeeks(req.user.email));
