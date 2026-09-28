@@ -25,7 +25,16 @@ const TOKEN_URL = 'https://id.jobadder.com/connect/token';
 // the existing refresh token was issued under the old scope list and
 // won't gain these; Settings → Connect JobAdder must be re-run once this
 // is deployed.
-const SCOPES = 'read_candidate read_placement read_job read_jobad offline_access';
+// read_jobapplication added 2026-09-28 (Joy: click an open ad, see who
+// applied) — GET /jobads/{adId}/applications (the real "applications" link
+// JobAdder itself returns on every job ad) came back 403 insufficient_scope
+// with just read_jobad, confirming the endpoint exists but needs its own
+// scope. Not yet confirmed which exact scope name unlocks it — inferred
+// from JobAdder's consistent read_X/write_X-per-resource pattern (already
+// right twice for read_job/read_jobad), but this is the first scope in this
+// list added on inference rather than a documented spec page; verify the
+// real API call succeeds after the next reconnect before trusting it.
+const SCOPES = 'read_candidate read_placement read_job read_jobad read_jobapplication offline_access';
 
 // Must exactly match one of the "Authorized redirect URIs" the JobAdder
 // application was registered with — JobAdder's docs: "Redirect URI used
