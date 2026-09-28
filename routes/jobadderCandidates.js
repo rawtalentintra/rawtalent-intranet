@@ -136,6 +136,94 @@ async function fetchAllJobAds(token) {
   return items;
 }
 
+// Lighter-weight than the full mapped shape in /ads/:adId/applications —
+// dashboard only needs to count classifications, not render candidate
+// details, so this skips the candidate/status/source fields entirely.
+async function fetchApplicationIdsForAd(token, adId) {
+  const ids = [];
+  let offset = 0;
+  const limit = 100;
+  while (offset < 2000) {
+    const res = await fetch(`${token.apiBaseUrl}/jobads/${adId}/applications?limit=${limit}&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token.accessToken}` }
+    });
+    if (!res.ok) break; // an ad that 404s/errors here just reports 0 applicants rather than failing the whole dashboard
+    const data = await res.json();
+    const page = data.items || [];
+    for (const it of page) ids.push(it.applicationId);
+    offset += limit;
+    if (page.length < limit || offset >= (data.totalCount ?? 0)) break;
+  }
+  return ids;
+}
+
+function pct(part, whole) {
+  return whole ? Math.round((part / whole) * 1000) / 10 : 0;
+}
+
+// Dashboard (Joy, 2026-09-28: "how many applicants, how many reviewed, how
+// many to move forward, % performance") — per open ad AND totals across
+// all of them. Classification counts come from our own review table (see
+// jobadder_application_reviews), joined against the real applicationIds
+// JobAdder has right now for each ad — an application that's never been
+// reviewed simply isn't in that table, which the LEFT JOIN-equivalent
+// (Map lookup defaulting to 'not_reviewed' below) already handles.
+router.get('/open-ads/dashboard', requireAdmin, async (req, res) => {
+  try {
+    const token = await jobAdderService.getValidAccessToken();
+    if (!token) return res.status(400).json({ error: 'JobAdder is not connected.', notConnected: true });
+    const all = await fetchAllJobAds(token);
+    const openAds = all.filter(a => a.state === 'Current');
+    const db = getDb();
+
+    const perAd = [];
+    const totals = { totalApplicants: 0, notReviewed: 0, moveForward: 0, notAFit: 0 };
+    for (const ad of openAds) {
+      const ids = await fetchApplicationIdsForAd(token, ad.adId);
+      let classById = new Map();
+      if (ids.length) {
+        const r = await db.execute({
+          sql: `SELECT application_id, classification FROM jobadder_application_reviews WHERE application_id = ANY(?)`,
+          args: [ids]
+        });
+        classById = new Map(r.rows.map(row => [String(row.application_id), row.classification]));
+      }
+      let notReviewed = 0, moveForward = 0, notAFit = 0;
+      for (const id of ids) {
+        const c = classById.get(String(id)) || 'not_reviewed';
+        if (c === 'move_forward') moveForward++;
+        else if (c === 'not_a_fit') notAFit++;
+        else notReviewed++;
+      }
+      const total = ids.length;
+      const reviewed = moveForward + notAFit;
+      perAd.push({
+        adId: ad.adId, title: ad.title, reference: ad.reference,
+        totalApplicants: total, notReviewed, moveForward, notAFit,
+        reviewedPct: pct(reviewed, total),
+        moveForwardPctOfTotal: pct(moveForward, total),
+        moveForwardPctOfReviewed: pct(moveForward, reviewed)
+      });
+      totals.totalApplicants += total;
+      totals.notReviewed += notReviewed;
+      totals.moveForward += moveForward;
+      totals.notAFit += notAFit;
+    }
+    const reviewedTotal = totals.moveForward + totals.notAFit;
+    res.json({
+      ads: perAd.sort((a, b) => b.totalApplicants - a.totalApplicants),
+      totals: {
+        ...totals,
+        reviewedPct: pct(reviewedTotal, totals.totalApplicants),
+        moveForwardPctOfTotal: pct(totals.moveForward, totals.totalApplicants),
+        moveForwardPctOfReviewed: pct(totals.moveForward, reviewedTotal)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/open-ads', requireAdmin, async (req, res) => {
   try {
     const token = await jobAdderService.getValidAccessToken();

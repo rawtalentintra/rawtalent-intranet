@@ -823,9 +823,18 @@
             <div class="admin-page-title">Open Job Ads</div>
             <div class="admin-page-sub">Every currently-live JobAdder ad (not expired, not a draft) across the account.</div>
           </div>
-          <button class="btn-add" onclick="loadJobadderOpenAds()">↻ Refresh</button>
+          <button class="btn-add" onclick="loadJobadderOpenAds();loadJobadderOpenAdsDashboard()">↻ Refresh</button>
         </div>
         <div id="jobadderOpenAdsBanner" style="display:none;margin-bottom:16px"></div>
+
+        <!-- Applicant review dashboard (Joy, 2026-09-28: "how many
+             applicants, how many reviewed, how many to move forward, %
+             performance") — loaded separately from the ads list below since
+             it's a heavier call (fetches every open ad's applications to
+             count classifications), so a slow dashboard load never blocks
+             the ads table from showing. -->
+        <div id="jobadderDashboardWrap" style="margin-bottom:20px"></div>
+
         <div id="jobadderOpenAdsSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
         <div id="jobadderOpenAdsWrap"></div>
       </div>
@@ -6608,7 +6617,7 @@
       if (id === 'payroll') initPayrollSection();
       if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
       if (id === 'jobadder-candidates') initJobAdderCandidatesSection();
-      if (id === 'jobadder-open-ads') loadJobadderOpenAds();
+      if (id === 'jobadder-open-ads') { loadJobadderOpenAds(); loadJobadderOpenAdsDashboard(); }
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
@@ -8013,6 +8022,63 @@
       } catch (err) {
         wrap.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load: ${escHtml(err.message)}</div>`;
       }
+    }
+
+    async function loadJobadderOpenAdsDashboard() {
+      const wrap = document.getElementById('jobadderDashboardWrap');
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const res = await fetch('/api/jobadder/open-ads/dashboard');
+        const data = await res.json();
+        if (!res.ok) { wrap.innerHTML = ''; return; } // the ads-list banner above already explains a notConnected error
+        wrap.innerHTML = jobadderDashboardHtml(data);
+      } catch (err) {
+        wrap.innerHTML = `<div style="color:var(--text-muted);padding:12px;text-align:center">Dashboard failed to load: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    function jobadderStatCardHtml(label, value, sub) {
+      return `<div style="background:white;border:1px solid var(--gray-200);border-radius:10px;padding:12px 16px;min-width:120px">
+        <div style="font-size:20px;font-weight:800;color:var(--navy)">${value}</div>
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600">${label}</div>
+        ${sub ? `<div style="font-size:10.5px;color:var(--text-muted)">${sub}</div>` : ''}
+      </div>`;
+    }
+
+    function jobadderDashboardHtml(data) {
+      const t = data.totals;
+      const cards = [
+        jobadderStatCardHtml('Total Applicants', t.totalApplicants),
+        jobadderStatCardHtml('Not Reviewed', t.notReviewed),
+        jobadderStatCardHtml('Move Forward', t.moveForward, `${t.moveForwardPctOfTotal}% of all applicants`),
+        jobadderStatCardHtml('Not a Fit', t.notAFit),
+        jobadderStatCardHtml('Reviewed', `${t.reviewedPct}%`, `${t.moveForward + t.notAFit} of ${t.totalApplicants}`),
+        jobadderStatCardHtml('Move Forward Rate', `${t.moveForwardPctOfReviewed}%`, 'of those reviewed')
+      ];
+      const td = 'padding:4px 8px;font-size:11.5px;white-space:nowrap';
+      const adsRows = data.ads.map(a => `
+        <tr style="border-bottom:1px solid var(--gray-100)">
+          <td style="${td};white-space:normal;font-weight:600;color:var(--navy);max-width:280px">${escHtml(a.title || '—')}</td>
+          <td style="${td}">${a.totalApplicants}</td>
+          <td style="${td}">${a.notReviewed}</td>
+          <td style="${td}">${a.moveForward}</td>
+          <td style="${td}">${a.notAFit}</td>
+          <td style="${td}">${a.reviewedPct}%</td>
+          <td style="${td}">${a.moveForwardPctOfReviewed}%</td>
+        </tr>`).join('');
+      return `
+        <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📊 Applicant Review Dashboard</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">${cards.join('')}</div>
+        <div class="admin-table-card"><div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100);background:var(--offwhite)">
+            <th style="${td}">Ad</th><th style="${td}">Total</th><th style="${td}">Not Reviewed</th>
+            <th style="${td}">Move Forward</th><th style="${td}">Not a Fit</th><th style="${td}">Reviewed %</th>
+            <th style="${td}">Move Forward % (of reviewed)</th>
+          </tr></thead>
+          <tbody>${adsRows}</tbody>
+        </table>
+        </div></div>`;
     }
 
     function jobadderOpenAdsTableHtml(ads) {
