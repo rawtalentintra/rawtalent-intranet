@@ -48,6 +48,18 @@ function buildAuthorizeUrl(state) {
     response_type: 'code',
     client_id: process.env.JOBADDER_CLIENT_ID,
     scope: SCOPES,
+    // id.jobadder.com/connect/* is a standard IdentityServer instance, which
+    // silently re-issues a token scoped to whatever was already granted
+    // instead of re-prompting when a user re-authorizes an app they'd
+    // already approved — confirmed the hard way 2026-09-28: adding
+    // read_job/read_jobad to SCOPES and having Joy click through again
+    // still came back scoped to the old read_candidate/read_placement
+    // grant (GET /jobs returned insufficient_scope right after). Passing
+    // the standard OIDC `prompt=consent` forces JobAdder to show the real
+    // consent screen for the current SCOPES list every time, instead of
+    // silently reusing a stale grant — needed on top of a fresh state param
+    // whenever SCOPES changes, not just on first-ever connection.
+    prompt: 'consent',
     redirect_uri: REDIRECT_URI,
     state
   });
