@@ -809,15 +809,6 @@
         <div id="jobadderResultsSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
         <div id="jobadderResultsWrap"></div>
       </div>
-      <div class="modal-overlay" id="jobadderCandidateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeJobadderCandidateModal()">
-        <div class="modal" style="max-width:640px">
-          <div class="modal-header">
-            <div class="modal-title" id="jobadderCandidateModalTitle">Candidate</div>
-            <button class="modal-close" onclick="closeJobadderCandidateModal()">×</button>
-          </div>
-          <div class="modal-body" id="jobadderCandidateModalBody" style="max-height:70vh;overflow-y:auto"></div>
-        </div>
-      </div>
       </template>
 
       <!-- JobAdder: Open Job Ads (2026-09-28, Joy) — every currently-live
@@ -4758,6 +4749,26 @@
         <button class="btn-secondary" onclick="exportEvalPdf()">🖨️ Print / Save as PDF</button>
         <button class="btn-secondary" onclick="closeEvalDetailModal()">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- JobAdder candidate detail — deliberately OUTSIDE any <template>
+       (see showSection()'s __lazy_ swap comment): it's shared by two
+       lazy sections now (Find Applicants Near Centres AND Open Job Ads'
+       applicants list), and a lazy template's markup only enters the DOM
+       once that specific section has been visited. Nesting this inside
+       either one meant openJobadderCandidateDetail() silently no-oped
+       (getElementById returned null) whenever the OTHER section was
+       visited first in a session — bug found 2026-09-28 the hard way:
+       Joy went straight to Open Job Ads, clicked an applicant, nothing
+       happened. Global placement means it always exists on page load. -->
+  <div class="modal-overlay" id="jobadderCandidateModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeJobadderCandidateModal()">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header">
+        <div class="modal-title" id="jobadderCandidateModalTitle">Candidate</div>
+        <button class="modal-close" onclick="closeJobadderCandidateModal()">×</button>
+      </div>
+      <div class="modal-body" id="jobadderCandidateModalBody" style="max-height:70vh;overflow-y:auto"></div>
     </div>
   </div>
 
