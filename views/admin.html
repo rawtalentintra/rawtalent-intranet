@@ -349,6 +349,9 @@
         <div class="admin-nav-item" onclick="showSection('jobadder-candidates', this)">
           <span class="admin-nav-icon">🎯</span> Find Applicants Near Centres
         </div>
+        <div class="admin-nav-item" onclick="showSection('jobadder-open-ads', this)">
+          <span class="admin-nav-icon">📣</span> Open Job Ads
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
@@ -814,6 +817,26 @@
           </div>
           <div class="modal-body" id="jobadderCandidateModalBody" style="max-height:70vh;overflow-y:auto"></div>
         </div>
+      </div>
+      </template>
+
+      <!-- JobAdder: Open Job Ads (2026-09-28, Joy) — every currently-live
+           (state=Current, not expired/draft) job ad across the whole
+           account. No location field on the ad itself, so state/suburb
+           has to be read off the title/reference like Joy did from her own
+           JobAdder screenshot — not guessed or parsed here. -->
+      <template id="__lazy_jobadder_open_ads">
+      <div class="admin-section" id="section-jobadder-open-ads">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Open Job Ads</div>
+            <div class="admin-page-sub">Every currently-live JobAdder ad (not expired, not a draft) across the account.</div>
+          </div>
+          <button class="btn-add" onclick="loadJobadderOpenAds()">↻ Refresh</button>
+        </div>
+        <div id="jobadderOpenAdsBanner" style="display:none;margin-bottom:16px"></div>
+        <div id="jobadderOpenAdsSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
+        <div id="jobadderOpenAdsWrap"></div>
       </div>
       </template>
 
@@ -6561,6 +6584,7 @@
       if (id === 'payroll') initPayrollSection();
       if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
       if (id === 'jobadder-candidates') initJobAdderCandidatesSection();
+      if (id === 'jobadder-open-ads') loadJobadderOpenAds();
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
@@ -7938,6 +7962,57 @@
       }
     }
     function closeJobadderCandidateModal() { document.getElementById('jobadderCandidateModal').classList.remove('open'); }
+
+    // ── JobAdder → Open Job Ads (2026-09-28) ────────────────────────
+    async function loadJobadderOpenAds() {
+      const wrap = document.getElementById('jobadderOpenAdsWrap');
+      const summary = document.getElementById('jobadderOpenAdsSummary');
+      const banner = document.getElementById('jobadderOpenAdsBanner');
+      banner.style.display = 'none';
+      summary.textContent = '';
+      wrap.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const res = await fetch('/api/jobadder/open-ads');
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.notConnected) {
+            banner.style.display = 'block';
+            banner.innerHTML = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;font-size:13px;color:#9a3412">JobAdder isn't connected yet. <a href="/auth/jobadder" target="_blank" style="color:var(--orange);font-weight:700">Connect JobAdder →</a></div>`;
+          }
+          wrap.innerHTML = '';
+          return;
+        }
+        summary.textContent = `${data.openCount} open ad${data.openCount === 1 ? '' : 's'} (scanned ${data.scannedCount} total ads in the account)`;
+        wrap.innerHTML = jobadderOpenAdsTableHtml(data.items || []);
+      } catch (err) {
+        wrap.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    function jobadderOpenAdsTableHtml(ads) {
+      if (!ads.length) return '<div style="color:var(--text-muted);padding:20px;text-align:center">No open job ads right now.</div>';
+      const td = 'padding:4px 8px;font-size:11.5px;white-space:nowrap';
+      return `
+        <div class="admin-table-card"><div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100);background:var(--offwhite)">
+            <th style="${td}">Title</th><th style="${td}">Reference</th><th style="${td}">Owner</th>
+            <th style="${td}">Posted</th><th style="${td}">Expires</th>
+          </tr></thead>
+          <tbody>
+            ${ads.map(a => `
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="${td};white-space:normal;font-weight:700;color:var(--navy);max-width:340px">${escHtml(a.title || '—')}</td>
+                <td style="${td}">${escHtml(a.reference || '—')}</td>
+                <td style="${td}">${escHtml(a.owner || '—')}</td>
+                <td style="${td}">${a.postAt ? fmtDate(a.postAt) : '—'}</td>
+                <td style="${td}">${a.expireAt ? fmtDate(a.expireAt) : '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        </div></div>`;
+    }
 
     // ── Payroll → Company Totals (final-approval stage only) ───────
     async function loadPayrollCompany() {
