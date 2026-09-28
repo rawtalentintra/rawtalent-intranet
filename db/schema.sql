@@ -654,6 +654,23 @@ CREATE TABLE IF NOT EXISTS jobadder_auth_state (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Joy's own review of a JobAdder application (2026-09-28) — separate from
+-- JobAdder's own status/workflow (which just tracks "Applied" / stage in
+-- their hiring pipeline), this is RT's own "did someone here actually look
+-- at this and what did they decide" — classification + when they were
+-- called + free-text notes (e.g. "already has an RT profile, keen to
+-- complete it, placement isn't until February"). Keyed by JobAdder's own
+-- applicationId since that's stable and unique per application; no FK to
+-- a local table since applications live entirely in JobAdder, not here.
+CREATE TABLE IF NOT EXISTS jobadder_application_reviews (
+  application_id BIGINT PRIMARY KEY,
+  classification TEXT NOT NULL DEFAULT 'not_reviewed', -- 'not_reviewed' | 'move_forward' | 'not_a_fit'
+  call_date DATE,
+  notes TEXT,
+  updated_by CITEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- How long each agent has held their current Webex status — Webex's API has
 -- no such field, so this is derived from our own poll history and must be
 -- persisted (not kept in memory) so a deploy/restart doesn't reset every

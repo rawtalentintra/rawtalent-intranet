@@ -4,6 +4,68 @@ const { requireAuth, requireAdmin } = require('../middleware/authMiddleware');
 const jobAdderService = require('../services/jobAdderService');
 const candidateService = require('../services/jobAdderCandidateService');
 const resumePreviewService = require('../services/resumePreviewService');
+const { getDb } = require('../db/database');
+
+const VALID_CLASSIFICATIONS = new Set(['not_reviewed', 'move_forward', 'not_a_fit']);
+
+// Same "last 9 digits" comparison as services/educatorSearchService.js
+// (0417225760 / +61417225760 / 417225760 all match) — duplicated rather
+// than imported since that service's searchEducators() does one query per
+// call and a fuzzy name fallback we don't want here; this is a single
+// batched exact-phone lookup across every applicant on the ad at once.
+function last9Digits(phone) {
+  const digits = (phone || '').replace(/\D/g, '');
+  return digits.length >= 8 ? digits.slice(-9) : null;
+}
+
+// Attaches whether each applicant already has an RT profile (matched by
+// phone — the strong signal, same as educatorSearchService) and Joy's own
+// review of that application (classification/call date/notes — separate
+// from JobAdder's own status, see db/schema.sql's jobadder_application_
+// reviews comment). One batched query each rather than N+1 per applicant.
+async function enrichApplicants(applicants) {
+  const db = getDb();
+  const phoneByLast9 = new Map();
+  for (const a of applicants) {
+    const key = last9Digits(a.mobile);
+    if (key) phoneByLast9.set(key, a);
+  }
+  const last9List = [...phoneByLast9.keys()];
+  const rtByLast9 = new Map();
+  if (last9List.length) {
+    const res = await db.execute({
+      sql: `SELECT user_id, first_name, last_name, contact_no, is_active, suburb,
+                   RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) AS last9
+            FROM rt_candidates_cache
+            WHERE RIGHT(regexp_replace(coalesce(contact_no,''), '[^0-9]', '', 'g'), 9) = ANY(?)`,
+      args: [last9List]
+    });
+    for (const row of res.rows) rtByLast9.set(row.last9, row);
+  }
+
+  const appIds = applicants.map(a => a.applicationId);
+  const reviewById = new Map();
+  if (appIds.length) {
+    const res = await db.execute({
+      sql: `SELECT * FROM jobadder_application_reviews WHERE application_id = ANY(?)`,
+      args: [appIds]
+    });
+    for (const row of res.rows) reviewById.set(String(row.application_id), row);
+  }
+
+  return applicants.map(a => {
+    const last9 = last9Digits(a.mobile);
+    const rt = last9 ? rtByLast9.get(last9) : null;
+    const review = reviewById.get(String(a.applicationId));
+    return {
+      ...a,
+      rtProfile: rt ? { userId: rt.user_id, isActive: rt.is_active, suburb: rt.suburb } : null,
+      classification: review?.classification || 'not_reviewed',
+      callDate: review?.call_date || null,
+      notes: review?.notes || null
+    };
+  });
+}
 
 // Was router.use(requireAdmin) for the whole file — but the resume-
 // attachment route below is what "Resume Link" columns in outreach
@@ -128,20 +190,46 @@ router.get('/ads/:adId/applications', requireAdmin, async (req, res) => {
       offset += limit;
       if (page.length < limit || offset >= (data.totalCount ?? 0)) break;
     }
-    res.json({
-      totalCount: items.length,
-      items: items.map(a => ({
-        applicationId: a.applicationId,
-        candidateId: a.candidate?.candidateId ?? null,
-        name: `${a.candidate?.firstName || ''} ${a.candidate?.lastName || ''}`.trim() || '(No name)',
-        email: a.candidate?.email || null,
-        mobile: a.candidate?.mobile || null,
-        status: a.status?.name || null,
-        stage: a.status?.workflow?.stage || null,
-        source: a.source || null,
-        appliedAt: a.createdAt || null
-      })).sort((x, y) => new Date(y.appliedAt) - new Date(x.appliedAt))
+    const mapped = items.map(a => ({
+      applicationId: a.applicationId,
+      candidateId: a.candidate?.candidateId ?? null,
+      name: `${a.candidate?.firstName || ''} ${a.candidate?.lastName || ''}`.trim() || '(No name)',
+      email: a.candidate?.email || null,
+      mobile: a.candidate?.mobile || null,
+      status: a.status?.name || null,
+      stage: a.status?.workflow?.stage || null,
+      source: a.source || null,
+      appliedAt: a.createdAt || null
+    })).sort((x, y) => new Date(y.appliedAt) - new Date(x.appliedAt));
+    res.json({ totalCount: mapped.length, items: await enrichApplicants(mapped) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Joy's own review of one application — classification/call date/notes,
+// separate from JobAdder's own status (see db/schema.sql's comment on
+// jobadder_application_reviews). Upsert since the first save for an
+// application is a genuine INSERT and every one after is an update to the
+// same row.
+router.put('/applications/:id/review', requireAdmin, async (req, res) => {
+  const applicationId = Number(req.params.id);
+  if (!Number.isInteger(applicationId)) return res.status(400).json({ error: 'Invalid application id.' });
+  const { classification, callDate, notes } = req.body || {};
+  if (classification !== undefined && !VALID_CLASSIFICATIONS.has(classification)) {
+    return res.status(400).json({ error: `classification must be one of: ${[...VALID_CLASSIFICATIONS].join(', ')}` });
+  }
+  try {
+    const db = getDb();
+    await db.execute({
+      sql: `INSERT INTO jobadder_application_reviews (application_id, classification, call_date, notes, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, now())
+            ON CONFLICT (application_id) DO UPDATE SET
+              classification = excluded.classification, call_date = excluded.call_date,
+              notes = excluded.notes, updated_by = excluded.updated_by, updated_at = now()`,
+      args: [applicationId, classification || 'not_reviewed', callDate || null, notes || null, req.user.email]
     });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

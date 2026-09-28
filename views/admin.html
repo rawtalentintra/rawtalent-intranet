@@ -8066,30 +8066,88 @@
     // (openJobadderCandidateDetail, from Find Applicants Near Centres) —
     // that already renders full candidate info + attachments, so this
     // list stays focused on application-level context (status/source/date).
+    // Labels Joy asked for verbatim — value on the left is what's stored/
+    // sent to the API, label on the right is what's shown in the dropdown.
+    const JOBADDER_CLASSIFICATIONS = [
+      ['not_reviewed', 'Not Reviewed'],
+      ['move_forward', 'Reviewed - Move Forward'],
+      ['not_a_fit', 'Reviewed - Not a Fit']
+    ];
+
     function jobadderApplicantsTableHtml(applicants) {
       if (!applicants.length) return '<div style="color:var(--text-muted);padding:20px;text-align:center">No applicants for this ad yet.</div>';
-      const td = 'padding:4px 8px;font-size:11.5px;white-space:nowrap';
+      const td = 'padding:4px 8px;font-size:11.5px;vertical-align:top';
+      const nowrap = td + ';white-space:nowrap';
       return `
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:11.5px">
           <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100);background:var(--offwhite)">
-            <th style="${td}">Name</th><th style="${td}">Status</th><th style="${td}">Source</th>
-            <th style="${td}">Phone</th><th style="${td}">Email</th><th style="${td}">Applied</th>
+            <th style="${nowrap}">Name</th><th style="${nowrap}">RT Profile</th><th style="${nowrap}">Status</th>
+            <th style="${nowrap}">Source</th><th style="${nowrap}">Phone</th><th style="${td}">Email</th>
+            <th style="${nowrap}">Applied</th><th style="${nowrap}">Classification</th>
+            <th style="${nowrap}">Call Date</th><th style="${td}">Notes</th>
           </tr></thead>
           <tbody>
             ${applicants.map(a => `
-              <tr style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="openJobadderCandidateDetail(${a.candidateId})" onmouseover="this.style.background='var(--offwhite)'" onmouseout="this.style.background=''">
-                <td style="${td};font-weight:700;color:var(--navy)">${escHtml(a.name)}</td>
-                <td style="${td}">${escHtml(a.status || '—')}${a.stage ? ' <span style="color:var(--text-muted)">(' + escHtml(a.stage) + ')</span>' : ''}</td>
-                <td style="${td}">${escHtml(a.source || '—')}</td>
-                <td style="${td}">${escHtml(a.mobile || '—')}</td>
-                <td style="${td};max-width:200px;overflow:hidden;text-overflow:ellipsis">${escHtml(a.email || '—')}</td>
-                <td style="${td}">${a.appliedAt ? fmtDate(a.appliedAt) : '—'}</td>
+              <tr style="border-bottom:1px solid var(--gray-100)" data-application-id="${a.applicationId}">
+                <td style="${nowrap};font-weight:700;color:var(--navy);cursor:pointer" onclick="openJobadderCandidateDetail(${a.candidateId})">${escHtml(a.name)}</td>
+                <td style="${nowrap}">${jobadderRtProfileBadgeHtml(a.rtProfile)}</td>
+                <td style="${nowrap}">${escHtml(a.status || '—')}${a.stage ? ' <span style="color:var(--text-muted)">(' + escHtml(a.stage) + ')</span>' : ''}</td>
+                <td style="${nowrap}">${escHtml(a.source || '—')}</td>
+                <td style="${nowrap}">${escHtml(a.mobile || '—')}</td>
+                <td style="${td};max-width:180px;overflow:hidden;text-overflow:ellipsis">${escHtml(a.email || '—')}</td>
+                <td style="${nowrap}">${a.appliedAt ? fmtDate(a.appliedAt) : '—'}</td>
+                <td style="${nowrap}">
+                  <select class="form-control" style="font-size:11px;padding:3px 6px" onchange="saveJobadderApplicationReview(${a.applicationId}, this)">
+                    ${JOBADDER_CLASSIFICATIONS.map(([val, label]) => `<option value="${val}" ${a.classification === val ? 'selected' : ''}>${label}</option>`).join('')}
+                  </select>
+                </td>
+                <td style="${nowrap}">
+                  <input type="date" class="form-control" style="font-size:11px;padding:3px 6px;width:130px" value="${a.callDate ? String(a.callDate).slice(0, 10) : ''}" onchange="saveJobadderApplicationReview(${a.applicationId}, this)">
+                </td>
+                <td style="${td}">
+                  <input type="text" class="form-control" style="font-size:11px;padding:3px 6px;width:100%;min-width:160px" placeholder="Notes…" value="${escHtml(a.notes || '')}" onchange="saveJobadderApplicationReview(${a.applicationId}, this)">
+                </td>
               </tr>
             `).join('')}
           </tbody>
         </table>
         </div>`;
+    }
+
+    function jobadderRtProfileBadgeHtml(rt) {
+      if (!rt) return '<span style="color:var(--text-muted)">New</span>';
+      const color = rt.isActive ? '#059669' : '#9ca3af';
+      const label = rt.isActive ? 'Active' : 'Inactive';
+      return `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${rt.userId}" target="_blank" style="color:${color};font-weight:700;text-decoration:none" title="${escHtml(rt.suburb || '')}">Existing · ${label} ↗</a>`;
+    }
+
+    // Fires on change of any one field (classification/call date/notes) in
+    // an applicant row — reads all three current values from the row so a
+    // single save always writes the full, current state rather than
+    // clobbering the other two fields with stale ones.
+    async function saveJobadderApplicationReview(applicationId, changedEl) {
+      const row = changedEl.closest('tr');
+      const classification = row.querySelector('select').value;
+      const callDate = row.querySelector('input[type="date"]').value || null;
+      const notes = row.querySelector('input[type="text"]').value || null;
+      changedEl.disabled = true;
+      try {
+        const res = await fetch(`/api/jobadder/applications/${applicationId}/review`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ classification, callDate, notes })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Save failed');
+        }
+        toast('Saved', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        changedEl.disabled = false;
+      }
     }
 
     // ── Payroll → Company Totals (final-approval stage only) ───────
