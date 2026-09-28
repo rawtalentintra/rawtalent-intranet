@@ -39,35 +39,59 @@ router.get('/centres/search', requireAdmin, async (req, res) => {
 
 // Open job ads (Joy, 2026-09-28: "information on open job ads", same need
 // as the earlier JobAdder screenshot she pasted in for a QLD/ACT/NT
-// breakdown). GET /jobs?active=true is JobAdder's own "active/open jobs"
-// filter (confirmed against JobAdder's OpenAPI spec — no separate
-// open/closed flag on the job ad itself, status lives on the underlying
-// Job). Needs the read_job scope added 2026-09-28 — requires reconnecting
-// via /auth/jobadder before this returns real data.
-router.get('/open-jobs', requireAdmin, async (req, res) => {
+// breakdown). First attempt used GET /jobs?active=true (JobAdder's "active
+// job" filter per its OpenAPI spec) but this RT account posts ads
+// standalone with no underlying Job record behind them — that endpoint
+// always returns 0 items here. The real data is GET /jobads: a "state"
+// field of Current/Expired/Draft right on the ad itself (confirmed live,
+// 2026-09-28: 9 Current out of 2700 total ads). No server-side filter for
+// it exists (tried state=/status=/jobAdState= as query params — JobAdder
+// silently ignores all three and returns the full unfiltered set, same
+// totalCount every time), so this scans every page and filters client-side.
+// There's no location field on the ad either — title/reference are the
+// only signal, so `state` below is left null rather than guessed; the
+// admin UI can show title/reference and let a human read the state off
+// them, same as Joy did from her own screenshot.
+async function fetchAllJobAds(token) {
+  const items = [];
+  let offset = 0;
+  const limit = 100;
+  const HARD_CAP = 5000; // real safety backstop, not a "should never need more than this" guess — this account has 2700+ ads and will only grow
+  while (offset < HARD_CAP) {
+    const res = await fetch(`${token.apiBaseUrl}/jobads?limit=${limit}&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token.accessToken}` }
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`JobAdder /jobads call failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    const page = data.items || [];
+    items.push(...page);
+    offset += limit;
+    if (page.length < limit || offset >= (data.totalCount ?? 0)) break;
+  }
+  return items;
+}
+
+router.get('/open-ads', requireAdmin, async (req, res) => {
   try {
     const token = await jobAdderService.getValidAccessToken();
     if (!token) return res.status(400).json({ error: 'JobAdder is not connected.', notConnected: true });
-    const params = new URLSearchParams({ active: 'true', limit: '100' });
-    const apiRes = await fetch(`${token.apiBaseUrl}/jobs?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token.accessToken}` }
-    });
-    if (!apiRes.ok) {
-      const body = await apiRes.text().catch(() => '');
-      return res.status(502).json({ error: `JobAdder /jobs call failed (${apiRes.status}): ${body.slice(0, 300)}` });
-    }
-    const data = await apiRes.json();
-    const items = (data.items || []).map(j => ({
-      jobId: j.jobId,
-      jobTitle: j.jobTitle || null,
-      company: j.company?.name || null,
-      status: j.status?.name || null,
-      state: j.location?.state || j.workplace?.state || null,
-      city: j.location?.city || j.workplace?.city || null,
-      createdAt: j.createdAt || null,
-      owner: j.owner?.name || j.recruiter?.name || null
-    }));
-    res.json({ totalCount: data.totalCount ?? items.length, items });
+    const all = await fetchAllJobAds(token);
+    const open = all
+      .filter(a => a.state === 'Current')
+      .map(a => ({
+        adId: a.adId,
+        title: a.title || null,
+        reference: a.reference || null,
+        summary: a.summary || null,
+        owner: a.owner ? `${a.owner.firstName || ''} ${a.owner.lastName || ''}`.trim() : null,
+        postAt: a.postAt || null,
+        expireAt: a.expireAt || null
+      }))
+      .sort((x, y) => new Date(y.postAt) - new Date(x.postAt));
+    res.json({ scannedCount: all.length, openCount: open.length, items: open });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
