@@ -17,7 +17,15 @@ const TOKEN_URL = 'https://id.jobadder.com/connect/token';
 // exactly what this integration is for. offline_access is required to get
 // a refresh token at all — without it the access token (60 min lifetime)
 // would need a fresh human login every hour, useless for a background sync.
-const SCOPES = 'read_candidate read_placement offline_access';
+// read_job/read_jobad added 2026-09-28 (Joy: needs open job ad info) —
+// confirmed against JobAdder's own OpenAPI spec: GET /jobs (job status,
+// company, active=true filter) needs read_job; GET /jobads and
+// GET /jobboards/{id}/ads (the actual posted ad content/dates) need
+// read_jobad. Scope changes only take effect on a fresh authorization —
+// the existing refresh token was issued under the old scope list and
+// won't gain these; Settings → Connect JobAdder must be re-run once this
+// is deployed.
+const SCOPES = 'read_candidate read_placement read_job read_jobad offline_access';
 
 // Must exactly match one of the "Authorized redirect URIs" the JobAdder
 // application was registered with — JobAdder's docs: "Redirect URI used

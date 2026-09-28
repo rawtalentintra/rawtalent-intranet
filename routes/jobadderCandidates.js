@@ -37,6 +37,42 @@ router.get('/centres/search', requireAdmin, async (req, res) => {
   }
 });
 
+// Open job ads (Joy, 2026-09-28: "information on open job ads", same need
+// as the earlier JobAdder screenshot she pasted in for a QLD/ACT/NT
+// breakdown). GET /jobs?active=true is JobAdder's own "active/open jobs"
+// filter (confirmed against JobAdder's OpenAPI spec — no separate
+// open/closed flag on the job ad itself, status lives on the underlying
+// Job). Needs the read_job scope added 2026-09-28 — requires reconnecting
+// via /auth/jobadder before this returns real data.
+router.get('/open-jobs', requireAdmin, async (req, res) => {
+  try {
+    const token = await jobAdderService.getValidAccessToken();
+    if (!token) return res.status(400).json({ error: 'JobAdder is not connected.', notConnected: true });
+    const params = new URLSearchParams({ active: 'true', limit: '100' });
+    const apiRes = await fetch(`${token.apiBaseUrl}/jobs?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token.accessToken}` }
+    });
+    if (!apiRes.ok) {
+      const body = await apiRes.text().catch(() => '');
+      return res.status(502).json({ error: `JobAdder /jobs call failed (${apiRes.status}): ${body.slice(0, 300)}` });
+    }
+    const data = await apiRes.json();
+    const items = (data.items || []).map(j => ({
+      jobId: j.jobId,
+      jobTitle: j.jobTitle || null,
+      company: j.company?.name || null,
+      status: j.status?.name || null,
+      state: j.location?.state || j.workplace?.state || null,
+      city: j.location?.city || j.workplace?.city || null,
+      createdAt: j.createdAt || null,
+      owner: j.owner?.name || j.recruiter?.name || null
+    }));
+    res.json({ totalCount: data.totalCount ?? items.length, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/search-candidates', requireAdmin, async (req, res) => {
   try {
     const centreKeys = (req.query.centreKeys || '').split(',').map(s => s.trim()).filter(Boolean);
