@@ -838,6 +838,19 @@
         <div id="jobadderOpenAdsSummary" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px"></div>
         <div id="jobadderOpenAdsWrap"></div>
       </div>
+      <!-- Applicants for one ad — clicking a name here opens the existing
+           jobadderCandidateModal (openJobadderCandidateDetail, already
+           built for Find Applicants Near Centres) rather than duplicating
+           candidate detail/attachments rendering here. -->
+      <div class="modal-overlay" id="jobadderApplicantsModal" onmousedown="__modalMouseDownTarget=event.target" onclick="if(event.target===this&&__modalMouseDownTarget===this)closeJobadderApplicantsModal()">
+        <div class="modal" style="max-width:720px">
+          <div class="modal-header">
+            <div class="modal-title" id="jobadderApplicantsModalTitle">Applicants</div>
+            <button class="modal-close" onclick="closeJobadderApplicantsModal()">×</button>
+          </div>
+          <div class="modal-body" id="jobadderApplicantsModalBody" style="max-height:70vh;overflow-y:auto"></div>
+        </div>
+      </div>
       </template>
 
       <!-- Leads -->
@@ -7964,6 +7977,7 @@
     function closeJobadderCandidateModal() { document.getElementById('jobadderCandidateModal').classList.remove('open'); }
 
     // ── JobAdder → Open Job Ads (2026-09-28) ────────────────────────
+    let jobadderOpenAdsResults = [];
     async function loadJobadderOpenAds() {
       const wrap = document.getElementById('jobadderOpenAdsWrap');
       const summary = document.getElementById('jobadderOpenAdsSummary');
@@ -7983,7 +7997,8 @@
           return;
         }
         summary.textContent = `${data.openCount} open ad${data.openCount === 1 ? '' : 's'} (scanned ${data.scannedCount} total ads in the account)`;
-        wrap.innerHTML = jobadderOpenAdsTableHtml(data.items || []);
+        jobadderOpenAdsResults = data.items || [];
+        wrap.innerHTML = jobadderOpenAdsTableHtml(jobadderOpenAdsResults);
       } catch (err) {
         wrap.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load: ${escHtml(err.message)}</div>`;
       }
@@ -8001,7 +8016,7 @@
           </tr></thead>
           <tbody>
             ${ads.map(a => `
-              <tr style="border-bottom:1px solid var(--gray-100)">
+              <tr style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="openJobadderAdApplicants(${a.adId})" onmouseover="this.style.background='var(--offwhite)'" onmouseout="this.style.background=''" title="Click to see applicants">
                 <td style="${td};white-space:normal;font-weight:700;color:var(--navy);max-width:340px">${escHtml(a.title || '—')}</td>
                 <td style="${td}">${escHtml(a.reference || '—')}</td>
                 <td style="${td}">${escHtml(a.owner || '—')}</td>
@@ -8012,6 +8027,58 @@
           </tbody>
         </table>
         </div></div>`;
+    }
+
+    async function openJobadderAdApplicants(adId) {
+      const ad = jobadderOpenAdsResults.find(a => a.adId === adId);
+      const modal = document.getElementById('jobadderApplicantsModal');
+      const title = document.getElementById('jobadderApplicantsModalTitle');
+      const body = document.getElementById('jobadderApplicantsModalBody');
+      title.textContent = ad ? `Applicants — ${ad.title}` : 'Applicants';
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      modal.classList.add('open');
+      try {
+        const res = await fetch(`/api/jobadder/ads/${adId}/applications`);
+        const data = await res.json();
+        if (!res.ok) {
+          body.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">${escHtml(data.error || 'Failed to load applicants.')}</div>`;
+          return;
+        }
+        body.innerHTML = jobadderApplicantsTableHtml(data.items || []);
+      } catch (err) {
+        body.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center">Failed to load applicants: ${escHtml(err.message)}</div>`;
+      }
+    }
+    function closeJobadderApplicantsModal() { document.getElementById('jobadderApplicantsModal').classList.remove('open'); }
+
+    // Clicking a row here opens the existing candidate-detail modal
+    // (openJobadderCandidateDetail, from Find Applicants Near Centres) —
+    // that already renders full candidate info + attachments, so this
+    // list stays focused on application-level context (status/source/date).
+    function jobadderApplicantsTableHtml(applicants) {
+      if (!applicants.length) return '<div style="color:var(--text-muted);padding:20px;text-align:center">No applicants for this ad yet.</div>';
+      const td = 'padding:4px 8px;font-size:11.5px;white-space:nowrap';
+      return `
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--gray-100);background:var(--offwhite)">
+            <th style="${td}">Name</th><th style="${td}">Status</th><th style="${td}">Source</th>
+            <th style="${td}">Phone</th><th style="${td}">Email</th><th style="${td}">Applied</th>
+          </tr></thead>
+          <tbody>
+            ${applicants.map(a => `
+              <tr style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="openJobadderCandidateDetail(${a.candidateId})" onmouseover="this.style.background='var(--offwhite)'" onmouseout="this.style.background=''">
+                <td style="${td};font-weight:700;color:var(--navy)">${escHtml(a.name)}</td>
+                <td style="${td}">${escHtml(a.status || '—')}${a.stage ? ' <span style="color:var(--text-muted)">(' + escHtml(a.stage) + ')</span>' : ''}</td>
+                <td style="${td}">${escHtml(a.source || '—')}</td>
+                <td style="${td}">${escHtml(a.mobile || '—')}</td>
+                <td style="${td};max-width:200px;overflow:hidden;text-overflow:ellipsis">${escHtml(a.email || '—')}</td>
+                <td style="${td}">${a.appliedAt ? fmtDate(a.appliedAt) : '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        </div>`;
     }
 
     // ── Payroll → Company Totals (final-approval stage only) ───────

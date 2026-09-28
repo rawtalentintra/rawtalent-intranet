@@ -97,6 +97,56 @@ router.get('/open-ads', requireAdmin, async (req, res) => {
   }
 });
 
+// Applicants for one specific ad (Joy, 2026-09-28: click an open ad, see
+// who applied). GET /jobads/{adId}/applications — real endpoint (the ad's
+// own `links.applications` points here), needs read_jobapplication on top
+// of read_jobad; confirmed live 2026-09-28 against a real ad (2 real
+// applicants incl. candidate contact details, status/workflow stage,
+// source e.g. "Seek", createdAt). Deliberately NOT fetching attachments
+// here — the candidate's own attachments (incl. what they submitted for
+// this application) are already shown by the existing candidate-detail
+// modal via GET /candidates/:id/attachments, so clicking a name just opens
+// that instead of duplicating attachment-serving logic.
+router.get('/ads/:adId/applications', requireAdmin, async (req, res) => {
+  try {
+    const token = await jobAdderService.getValidAccessToken();
+    if (!token) return res.status(400).json({ error: 'JobAdder is not connected.', notConnected: true });
+    const items = [];
+    let offset = 0;
+    const limit = 100;
+    while (offset < 2000) {
+      const apiRes = await fetch(`${token.apiBaseUrl}/jobads/${encodeURIComponent(req.params.adId)}/applications?limit=${limit}&offset=${offset}`, {
+        headers: { Authorization: `Bearer ${token.accessToken}` }
+      });
+      if (!apiRes.ok) {
+        const body = await apiRes.text().catch(() => '');
+        return res.status(apiRes.status === 404 ? 404 : 502).json({ error: body.slice(0, 300) || 'Failed to load applicants' });
+      }
+      const data = await apiRes.json();
+      const page = data.items || [];
+      items.push(...page);
+      offset += limit;
+      if (page.length < limit || offset >= (data.totalCount ?? 0)) break;
+    }
+    res.json({
+      totalCount: items.length,
+      items: items.map(a => ({
+        applicationId: a.applicationId,
+        candidateId: a.candidate?.candidateId ?? null,
+        name: `${a.candidate?.firstName || ''} ${a.candidate?.lastName || ''}`.trim() || '(No name)',
+        email: a.candidate?.email || null,
+        mobile: a.candidate?.mobile || null,
+        status: a.status?.name || null,
+        stage: a.status?.workflow?.stage || null,
+        source: a.source || null,
+        appliedAt: a.createdAt || null
+      })).sort((x, y) => new Date(y.appliedAt) - new Date(x.appliedAt))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/search-candidates', requireAdmin, async (req, res) => {
   try {
     const centreKeys = (req.query.centreKeys || '').split(',').map(s => s.trim()).filter(Boolean);
