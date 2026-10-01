@@ -866,7 +866,7 @@ router.post('/:id/activities', async (req, res) => {
   const { channel, contactName, outcome, notes, opportunityNotes, nextStep, nextStepDueDate } = req.body;
   if (!channel) return res.status(400).json({ error: 'channel is required' });
   try {
-    const lead = await getDb().execute({ sql: 'SELECT id FROM leads WHERE id = ?', args: [req.params.id] });
+    const lead = await getDb().execute({ sql: 'SELECT id, lead_called_status, centre_visited_status FROM leads WHERE id = ?', args: [req.params.id] });
     if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
 
     const id = uuidv4();
@@ -881,6 +881,36 @@ router.post('/:id/activities', async (req, res) => {
         req.user.email, req.user.name || req.user.email
       ]
     });
+
+    // Logging an actual call/visit here is real-world proof it happened —
+    // bug report 2026-10-01 (a WF Partner on /wfp): "the voice messages are
+    // there but the last visited area doesnt have the date added". Root
+    // cause: this route only ever wrote to lead_activities, never to the
+    // lead's own lead_called_status/_at or centre_visited_status/_at — the
+    // fields the Leads list's "Last Called"/"Last Visited" columns and
+    // Stage actually read (see PUT /:id below, which DOES set these, but
+    // only from the separate Stage popover/picker, not from logging an
+    // activity). The two were never wired together on either platform;
+    // /wfp's "Log Visit" button (saveActivity() in views/wfp.html) just
+    // happened to be the first place anyone hit the gap, since Desktop's
+    // admin.html has no lead-activity-logging UI at all, only the Stage
+    // popover. Always stamps `now()` (not a user-supplied date) since this
+    // fires at the moment the activity is actually logged — matching
+    // PUT /:id's own `done` + current-timestamp shape for these fields.
+    if (channel === 'visit') {
+      await getDb().execute({
+        sql: `UPDATE leads SET centre_visited_status = 'done', centre_visited_at = now(),
+                     lead_called_status = CASE WHEN lead_called_status = 'to_schedule' THEN 'n_a' ELSE lead_called_status END
+              WHERE id = ?`,
+        args: [req.params.id]
+      });
+    } else if (channel === 'call') {
+      await getDb().execute({
+        sql: `UPDATE leads SET lead_called_status = 'done', lead_called_at = now() WHERE id = ?`,
+        args: [req.params.id]
+      });
+    }
+
     const row = (await getDb().execute({ sql: 'SELECT * FROM lead_activities WHERE id = ?', args: [id] })).rows[0];
     res.json(row);
   } catch (err) {

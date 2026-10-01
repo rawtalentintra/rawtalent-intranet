@@ -1766,12 +1766,20 @@
         } else {
           const body = {};
           if (newStage === 'new') { body.leadCalledStatus = 'to_schedule'; }
-          else if (newStage === 'contacted') { body.leadCalledStatus = 'done'; }
+          // Same bug as the one fixed 2026-10-01 in POST /api/leads/:id/
+          // activities (a WF Partner reported visits/calls not showing a
+          // date even though they'd logged them) — marking a stage "done"
+          // here without also stamping *_at left the Leads list's "Last
+          // Called"/"Last Visited" columns blank forever, since those read
+          // the _at columns, not the status alone. This picker is a
+          // separate path from logging an activity (saveActivity() below),
+          // so needs the same fix independently.
+          else if (newStage === 'contacted') { body.leadCalledStatus = 'done'; body.leadCalledAt = new Date().toISOString(); }
           else if (newStage === 'visit_scheduled') {
             body.leadCalledStatus = l.lead_called_status === 'to_schedule' ? 'done' : l.lead_called_status;
             body.centreVisitedStatus = 'scheduled';
             if (!l.centre_visited_at) body.centreVisitedAt = new Date().toISOString();
-          } else if (newStage === 'visited') { body.centreVisitedStatus = 'done'; }
+          } else if (newStage === 'visited') { body.centreVisitedStatus = 'done'; body.centreVisitedAt = new Date().toISOString(); }
           else if (newStage === 'signed') { body.signedStatus = 'signed'; }
           await api(`/api/leads/${l.id}`, { method: 'PUT', body: JSON.stringify(body) });
         }
