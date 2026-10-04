@@ -18,6 +18,13 @@ const { analyzeVisitFromTranscript } = require('../services/centreVisitAnalysisS
 
 router.use(requireAuth);
 
+// Marker on the lead_activities row auto-written when a Stage change moves a
+// lead to Called/Visited (see PUT /:id). Lets POST /:id/activities fold a
+// Log Call/Log Visit entry made right afterwards into that row instead of
+// counting one real action twice.
+const AUTO_STAGE_NOTE = 'Logged from stage change';
+const AUTO_STAGE_MERGE_WINDOW_MINUTES = 60;
+
 // Any format — a site-visit recording could be a phone-app voice memo, a
 // Zoom/Teams export, whatever the Workforce Partner actually captured, so
 // no mimetype allowlist. 200MB covers a real video export; well above the
@@ -445,6 +452,22 @@ router.get('/retention', leadsViewAccess, async (req, res) => {
   }
 });
 
+// Dashboard-wide lead call/visit feed for the WFP Dashboard's per-partner
+// Calls Logged / Visits Made cards — the lead-side twin of GET
+// /api/centres/visits-log. Only the columns that aggregation needs.
+// Registered ahead of GET /:id below so "activities-log" isn't read as a
+// lead id.
+router.get('/activities-log', leadsViewAccess, async (req, res) => {
+  try {
+    const result = await getDb().execute(
+      'SELECT channel, created_by_email, created_by_name, created_at FROM lead_activities ORDER BY created_at DESC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Feeds the compact VIC/SA performance charts — counts per stage, scoped to
 // a date range the client computes (this week / this month / arbitrary
 // month), so the chart logic stays purely in SQL and the frontend just picks
@@ -640,6 +663,35 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
 
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     const updated = result.rows[0];
+
+    // One source of truth for "who called/visited what": a Stage change that
+    // moves Called or Visited INTO done is a real call/visit by whoever made
+    // the change, so it writes the same lead_activities row Log Call/Log
+    // Visit does — otherwise the per-partner dashboard cards (which count
+    // lead_activities) never see anything done from the Stage picker.
+    // Strictly one channel per transition: marking Visited never implies a
+    // call (a partner can visit without calling). Moving a lead to Visit
+    // Scheduled also sets Called=done as a stage convention (not a call that
+    // was made), so that one case is skipped. Only the transition counts —
+    // re-saving an already-done status adds nothing. Failure to log must not
+    // fail the update that already succeeded.
+    try {
+      const before = existing.rows[0];
+      const loggedChannels = [];
+      if ('leadCalledStatus' in req.body && updated.lead_called_status === 'done' && before.lead_called_status !== 'done'
+          && req.body.centreVisitedStatus !== 'scheduled') loggedChannels.push('call');
+      if ('centreVisitedStatus' in req.body && updated.centre_visited_status === 'done' && before.centre_visited_status !== 'done') loggedChannels.push('visit');
+      for (const channel of loggedChannels) {
+        await getDb().execute({
+          sql: `INSERT INTO lead_activities (id, lead_id, channel, notes, created_by_email, created_by_name)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [uuidv4(), req.params.id, channel, AUTO_STAGE_NOTE, req.user.email, req.user.name || req.user.email]
+        });
+      }
+    } catch (logErr) {
+      console.error('Failed to log stage-change activity for lead', req.params.id, logErr.message);
+    }
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -869,18 +921,41 @@ router.post('/:id/activities', async (req, res) => {
     const lead = await getDb().execute({ sql: 'SELECT id, lead_called_status, centre_visited_status FROM leads WHERE id = ?', args: [req.params.id] });
     if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
 
-    const id = uuidv4();
-    await getDb().execute({
-      sql: `INSERT INTO lead_activities (
-              id, lead_id, channel, contact_name, outcome, notes, opportunity_notes,
-              next_step, next_step_due_date, created_by_email, created_by_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        id, req.params.id, channel, contactName || null, outcome || null, notes || null,
-        opportunityNotes || null, nextStep || null, nextStepDueDate || null,
-        req.user.email, req.user.name || req.user.email
-      ]
+    // If this same person just moved the lead's Stage to Called/Visited, that
+    // already wrote a bare activity row for this action — fill in that row
+    // with the details rather than inserting a second one.
+    const recentAuto = await getDb().execute({
+      sql: `SELECT id FROM lead_activities
+            WHERE lead_id = ? AND channel = ? AND created_by_email = ? AND notes = ?
+              AND created_at > now() - (? || ' minutes')::interval
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [req.params.id, channel, req.user.email, AUTO_STAGE_NOTE, String(AUTO_STAGE_MERGE_WINDOW_MINUTES)]
     });
+
+    let id;
+    if (recentAuto.rows[0]) {
+      id = recentAuto.rows[0].id;
+      await getDb().execute({
+        sql: `UPDATE lead_activities SET contact_name = ?, outcome = ?, notes = ?, opportunity_notes = ?,
+                     next_step = ?, next_step_due_date = ?
+              WHERE id = ?`,
+        args: [contactName || null, outcome || null, notes || null, opportunityNotes || null,
+               nextStep || null, nextStepDueDate || null, id]
+      });
+    } else {
+      id = uuidv4();
+      await getDb().execute({
+        sql: `INSERT INTO lead_activities (
+                id, lead_id, channel, contact_name, outcome, notes, opportunity_notes,
+                next_step, next_step_due_date, created_by_email, created_by_name
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          id, req.params.id, channel, contactName || null, outcome || null, notes || null,
+          opportunityNotes || null, nextStep || null, nextStepDueDate || null,
+          req.user.email, req.user.name || req.user.email
+        ]
+      });
+    }
 
     // Logging an actual call/visit here is real-world proof it happened —
     // bug report 2026-10-01 (a WF Partner on /wfp): "the voice messages are

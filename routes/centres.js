@@ -514,10 +514,13 @@ router.get('/', async (req, res) => {
 // centre at once, not any one centre's timeline. Only the columns that
 // aggregation actually needs — notes/outcome/etc. stay scoped to a
 // specific centre's own visit history, not exposed dashboard-wide.
+// Completed only — a Planned/Rescheduled entry is a future intention, not a
+// call or visit that happened (as of 2026-10-05, 10 of the 11 rows ever
+// logged were Planned, all counted as visits made before this filter).
 router.get('/visits-log', async (req, res) => {
   try {
     const result = await getDb().execute(
-      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits ORDER BY visit_date DESC"
+      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits WHERE status = 'completed' ORDER BY visit_date DESC"
     );
     res.json(result.rows);
   } catch (err) {

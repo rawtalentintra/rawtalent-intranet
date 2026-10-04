@@ -10524,21 +10524,32 @@
     // re-render-on-toggle pattern as clientRetentionData above. Calls and
     // visits are both rows in centre_visits (see its own schema comment
     // for why), distinguished by `channel`.
+    // Lead-side calls/visits live in lead_activities (GET /api/leads/
+    // activities-log); centre-side in centre_visits, Completed only (GET
+    // /api/centres/visits-log). Both feed the same per-partner cards — a
+    // partner's Calls/Visits Logged is their lead AND centre activity.
     let partnerActivityVisits = [];
+    let partnerActivityLeadLog = [];
     async function loadPartnerActivityVisits() {
-      try {
-        const data = await fetch('/api/centres/visits-log').then(r => r.json());
-        partnerActivityVisits = Array.isArray(data) ? data : [];
-      } catch { partnerActivityVisits = []; }
+      const safeJson = async url => {
+        try { const r = await fetch(url); const d = r.ok ? await r.json() : []; return Array.isArray(d) ? d : []; } catch { return []; }
+      };
+      [partnerActivityVisits, partnerActivityLeadLog] = await Promise.all([
+        safeJson('/api/centres/visits-log'),
+        safeJson('/api/leads/activities-log')
+      ]);
       renderSalesDashboard();
     }
     function renderSalesPartnerActivity(from, to) {
       const box = document.getElementById('salesPartnerActivityRow');
       if (!box) return;
       box.innerHTML = WFP_ACTIVITY_PARTNERS.map(p => {
-        const byPartner = v => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v.visit_date, from, to);
-        const calls = partnerActivityVisits.filter(v => v.channel === 'call' && byPartner(v)).length;
-        const visits = partnerActivityVisits.filter(v => v.channel === 'visit' && byPartner(v)).length;
+        const byPartner = (v, dateKey) => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v[dateKey], from, to);
+        const count = channel =>
+          partnerActivityVisits.filter(v => v.channel === channel && byPartner(v, 'visit_date')).length +
+          partnerActivityLeadLog.filter(v => v.channel === channel && byPartner(v, 'created_at')).length;
+        const calls = count('call');
+        const visits = count('visit');
         const leadsCreated = allLeads.filter(l => (l.submitted_by_email || '').toLowerCase() === p.email && inDateRange(l.created_at, from, to)).length;
         return `
           <div class="admin-table-card" style="padding:18px 20px;flex:1">
