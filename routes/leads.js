@@ -460,7 +460,7 @@ router.get('/retention', leadsViewAccess, async (req, res) => {
 router.get('/activities-log', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute(
-      'SELECT channel, created_by_email, created_by_name, created_at FROM lead_activities ORDER BY created_at DESC'
+      'SELECT lead_id, channel, created_by_email, created_by_name, created_at FROM lead_activities ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {

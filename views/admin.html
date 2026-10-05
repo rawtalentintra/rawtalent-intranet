@@ -975,8 +975,10 @@
         <div id="wfpPerfBody" style="display:none">
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
             <div class="sd-card-title">Partner Activity</div>
-            <div class="sd-card-sub">Calls and visits logged under each partner's own name, across leads and existing centres. Stage changes made before 5 Oct 2026 weren't recorded against a person, so earlier activity shows in the state table below instead.</div>
+            <div class="sd-card-sub">Calls and visits across leads and existing centres. Anything logged is credited to whoever logged it. Stage changes made before 5 Oct 2026 weren't recorded against a person, so those are credited to the partner the lead is assigned to.</div>
+            <div id="wfpPerfCentreBanner" style="display:none;margin-top:14px;padding:10px 14px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:12.5px;line-height:1.5"></div>
             <div id="wfpPerfPartnerRow" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-top:18px"></div>
+            <div id="wfpPerfPartnerNote" style="margin-top:12px;font-size:12px;color:var(--text-muted)"></div>
           </div>
 
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
@@ -984,7 +986,7 @@
             <div class="sd-card-sub">Counted by the date each call, visit or signing happened, not the date the lead was created.</div>
             <div id="wfpPerfStateTable" style="margin-top:18px;overflow-x:auto"></div>
             <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
-              <b>New leads</b> — leads created in the period. <b>Called / Visited / Signed</b> — leads that reached that stage in the period. <b>Centres</b> — completed calls and visits logged against existing centres. <b>Open leads</b> and <b>Priority items</b> are as of today, not period-based. A lead marked done without a date can't be placed in a period.
+              <b>New leads</b> — leads created in the period. <b>Called / Visited / Signed</b> — leads that reached that stage in the period. <b>Centres</b> — completed calls and visits logged against existing centres. <b>Open leads</b> and <b>Priority items</b> are as of today, not period-based, and only count leads still being worked (not closed or archived). Priority items counts each lead once, however many things it needs. A lead marked done without a date can't be placed in a period.
             </div>
           </div>
         </div>
@@ -10351,12 +10353,38 @@
         </div>`;
     }
 
+    // Calls/visits per person = entries logged under their name, PLUS stage
+    // changes made before 5 Oct 2026 (which carried no name — the Stage
+    // picker only stamped a date) credited to the partner the lead is
+    // assigned to. A stage change that already has a logged entry for the
+    // same lead + channel on the same day is the same action, counted once.
+    function wfpPerfLeadActivity(from, to) {
+      const inPeriod = d => inDateRange(d, from, to);
+      const dayKey = d => { const x = new Date(d); return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`; };
+      const logged = new Set(partnerActivityLeadLog.map(a => `${a.lead_id}|${a.channel}|${dayKey(a.created_at)}`));
+      const ownerEmail = l => {
+        const v = (l.assigned_workforce_partner || '').trim().toLowerCase();
+        const p = WFP_ACTIVITY_PARTNERS.find(x => x.name.toLowerCase() === v || x.email === v);
+        return p ? p.email : null;
+      };
+      const events = []; // { email|null, channel, source }
+      partnerActivityLeadLog.filter(a => inPeriod(a.created_at))
+        .forEach(a => events.push({ email: (a.created_by_email || '').toLowerCase(), channel: a.channel, source: 'logged' }));
+      allLeads.forEach(l => {
+        [['call', l.lead_called_status, l.lead_called_at], ['visit', l.centre_visited_status, l.centre_visited_at]].forEach(([channel, status, at]) => {
+          if (status !== 'done' || !at || !inPeriod(at) || logged.has(`${l.id}|${channel}|${dayKey(at)}`)) return;
+          events.push({ email: ownerEmail(l), channel, source: 'stage' });
+        });
+      });
+      return events;
+    }
+
     function renderWfpPerfPartners(from, to) {
+      const leadEvents = wfpPerfLeadActivity(from, to);
       document.getElementById('wfpPerfPartnerRow').innerHTML = WFP_ACTIVITY_PARTNERS.map(p => {
-        const mine = (v, dateKey) => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v[dateKey], from, to);
         const tally = channel => {
-          const lead = partnerActivityLeadLog.filter(v => v.channel === channel && mine(v, 'created_at')).length;
-          const centre = partnerActivityVisits.filter(v => v.channel === channel && mine(v, 'visit_date')).length;
+          const lead = leadEvents.filter(e => e.email === p.email && e.channel === channel).length;
+          const centre = partnerActivityVisits.filter(v => v.channel === channel && (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v.visit_date, from, to)).length;
           return { lead, centre, total: lead + centre };
         };
         const calls = tally('call');
@@ -10373,12 +10401,34 @@
             </div>
           </div>`;
       }).join('');
+
+      // Reconcile with the state table: stage changes on leads nobody is
+      // assigned to can't be credited to a person, so say so instead of
+      // letting the cards quietly add up to less than the table.
+      const unassigned = leadEvents.filter(e => !WFP_ACTIVITY_PARTNERS.some(p => p.email === e.email));
+      const uc = unassigned.filter(e => e.channel === 'call').length;
+      const uv = unassigned.filter(e => e.channel === 'visit').length;
+      const note = document.getElementById('wfpPerfPartnerNote');
+      if (note) note.textContent = (uc || uv) ? `Not shown above: ${uc} call${uc === 1 ? '' : 's'} and ${uv} visit${uv === 1 ? '' : 's'} on leads with no assigned partner (or done by someone else).` : '';
+
+      // Centre calls/visits can only be counted if someone logged them.
+      const banner = document.getElementById('wfpPerfCentreBanner');
+      if (banner) {
+        const everLogged = partnerActivityVisits.length;
+        banner.style.display = everLogged < 25 ? 'block' : 'none';
+        banner.textContent = `Heads up: only ${everLogged} completed centre call${everLogged === 1 ? '' : 's'}/visit${everLogged === 1 ? ' has' : 's have'} ever been logged in HeartBeat, so centre numbers here read near zero because they aren't being recorded, not because nothing happened. Partners need to log centre calls and visits for them to count.`;
+      }
     }
 
     const cols_any = r => ['newLeads', 'called', 'visited', 'signed', 'centreCalls', 'centreVisits', 'open', 'priority'].some(k => r[k]);
 
     function renderWfpPerfStates(from, to) {
+      // computeAttentionItems() honours the WFP Dashboard's state filter, which
+      // must not leak into this table — read it unfiltered.
+      const savedStateFilter = wfpStateFilter;
+      wfpStateFilter = null;
       const attention = computeAttentionItems();
+      wfpStateFilter = savedStateFilter;
       const centreState = new Map(myCentresData.map(c => [c.centreKey, wfpCentreStateBucket(c.state)]));
       const inPeriod = d => inDateRange(d, from, to);
       const centreCount = (channel, st) => centreActivityLog.filter(a =>
@@ -10397,8 +10447,8 @@
           signed: leads.filter(l => l.signed_status === 'signed' && inPeriod(l.signed_at)).length,
           centreCalls: centreLog('call'),
           centreVisits: centreLog('visit'),
-          open: leads.filter(l => !l.closed_at).length,
-          priority: attention.filter(a => a.type !== 'centre' && attentionMatches(a.lead.state)).length
+          open: leads.filter(l => !l.closed_at && !l.archived_at).length,
+          priority: new Set(attention.filter(a => a.type !== 'centre' && !a.lead.closed_at && !a.lead.archived_at && attentionMatches(a.lead.state)).map(a => a.lead.id)).size
         };
       };
       const rows = WFP_PERF_STATES.map(({ key: st, color }) =>
