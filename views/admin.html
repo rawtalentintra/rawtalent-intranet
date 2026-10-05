@@ -358,7 +358,7 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
-        <div class="admin-nav-item" onclick="showSection('wfp-performance', this)">
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('wfp-performance', this)">
           <span class="admin-nav-icon">🏆</span> WFP Performance
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -863,7 +863,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">WFP Dashboard</div>
-            <div class="admin-page-sub">What needs attention today across leads and existing centres. Calls, visits and conversion by partner and by state live in <a href="#" onclick="showSection('wfp-performance', document.querySelector('[onclick*=\'wfp-performance\']'));return false" style="color:var(--orange);font-weight:600">WFP Performance</a>. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
+            <div class="admin-page-sub">What needs attention today across leads and existing centres. <span class="super-admin-only" style="display:none">Calls, visits and conversion by partner and by state live in <a href="#" onclick="showSection('wfp-performance', document.querySelector('[onclick*=\'wfp-performance\']'));return false" style="color:var(--orange);font-weight:600">WFP Performance</a>. </span>Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="onSalesDashRangeChange()">
@@ -4923,7 +4923,7 @@
     // server.js — two different server-side gates behind these two URLs).
     const IS_WFP_PWA = location.pathname.startsWith('/wfp');
     const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners') || IS_WFP_PWA;
-    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'wfp-performance', 'leads', 'my-centres', 'micropods', 'route-planner'];
+    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'leads', 'my-centres', 'micropods', 'route-planner'];
 
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
@@ -5123,7 +5123,7 @@
       // The full company-wide history table below the approvals list
       // still 403s for them server-side (requireAdmin on /admin/all) —
       // intentional, that's more than their own team's approvals.
-      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'workforce-queue', 'leave-requests'],
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue', 'leave-requests'],
       // 'educator-outreach', 'report-candidates' (Educators),
       // 'document-checker', and 'advertising-opportunities' — Onboarding's
       // remaining items — plus 'report-clients' (Centres, moved to the
@@ -5132,7 +5132,7 @@
       // admin/super_admin-only before this section existed and this move
       // doesn't change that; qa_view/workforce_partner access can be added
       // later if Ops needs it.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
@@ -6547,7 +6547,8 @@
     }
 
     // ── Navigation ────────────────────────────────────────────────
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports'];
+    // 'wfp-performance' is a super_admin-only preview (Joy, 2026-10-05) — not for Workforce Partners or anyone else until the numbers are signed off.
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
