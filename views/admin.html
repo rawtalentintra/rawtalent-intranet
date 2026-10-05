@@ -358,6 +358,9 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
+        <div class="admin-nav-item" onclick="showSection('wfp-performance', this)">
+          <span class="admin-nav-icon">🏆</span> WFP Performance
+        </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
@@ -860,7 +863,7 @@
         <div class="admin-header">
           <div>
             <div class="admin-page-title">WFP Dashboard</div>
-            <div class="admin-page-sub">New-business pipeline (leads → called → visited → signed) and what needs attention today. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
+            <div class="admin-page-sub">What needs attention today across leads and existing centres. Calls, visits and conversion by partner and by state live in <a href="#" onclick="showSection('wfp-performance', document.querySelector('[onclick*=\'wfp-performance\']'));return false" style="color:var(--orange);font-weight:600">WFP Performance</a>. Once a centre is signed and booking, its ongoing account health moves to <a href="#" onclick="showSection('my-centres', document.querySelector('[onclick*=\'my-centres\']'));return false" style="color:var(--orange);font-weight:600">My Centres</a>.</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             <select id="salesDashRange" class="form-control" style="max-width:170px" onchange="onSalesDashRangeChange()">
@@ -928,27 +931,66 @@
           <div id="salesPortfolioSnapshot" style="margin-top:14px;display:grid;grid-template-columns:repeat(6,1fr);gap:10px"></div>
         </div>
 
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">Pipeline Funnel — by state</div>
-          <div class="sd-card-sub">Where leads drop off between first contact and a signed centre</div>
-          <div style="display:flex;gap:16px;margin-top:14px" id="salesFunnelRow"></div>
-        </div>
-
-        <div style="display:flex;gap:16px;margin-bottom:20px" id="salesPartnerRow"></div>
-
-        <!-- Partner Activity (2026-09-21, Liam: "calls logged, visits made,
-             leads created per partner") — deliberately real people, not the
-             VIC/SA/QLD/NT state cards above: a partner's own activity is
-             theirs regardless of which state filter is selected elsewhere
-             on this page, so this row ignores the toggle on purpose. -->
-        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-          <div class="sd-card-title">Partner Activity</div>
-          <div class="sd-card-sub">Each partner's own calls, visits, and leads for the selected period — not affected by the state filter above</div>
-          <div style="display:flex;gap:16px;margin-top:14px" id="salesPartnerActivityRow"></div>
-        </div>
         </div>
       </div>
       </template>
+
+      <!-- WFP Performance (2026-10-05) — split out of the WFP Dashboard
+           (Liam, 28 Sep sync: "a workforce partner dashboard, but then a
+           workforce partner performance"). Pipeline Funnel, the per-state
+           cards and Partner Activity moved here, rebuilt around what was
+           actually DONE in the period rather than leads created in it. -->
+      <template id="__lazy_wfp_performance">
+      <div class="admin-section" id="section-wfp-performance">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">WFP Performance</div>
+            <div class="admin-page-sub">What each partner and each state actually got done in the period — calls, visits, new leads and signings. What needs attention today stays on the <a href="#" onclick="showSection('sales-dashboard', document.querySelector('[onclick*=\'sales-dashboard\']'));return false" style="color:var(--orange);font-weight:600">WFP Dashboard</a>.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <select id="wfpPerfRange" class="form-control" style="max-width:170px" onchange="onWfpPerfRangeChange()">
+              <option value="last30" selected>Last 30 Days</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="lastmonth">Last Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="all">All Time</option>
+              <option value="custom">Custom Range…</option>
+            </select>
+            <div id="wfpPerfCustomRange" style="display:none;gap:4px;align-items:center">
+              <input type="date" id="wfpPerfFrom" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="renderWfpPerformance()">
+              <span style="color:var(--text-muted);font-size:11px">–</span>
+              <input type="date" id="wfpPerfTo" class="form-control" style="width:124px;padding:4px 6px;font-size:12px" onchange="renderWfpPerformance()">
+            </div>
+            <div id="wfpPerfRangeLabel" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+
+        <div id="wfpPerfLoading" class="loading-spinner">
+          <div class="spinner"></div>
+          Pulling together calls, visits and leads…
+        </div>
+
+        <div id="wfpPerfBody" style="display:none">
+          <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
+            <div class="sd-card-title">Partner Activity</div>
+            <div class="sd-card-sub">Calls and visits logged under each partner's own name, across leads and existing centres. Stage changes made before 5 Oct 2026 weren't recorded against a person, so earlier activity shows in the state table below instead.</div>
+            <div id="wfpPerfPartnerRow" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-top:18px"></div>
+          </div>
+
+          <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
+            <div class="sd-card-title">By State</div>
+            <div class="sd-card-sub">Counted by the date each call, visit or signing happened, not the date the lead was created.</div>
+            <div id="wfpPerfStateTable" style="margin-top:18px;overflow-x:auto"></div>
+            <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
+              <b>New leads</b> — leads created in the period. <b>Called / Visited / Signed</b> — leads that reached that stage in the period. <b>Centres</b> — completed calls and visits logged against existing centres. <b>Open leads</b> and <b>Priority items</b> are as of today, not period-based. A lead marked done without a date can't be placed in a period.
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+
 
       <!-- Wrapped in <template> so this section's markup is parsed but not
            part of the live DOM (no weight, no paint cost) until someone
@@ -4881,7 +4923,7 @@
     // server.js — two different server-side gates behind these two URLs).
     const IS_WFP_PWA = location.pathname.startsWith('/wfp');
     const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners') || IS_WFP_PWA;
-    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'leads', 'my-centres', 'micropods', 'route-planner'];
+    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'wfp-performance', 'leads', 'my-centres', 'micropods', 'route-planner'];
 
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
@@ -5081,7 +5123,7 @@
       // The full company-wide history table below the approvals list
       // still 403s for them server-side (requireAdmin on /admin/all) —
       // intentional, that's more than their own team's approvals.
-      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'workforce-queue', 'leave-requests'],
+      qa_view: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'workforce-queue', 'leave-requests'],
       // 'educator-outreach', 'report-candidates' (Educators),
       // 'document-checker', and 'advertising-opportunities' — Onboarding's
       // remaining items — plus 'report-clients' (Centres, moved to the
@@ -5090,7 +5132,7 @@
       // admin/super_admin-only before this section existed and this move
       // doesn't change that; qa_view/workforce_partner access can be added
       // later if Ops needs it.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'my-centres', 'route-planner', 'micropods']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
@@ -6626,6 +6668,7 @@
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
+      if (id === 'wfp-performance') loadWfpPerformance();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -10155,7 +10198,6 @@
       document.getElementById('salesDashboardLoading').style.display = 'none';
       document.getElementById('salesDashboardBody').style.display = 'block';
       loadClientRetention(); // fired, not awaited — dashboard renders immediately, retention panel fills in once ready
-      loadPartnerActivityVisits(); // fired, not awaited — same reasoning
     }
 
     // Split from loadSalesDashboard() so the territory filter buttons
@@ -10213,9 +10255,197 @@
 
       renderSalesKpis(current, previous, from, to, prevFrom, prevTo);
       renderSalesPortfolioSnapshot();
-      renderSalesFunnel(current);
-      renderSalesPartnerCards(current);
-      renderSalesPartnerActivity(from, to);
+    }
+
+    // ── WFP Performance ───────────────────────────────────────────
+    // Partners are real people (a partner's activity is theirs whatever
+    // state they're working), not the VIC/SA state labels.
+    const WFP_ACTIVITY_PARTNERS = [
+      { name: 'Liam', email: 'liam@rawtalent.com.au' },
+      { name: 'Justine', email: 'justine@rawtalent.com.au' },
+      { name: 'Gwen', email: 'gwen@rawtalent.com.au' }
+    ];
+    const WFP_PERF_STATES = [
+      { key: 'VIC', color: '#2563eb' }, { key: 'SA', color: '#db2777' }, { key: 'QLD', color: '#f97316' },
+      { key: 'NT', color: '#0d9488' }, { key: 'ACT', color: '#7c3aed' }, { key: 'WA', color: '#475569' }
+    ];
+    // Lead-side calls/visits live in lead_activities (GET /api/leads/
+    // activities-log); centre-side in centre_visits, Completed only (GET
+    // /api/centres/visits-log).
+    let partnerActivityVisits = [];
+    let partnerActivityLeadLog = [];
+    async function loadPartnerActivityData() {
+      const safeJson = async url => {
+        try { const r = await fetch(url); const d = r.ok ? await r.json() : []; return Array.isArray(d) ? d : []; } catch { return []; }
+      };
+      [partnerActivityVisits, partnerActivityLeadLog] = await Promise.all([
+        safeJson('/api/centres/visits-log'),
+        safeJson('/api/leads/activities-log')
+      ]);
+    }
+
+    function wfpPerfPeriod() {
+      const key = document.getElementById('wfpPerfRange').value;
+      const now = new Date();
+      if (key === 'custom') {
+        const f = document.getElementById('wfpPerfFrom').value;
+        const t = document.getElementById('wfpPerfTo').value;
+        return {
+          key,
+          from: f ? new Date(f + 'T00:00:00') : new Date(2000, 0, 1),
+          to: t ? new Date(new Date(t + 'T00:00:00').getTime() + 86400000) : new Date(now.getTime() + 86400000)
+        };
+      }
+      if (key === 'last30') {
+        const to = new Date(now); to.setHours(0, 0, 0, 0); to.setDate(to.getDate() + 1);
+        const from = new Date(to); from.setDate(from.getDate() - 30);
+        return { key, from, to };
+      }
+      if (key === 'lastmonth') {
+        return { key, from: new Date(now.getFullYear(), now.getMonth() - 1, 1), to: new Date(now.getFullYear(), now.getMonth(), 1) };
+      }
+      return { key, ...salesDashRange(key) };
+    }
+
+    function onWfpPerfRangeChange() {
+      const isCustom = document.getElementById('wfpPerfRange').value === 'custom';
+      document.getElementById('wfpPerfCustomRange').style.display = isCustom ? 'flex' : 'none';
+      if (isCustom) {
+        const fromEl = document.getElementById('wfpPerfFrom');
+        const toEl = document.getElementById('wfpPerfTo');
+        if (!fromEl.value || !toEl.value) {
+          const now = new Date();
+          fromEl.value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+          toEl.value = ymd(now);
+        }
+      }
+      renderWfpPerformance();
+    }
+
+    async function loadWfpPerformance() {
+      document.getElementById('wfpPerfLoading').style.display = 'block';
+      document.getElementById('wfpPerfBody').style.display = 'none';
+      if (!allLeads.length) { try { allLeads = await fetch('/api/leads').then(r => r.json()); } catch { allLeads = []; } }
+      if (!Array.isArray(allLeads)) allLeads = [];
+      await Promise.all([ensureCentresLoaded(), ensureCentreActivityLogLoaded(), loadPartnerActivityData()]);
+      renderWfpPerformance();
+      document.getElementById('wfpPerfLoading').style.display = 'none';
+      document.getElementById('wfpPerfBody').style.display = 'block';
+    }
+
+    function renderWfpPerformance() {
+      const { key, from, to } = wfpPerfPeriod();
+      const fmt = d => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      document.getElementById('wfpPerfRangeLabel').textContent = key === 'all' ? 'All time' : `${fmt(from)} – ${fmt(new Date(to.getTime() - 1))}`;
+      renderWfpPerfPartners(from, to);
+      renderWfpPerfStates(from, to);
+    }
+
+    function wfpPerfTile(label, value, sub) {
+      return `
+        <div>
+          <div style="font-size:34px;font-weight:800;line-height:1.1;color:${value ? 'var(--navy)' : '#9ca3af'}">${value}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-top:6px">${escHtml(label)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${sub}</div>
+        </div>`;
+    }
+
+    function renderWfpPerfPartners(from, to) {
+      document.getElementById('wfpPerfPartnerRow').innerHTML = WFP_ACTIVITY_PARTNERS.map(p => {
+        const mine = (v, dateKey) => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v[dateKey], from, to);
+        const tally = channel => {
+          const lead = partnerActivityLeadLog.filter(v => v.channel === channel && mine(v, 'created_at')).length;
+          const centre = partnerActivityVisits.filter(v => v.channel === channel && mine(v, 'visit_date')).length;
+          return { lead, centre, total: lead + centre };
+        };
+        const calls = tally('call');
+        const visits = tally('visit');
+        const leadsCreated = allLeads.filter(l => (l.submitted_by_email || '').toLowerCase() === p.email && inDateRange(l.created_at, from, to)).length;
+        const split = t => `${t.lead} lead${t.lead === 1 ? '' : 's'} · ${t.centre} centre${t.centre === 1 ? '' : 's'}`;
+        return `
+          <div style="border:1px solid var(--gray-200);border-radius:14px;padding:22px 24px;background:#fff">
+            <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:20px">${escHtml(p.name)}</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+              ${wfpPerfTile('Calls', calls.total, split(calls))}
+              ${wfpPerfTile('Visits', visits.total, split(visits))}
+              ${wfpPerfTile('Leads created', leadsCreated, 'added by ' + escHtml(p.name))}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    const cols_any = r => ['newLeads', 'called', 'visited', 'signed', 'centreCalls', 'centreVisits', 'open', 'priority'].some(k => r[k]);
+
+    function renderWfpPerfStates(from, to) {
+      const attention = computeAttentionItems();
+      const centreState = new Map(myCentresData.map(c => [c.centreKey, wfpCentreStateBucket(c.state)]));
+      const inPeriod = d => inDateRange(d, from, to);
+      const centreCount = (channel, st) => centreActivityLog.filter(a =>
+        a.channel === channel && inPeriod(a.visitDate || a.createdAt) && (centreState.get(a.centreKey) || null) === st).length;
+
+      const knownStates = new Set(WFP_PERF_STATES.map(s => s.key));
+      const statRow = (label, color, leadsOf, centreMatches, attentionMatches) => {
+        const leads = allLeads.filter(leadsOf);
+        const centreLog = (channel) => centreActivityLog.filter(a =>
+          a.channel === channel && inPeriod(a.visitDate || a.createdAt) && centreMatches(centreState.get(a.centreKey) || null)).length;
+        return {
+          label, color,
+          newLeads: leads.filter(l => inPeriod(l.created_at)).length,
+          called: leads.filter(l => l.lead_called_status === 'done' && inPeriod(l.lead_called_at)).length,
+          visited: leads.filter(l => l.centre_visited_status === 'done' && inPeriod(l.centre_visited_at)).length,
+          signed: leads.filter(l => l.signed_status === 'signed' && inPeriod(l.signed_at)).length,
+          centreCalls: centreLog('call'),
+          centreVisits: centreLog('visit'),
+          open: leads.filter(l => !l.closed_at).length,
+          priority: attention.filter(a => a.type !== 'centre' && attentionMatches(a.lead.state)).length
+        };
+      };
+      const rows = WFP_PERF_STATES.map(({ key: st, color }) =>
+        statRow(st, color, l => l.state === st, cs => cs === st, ls => ls === st));
+      // Leads in another state (NSW, TAS) or with none set, and centre
+      // activity at a centre whose state couldn't be worked out, would
+      // otherwise vanish from the totals — show them rather than hide them.
+      const other = statRow('Other', '#9ca3af', l => !knownStates.has(l.state), cs => !knownStates.has(cs), ls => !knownStates.has(ls));
+      if (cols_any(other)) rows.push(other);
+      const total = rows.reduce((t, r) => {
+        Object.keys(r).forEach(k => { if (typeof r[k] === 'number') t[k] = (t[k] || 0) + r[k]; });
+        return t;
+      }, {});
+
+      const cols = ['newLeads', 'called', 'visited', 'signed', 'centreCalls', 'centreVisits', 'open', 'priority'];
+      const num = (v, isPriority) => `<td style="padding:14px 10px;text-align:center;font-size:16px;font-weight:${v ? 700 : 500};color:${!v ? '#c0c4cc' : (isPriority ? '#c0392b' : 'var(--navy)')}">${v}</td>`;
+      const th = (txt, extra = '') => `<th style="padding:10px;text-align:center;font-size:12px;font-weight:700;color:var(--text-muted);text-transform:none;white-space:nowrap;${extra}">${txt}</th>`;
+      const group = (txt, span) => `<th colspan="${span}" style="padding:6px 10px;text-align:center;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--gray-200)">${txt}</th>`;
+      const border = 'border-left:1px solid var(--gray-200);';
+
+      document.getElementById('wfpPerfStateTable').innerHTML = `
+        <table style="width:100%;border-collapse:collapse;min-width:760px">
+          <thead>
+            <tr>
+              <th></th>
+              ${group('Leads', 4)}
+              ${group('Existing centres', 2)}
+              ${group('Right now', 2)}
+            </tr>
+            <tr style="border-bottom:1px solid var(--gray-200)">
+              ${th('State', 'text-align:left;')}
+              ${th('New leads')}${th('Called')}${th('Visited')}${th('Signed')}
+              ${th('Called', border)}${th('Visited')}
+              ${th('Open leads', border)}${th('Priority items')}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:14px 10px;font-size:14px;font-weight:700;color:var(--navy);white-space:nowrap"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:10px"></span>${escHtml(r.label)}</td>
+                ${cols.map(c => num(r[c], c === 'priority')).join('')}
+              </tr>`).join('')}
+            <tr style="border-top:2px solid var(--gray-200);background:var(--gray-100)">
+              <td style="padding:14px 10px;font-size:14px;font-weight:800;color:var(--navy)">Total</td>
+              ${cols.map(c => num(total[c] || 0, c === 'priority')).join('')}
+            </tr>
+          </tbody>
+        </table>`;
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
@@ -10457,39 +10687,9 @@
     // showing the same numbers a second time. activityCountsFor() above
     // stays — renderSalesKpis still uses it for the now period-aware cards.
 
-    function renderSalesFunnel(leads) {
-      // Pure state breakdown (2026-09-21) — see leadMatchesWfpFilter's own
-      // comment for why the per-person VIC split was removed.
-      const allStates = [{ key: 'VIC', label: 'VIC' }, { key: 'SA', label: 'SA' }, { key: 'QLD', label: 'QLD' }, { key: 'NT', label: 'NT' }, { key: 'ACT', label: 'ACT' }, { key: 'WA', label: 'WA' }];
-      const states = wfpStateFilter ? allStates.filter(s => s.key === wfpStateFilter) : allStates;
-      document.getElementById('salesFunnelRow').innerHTML = states.map(s => {
-        const stateLeads = leads.filter(l => l.state === s.key);
-        const c = salesFunnelCounts(stateLeads);
-        const stages = [
-          { label: 'Leads', value: c.total },
-          { label: 'Called', value: c.called },
-          { label: 'Visited', value: c.visited },
-          { label: 'Signed', value: c.signed }
-        ];
-        const max = Math.max(1, c.total);
-        return `
-          <div class="funnel-card">
-            <div class="funnel-head"><span>${s.label}</span><span class="funnel-total">${c.total} lead${c.total === 1 ? '' : 's'}</span></div>
-            <div class="funnel-stages">
-              ${stages.map((st, i) => `
-                <div class="funnel-stage">
-                  <div class="funnel-stage-label">${st.label}</div>
-                  <div class="funnel-stage-track"><div class="funnel-stage-fill" style="width:${Math.round((st.value / max) * 100)}%"></div></div>
-                  <div class="funnel-stage-value">${st.value}${i > 0 ? ` <span class="funnel-stage-pct">(${pct(st.value, c.total)}%)</span>` : ''}</div>
-                </div>`).join('')}
-            </div>
-          </div>`;
-      }).join('');
-    }
-
     // renderSalesAttentionQueue() (the "Priority Today" panel) removed —
     // Joy, 2026-09-02: "a bit of noise". computeAttentionItems() itself is
-    // still used by renderSalesPartnerCards' per-partner attention counts,
+    // still used by WFP Performance's per-state priority counts,
     // so that stays.
 
     // Client Retention — "did signing this centre lead to activation,
@@ -10510,59 +10710,6 @@
       renderSalesDashboard();
     }
 
-    // Partner Activity (2026-09-21) — real people, not the VIC/SA/QLD/NT
-    // state labels used everywhere else on this page (which lists Gwen
-    // twice, once per state, for the manual centre-assignment dropdown).
-    // A distinct list on purpose: "each partner's activity" is a personal
-    // metric, not a territory one.
-    const WFP_ACTIVITY_PARTNERS = [
-      { name: 'Liam', email: 'liam@rawtalent.com.au' },
-      { name: 'Justine', email: 'justine@rawtalent.com.au' },
-      { name: 'Gwen', email: 'gwen@rawtalent.com.au' }
-    ];
-    // GET /api/centres/visits-log — same fetch-once-per-visit, cache,
-    // re-render-on-toggle pattern as clientRetentionData above. Calls and
-    // visits are both rows in centre_visits (see its own schema comment
-    // for why), distinguished by `channel`.
-    // Lead-side calls/visits live in lead_activities (GET /api/leads/
-    // activities-log); centre-side in centre_visits, Completed only (GET
-    // /api/centres/visits-log). Both feed the same per-partner cards — a
-    // partner's Calls/Visits Logged is their lead AND centre activity.
-    let partnerActivityVisits = [];
-    let partnerActivityLeadLog = [];
-    async function loadPartnerActivityVisits() {
-      const safeJson = async url => {
-        try { const r = await fetch(url); const d = r.ok ? await r.json() : []; return Array.isArray(d) ? d : []; } catch { return []; }
-      };
-      [partnerActivityVisits, partnerActivityLeadLog] = await Promise.all([
-        safeJson('/api/centres/visits-log'),
-        safeJson('/api/leads/activities-log')
-      ]);
-      renderSalesDashboard();
-    }
-    function renderSalesPartnerActivity(from, to) {
-      const box = document.getElementById('salesPartnerActivityRow');
-      if (!box) return;
-      box.innerHTML = WFP_ACTIVITY_PARTNERS.map(p => {
-        const byPartner = (v, dateKey) => (v.created_by_email || '').toLowerCase() === p.email && inDateRange(v[dateKey], from, to);
-        const count = channel =>
-          partnerActivityVisits.filter(v => v.channel === channel && byPartner(v, 'visit_date')).length +
-          partnerActivityLeadLog.filter(v => v.channel === channel && byPartner(v, 'created_at')).length;
-        const calls = count('call');
-        const visits = count('visit');
-        const leadsCreated = allLeads.filter(l => (l.submitted_by_email || '').toLowerCase() === p.email && inDateRange(l.created_at, from, to)).length;
-        return `
-          <div class="admin-table-card" style="padding:18px 20px;flex:1">
-            <div class="sd-card-title" style="margin-bottom:12px">${escHtml(p.name)}</div>
-            <div class="partner-activity-grid">
-              <div><div class="partner-stat-value">${calls}</div><div class="partner-stat-label">Calls Logged</div></div>
-              <div><div class="partner-stat-value">${visits}</div><div class="partner-stat-label">Visits Made</div></div>
-              <div><div class="partner-stat-value">${leadsCreated}</div><div class="partner-stat-label">Leads Created</div></div>
-            </div>
-          </div>`;
-      }).join('');
-    }
-
     // Signed leads bucketed by whether their matched RT centre has actually
     // started booking yet — same bookingsSinceSigned figure the Client
     // Retention panel and Leads table's Pre-booking/Booked badge use.
@@ -10581,37 +10728,6 @@
     // signedCentreBookingCounts()/retentionRowMatchesWfpFilter() above all
     // stay — signedCentreBookingCounts() still feeds the KPI row's Pre-
     // booking/With Bookings cards.
-
-    function renderSalesPartnerCards(leads) {
-      // Pure state breakdown (2026-09-21) — see leadMatchesWfpFilter's own
-      // comment for why the per-person VIC split was removed. Despite the
-      // function name (kept as-is — still the WFP Dashboard's per-territory
-      // card row, just keyed by state now instead of by partner).
-      const allPartners = [{ key: 'VIC', short: 'VIC' }, { key: 'SA', short: 'SA' }, { key: 'QLD', short: 'QLD' }, { key: 'NT', short: 'NT' }, { key: 'ACT', short: 'ACT' }, { key: 'WA', short: 'WA' }];
-      const partners = wfpStateFilter ? allPartners.filter(p => p.key === wfpStateFilter) : allPartners;
-      const attention = computeAttentionItems();
-      document.getElementById('salesPartnerRow').innerHTML = partners.map(p => {
-        const stateLeads = leads.filter(l => l.state === p.key);
-        const c = salesFunnelCounts(stateLeads);
-        // Centre attention items aren't scoped to a Workforce Partner yet
-        // (see the My Centres section note) and RT's state is a full name
-        // ("Victoria") rather than this card's short 'VIC'/'SA' key, so
-        // they're excluded from this specific per-partner count rather
-        // than compared incorrectly.
-        const attnCount = attention.filter(a => a.type !== 'centre' && a.lead.state === p.key).length;
-        return `
-          <div class="admin-table-card" style="padding:18px 20px;flex:1">
-            <div class="sd-card-title" style="margin-bottom:2px">${p.short}</div>
-            <div class="sd-card-sub" style="margin-bottom:12px">${c.total} lead${c.total === 1 ? '' : 's'} this period</div>
-            <div class="partner-stat-grid">
-              <div><div class="partner-stat-value">${pct(c.called, c.total)}%</div><div class="partner-stat-label">Called</div></div>
-              <div><div class="partner-stat-value">${pct(c.visited, c.called)}%</div><div class="partner-stat-label">Visited</div></div>
-              <div><div class="partner-stat-value">${pct(c.signed, c.visited)}%</div><div class="partner-stat-label">Signed</div></div>
-              <div><div class="partner-stat-value" style="color:${attnCount ? '#c0392b' : 'var(--navy)'}">${attnCount}</div><div class="partner-stat-label">Priority Items</div></div>
-            </div>
-          </div>`;
-      }).join('');
-    }
 
     // targetId defaults to the WFP Dashboard's own element so its existing
     // call site doesn't need to change — the Leads section (2026-08-24,

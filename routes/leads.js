@@ -657,6 +657,14 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
       sets.push('closed_at = ?', 'closed_by_email = ?');
       args.push(new Date().toISOString(), req.user.email);
     }
+    // Same gap as the called/visited dates: the /wfp Stage picker marks a
+    // lead signed without sending a date, so signed_at stayed empty and the
+    // signing couldn't be placed in any period on WFP Performance. Stamp it
+    // the first time a lead becomes signed unless the caller supplied one.
+    if (req.body.signedStatus === 'signed' && !('signedAt' in req.body) && !existing.rows[0].signed_at) {
+      sets.push('signed_at = ?');
+      args.push(new Date().toISOString());
+    }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     args.push(req.params.id);
     await getDb().execute({ sql: `UPDATE leads SET ${sets.join(', ')}, updated_at = now() WHERE id = ?`, args });
