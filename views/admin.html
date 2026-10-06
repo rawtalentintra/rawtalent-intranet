@@ -11453,6 +11453,22 @@
           <div style="font-size:15px;font-weight:600;color:var(--navy);margin-top:4px">${escHtml((c.healthReasons && c.healthReasons[0]) || 'No specific reason recorded.')}</div>
         </div>
 
+        <!-- One-click Called / Visited (2026-10-07) — same as /wfp's Quick
+             log: the full Log Call/Visit form was so heavy that only 11
+             centre calls/visits had ever been logged, so WFP Performance
+             read near zero for centres. -->
+        <div class="admin-table-card" style="padding:16px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <div>
+            <div class="sd-card-title" style="color:var(--orange)">Quick log</div>
+            <div class="sd-card-sub" style="margin-top:2px" data-ql-status="${escHtml(c.centreKey)}">${quickLogStatusHtml(c.centreKey) || 'One click, no form. Add notes with Call/Visit + Notes.'}</div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            ${quickBtnHtml(c.centreKey, 'call', 'btn-add')}
+            ${quickBtnHtml(c.centreKey, 'visit', 'btn-add')}
+            <button class="btn-secondary" onclick="openVisitLogModal('${c.centreKey}')">Call/Visit + Notes</button>
+          </div>
+        </div>
+
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div class="sd-card-title" style="color:var(--orange)">Overview</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px;overflow-wrap:break-word">
@@ -12787,6 +12803,95 @@
       const d = new Date(dateStr);
       d.setDate(d.getDate() + days);
       return toDateInputValue(d);
+    }
+
+    // ── One-click Called / Visited for centres (2026-10-07) ───────────
+    // Records just the fact — who, which centre, call or visit, now — as a
+    // Completed entry (POST /api/centres/:key/quick-log). The full modal
+    // stays for notes. Undoable for 10 minutes (the server enforces the
+    // same window); a repeat click within 2 minutes isn't counted twice.
+    const QUICK_LOG_UNDO_WINDOW_MS = 10 * 60 * 1000;
+    const quickLogged = {}; // `${centreKey}|${channel}` -> { id, at }
+    let undoBarTimer = null;
+
+    function quickLogState(centreKey, channel) {
+      const e = quickLogged[centreKey + '|' + channel];
+      return e && Date.now() - e.at < QUICK_LOG_UNDO_WINDOW_MS ? e : null;
+    }
+    function quickBtnHtml(centreKey, channel, cls) {
+      const done = quickLogState(centreKey, channel);
+      const label = channel === 'call' ? 'Called' : 'Visited';
+      return `<button type="button" class="${cls}" style="${done ? 'opacity:.7;' : ''}" data-ql="${escHtml(centreKey)}|${channel}" ${done ? 'disabled' : ''}
+                onclick="quickLogCentre('${escHtml(centreKey)}','${channel}')">${done ? '✓ ' : ''}${label}</button>`;
+    }
+    function quickLogStatusHtml(centreKey) {
+      return ['call', 'visit'].map(ch => {
+        const e = quickLogState(centreKey, ch);
+        if (!e) return '';
+        const t = new Date(e.at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        return `✓ ${ch === 'call' ? 'Call' : 'Visit'} logged ${t} · <a href="#" onclick="undoQuickLog('${escHtml(centreKey)}','${ch}');return false" style="color:var(--orange);font-weight:600">Undo</a>`;
+      }).filter(Boolean).join('<br>');
+    }
+    function refreshQuickButtons() {
+      document.querySelectorAll('[data-ql]').forEach(btn => {
+        const [key, channel] = btn.dataset.ql.split('|');
+        const done = quickLogState(key, channel);
+        btn.disabled = !!done;
+        btn.style.opacity = done ? '.7' : '';
+        btn.textContent = (done ? '✓ ' : '') + (channel === 'call' ? 'Called' : 'Visited');
+      });
+      document.querySelectorAll('[data-ql-status]').forEach(el => {
+        el.innerHTML = quickLogStatusHtml(el.dataset.qlStatus) || 'One click, no form. Add notes with Call/Visit + Notes.';
+      });
+    }
+    function showUndoBar(message, centreKey, channel) {
+      let bar = document.getElementById('undoBar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'undoBar';
+        bar.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 8px 8px 18px;border-radius:22px;font-size:13.5px;z-index:2000;display:none;align-items:center;gap:12px;contain:paint;transform-style:flat';
+        document.body.appendChild(bar);
+      }
+      bar.innerHTML = `<span>${escHtml(message)}</span><button type="button" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:16px;padding:6px 14px;font-weight:700;font-size:13px;cursor:pointer" onclick="undoQuickLog('${escHtml(centreKey)}','${channel}')">Undo</button>`;
+      bar.style.display = 'flex';
+      clearTimeout(undoBarTimer);
+      undoBarTimer = setTimeout(() => { bar.style.display = 'none'; }, 6000);
+    }
+    async function quickLogCentre(centreKey, channel) {
+      const btns = [...document.querySelectorAll('[data-ql]')].filter(b => b.dataset.ql === centreKey + '|' + channel);
+      if (btns.some(b => b.disabled)) return;
+      const original = btns.map(b => b.textContent);
+      btns.forEach(b => { b.disabled = true; b.textContent = 'Saving…'; });
+      try {
+        const res = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/quick-log`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel })
+        });
+        const row = await res.json();
+        if (!res.ok) throw new Error(row.error || 'Could not log');
+        quickLogged[centreKey + '|' + channel] = { id: row.id, at: Date.now() };
+        refreshQuickButtons();
+        const label = channel === 'call' ? 'Call' : 'Visit';
+        if (row.duplicate) toast(`${label} was already logged a moment ago`);
+        else showUndoBar(`${label} logged`, centreKey, channel);
+        centreActivityLog = []; // dashboards re-read the activity feed next time they open
+      } catch (e) {
+        toast(e.message || 'Network error', 'error');
+        btns.forEach((b, i) => { b.disabled = false; b.textContent = original[i]; });
+      }
+    }
+    async function undoQuickLog(centreKey, channel) {
+      const e = quickLogState(centreKey, channel);
+      if (!e) return;
+      try {
+        const res = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/visits/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not undo');
+        delete quickLogged[centreKey + '|' + channel];
+        const bar = document.getElementById('undoBar'); if (bar) bar.style.display = 'none';
+        refreshQuickButtons();
+        toast('Undone', 'success');
+        centreActivityLog = [];
+      } catch (err) { toast(err.message || 'Network error', 'error'); }
     }
 
     async function openVisitLogModal(centreKey, visitId) {
