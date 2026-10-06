@@ -187,6 +187,7 @@ app.use('/api/payslips', require('./routes/payslips'));
 app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/centres', require('./routes/centres'));
+app.use('/api/first-shift', require('./routes/firstShift'));
 app.use('/api/educators', require('./routes/educators'));
 app.use('/api/micropods', require('./routes/micropods'));
 app.use('/api/reports', require('./routes/reports'));

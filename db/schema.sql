@@ -2542,3 +2542,24 @@ CREATE TABLE IF NOT EXISTS acecqa_sync_state (
   CONSTRAINT acecqa_sync_state_singleton CHECK (id = 1)
 );
 INSERT INTO acecqa_sync_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- First Shift Completion follow-ups (Liam/Sophia, 2 and 4 Sep): after an
+-- educator's first completed shift, someone calls the centre for feedback and
+-- offers to add the educator to the centre's favourites. The list of first
+-- shifts is derived live from RT bookings; this table only holds what a person
+-- has done about each one (a row appears the first time someone acts on it).
+-- educator_user_id is RT's userId as text, same key as rt_candidates_cache.
+CREATE TABLE IF NOT EXISTS first_shift_followups (
+  educator_user_id TEXT PRIMARY KEY,
+  first_shift_booking_id TEXT,
+  first_shift_date DATE,
+  centre_name TEXT,
+  status TEXT NOT NULL DEFAULT 'to_call', -- 'to_call' | 'called' | 'no_answer' | 'done'
+  assigned_to_email CITEXT,
+  centre_feedback TEXT,                   -- 'positive' | 'neutral' | 'negative'
+  added_to_favourites BOOLEAN DEFAULT false,
+  notes TEXT,
+  updated_by CITEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

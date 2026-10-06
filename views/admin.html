@@ -334,6 +334,9 @@
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
         </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('first-shift', this)">
+          <span class="admin-nav-icon">📞</span> First Shift Follow-ups
+        </div>
         <div class="admin-nav-item" onclick="showSection('data-accuracy-check', this)">
           <span class="admin-nav-icon">🔍</span> HB vs RT Data Check
         </div>
@@ -993,6 +996,48 @@
       </div>
       </template>
 
+      <!-- First Shift Follow-ups (2026-10-07) — Liam/Sophia, 2 and 4 Sep:
+           "First Shift Completion" — call the centre after an educator's very
+           first shift for feedback and offer to add them to the centre's
+           favourites. Replaces the manual tracking Lorie/Marsha did. Preview:
+           super_admin only until Joy opens it to the people who'll use it. -->
+      <template id="__lazy_first_shift">
+      <div class="admin-section" id="section-first-shift">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">First Shift Follow-ups</div>
+            <div class="admin-page-sub">Educators who have just completed their very first shift. Call the centre for feedback and offer to add the educator to the centre's favourites.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <select id="firstShiftDays" class="form-control" style="max-width:170px" onchange="loadFirstShifts()">
+              <option value="7">Last 7 days</option>
+              <option value="14" selected>Last 14 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+            <div id="firstShiftStamp" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+
+        <div id="firstShiftLoading" class="loading-spinner">
+          <div class="spinner"></div>
+          Reading recent bookings from RT — the first load can take up to 30 seconds…
+        </div>
+        <div id="firstShiftError" style="display:none;padding:12px 16px;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:13px;margin-bottom:16px"></div>
+
+        <div id="firstShiftBody" style="display:none">
+          <div id="firstShiftStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:20px"></div>
+          <div id="firstShiftFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+          <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto">
+            <div id="firstShiftTable"></div>
+          </div>
+          <div style="margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.6">
+            A "first shift" is an educator's earliest completed booking, shown only for educators who joined RT within the last 6 months (older accounts can't be confirmed as first-timers). A call still outstanding more than <span id="firstShiftOverdueDays">2</span> days after the shift is marked overdue. Choosing a centre feedback marks the follow-up Done. Changes save as you make them.
+          </div>
+        </div>
+      </div>
+      </template>
+
+
 
       <!-- Wrapped in <template> so this section's markup is parsed but not
            part of the live DOM (no weight, no paint cost) until someone
@@ -1519,12 +1564,12 @@
             <div class="form-group-modal">
               <label class="form-label-modal">Status</label>
               <select id="centreLeadStatus" class="form-control">
-                <option value="to_schedule">To Schedule</option>
+                <option value="to_schedule" selected>Pending (To Schedule)</option>
                 <option value="called">Called</option>
                 <option value="visited">Visited</option>
-                <option value="signed" selected>Profile Created</option>
+                <option value="signed">Profile Created</option>
               </select>
-              <div class="form-hint">Adding a centre here usually means it's already a real client — defaults to Profile Created (Called/Visited marked N/A) rather than starting it back at the top of the pipeline. Change this if you're adding an earlier-stage prospect instead.</div>
+              <div class="form-hint">Defaults to Pending so the centre shows up in the active pipeline for a Workforce Partner to follow up (Liam, 20 Sep). Only choose Profile Created if it's already a real client — that closes the lead and marks Called/Visited N/A.</div>
             </div>
           </div>
           <div class="modal-footer">
@@ -6550,7 +6595,7 @@
 
     // ── Navigation ────────────────────────────────────────────────
     // 'wfp-performance' is a super_admin-only preview (Joy, 2026-10-05) — not for Workforce Partners or anyone else until the numbers are signed off.
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
@@ -6672,6 +6717,7 @@
       if (id === 'route-planner') loadRoutePlannerSection();
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id === 'wfp-performance') loadWfpPerformance();
+      if (id === 'first-shift') loadFirstShifts();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -8885,7 +8931,7 @@
       ].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('centreLeadState').value = '';
       document.getElementById('centreLeadAgencyUsage').value = '';
-      document.getElementById('centreLeadStatus').value = 'signed';
+      document.getElementById('centreLeadStatus').value = 'to_schedule';
       document.getElementById('centreLeadExcludedWarning').style.display = 'none';
       document.getElementById('centreLeadRtClientWarning').style.display = 'none';
       hideCentreLeadDupWarning('centre');
@@ -10497,6 +10543,123 @@
             </tr>
           </tbody>
         </table>`;
+    }
+
+    // ── First Shift Follow-ups ────────────────────────────────────
+    let firstShiftData = { shifts: [], assignees: [], overdueAfterDays: 2 };
+    let firstShiftFilter = 'all';
+    const FIRST_SHIFT_STATUS = [
+      { key: 'to_call', label: 'To call' }, { key: 'called', label: 'Called' },
+      { key: 'no_answer', label: 'No answer' }, { key: 'done', label: 'Done' }
+    ];
+
+    async function loadFirstShifts() {
+      const days = document.getElementById('firstShiftDays').value;
+      document.getElementById('firstShiftLoading').style.display = 'block';
+      document.getElementById('firstShiftBody').style.display = 'none';
+      document.getElementById('firstShiftError').style.display = 'none';
+      try {
+        const res = await fetch(`/api/first-shift?days=${encodeURIComponent(days)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load first shifts');
+        firstShiftData = data;
+        document.getElementById('firstShiftOverdueDays').textContent = data.overdueAfterDays;
+        document.getElementById('firstShiftStamp').textContent = 'Updated ' + new Date(data.generatedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        renderFirstShifts();
+        document.getElementById('firstShiftBody').style.display = 'block';
+      } catch (e) {
+        const box = document.getElementById('firstShiftError');
+        box.textContent = e.message; box.style.display = 'block';
+      } finally {
+        document.getElementById('firstShiftLoading').style.display = 'none';
+      }
+    }
+
+    function setFirstShiftFilter(key) { firstShiftFilter = key; renderFirstShifts(); }
+
+    function renderFirstShifts() {
+      const all = firstShiftData.shifts;
+      const count = k => all.filter(s => s.status === k).length;
+      const overdue = all.filter(s => s.overdue).length;
+      const card = (label, value, sub, color) => `
+        <div class="admin-table-card" style="padding:18px 20px">
+          <div style="font-size:30px;font-weight:800;line-height:1.1;color:${value ? (color || 'var(--navy)') : '#9ca3af'}">${value}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-top:6px">${label}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${sub}</div>
+        </div>`;
+      document.getElementById('firstShiftStats').innerHTML =
+        card('First shifts', all.length, 'in this period') +
+        card('To call', count('to_call'), 'not contacted yet') +
+        card('Overdue', overdue, `over ${firstShiftData.overdueAfterDays} days, not done`, '#c0392b') +
+        card('Done', count('done'), 'feedback recorded', '#15803d');
+
+      const chips = [{ key: 'all', label: 'All', n: all.length }, { key: 'overdue', label: 'Overdue', n: overdue }]
+        .concat(FIRST_SHIFT_STATUS.map(s => ({ key: s.key, label: s.label, n: count(s.key) })));
+      document.getElementById('firstShiftFilters').innerHTML = chips.map(c => `
+        <button type="button" onclick="setFirstShiftFilter('${c.key}')" style="border:1px solid var(--gray-200);border-radius:18px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;background:${firstShiftFilter === c.key ? 'var(--navy)' : '#fff'};color:${firstShiftFilter === c.key ? '#fff' : 'var(--navy)'}">${c.label} · ${c.n}</button>`).join('');
+
+      const rows = all.filter(s => firstShiftFilter === 'all' ? true : firstShiftFilter === 'overdue' ? s.overdue : s.status === firstShiftFilter);
+      if (!rows.length) {
+        document.getElementById('firstShiftTable').innerHTML = `<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:13.5px">${all.length ? 'Nothing in this view.' : 'No first shifts in this period.'}</div>`;
+        return;
+      }
+      const sel = (id, field, options, current, extra = '') => `<select class="form-control" style="font-size:12.5px;padding:5px 8px;${extra}" onchange="saveFirstShift('${id}','${field}',this.value)">${options.map(o => `<option value="${escHtml(o.value)}" ${o.value === (current || '') ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}</select>`;
+      const assigneeOpts = [{ value: '', label: 'Unassigned' }].concat(firstShiftData.assignees.map(a => ({ value: a.email, label: a.name || a.email })));
+      const feedbackOpts = [{ value: '', label: '—' }, { value: 'positive', label: 'Positive' }, { value: 'neutral', label: 'Neutral' }, { value: 'negative', label: 'Negative' }];
+      const th = (t, w) => `<th style="padding:10px;text-align:left;font-size:12px;font-weight:700;color:var(--text-muted);white-space:nowrap;${w ? 'width:' + w : ''}">${t}</th>`;
+      document.getElementById('firstShiftTable').innerHTML = `
+        <table style="width:100%;border-collapse:collapse;min-width:1100px">
+          <thead><tr style="border-bottom:1px solid var(--gray-200)">
+            ${th('Educator')}${th('First shift')}${th('Centre', '240px')}${th('Status', '120px')}${th('Assigned to', '150px')}${th('Centre feedback', '130px')}${th('Added to favourites', '90px')}${th('Notes')}
+          </tr></thead>
+          <tbody>
+            ${rows.map(s => {
+              const id = escHtml(s.educatorUserId);
+              return `
+              <tr id="fsRow-${id}" style="border-bottom:1px solid var(--gray-100);background:${s.overdue ? '#fef2f2' : 'transparent'};vertical-align:top">
+                <td style="padding:12px 10px">
+                  <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml(s.educatorName)}</div>
+                  <div style="font-size:12px;color:var(--text-muted)">${s.educatorPhone ? `<a href="tel:${escHtml(s.educatorPhone)}" style="color:inherit">${escHtml(s.educatorPhone)}</a>` : 'No phone'}</div>
+                </td>
+                <td style="padding:12px 10px;white-space:nowrap">
+                  <div style="font-size:13px;font-weight:600;color:var(--navy)">${fmtDate(s.firstShiftDate)}</div>
+                  <div style="font-size:12px;color:${s.overdue ? '#b91c1c' : 'var(--text-muted)'};font-weight:${s.overdue ? 700 : 400}">${s.daysSince === 0 ? 'today' : s.daysSince + ' day' + (s.daysSince === 1 ? '' : 's') + ' ago'}${s.overdue ? ' · overdue' : ''}</div>
+                </td>
+                <td style="padding:12px 10px">
+                  <div style="font-size:13px;font-weight:600;color:var(--navy)">${s.centreKey ? `<a href="#" onclick="goToCentre360('${escHtml(s.centreKey)}');return false" style="color:inherit;text-decoration:underline">${escHtml(s.centreName)}</a>` : escHtml(s.centreName)}</div>
+                  <div style="font-size:12px;color:var(--text-muted)">${s.centreContactName || s.centreContactNo ? `${escHtml(s.centreContactName || 'Contact')}${s.centreContactNo ? ' · <a href="tel:' + escHtml(s.centreContactNo) + '" style="color:inherit">' + escHtml(s.centreContactNo) + '</a>' : ''}` : 'No contact on file'}</div>
+                </td>
+                <td style="padding:12px 10px">${sel(id, 'status', FIRST_SHIFT_STATUS.map(x => ({ value: x.key, label: x.label })), s.status)}</td>
+                <td style="padding:12px 10px">${sel(id, 'assignedToEmail', assigneeOpts, s.assignedToEmail)}</td>
+                <td style="padding:12px 10px">${sel(id, 'centreFeedback', feedbackOpts, s.centreFeedback)}</td>
+                <td style="padding:12px 10px;text-align:center"><input type="checkbox" ${s.addedToFavourites ? 'checked' : ''} onchange="saveFirstShift('${id}','addedToFavourites',this.checked)" style="width:18px;height:18px;margin-top:6px"></td>
+                <td style="padding:12px 10px"><input type="text" class="form-control" value="${escHtml(s.notes || '')}" placeholder="Add a note…" style="font-size:12.5px;padding:5px 8px;min-width:180px" onchange="saveFirstShift('${id}','notes',this.value)"></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function saveFirstShift(educatorUserId, field, value) {
+      const s = firstShiftData.shifts.find(x => x.educatorUserId === educatorUserId);
+      if (!s) return;
+      const body = { [field]: value, bookingId: s.bookingId, firstShiftDate: s.firstShiftDate, centreName: s.centreName };
+      // Recording the centre's feedback is the point of the call — mark it Done.
+      if (field === 'centreFeedback' && value && (s.status === 'to_call' || s.status === 'called')) body.status = 'done';
+      try {
+        const res = await fetch(`/api/first-shift/${encodeURIComponent(educatorUserId)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const row = await res.json();
+        if (!res.ok) throw new Error(row.error || 'Could not save');
+        s.status = row.status; s.assignedToEmail = row.assigned_to_email; s.centreFeedback = row.centre_feedback;
+        s.addedToFavourites = !!row.added_to_favourites; s.notes = row.notes;
+        s.overdue = s.status !== 'done' && s.daysSince > firstShiftData.overdueAfterDays;
+        renderFirstShifts();
+      } catch (e) {
+        toast(e.message || 'Network error', 'error');
+        renderFirstShifts();
+      }
     }
 
     // Framework Row 1 explicitly asks for "portfolio booking growth or
