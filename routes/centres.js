@@ -1013,6 +1013,45 @@ function validateVisitFields({ visitDate, channel, activityType, outcome, status
   return null;
 }
 
+// One-tap "Called" / "Visited" from the /wfp app (2026-10-07): the full Log
+// Call/Log Visit form asks for contact, outcome and notes, and almost nobody
+// filled it in — only 11 centre calls/visits had ever been logged, so the
+// WFP Performance centre numbers read near zero. This records just the fact
+// (who, which centre, call or visit, now) as a Completed entry; notes can
+// still be added with the full form. Outcome is left empty on purpose —
+// only 'issue_raised' means anything to the health logic, and a made-up
+// "neutral" would be a claim nobody made. A second tap within 2 minutes by
+// the same person on the same centre + channel returns the first entry
+// instead of counting twice.
+router.post('/:centreKey/quick-log', async (req, res) => {
+  const { channel } = req.body;
+  if (channel !== 'call' && channel !== 'visit') return res.status(400).json({ error: "channel must be 'call' or 'visit'" });
+  if (!parseCentreKey(req.params.centreKey)) return res.status(400).json({ error: 'Invalid centre key' });
+  try {
+    const recent = (await getDb().execute({
+      sql: `SELECT * FROM centre_visits
+            WHERE centre_key = ? AND channel = ? AND created_by_email = ? AND status = 'completed'
+              AND activity_type = 'Quick log' AND created_at > now() - interval '2 minutes'
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [req.params.centreKey, channel, req.user.email]
+    })).rows[0];
+    if (recent) return res.json({ ...recent, duplicate: true });
+
+    const id = uuidv4();
+    await getDb().execute({
+      sql: `INSERT INTO centre_visits (
+              id, centre_key, visit_date, status, created_by_email, created_by_name,
+              channel, activity_type, next_step_owner
+            ) VALUES (?, ?, now(), 'completed', ?, ?, ?, 'Quick log', ?)`,
+      args: [id, req.params.centreKey, req.user.email, req.user.name || req.user.email, channel, req.user.email]
+    });
+    const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [id] })).rows[0];
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:centreKey/visits', async (req, res) => {
   const {
     visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
@@ -1079,9 +1118,22 @@ router.put('/:centreKey/visits/:visitId', async (req, res) => {
   }
 });
 
-router.delete('/:centreKey/visits/:visitId', requireRole('admin', 'super_admin'), async (req, res) => {
+// admin/super_admin can delete any entry. Anyone else can only undo their OWN
+// entry, within 10 minutes of making it — so a mistaken one-tap Called/Visited
+// can be taken back, without opening everyone's history to deletion.
+router.delete('/:centreKey/visits/:visitId', async (req, res) => {
   try {
-    await getDb().execute({ sql: 'DELETE FROM centre_visits WHERE id = ?', args: [req.params.visitId] });
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
+    if (isAdmin) {
+      await getDb().execute({ sql: 'DELETE FROM centre_visits WHERE id = ?', args: [req.params.visitId] });
+      return res.json({ success: true });
+    }
+    const result = await getDb().execute({
+      sql: `DELETE FROM centre_visits
+            WHERE id = ? AND centre_key = ? AND created_by_email = ? AND created_at > now() - interval '10 minutes'`,
+      args: [req.params.visitId, req.params.centreKey, req.user.email]
+    });
+    if (result.rowsAffected === 0) return res.status(403).json({ error: 'You can only undo your own entry within 10 minutes of logging it' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

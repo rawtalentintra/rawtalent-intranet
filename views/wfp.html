@@ -209,6 +209,15 @@
     }
     .toast.show { opacity: 1; }
     .toast.error { background: var(--red); }
+    .undo-bar {
+      position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom));
+      transform: translateX(-50%); background: var(--navy); color: white; padding: 7px 8px 7px 18px;
+      border-radius: 22px; font-size: 13.5px; z-index: 101; display: none; align-items: center; gap: 12px;
+      contain: paint; transform-style: flat;
+    }
+    .undo-bar.show { display: flex; }
+    .undo-bar button { background: rgba(255,255,255,.2); color: white; border: none; border-radius: 16px; padding: 6px 14px; font-weight: 700; font-size: 13px; cursor: pointer; }
+    .quick-log-done { opacity: .85; }
 
     /* Recorder — one shared component (Leads + Centres) */
     .recorder-box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 10px 0; text-align: center; }
@@ -872,7 +881,7 @@
             ${address ? `<div class="sub">${escHtml(address)}</div>` : ''}
             ${isReal ? `
             <div class="card-corner-badge" style="justify-content:${showLog ? 'space-between' : 'flex-end'}">
-              ${showLog ? `<button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stop.id}')">Log</button>` : ''}
+              ${showLog ? `<span style="display:flex;gap:6px;flex-wrap:wrap">${stop.type === 'centre' ? quickBtnHtml(stop.id, 'call', 'qa-btn lightblue') + quickBtnHtml(stop.id, 'visit', 'qa-btn lightblue') : ''}<button class="qa-btn" onclick="openLogActivityFor('${stop.type}','${stop.id}')">Log</button></span>` : ''}
               <span class="badge neutral corner">${stop.type === 'lead' ? 'Lead' : 'Centre'}</span>
             </div>` : ''}
           </div>`;
@@ -2089,9 +2098,17 @@
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="messageTeam(this)">Message Team</button>
         </div>
+        <div class="card" style="cursor:default;margin-top:12px">
+          <div class="section-title" style="margin:0 0 8px">Quick log</div>
+          <div class="action-row" style="margin:0">
+            ${quickBtnHtml(currentCentreKey, 'call', 'btn btn-primary')}
+            ${quickBtnHtml(currentCentreKey, 'visit', 'btn btn-primary')}
+          </div>
+          <div class="sub" style="margin-top:8px" data-ql-status="${escHtml(currentCentreKey)}">${quickLogStatusHtml(currentCentreKey) || 'One tap, no form. Add notes with the buttons below.'}</div>
+        </div>
         <div class="action-row">
-          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">Log Call</button>
-          <button class="btn btn-primary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">Log Visit</button>
+          <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">Call + Notes</button>
+          <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">Visit + Notes</button>
         </div>
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="addStopToRoute('centre','${currentCentreKey}')">Add to Route</button>
@@ -2157,6 +2174,85 @@
     // 2026-09-04 — it was redundant with the Next Step/Due Date fields
     // already on this full form, and kept hitting "outcome is required"
     // since it skipped Outcome but still posted status=completed.
+    // ── One-tap Called / Visited for centres (2026-10-07) ─────────────
+    // The full Log Call/Log Visit form was too much to fill in for a quick
+    // touchpoint, so centre calls/visits mostly went unrecorded and the
+    // WFP Performance numbers read near zero. These buttons record just
+    // the fact — who, which centre, call or visit, now — in one tap. The
+    // full form stays for when there are notes worth keeping. A tap can be
+    // undone for 10 minutes (server enforces the same window).
+    const QUICK_LOG_UNDO_WINDOW_MS = 10 * 60 * 1000;
+    const quickLogged = {}; // `${centreKey}|${channel}` -> { id, at }
+    let undoBarTimer = null;
+
+    function quickLogState(centreKey, channel) {
+      const e = quickLogged[centreKey + '|' + channel];
+      return e && Date.now() - e.at < QUICK_LOG_UNDO_WINDOW_MS ? e : null;
+    }
+    function quickBtnHtml(centreKey, channel, cls) {
+      const done = quickLogState(centreKey, channel);
+      const label = channel === 'call' ? 'Called' : 'Visited';
+      return `<button type="button" class="${cls}${done ? ' quick-log-done' : ''}" data-ql="${escHtml(centreKey)}|${channel}" ${done ? 'disabled' : ''}
+                onclick="quickLogCentre('${escHtml(centreKey)}','${channel}')">${done ? '✓ ' : ''}${label}</button>`;
+    }
+    function refreshQuickButtons() {
+      document.querySelectorAll('[data-ql]').forEach(btn => {
+        const [key, channel] = btn.dataset.ql.split('|');
+        const done = quickLogState(key, channel);
+        btn.disabled = !!done;
+        btn.classList.toggle('quick-log-done', !!done);
+        btn.textContent = (done ? '✓ ' : '') + (channel === 'call' ? 'Called' : 'Visited');
+      });
+      document.querySelectorAll('[data-ql-status]').forEach(el => { el.innerHTML = quickLogStatusHtml(el.dataset.qlStatus); });
+    }
+    function quickLogStatusHtml(centreKey) {
+      const parts = ['call', 'visit'].map(ch => {
+        const e = quickLogState(centreKey, ch);
+        if (!e) return '';
+        const t = new Date(e.at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        return `✓ ${ch === 'call' ? 'Call' : 'Visit'} logged ${t} · <a href="#" onclick="undoQuickLog('${escHtml(centreKey)}','${ch}');return false" style="color:var(--blue);font-weight:600">Undo</a>`;
+      }).filter(Boolean);
+      return parts.join('<br>');
+    }
+    function showUndoBar(message, centreKey, channel) {
+      let bar = document.getElementById('undoBar');
+      if (!bar) { bar = document.createElement('div'); bar.id = 'undoBar'; bar.className = 'undo-bar'; document.body.appendChild(bar); }
+      bar.innerHTML = `<span>${escHtml(message)}</span><button type="button" onclick="undoQuickLog('${escHtml(centreKey)}','${channel}')">Undo</button>`;
+      bar.classList.add('show');
+      clearTimeout(undoBarTimer);
+      undoBarTimer = setTimeout(() => bar.classList.remove('show'), 6000);
+    }
+    async function quickLogCentre(centreKey, channel) {
+      const btns = [...document.querySelectorAll('[data-ql]')].filter(b => b.dataset.ql === centreKey + '|' + channel);
+      if (btns.some(b => b.disabled)) return;
+      const original = btns.map(b => b.textContent);
+      btns.forEach(b => { b.disabled = true; b.textContent = 'Saving…'; });
+      try {
+        const row = await api(`/api/centres/${encodeURIComponent(centreKey)}/quick-log`, { method: 'POST', body: JSON.stringify({ channel }) });
+        quickLogged[centreKey + '|' + channel] = { id: row.id, at: Date.now() };
+        refreshQuickButtons();
+        const label = channel === 'call' ? 'Call' : 'Visit';
+        if (row.duplicate) toast(`${label} was already logged a moment ago`);
+        else showUndoBar(`${label} logged`, centreKey, channel);
+        ensureDataLoaded(true).catch(() => {});
+      } catch (e) {
+        toast(e.message, 'error');
+        btns.forEach((b, i) => { b.disabled = false; b.textContent = original[i]; });
+      }
+    }
+    async function undoQuickLog(centreKey, channel) {
+      const e = quickLogState(centreKey, channel);
+      if (!e) return;
+      try {
+        await api(`/api/centres/${encodeURIComponent(centreKey)}/visits/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+        delete quickLogged[centreKey + '|' + channel];
+        document.getElementById('undoBar')?.classList.remove('show');
+        refreshQuickButtons();
+        toast('Undone');
+        ensureDataLoaded(true).catch(() => {});
+      } catch (err) { toast(err.message, 'error'); }
+    }
+
     function openLogActivityFor(type, id, opts) {
       logTarget = { type, id, ...opts };
       setView('log-activity');
