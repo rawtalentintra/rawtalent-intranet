@@ -16,6 +16,7 @@ const rtCandidatesSync = require('./services/rtCandidatesSyncService');
 const rtApiService = require('./services/rtApiReportService');
 const leadAutoSignService = require('./services/leadAutoSignService');
 const centreReactivationService = require('./services/centreReactivationService');
+const centreOwnershipService = require('./services/centreOwnershipService');
 const acecqaSync = require('./services/acecqaSyncService');
 
 const app = express();
@@ -188,6 +189,7 @@ app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/centres', require('./routes/centres'));
 app.use('/api/first-shift', require('./routes/firstShift'));
+app.use('/api/centre-ownership', require('./routes/centreOwnership'));
 app.use('/api/educators', require('./routes/educators'));
 app.use('/api/micropods', require('./routes/micropods'));
 app.use('/api/reports', require('./routes/reports'));
@@ -480,6 +482,19 @@ async function start() {
       .catch(err => console.error('Centre reactivation check error:', err.message));
     runCentreReactivationCheck();
     setInterval(runCentreReactivationCheck, 15 * 60 * 1000);
+
+    // WFP attribution model's network-expansion rule (2026-10-07) — see
+    // centreOwnershipService's header. Runs after the reactivation check on
+    // the same cadence and the same cached centres/bookings pull; only ever
+    // fills a centre with no owner.
+    const runNetworkExpansionCheck = () => centreOwnershipService.applyNetworkExpansion()
+      .then(({ credits, conflicts, applied }) => {
+        if (applied) console.log(`Network expansion: ${applied} centre(s) credited to the partner who converted their network.`);
+        if (conflicts.length) console.log(`Network expansion: ${conflicts.length} network(s) skipped — more than one partner has converted a centre there.`);
+      })
+      .catch(err => console.error('Network expansion check error:', err.message));
+    setTimeout(runNetworkExpansionCheck, 60 * 1000);
+    setInterval(runNetworkExpansionCheck, 15 * 60 * 1000);
 
     // Warm routes/centres.js's shared centres+bookings cache on boot, not
     // just on first request — reported live 2026-09-11 as "Today's still
