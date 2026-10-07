@@ -17733,6 +17733,10 @@
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading recordings…</div>
         </div>
 
+        <div class="lead-group-label" style="margin-top:14px">Educators known to this centre</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">Educators who already work here through other agencies — so a partner can show the centre how to book them. Not a record of work done through Raw Talent.</div>
+        <div id="leadEducatorsBox" style="margin-bottom:10px"><div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading…</div></div>
+
         <div class="lead-group-label" style="margin-top:14px">Notes</div>
         <div id="leadNotesList" style="margin-bottom:10px">
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading notes…</div>
@@ -17754,7 +17758,103 @@
       updateLeadStatusCalendarIcon('centre_visited');
       loadLeadNotes(id);
       loadLeadRecordings(id);
+      loadLeadEducators(id);
       resetLeadVoiceRecorder();
+    }
+
+    // ── Educators tagged to a lead (Liam, 4 Sep) ─────────────────────
+    const LEAD_READINESS_BADGE = {
+      ready: { bg: '#dcfce7', color: '#15803d', label: 'Ready to book' },
+      not_active: { bg: '#f3f4f6', color: '#4b5563', label: 'Not active in RT' },
+      onboarding: { bg: '#fef3c7', color: '#b45309', label: 'Still onboarding' },
+      documents: { bg: '#fef3c7', color: '#b45309', label: 'Documents need attention' },
+      unknown: { bg: '#f3f4f6', color: '#4b5563', label: 'Not found in RT' }
+    };
+    let leadEducatorsState = { tagged: [], suggestion: null };
+    let leadEducatorSearchTimer = null;
+    const cleanPersonName = n => String(n || '').replace(/\s+/g, ' ').trim();
+
+    async function loadLeadEducators(leadId) {
+      const box = document.getElementById('leadEducatorsBox');
+      if (!box) return;
+      try {
+        const res = await fetch(`/api/leads/${leadId}/educators`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'failed');
+        if (currentLeadDetailId !== leadId) return;
+        leadEducatorsState = data;
+        paintLeadEducators();
+      } catch {
+        box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Couldn't load tagged educators.</div>`;
+      }
+    }
+    function paintLeadEducators() {
+      const box = document.getElementById('leadEducatorsBox');
+      if (!box) return;
+      const canEdit = currentUserRole !== 'qa_view';
+      const { tagged, suggestion } = leadEducatorsState;
+      box.innerHTML = `
+        ${tagged.length ? tagged.map(t => {
+          const b = LEAD_READINESS_BADGE[t.readiness] || LEAD_READINESS_BADGE.unknown;
+          const mine = (t.created_by || '').toLowerCase() === (currentUserEmail || '').toLowerCase();
+          return `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:13px">
+            <div>
+              <div style="font-weight:600;color:var(--navy)">${escHtml(cleanPersonName([t.first_name, t.last_name].filter(Boolean).join(' ')) || 'Educator #' + t.candidate_user_id)}
+                <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;background:${b.bg};color:${b.color}">${b.label}</span></div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml([t.qualification, t.suburb].filter(Boolean).join(' · '))}${t.note ? ' — ' + escHtml(t.note) : ''}</div>
+              <div style="font-size:11px;color:var(--text-muted)">Tagged by ${escHtml(t.created_by_name || t.created_by || 'Unknown')} · ${fmtDate(t.created_at)}</div>
+            </div>
+            ${canEdit && (mine || currentUserRole === 'admin' || currentUserRole === 'super_admin') ? `<button class="action-btn delete" style="padding:2px 8px;font-size:10.5px" onclick="removeLeadEducatorTag('${t.id}')">Remove</button>` : ''}
+          </div>`;
+        }).join('') : `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">No educators tagged yet.</div>`}
+        ${canEdit && suggestion ? `
+          <div style="margin-top:8px;padding:8px 12px;border-radius:8px;background:#eff6ff;font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span><b>${escHtml(cleanPersonName(suggestion.name))}</b>${suggestion.suburb ? ' (' + escHtml(suggestion.suburb) + ')' : ''} reported this lead — tag them?</span>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="tagLeadEducator('${suggestion.candidateUserId}')">Tag</button>
+          </div>` : ''}
+        ${canEdit ? `
+          <div style="margin-top:8px">
+            <input type="text" id="leadEducatorSearch" class="form-control" placeholder="Tag an educator — search by name, phone or email" autocomplete="off" oninput="onLeadEducatorSearch(this.value)">
+            <div id="leadEducatorResults"></div>
+          </div>` : ''}`;
+    }
+    function onLeadEducatorSearch(q) {
+      clearTimeout(leadEducatorSearchTimer);
+      const out = document.getElementById('leadEducatorResults');
+      if (!q || q.trim().length < 3) { out.innerHTML = ''; return; }
+      leadEducatorSearchTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/educators/search?q=${encodeURIComponent(q.trim())}`);
+          const rows = await res.json();
+          if (!res.ok) throw new Error(rows.error || 'Search failed');
+          const tagged = new Set(leadEducatorsState.tagged.map(t => t.candidate_user_id));
+          const list = rows.filter(r => !tagged.has(String(r.userId)));
+          out.innerHTML = list.length ? list.map(r => `
+            <div style="padding:7px 10px;border:1px solid var(--gray-100);border-top:none;cursor:pointer;font-size:13px" onclick="tagLeadEducator('${escHtml(String(r.userId))}')">
+              <b>${escHtml(cleanPersonName(r.name))}</b> <span style="color:var(--text-muted);font-size:12px">${escHtml(r.suburb || '')}${r.isActive === false ? ' · disabled in RT' : ''}</span>
+            </div>`).join('') : `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">No match.</div>`;
+        } catch (e) { out.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">${escHtml(e.message)}</div>`; }
+      }, 300);
+    }
+    async function tagLeadEducator(candidateUserId) {
+      const leadId = currentLeadDetailId;
+      try {
+        const res = await fetch(`/api/leads/${leadId}/educators`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateUserId }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not tag');
+        toast('Educator tagged', 'success');
+        await loadLeadEducators(leadId);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function removeLeadEducatorTag(tagId) {
+      const leadId = currentLeadDetailId;
+      try {
+        const res = await fetch(`/api/leads/${leadId}/educators/${encodeURIComponent(tagId)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not remove');
+        await loadLeadEducators(leadId);
+      } catch (e) { toast(e.message, 'error'); }
     }
 
     // ── Lead notes thread ────────────────────────────────────────

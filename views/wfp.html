@@ -256,6 +256,7 @@
     let currentLeadId = null;
     let currentLeadActivities = [];
     let currentLeadNotes = [];
+    let currentLeadEducators = { tagged: [], suggestion: null };
     let activityTypes = { callTypes: [], visitTypes: [] };
     let wfpFilterLabel = null; // admin-only territory toggle — null = All States (see ensureDataLoaded)
     let logTarget = null; // { type: 'lead'|'centre', id, channel, prefillOutcome }
@@ -1694,6 +1695,8 @@
         currentLeadActivities = activities;
         currentLeadNotes = notes;
       } catch { currentLeadActivities = []; currentLeadNotes = []; }
+      try { currentLeadEducators = await api(`/api/leads/${currentLeadId}/educators`); }
+      catch { currentLeadEducators = { tagged: [], suggestion: null }; }
       paintLeadDetail();
     }
     function paintLeadDetail() {
@@ -1747,6 +1750,9 @@
           ${Object.entries(LEAD_STAGE_META).map(([k, v]) => `<option value="${k}" ${deriveLeadStage(l) === k ? 'selected' : ''}>${escHtml(v.label)}</option>`).join('')}
         </select>
 
+        <div class="section-title">Educators known to this centre</div>
+        <div id="leadEducatorsBox">${leadEducatorsHtml()}</div>
+
         <div class="section-title">Last Activity</div>
         ${lastActivity ? `
           <div class="note-line">
@@ -1759,6 +1765,88 @@
 
         ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
       `;
+    }
+
+    // ── Educators tagged to a lead (Liam, 4 Sep) ─────────────────────
+    // So a partner can show a centre manager how to book the specific
+    // educators who already work there through other agencies. Market
+    // intelligence, not a claim they worked there through Raw Talent.
+    const READINESS_BADGE = {
+      ready: { cls: 'good', label: 'Ready to book' },
+      not_active: { cls: 'neutral', label: 'Not active in RT' },
+      onboarding: { cls: 'warn', label: 'Still onboarding' },
+      documents: { cls: 'warn', label: 'Documents need attention' },
+      unknown: { cls: 'neutral', label: 'Not found in RT' }
+    };
+    let leadEducatorSearchTimer = null;
+    function cleanName(n) { return String(n || '').replace(/\s+/g, ' ').trim(); }
+    function leadEducatorsHtml() {
+      const { tagged, suggestion } = currentLeadEducators;
+      return `
+        ${tagged.length ? tagged.map(t => {
+          const b = READINESS_BADGE[t.readiness] || READINESS_BADGE.unknown;
+          return `
+          <div class="educator-row">
+            <div>
+              <div class="name">${escHtml(cleanName([t.first_name, t.last_name].filter(Boolean).join(' ')) || 'Educator #' + t.candidate_user_id)}</div>
+              <div class="meta">${escHtml([t.qualification, t.suburb].filter(Boolean).join(' · ') || '')}</div>
+              ${t.note ? `<div class="meta">${escHtml(t.note)}</div>` : ''}
+              <span class="badge inline ${b.cls}" style="margin-top:4px">${b.label}</span>
+            </div>
+            <button class="qa-btn" onclick="removeLeadEducator('${t.id}')" aria-label="Remove">Remove</button>
+          </div>`;
+        }).join('') : `<div class="note-line">No educators tagged yet.</div>`}
+        ${suggestion ? `
+        <div style="background:var(--blue-bg);border-radius:10px;padding:10px 12px;margin-top:8px">
+          <div class="sub" style="color:var(--text)">${escHtml(cleanName(suggestion.name))}${suggestion.suburb ? ' (' + escHtml(suggestion.suburb) + ')' : ''} reported this lead — tag them?</div>
+          <button class="btn btn-secondary" style="width:100%;margin-top:6px" onclick="tagLeadEducator('${suggestion.candidateUserId}')">Tag ${escHtml(cleanName(suggestion.name))}</button>
+        </div>` : ''}
+        <div class="action-row" style="margin-top:8px">
+          <button class="btn btn-secondary" style="flex:none;width:100%" onclick="toggleLeadEducatorSearch()">Tag an educator</button>
+        </div>
+        <div id="leadEducatorSearchBox" style="display:none">
+          <input type="text" id="leTagSearch" placeholder="Search by name, phone or email" oninput="onLeadEducatorSearch(this.value)" autocomplete="off">
+          <div id="leTagResults"></div>
+        </div>`;
+    }
+    function paintLeadEducatorsBox() {
+      const box = document.getElementById('leadEducatorsBox');
+      if (box) box.innerHTML = leadEducatorsHtml();
+    }
+    function toggleLeadEducatorSearch() {
+      const box = document.getElementById('leadEducatorSearchBox');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      if (box.style.display === 'block') document.getElementById('leTagSearch').focus();
+    }
+    function onLeadEducatorSearch(q) {
+      clearTimeout(leadEducatorSearchTimer);
+      const results = document.getElementById('leTagResults');
+      if (!q || q.trim().length < 3) { results.innerHTML = ''; return; }
+      leadEducatorSearchTimer = setTimeout(async () => {
+        try {
+          const rows = await api(`/api/educators/search?q=${encodeURIComponent(q.trim())}`);
+          const tagged = new Set(currentLeadEducators.tagged.map(t => t.candidate_user_id));
+          const list = (Array.isArray(rows) ? rows : []).filter(r => !tagged.has(String(r.userId)));
+          results.innerHTML = list.length ? list.map(r =>
+            `<div class="autocomplete-item" onclick="tagLeadEducator('${escHtml(String(r.userId))}')">${escHtml(cleanName(r.name))}<div class="meta">${escHtml(r.suburb || '')}${r.isActive === false ? ' · disabled in RT' : ''}</div></div>`
+          ).join('') : `<div class="note-line">No match.</div>`;
+        } catch (e) { results.innerHTML = `<div class="note-line">${escHtml(e.message)}</div>`; }
+      }, 300);
+    }
+    async function tagLeadEducator(candidateUserId) {
+      try {
+        await api(`/api/leads/${currentLeadId}/educators`, { method: 'POST', body: JSON.stringify({ candidateUserId }) });
+        currentLeadEducators = await api(`/api/leads/${currentLeadId}/educators`);
+        paintLeadEducatorsBox();
+        toast('Educator tagged');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function removeLeadEducator(tagId) {
+      try {
+        await api(`/api/leads/${currentLeadId}/educators/${encodeURIComponent(tagId)}`, { method: 'DELETE' });
+        currentLeadEducators = await api(`/api/leads/${currentLeadId}/educators`);
+        paintLeadEducatorsBox();
+      } catch (e) { toast(e.message, 'error'); }
     }
 
     // Update Stage picker writes back through the SAME 3 fields the rest

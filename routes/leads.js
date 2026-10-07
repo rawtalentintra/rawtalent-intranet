@@ -1001,6 +1001,101 @@ router.post('/:id/activities', async (req, res) => {
   }
 });
 
+// Educators tagged to a lead (see db/schema.sql's lead_educators comment). The
+// GET also says whether each educator could actually be booked today — the
+// point of tagging is for a partner to show a centre how to book THESE people,
+// which only works for someone Active, fully onboarded and compliant in RT.
+// Compliance is the same rule micropods.js uses (every mandatory requirement
+// reviewed and not expired).
+const READINESS_SQL = `
+  CASE
+    WHEN c.user_id IS NULL THEN 'unknown'
+    WHEN c.is_active IS NOT TRUE OR (c.raw->>'status') <> '1' THEN 'not_active'
+    WHEN c.raw->>'obStatus' <> 'Completed' THEN 'onboarding'
+    WHEN EXISTS (
+      SELECT 1 FROM jsonb_array_elements(coalesce(c.raw->'attachedRequirements','[]'::jsonb)) r
+      WHERE (r->>'isMandatory')::boolean IS TRUE
+        AND ((r->>'isReviewed')::boolean IS NOT TRUE
+          OR (r->>'expiryDate' IS NOT NULL AND r->>'requirementName' <> 'Qualification/Course of Study'
+              AND left(r->>'expiryDate',10) NOT IN ('0001-01-01','9999-12-31')
+              AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD')))
+    ) THEN 'documents'
+    ELSE 'ready'
+  END`;
+
+router.get('/:id/educators', leadsViewAccess, async (req, res) => {
+  try {
+    const db = getDb();
+    const tagged = (await db.execute({
+      sql: `SELECT le.id, le.candidate_user_id, le.note, le.created_by, le.created_by_name, le.created_at,
+                   c.first_name, c.last_name, c.suburb,
+                   c.raw->'qualifications'->0->>'qualificationName' AS qualification,
+                   ${READINESS_SQL} AS readiness
+            FROM lead_educators le
+            LEFT JOIN rt_candidates_cache c ON c.user_id::text = le.candidate_user_id
+            WHERE le.lead_id = ? ORDER BY le.created_at DESC`,
+      args: [req.params.id]
+    })).rows;
+
+    // The lead already records the educator who reported it (educator_name,
+    // free text). When that name matches exactly one RT educator and they
+    // aren't tagged yet, offer them as a one-tap suggestion — never auto-tag,
+    // since a common name could be the wrong person.
+    let suggestion = null;
+    const lead = (await db.execute({ sql: 'SELECT educator_name FROM leads WHERE id = ?', args: [req.params.id] })).rows[0];
+    const name = (lead && lead.educator_name || '').trim();
+    if (name) {
+      const matches = (await db.execute({
+        sql: `SELECT c.user_id::text AS user_id, c.first_name, c.last_name, c.suburb
+              FROM rt_candidates_cache c
+              WHERE c.is_deleted = false
+                AND regexp_replace(lower(trim(coalesce(c.first_name,'') || ' ' || coalesce(c.last_name,''))), '\\s+', ' ', 'g') = lower(?)
+              LIMIT 3`,
+        args: [name.replace(/\s+/g, ' ')]
+      })).rows;
+      if (matches.length === 1 && !tagged.some(t => t.candidate_user_id === matches[0].user_id)) {
+        suggestion = { candidateUserId: matches[0].user_id, name: [matches[0].first_name, matches[0].last_name].filter(Boolean).join(' '), suburb: matches[0].suburb };
+      }
+    }
+    res.json({ tagged, suggestion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/educators', async (req, res) => {
+  const { candidateUserId, note } = req.body || {};
+  if (!candidateUserId) return res.status(400).json({ error: 'candidateUserId is required' });
+  try {
+    const db = getDb();
+    if (!(await db.execute({ sql: 'SELECT 1 FROM leads WHERE id = ?', args: [req.params.id] })).rows[0]) return res.status(404).json({ error: 'Lead not found' });
+    if (!(await db.execute({ sql: 'SELECT 1 FROM rt_candidates_cache WHERE user_id::text = ?', args: [String(candidateUserId)] })).rows[0]) return res.status(400).json({ error: 'That educator is not in RT' });
+    const id = uuidv4();
+    const r = await db.execute({
+      sql: `INSERT INTO lead_educators (id, lead_id, candidate_user_id, note, created_by, created_by_name)
+            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (lead_id, candidate_user_id) DO NOTHING`,
+      args: [id, req.params.id, String(candidateUserId), note || null, req.user.email, req.user.name || req.user.email]
+    });
+    res.json({ success: true, id, alreadyTagged: !r.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/educators/:tagId', async (req, res) => {
+  try {
+    const row = (await getDb().execute({ sql: 'SELECT created_by FROM lead_educators WHERE id = ? AND lead_id = ?', args: [req.params.tagId, req.params.id] })).rows[0];
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if ((row.created_by || '').toLowerCase() !== req.user.email.toLowerCase() && !['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only the person who tagged this educator or an admin can remove it' });
+    }
+    await getDb().execute({ sql: 'DELETE FROM lead_educators WHERE id = ?', args: [req.params.tagId] });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Site-visit recordings — same access shape as notes (readable by anyone
 // with leads view access, uploadable/deletable by the people actually
 // managing a lead day to day). Any file format, see leadRecordingUpload.

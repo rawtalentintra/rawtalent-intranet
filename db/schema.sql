@@ -2563,3 +2563,23 @@ CREATE TABLE IF NOT EXISTS first_shift_followups (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Educators tagged to a LEAD (Liam, 4 Sep HeartBeat mobile demo: "add a field to
+-- show educators tagged to a lead" so a partner can show a centre manager how to
+-- book the specific educators who already work there through other agencies).
+-- Same idea as centre_educator_relationships, but a lead has no RT centre yet,
+-- so it keys on the lead. candidate_user_id is RT's userId as text
+-- (rt_candidates_cache.user_id). Deliberately NOT a claim that the educator
+-- worked there through Raw Talent — it's market intelligence, like 'known to
+-- centre' on a centre.
+CREATE TABLE IF NOT EXISTS lead_educators (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  candidate_user_id TEXT NOT NULL,
+  note TEXT,
+  created_by CITEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (lead_id, candidate_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_lead_educators_lead ON lead_educators(lead_id);
