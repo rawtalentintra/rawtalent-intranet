@@ -599,6 +599,74 @@ router.get('/activity-log', async (req, res) => {
   }
 });
 
+// Fill rate by partner (Liam, 7 Sep: "real-time bookings and fill rates for all
+// partners"). filled = Assigned or Completed shifts. unfilled = shifts ops
+// could not fill: RT never uses status 7 (Failed/Unfilled) in practice, so
+// they are bookings cancelled with RT's "Unfilled" cancellation reason (code
+// 50, read from the booking's own cancel log). That code is INFERRED, not
+// documented — every code-50 cancellation checked carries a note like "No C3
+// found" / "Unfilled: NO educ found" / "No takers" (same inferred-from-data
+// caveat as BOOKING_STATUS_LABELS). It also catches shifts ops then re-posted
+// as another qualification and filled — RT doesn't link those by hand — so
+// this reads lower than the weekly figure ops quote (e.g. 97.4% vs 99.12% for
+// 21-27 Sep): it's the share filled FIRST TIME, i.e. unmet demand, which is
+// what Liam asked to track. Rate = filled / (filled + unfilled). Other
+// cancellations (the client pulled it, test bookings, mistakes) and ones still
+// Open/Requested are reported separately and left out.
+// A booking belongs to the partner its centre is assigned to: an explicit
+// centre_partner_assignments row, else the VIC suburb split, else the state's
+// default partner (the same chain the ?mine/?partnerLabel filter on GET /
+// uses), else "Unassigned" (NT/ACT/WA have no default). Hidden centres are
+// excluded.
+const FILLED_STATUS_IDS = new Set([3, 5]);
+const UNFILLED_STATUS_ID = 7;
+const CANCELLED_STATUS_ID = 6;
+const UNFILLED_CANCEL_REASON = 50;
+const PENDING_STATUS_IDS = new Set([1, 2]);
+function lastCancelReason(b) {
+  const log = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === CANCELLED_STATUS_ID).slice(-1)[0];
+  return log ? log.reason : null;
+}
+router.get('/fill-rate-by-partner', async (req, res) => {
+  try {
+    const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+    const today = new Date(); const dayMs = 86400000;
+    const ymd = d => d.toISOString().slice(0, 10);
+    const from = isDay(req.query.from) ? req.query.from : ymd(new Date(today.getTime() - 30 * dayMs));
+    const to = isDay(req.query.to) ? req.query.to : ymd(new Date(today.getTime() + dayMs)); // exclusive
+    const { centres, bookings } = await getCentresAndBookings();
+    const [hidden, assignments] = await Promise.all([getHiddenCentreKeys(), getCentrePartnerAssignments()]);
+    const partnerByKey = new Map();
+    for (const c of centres) {
+      if (hidden.has(c.centreKey)) continue;
+      partnerByKey.set(c.centreKey, assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned');
+    }
+    const rows = new Map();
+    const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0 }); return rows.get(name); };
+    for (const b of bookings) {
+      const d = (b.bookingDate || '').slice(0, 10);
+      if (!d || d < from || d >= to) continue;
+      const key = partnerByKey.has(`loc:${b.locationId}`) ? `loc:${b.locationId}` : `client:${b.clientId}`;
+      if (!partnerByKey.has(key)) continue; // hidden centre, or one RT no longer lists
+      const r = row(partnerByKey.get(key));
+      r.centres.add(key);
+      if (FILLED_STATUS_IDS.has(b.statusId)) r.filled++;
+      else if (b.statusId === UNFILLED_STATUS_ID) r.unfilled++;
+      else if (b.statusId === CANCELLED_STATUS_ID) { if (lastCancelReason(b) === UNFILLED_CANCEL_REASON) r.unfilled++; else r.cancelled++; }
+      else if (PENDING_STATUS_IDS.has(b.statusId)) r.open++;
+    }
+    const withRate = r => ({ partner: r.partner, centres: r.centres.size, filled: r.filled, unfilled: r.unfilled, cancelled: r.cancelled, open: r.open,
+      fillRate: (r.filled + r.unfilled) ? Math.round((r.filled / (r.filled + r.unfilled)) * 10000) / 100 : null });
+    const list = [...rows.values()].map(withRate).sort((a, b) => (b.filled + b.unfilled) - (a.filled + a.unfilled));
+    const sum = k => list.reduce((n, r) => n + r[k], 0);
+    const total = { partner: 'All centres', centres: sum('centres'), filled: sum('filled'), unfilled: sum('unfilled'), cancelled: sum('cancelled'), open: sum('open') };
+    total.fillRate = (total.filled + total.unfilled) ? Math.round((total.filled / (total.filled + total.unfilled)) * 10000) / 100 : null;
+    res.json({ from, to, partners: list, total });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // Centre 360 overview — re-fetches this one client live from RT so the
 // name/contact/active status shown is always current even if the bulk
 // list cache is a few minutes stale (same "list can lag, detail is

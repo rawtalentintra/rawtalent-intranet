@@ -985,6 +985,15 @@
           </div>
 
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
+            <div class="sd-card-title">Fill Rate by Partner</div>
+            <div class="sd-card-sub">How many shifts at each partner's centres were filled the first time. Counted by booking date.</div>
+            <div id="wfpPerfFillRate" style="margin-top:18px;overflow-x:auto"><div style="font-size:13px;color:var(--text-muted);padding:10px 0">Loading…</div></div>
+            <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
+              <b>Filled</b> — Assigned or Completed. <b>Unfilled</b> — shifts ops couldn't fill and tagged Unfilled in RT; this includes shifts later re-posted as another qualification and filled, so it reads lower than the weekly figure ops quote. <b>Fill rate</b> = filled ÷ (filled + unfilled). Other cancellations and bookings still open are shown but not counted in the rate. A centre belongs to the partner it's assigned to, otherwise its state's default partner.
+            </div>
+          </div>
+
+          <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
             <div class="sd-card-title">By State</div>
             <div class="sd-card-sub">Counted by the date each call, visit or signing happened, not the date the lead was created.</div>
             <div id="wfpPerfStateTable" style="margin-top:18px;overflow-x:auto"></div>
@@ -10388,6 +10397,38 @@
       document.getElementById('wfpPerfRangeLabel').textContent = key === 'all' ? 'All time' : `${fmt(from)} – ${fmt(new Date(to.getTime() - 1))}`;
       renderWfpPerfPartners(from, to);
       renderWfpPerfStates(from, to);
+      loadWfpFillRate(from, to);
+    }
+
+    // Fill rate comes from the server (it needs every RT booking, not just
+    // what this page already holds). Latest request wins, so flicking
+    // through periods quickly can't paint an older answer over a newer one.
+    let wfpFillRateRequest = 0;
+    async function loadWfpFillRate(from, to) {
+      const box = document.getElementById('wfpPerfFillRate');
+      if (!box) return;
+      const mine = ++wfpFillRateRequest;
+      try {
+        const res = await fetch(`/api/centres/fill-rate-by-partner?from=${ymd(from)}&to=${ymd(to)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load fill rate');
+        if (mine !== wfpFillRateRequest) return;
+        const cell = (v, bold, color) => `<td style="padding:13px 10px;text-align:center;font-size:15px;font-weight:${v ? (bold ? 800 : 700) : 500};color:${!v ? '#c0c4cc' : (color || 'var(--navy)')}">${v}</td>`;
+        const rate = r => r.fillRate == null ? '<td style="padding:13px 10px;text-align:center;color:#c0c4cc">—</td>' : `<td style="padding:13px 10px;text-align:center;font-size:17px;font-weight:800;color:var(--navy)">${r.fillRate.toFixed(1)}%</td>`;
+        const th = (t, left) => `<th style="padding:10px;text-align:${left ? 'left' : 'center'};font-size:12px;font-weight:700;color:var(--text-muted);white-space:nowrap">${t}</th>`;
+        const row = (r, isTotal) => `
+          <tr style="${isTotal ? 'border-top:2px solid var(--gray-200);background:var(--gray-100)' : 'border-bottom:1px solid var(--gray-100)'}">
+            <td style="padding:13px 10px;font-size:14px;font-weight:${isTotal ? 800 : 700};color:var(--navy)">${escHtml(r.partner)}</td>
+            ${cell(r.centres)}${cell(r.filled)}${cell(r.unfilled, false, '#c0392b')}${cell(r.cancelled)}${cell(r.open)}${rate(r)}
+          </tr>`;
+        box.innerHTML = data.partners.length ? `
+          <table style="width:100%;border-collapse:collapse;min-width:640px">
+            <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Partner', true)}${th('Centres')}${th('Filled')}${th('Unfilled')}${th('Cancelled')}${th('Still open')}${th('Fill rate')}</tr></thead>
+            <tbody>${data.partners.map(r => row(r, false)).join('')}${row(data.total, true)}</tbody>
+          </table>` : `<div style="font-size:13px;color:var(--text-muted);padding:10px 0">No bookings in this period.</div>`;
+      } catch (e) {
+        if (mine === wfpFillRateRequest) box.innerHTML = `<div style="font-size:13px;color:#b91c1c;padding:10px 0">${escHtml(e.message)}</div>`;
+      }
     }
 
     function wfpPerfTile(label, value, sub) {
