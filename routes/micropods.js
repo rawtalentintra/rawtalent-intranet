@@ -8,7 +8,7 @@ const centreGeoService = require('../services/centreGeoService');
 const { computeTerritoryStrategy } = require('../services/territoryStrategyService');
 const { computeAdvertisingOpportunities, DEFAULT_RADIUS_KM, DEFAULT_MIN_EDUCATORS } = require('../services/advertisingOpportunityService');
 const { getCentresAndBookings } = require('./centres');
-const { LIAM, JUSTINE, partnerForSuburbState } = require('../services/melbourneTerritoryService');
+const { JUSTINE, partnerForSuburbState } = require('../services/melbourneTerritoryService');
 
 // Candidate density clustering ("Micropods") for the Workforce Partners
 // section — computed on read from rt_candidates_cache (nightly-synced), no
@@ -196,7 +196,7 @@ function parseStateFilter(raw) {
 // partner label wouldn't make sense.
 function parsePartnerFilter(raw) {
   const v = (raw || '').trim().toLowerCase();
-  return v === 'liam' || v === 'justine' ? v : null;
+  return v === 'justine' ? v : null;
 }
 
 function median(numbers) {
@@ -251,7 +251,7 @@ async function getPodsForParams(req) {
   // header comment for why "outside the metro split falls back to
   // Justine" is the rule, not an error).
   if (partner) {
-    const wanted = partner === 'liam' ? LIAM : JUSTINE;
+    const wanted = JUSTINE;
     fullStatePoints = fullStatePoints.filter(p => partnerForSuburbState(p.suburb, 'VIC') === wanted);
   }
   let statePoints = fullStatePoints;
