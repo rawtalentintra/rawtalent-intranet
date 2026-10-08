@@ -468,6 +468,51 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
   }
 });
 
+// Who did each call/visit that was recorded by changing a lead's stage — the
+// Stage picker only stamped a date before 5 Oct 2026, never a person. The
+// assigned partner is NOT evidence of who did the work (leads are assigned by
+// suburb, regardless of who calls them — e.g. 5 leads Justine submitted and
+// worked sat under Liam), so the actor is inferred only from:
+//   1. the lead's submitter, if they are one of the partners;
+//   2. otherwise the partner whose note on the lead is closest in time to the
+//      event.
+// With neither, actor is null and the page reports it as unattributed rather
+// than guessing. Feeds WFP Performance's per-partner cards.
+const STAGE_EVENT_PARTNERS = ['liam@rawtalent.com.au', 'justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
+router.get('/stage-events', leadsViewAccess, async (req, res) => {
+  try {
+    const db = getDb();
+    const leads = (await db.execute({
+      sql: `SELECT id, lower(submitted_by_email) AS submitter, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at
+            FROM leads
+            WHERE (lead_called_status = 'done' AND lead_called_at IS NOT NULL) OR (centre_visited_status = 'done' AND centre_visited_at IS NOT NULL)`,
+      args: []
+    })).rows;
+    const notes = (await db.execute({
+      sql: `SELECT lead_id, lower(author_email) AS author, created_at FROM lead_notes WHERE lower(author_email) = ANY(?)`,
+      args: [STAGE_EVENT_PARTNERS]
+    })).rows;
+    const notesByLead = new Map();
+    for (const n of notes) { if (!notesByLead.has(n.lead_id)) notesByLead.set(n.lead_id, []); notesByLead.get(n.lead_id).push(n); }
+    const actorFor = (lead, at) => {
+      if (STAGE_EVENT_PARTNERS.includes(lead.submitter)) return { email: lead.submitter, basis: 'submitter' };
+      const list = notesByLead.get(lead.id) || [];
+      if (!list.length) return { email: null, basis: 'none' };
+      const t = new Date(at).getTime();
+      const nearest = list.reduce((best, n) => (Math.abs(new Date(n.created_at).getTime() - t) < Math.abs(new Date(best.created_at).getTime() - t) ? n : best));
+      return { email: nearest.author, basis: 'notes' };
+    };
+    const events = [];
+    for (const l of leads) {
+      if (l.lead_called_status === 'done' && l.lead_called_at) events.push({ lead_id: l.id, channel: 'call', at: l.lead_called_at, ...actorFor(l, l.lead_called_at) });
+      if (l.centre_visited_status === 'done' && l.centre_visited_at) events.push({ lead_id: l.id, channel: 'visit', at: l.centre_visited_at, ...actorFor(l, l.centre_visited_at) });
+    }
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Feeds the compact VIC/SA performance charts — counts per stage, scoped to
 // a date range the client computes (this week / this month / arbitrary
 // month), so the chart logic stays purely in SQL and the frontend just picks

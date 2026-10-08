@@ -639,7 +639,9 @@ router.get('/fill-rate-by-partner', async (req, res) => {
     const partnerByKey = new Map();
     for (const c of centres) {
       if (hidden.has(c.centreKey)) continue;
-      partnerByKey.set(c.centreKey, assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned');
+      const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned';
+      // The old Liam (north/west) / Justine (east) VIC split is over — all of VIC is Justine's (Joy, 2026-10-08).
+      partnerByKey.set(c.centreKey, label === 'Liam' ? 'Justine' : label);
     }
     const rows = new Map();
     const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0 }); return rows.get(name); };
