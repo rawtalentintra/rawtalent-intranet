@@ -38,7 +38,6 @@ const SYSTEM_ASSIGNER_NAME = 'Auto — Reactivation';
 // Gwen can now work in any territory, matching the canonical wfp_label/
 // assigned_workforce_partner values everywhere else in the app).
 const REACTIVATION_CREDIT_PARTNERS = [
-  { email: 'liam@rawtalent.com.au', label: 'Liam' },
   { email: 'justine@rawtalent.com.au', label: 'Justine' },
   { email: 'gwen@rawtalent.com.au', label: 'Gwen' }
 ];

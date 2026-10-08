@@ -478,7 +478,7 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
 //      event.
 // With neither, actor is null and the page reports it as unattributed rather
 // than guessing. Feeds WFP Performance's per-partner cards.
-const STAGE_EVENT_PARTNERS = ['liam@rawtalent.com.au', 'justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
+const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
 router.get('/stage-events', leadsViewAccess, async (req, res) => {
   try {
     const db = getDb();

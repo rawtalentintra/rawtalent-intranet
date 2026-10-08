@@ -31,7 +31,7 @@ const { getCentresAndBookings, indexBookingsByCentre, bookingsForCentre } = requ
 const { MEANINGFUL_BOOKING_STATUSES } = require('./centreHealthService');
 
 const OWNERSHIP_MODEL_START = '2026-09-17T00:00:00Z';
-const PARTNER_LABELS = ['Liam', 'Justine', 'Gwen'];
+const PARTNER_LABELS = ['Justine', 'Gwen'];
 const RAWTALENT_LABEL = 'RawTalent';
 const SYSTEM_ASSIGNER_EMAIL = 'system@rawtalent.internal';
 const NETWORK_ASSIGNER_NAME = 'Auto — Network expansion';

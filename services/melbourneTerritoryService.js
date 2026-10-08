@@ -151,7 +151,8 @@ function normalize(suburb) {
 }
 
 const MELBOURNE_SUBURB_PARTNER = {};
-LIAM_SUBURBS.forEach(s => { MELBOURNE_SUBURB_PARTNER[normalize(s)] = LIAM; });
+// All of VIC is Justine's again (Joy, 2026-10-08) — the north/west list now maps to her too.
+LIAM_SUBURBS.forEach(s => { MELBOURNE_SUBURB_PARTNER[normalize(s)] = JUSTINE; });
 JUSTINE_SUBURBS.forEach(s => { MELBOURNE_SUBURB_PARTNER[normalize(s)] = JUSTINE; });
 
 function isVicState(rawState) {
