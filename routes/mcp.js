@@ -242,7 +242,7 @@ async function requireMcpToken(req, res, next) {
   // routes/mcpTokens.js — token generation is already gated there, but
   // this is the actual data-access endpoint, so it gets its own
   // independent check rather than trusting that gate alone).
-  if (user.role !== 'super_admin') {
+  if (!mcpTokens.canUseMcp(user.email, user.role)) {
     res.status(403).json({ jsonrpc: '2.0', error: { code: -32001, message: 'MCP access is not enabled for this account' }, id: null });
     return;
   }

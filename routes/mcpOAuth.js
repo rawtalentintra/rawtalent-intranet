@@ -238,8 +238,8 @@ router.get('/authorize', async (req, res) => {
   // Same restriction as routes/mcp.js's own data-access gate (Joy
   // 2026-08-28) — enforced here too so someone else logged into HeartBeat
   // can't even reach the consent screen, not just fail later at /mcp.
-  if (req.user.role !== 'super_admin') {
-    res.status(403).send(renderMessagePage('Access Restricted', 'MCP access is limited to the HeartBeat super admin account. Sign in as that account to connect this.'));
+  if (!mcpTokens.canUseMcp(req.user.email, req.user.role)) {
+    res.status(403).send(renderMessagePage('Access Restricted', 'MCP access is limited to approved HeartBeat accounts. Sign in with an approved account to connect this.'));
     return;
   }
 
@@ -259,8 +259,8 @@ router.get('/authorize', async (req, res) => {
 
 router.post('/authorize', async (req, res) => {
   const { decision, client_id, redirect_uri, state, code_challenge, code_challenge_method, scope } = req.body || {};
-  if (!req.isAuthenticated() || req.user.role !== 'super_admin') {
-    const message = 'MCP access is limited to the HeartBeat super admin account.';
+  if (!req.isAuthenticated() || !mcpTokens.canUseMcp(req.user.email, req.user.role)) {
+    const message = 'MCP access is limited to approved HeartBeat accounts.';
     if (wantsJson(req)) { res.status(403).json({ error_description: message }); return; }
     res.status(403).send(renderMessagePage('Access Restricted', message));
     return;

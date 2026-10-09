@@ -62,4 +62,12 @@ async function verifyToken(rawToken) {
   return { email: row.user_email, role: row.role };
 }
 
-module.exports = { generateToken, listTokens, revokeToken, verifyToken };
+// Who may connect to the MCP server: the super_admin, plus named people Joy
+// has allowed (Liam, 2026-10-09, for his ChatGPT). Same tools and data as the
+// super_admin sees — no separate view.
+const MCP_ALLOWED_EMAILS = ['liam@rawtalent.com.au'];
+function canUseMcp(email, role) {
+  return role === 'super_admin' || MCP_ALLOWED_EMAILS.includes(String(email || '').toLowerCase());
+}
+
+module.exports = { generateToken, listTokens, revokeToken, verifyToken, canUseMcp };
