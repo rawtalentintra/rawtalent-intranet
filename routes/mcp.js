@@ -29,6 +29,7 @@ const rtApi = require('../services/rtApiReportService');
 // second search_centres call moments later doesn't re-hit RT's API.
 const { getCentresAndBookings } = require('./centres');
 const educatorSearchService = require('../services/educatorSearchService');
+const { registerAdminTools } = require('./mcpAdminTools');
 
 // sessionId -> { transport, email } — an MCP "session" spans several
 // JSON-RPC calls (initialize, then repeated tool calls) over what the
@@ -219,6 +220,10 @@ function buildServerForUser(email) {
     ];
     return { content: [{ type: 'text', text: lines.filter(Boolean).join('\n') }] };
   });
+
+  // Leads/WFP pipeline, bookings and fill rate, JobAdder and meetings — read-only,
+  // for the company owner (see routes/mcpAdminTools.js).
+  registerAdminTools(server);
 
   return server;
 }
