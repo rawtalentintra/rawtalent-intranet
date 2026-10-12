@@ -12112,7 +12112,7 @@
       const { state, partner } = micropodsApiStateParams();
       const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
       document.getElementById('micropodsTerritoryNote').style.display = territoryMode ? 'block' : 'none';
-      const colspan = territoryMode ? 4 : 8;
+      const colspan = territoryMode ? 4 : 9;
       const tbody = document.getElementById('micropodsTableBody');
       tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       document.getElementById('micropodsSummary').textContent = '';
@@ -12133,7 +12133,7 @@
     function renderMicropodsTableHead(territoryMode) {
       document.getElementById('micropodsTableHead').innerHTML = territoryMode
         ? '<tr><th>Area</th><th>Educator Supply</th><th>Nearby Demand (30d)</th><th>Strategy</th></tr>'
-        : `<tr><th>Area</th><th>Candidates</th>${SEGMENT_ORDER.map(key => `<th title="${escHtml(SEGMENT_META[key].desc)}" style="cursor:help">${SEGMENT_META[key].label}</th>`).join('')}</tr>`;
+        : `<tr><th>Area</th><th>Candidates</th><th title="Active in RT, onboarding complete, every document in date" style="cursor:help">Ready to roster</th>${SEGMENT_ORDER.map(key => `<th title="${escHtml(SEGMENT_META[key].desc)}" style="cursor:help">${SEGMENT_META[key].label}</th>`).join('')}</tr>`;
     }
 
     // The "N candidates outside any pod" count used to be a bare number
@@ -12150,18 +12150,19 @@
 
     function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
-      const colspan = territoryMode ? 4 : 8;
+      const colspan = territoryMode ? 4 : 9;
       if (!data || !data.pods.length) {
         document.getElementById('micropodsSummary').innerHTML = data ? `0 pods · ${unclusteredSummaryHtml(data.unclusteredCount)}` : '';
         tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it, or see the candidates outside any pod above.</td></tr>`;
         return;
       }
       if (!territoryMode) {
-        document.getElementById('micropodsSummary').innerHTML = `${data.pods.length} pods · ${unclusteredSummaryHtml(data.unclusteredCount)}`;
+        document.getElementById('micropodsSummary').innerHTML = `${data.pods.length} pods · ${unclusteredSummaryHtml(data.unclusteredCount)}${data.readyToRosterCount != null ? ` · <b>${data.readyToRosterCount} ready to roster</b> in this selection (Active, fully compliant)` : ''}`;
         tbody.innerHTML = data.pods.map(p => `
           <tr style="cursor:pointer" onclick="openMicropod('${p.id}')">
             <td>${escHtml(p.name)}</td>
             <td>${p.candidateCount}</td>
+            <td style="font-weight:700">${p.readyToRosterCount != null ? p.readyToRosterCount : '–'}</td>
             ${SEGMENT_ORDER.map(key => `<td style="color:${SEGMENT_META[key].color}">${p.segmentCounts ? p.segmentCounts[key] : 0}</td>`).join('')}
           </tr>`).join('');
         return;

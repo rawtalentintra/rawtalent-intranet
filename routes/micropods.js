@@ -9,6 +9,7 @@ const { computeTerritoryStrategy } = require('../services/territoryStrategyServi
 const { computeAdvertisingOpportunities, DEFAULT_RADIUS_KM, DEFAULT_MIN_EDUCATORS } = require('../services/advertisingOpportunityService');
 const { getCentresAndBookings } = require('./centres');
 const { JUSTINE, partnerForSuburbState } = require('../services/melbourneTerritoryService');
+const { complianceReasons } = require('../services/educatorComplianceService');
 
 // Candidate density clustering ("Micropods") for the Workforce Partners
 // section — computed on read from rt_candidates_cache (nightly-synced), no
@@ -83,23 +84,9 @@ async function getCandidatePoints() {
               SELECT 1 FROM jsonb_array_elements(coalesce(raw->'availableCandidateList','[]'::jsonb)) a
               WHERE left(a->>'date', 10) >= to_char(current_date, 'YYYY-MM-DD')
             ) AS has_current_availability,
-            NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements(coalesce(raw->'attachedRequirements','[]'::jsonb)) r
-              WHERE (r->>'isMandatory')::boolean IS TRUE
-                AND (
-                     (r->>'isReviewed')::boolean IS NOT TRUE
-                  OR (r->>'expiryDate' IS NOT NULL
-                      -- Qualification/Course of Study has no real expiry
-                      -- concept at all (see rtCandidatesSyncService.js's
-                      -- NO_EXPIRY_REQUIREMENT_NAMES comment) — excluded by
-                      -- name, not just RT's two sentinel dates, since some
-                      -- real candidates carry a human-typed far-future
-                      -- placeholder here instead.
-                      AND r->>'requirementName' <> 'Qualification/Course of Study'
-                      AND left(r->>'expiryDate',10) NOT IN ('0001-01-01','9999-12-31')
-                      AND left(r->>'expiryDate',10) < to_char(current_date,'YYYY-MM-DD'))
-                )
-            ) AS fully_compliant
+            raw->>'obStatus' AS ob_status,
+            raw->'attachedRequirements' AS reqs,
+            raw->'visaDetails' AS visa
           FROM rt_candidates_cache
           WHERE is_active = true
             AND is_deleted IS NOT TRUE
@@ -116,6 +103,14 @@ async function getCandidatePoints() {
   // bookingAggregates comes from the exact same 6-month RT bookings fetch
   // the original engagement split already used — no second RT call.
   const { bookingAggregates } = await engagement.getEngagedUserIds();
+
+  // Compliance is decided in JS by services/educatorComplianceService.js (newest
+  // copy of every document, core documents present, visa in date) — the old SQL
+  // check passed anyone with NO documents on file at all (an empty list has no
+  // expired document), which marked ~1,800 early-onboarding educators "fully
+  // compliant". See that file's header.
+  const today = new Date().toISOString().slice(0, 10);
+  rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today).length === 0; });
 
   const points = rows.map(r => {
     const agg = bookingAggregates.get(String(r.user_id));
@@ -136,6 +131,10 @@ async function getCandidatePoints() {
       lng: r.lng,
       segment: engagement.classifyEducator(facts, agg),
       fullyCompliant: r.fully_compliant,
+      // Active in RT, onboarding Completed and fully compliant: the people who can be
+      // rostered today. Whatever segment they sit in (a lapsed Active educator is still
+      // ready); the "Ready to roster" count and the SA ready list both use this.
+      readyToRoster: r.status === 1 && r.ob_status === 'Completed' && r.fully_compliant,
       hasCurrentAvailability: r.has_current_availability,
       qualification: r.qualification_name || null,
       shifts28d: agg?.shiftsIn28Days || 0,
@@ -218,16 +217,18 @@ function emptySegmentCounts() {
 function computePodAggregates(memberPoints) {
   const segmentCounts = emptySegmentCounts();
   let availableNowCount = 0;
+  let readyToRosterCount = 0;
   let shifts28d = 0;
   const daysSinceValues = [];
   for (const p of memberPoints) {
+    if (p.readyToRoster) readyToRosterCount++;
     if (p.segment) segmentCounts[p.segment] = (segmentCounts[p.segment] || 0) + 1;
     if (p.hasCurrentAvailability) availableNowCount++;
     shifts28d += p.shifts28d || 0;
     if (p.daysSinceLastShift != null) daysSinceValues.push(p.daysSinceLastShift);
   }
   const activeSupplyCount = segmentCounts.currently_working + segmentCounts.newly_activated + segmentCounts.available_engaged;
-  return { segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift: median(daysSinceValues) };
+  return { segmentCounts, activeSupplyCount, availableNowCount, readyToRosterCount, shifts28d, medianDaysSinceLastShift: median(daysSinceValues) };
 }
 
 async function getPodsForParams(req) {
@@ -301,7 +302,9 @@ async function getPodsForParams(req) {
     return { ...pod, id: `${state || 'ALL'}${partner ? '_' + partner.toUpperCase() : ''}-${Math.round(pod.centroid.lat * 1000)}-${Math.round(pod.centroid.lng * 1000)}`, ...computePodAggregates(memberPoints) };
   });
 
-  const result = { pods: podsWithId, unclusteredCount, unclusteredMemberIds, totalActive, totalGeocoded, statePointCount: statePoints.length };
+  // Everyone in this state/partner selection who is Active, onboarded and fully compliant — in a pod or not.
+  const readyToRosterCount = fullStatePoints.filter(p => p.readyToRoster).length;
+  const result = { pods: podsWithId, unclusteredCount, unclusteredMemberIds, totalActive, totalGeocoded, statePointCount: statePoints.length, readyToRosterCount };
   podsCache.set(cacheKey, { result, expiresAt: Date.now() + PODS_CACHE_TTL_MS });
   return { state: state || '', partner: partner || '', gridKm, minPodSize, segments: segmentFilter, ...result };
 }
@@ -312,13 +315,14 @@ router.get('/', async (req, res) => {
   try {
     const result = await getPodsForParams(req);
     if (result.error) return res.status(400).json({ error: result.error });
-    const { pods, unclusteredCount, totalActive, totalGeocoded } = result;
+    const { pods, unclusteredCount, totalActive, totalGeocoded, readyToRosterCount } = result;
     res.json({
-      pods: pods.map(({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift }) =>
-        ({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, shifts28d, medianDaysSinceLastShift })),
+      pods: pods.map(({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, readyToRosterCount, shifts28d, medianDaysSinceLastShift }) =>
+        ({ id, name, centroid, candidateCount, segmentCounts, activeSupplyCount, availableNowCount, readyToRosterCount, shifts28d, medianDaysSinceLastShift })),
       unclusteredCount,
       totalActive,
-      totalGeocoded
+      totalGeocoded,
+      readyToRosterCount
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -503,3 +507,4 @@ router.get('/:podId', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.getCandidatePoints = getCandidatePoints;
