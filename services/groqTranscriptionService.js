@@ -13,7 +13,7 @@ async function transcribeAudio(base64Data, mimetype = 'audio/mpeg') {
   if (!apiKey) throw new Error('Groq is not configured. Set GROQ_API_KEY.');
 
   const buffer = Buffer.from(base64Data, 'base64');
-  const ext = mimetype.includes('wav') ? 'wav' : mimetype.includes('mp4') || mimetype.includes('m4a') ? 'm4a' : 'mp3';
+  const ext = mimetype.includes('wav') ? 'wav' : mimetype.includes('webm') ? 'webm' : mimetype.includes('ogg') ? 'ogg' : mimetype.includes('mp4') || mimetype.includes('m4a') || mimetype.includes('aac') ? 'm4a' : 'mp3';
 
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimetype }), `recording.${ext}`);

@@ -1463,6 +1463,10 @@ CREATE TABLE IF NOT EXISTS centre_recordings (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_centre_recordings_centre_key ON centre_recordings(centre_key);
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS transcript TEXT;
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS transcribed_at TIMESTAMPTZ;
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS transcription_error TEXT;
 
 -- "Delete centre" on My Centres — a centre isn't a local row, it's RT
 -- client/location data pulled live, so there's nothing in our own DB to
@@ -1589,6 +1593,13 @@ CREATE TABLE IF NOT EXISTS lead_recordings (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lead_recordings_lead_id ON lead_recordings(lead_id);
+-- Transcript + short summary of each voice note, filled in by
+-- services/recordingTranscriptService.js (2026-10-12). transcription_error is
+-- set when a file could not be transcribed, so the background job skips it.
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS transcript TEXT;
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS transcribed_at TIMESTAMPTZ;
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS transcription_error TEXT;
 
 -- One row per Workforce Partner calendar being watched — the sync_token
 -- is the incremental-fetch cursor Google's events.list returns, so a

@@ -17,6 +17,7 @@ const rtApiService = require('./services/rtApiReportService');
 const leadAutoSignService = require('./services/leadAutoSignService');
 const centreReactivationService = require('./services/centreReactivationService');
 const centreOwnershipService = require('./services/centreOwnershipService');
+const recordingTranscriptService = require('./services/recordingTranscriptService');
 const acecqaSync = require('./services/acecqaSyncService');
 
 const app = express();
@@ -495,6 +496,15 @@ async function start() {
       .catch(err => console.error('Network expansion check error:', err.message));
     setTimeout(runNetworkExpansionCheck, 60 * 1000);
     setInterval(runNetworkExpansionCheck, 15 * 60 * 1000);
+
+    // Stored transcripts for partner voice notes (2026-10-12) — see
+    // recordingTranscriptService's header. Picks up any audio recording that
+    // has no transcript yet, a few at a time.
+    const runRecordingTranscripts = () => recordingTranscriptService.transcribePending(5)
+      .then(({ done, failed }) => { if (done || failed) console.log(`Recording transcripts: ${done} stored, ${failed} failed.`); })
+      .catch(err => console.error('Recording transcript job error:', err.message));
+    setTimeout(runRecordingTranscripts, 90 * 1000);
+    setInterval(runRecordingTranscripts, 10 * 60 * 1000);
 
     // Warm routes/centres.js's shared centres+bookings cache on boot, not
     // just on first request — reported live 2026-09-11 as "Today's still
