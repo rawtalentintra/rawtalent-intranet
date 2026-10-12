@@ -17,7 +17,10 @@ const CORE = [
   ['ID document', /passport|birth cert|citizenship/i],
   ['First Aid', /first aid/i],
   ['Working with Children / vulnerable people', /working with (children|vulnerable)|blue card|\bwwc/i],
-  ['Child safety training', /protecting children|child safety|ec-protect|rran|\bran\b/i],
+  // The mandatory child safety training only: Foundations (Courses 1 & 2), RRHAN-EC / RAN, or Protecting Children.
+  // "Advanced Child Safety Training" (Courses 3 & 4) is an optional follow-on and does NOT satisfy this (found when
+  // hand-auditing documents, 2026-10-12: someone with only the Advanced certificate was passing).
+  ['Child safety training', /protecting children|foundations of child safety|ec-protect|rran|\bran\b/i],
   ['Qualification', /qualification|teachers accreditation/i]
 ];
 const dateOf = v => (v ? String(v).slice(0, 10) : null);
