@@ -148,9 +148,15 @@ async function getCandidatePoints() {
     // (1,220 rows, all with otherwise-legit suburb/state text). Treated
     // as ungeocoded so it doesn't form a fake pod off the coast of Africa.
     Number.isFinite(p.lat) && Number.isFinite(p.lng) && !(p.lat === 0 && p.lng === 0)
-  );
+  )
+  // Micropods only ever shows educators who can be rostered today: Active in RT, onboarding
+  // Completed, and fully compliant (Joy, 2026-10-12 — "Micropods should only see those who are
+  // Active and Compliant"). Someone still onboarding, or with a missing/expired document, isn't supply.
+  .filter(p => p.readyToRoster);
 
-  candidatesCache = { points, totalActive, totalGeocoded: points.length, expiresAt: Date.now() + CANDIDATES_CACHE_TTL_MS };
+  // densityBase = how many geocoded candidates existed BEFORE the ready-only filter. DEFAULT_CORE_MIN_PER_CELL was
+  // tuned against that larger pool, so pod-density thresholds scale against it, not the (much smaller) ready pool.
+  candidatesCache = { points, totalActive, totalGeocoded: points.length, densityBase: rows.length, expiresAt: Date.now() + CANDIDATES_CACHE_TTL_MS };
   return candidatesCache;
 }
 
@@ -244,7 +250,7 @@ async function getPodsForParams(req) {
   const cached = podsCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return { state: state || '', partner: partner || '', gridKm, minPodSize, segments: segmentFilter, ...cached.result };
 
-  const { points, totalActive, totalGeocoded } = await getCandidatePoints();
+  const { points, totalActive, totalGeocoded, densityBase } = await getCandidatePoints();
   let fullStatePoints = state ? points.filter(p => p.state === state) : points;
   // Liam's north/west VIC territory vs Justine's east/south-east/bayside/
   // Port Phillip split — same suburb map every other partner-aware VIC
@@ -281,8 +287,8 @@ async function getPodsForParams(req) {
   // to just merge every occupied cell again. An unfiltered "All States, no
   // segment" call thins nothing (both ratios are 1) and falls through to
   // buildMicropods' own default, so that behaviour is untouched.
-  let coreMinPerCell = state && points.length
-    ? Math.max(3, Math.round(DEFAULT_CORE_MIN_PER_CELL * (fullStatePoints.length / points.length)))
+  let coreMinPerCell = points.length
+    ? Math.max(3, Math.round(DEFAULT_CORE_MIN_PER_CELL * (fullStatePoints.length / (densityBase || points.length))))
     : undefined;
   if (segmentFilter.length && fullStatePoints.length) {
     const base = coreMinPerCell ?? DEFAULT_CORE_MIN_PER_CELL;
