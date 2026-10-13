@@ -45,8 +45,9 @@ async function matchCentre(entered) {
 const publicRouter = express.Router();
 publicRouter.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true }));
 publicRouter.post('/', async (req, res) => {
-  const key = process.env.QR_FORM_KEY;
-  const given = String(req.get('x-form-key') || '');
+  // Trimmed: a stray space or newline pasted into Railway's Variables tab shouldn't lock the form out.
+  const key = (process.env.QR_FORM_KEY || '').trim().replace(/^["']|["']$/g, '');
+  const given = String(req.get('x-form-key') || '').trim();
   if (!key || given.length !== key.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) {
     return res.status(401).json({ error: 'Not authorised' });
   }
@@ -121,7 +122,7 @@ router.get('/', async (req, res) => {
       };
     });
     const assignees = (await db.execute({ sql: "SELECT email, name FROM users WHERE active = true AND role IN ('admin','super_admin') ORDER BY name", args: [] })).rows;
-    res.json({ referrals: out, assignees, centres: centres.map(c => ({ key: c.centreKey, name: c.name, state: c.state })), formKeyConfigured: !!process.env.QR_FORM_KEY });
+    res.json({ referrals: out, assignees, centres: centres.map(c => ({ key: c.centreKey, name: c.name, state: c.state })), formKeyConfigured: !!(process.env.QR_FORM_KEY || '').trim() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
