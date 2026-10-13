@@ -190,6 +190,9 @@ app.use('/api/ideas', require('./routes/ideas'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/centres', require('./routes/centres'));
 app.use('/api/first-shift', require('./routes/firstShift'));
+// QR Code Educator Recruitment (Liam, 13 Oct 2026): public landing-page form + Operations view.
+app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter);
+app.use('/api/qr-referrals', require('./routes/qrReferrals').router);
 app.use('/api/centre-ownership', require('./routes/centreOwnership'));
 app.use('/api/educators', require('./routes/educators'));
 app.use('/api/micropods', require('./routes/micropods'));

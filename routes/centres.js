@@ -1385,3 +1385,4 @@ module.exports.getCentreStopsByKeys = getCentreStopsByKeys;
 // centre's bookings".
 module.exports.indexBookingsByCentre = indexBookingsByCentre;
 module.exports.bookingsForCentre = bookingsForCentre;
+module.exports.getCentrePartnerAssignments = getCentrePartnerAssignments;

@@ -337,6 +337,9 @@
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('first-shift', this)">
           <span class="admin-nav-icon">📞</span> First Shift Follow-ups
         </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('qr-referrals', this)">
+          <span class="admin-nav-icon">📱</span> QR Code Referrals
+        </div>
         <div class="admin-nav-item" onclick="showSection('data-accuracy-check', this)">
           <span class="admin-nav-icon">🔍</span> HB vs RT Data Check
         </div>
@@ -1010,6 +1013,32 @@
            first shift for feedback and offer to add them to the centre's
            favourites. Replaces the manual tracking Lorie/Marsha did. Preview:
            super_admin only until Joy opens it to the people who'll use it. -->
+      <!-- QR Code Educator Recruitment (Liam, 13 Oct 2026), Phase 1: educators who
+           scanned a recruitment poster in a centre. Priority onboarding list with
+           pay-rate and welcome-bonus fields. Preview: super_admin only. -->
+      <template id="__lazy_qr_referrals">
+      <div class="admin-section" id="section-qr-referrals">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">QR Code Referrals</div>
+            <div class="admin-page-sub">Educators who scanned a recruitment poster at one of our centres. They may already know that centre, so contact them first and move their onboarding along quickly.</div>
+          </div>
+          <button class="btn btn-outline" onclick="loadQrReferrals()">Refresh</button>
+        </div>
+        <div id="qrLoading" class="loading-spinner"><div class="spinner"></div>Loading…</div>
+        <div id="qrError" style="display:none;padding:12px 16px;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:13px;margin-bottom:16px"></div>
+        <div id="qrBody" style="display:none">
+          <div id="qrNotice"></div>
+          <div id="qrStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:20px"></div>
+          <div id="qrFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+          <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="qrTable"></div></div>
+          <div style="margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.6">
+            RT onboarding progress is matched by email or phone from HeartBeat's nightly copy of RT, so it can be up to a day behind. Changes save as you make them. Welcome bonus: $100 once the educator accepts their first shift (automatic payroll task comes in a later phase).
+          </div>
+        </div>
+      </div>
+      </template>
+
       <template id="__lazy_first_shift">
       <div class="admin-section" id="section-first-shift">
         <div class="admin-header">
@@ -6604,7 +6633,7 @@
 
     // ── Navigation ────────────────────────────────────────────────
     // 'wfp-performance' is a super_admin-only preview (Joy, 2026-10-05) — not for Workforce Partners or anyone else until the numbers are signed off.
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
@@ -6727,6 +6756,7 @@
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id === 'wfp-performance') loadWfpPerformance();
       if (id === 'first-shift') loadFirstShifts();
+      if (id === 'qr-referrals') loadQrReferrals();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -10589,6 +10619,100 @@
       { key: 'to_call', label: 'To call' }, { key: 'called', label: 'Called' },
       { key: 'no_answer', label: 'No answer' }, { key: 'done', label: 'Done' }
     ];
+
+
+    // ── QR Code Referrals (Liam, 13 Oct 2026) ─────────────────────────────
+    let qrData = null, qrFilter = 'open';
+    const QR_STATUS = [
+      { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' }, { key: 'onboarding', label: 'Onboarding' },
+      { key: 'active', label: 'Active' }, { key: 'not_proceeding', label: 'Not proceeding' }
+    ];
+    async function loadQrReferrals() {
+      document.getElementById('qrLoading').style.display = 'block';
+      document.getElementById('qrBody').style.display = 'none';
+      document.getElementById('qrError').style.display = 'none';
+      try {
+        const res = await fetch('/api/qr-referrals');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load QR referrals');
+        qrData = data;
+        document.getElementById('qrNotice').innerHTML = data.formKeyConfigured ? '' :
+          '<div style="padding:10px 14px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:13px;margin-bottom:14px">The landing page can\'t send registrations yet: the form key (QR_FORM_KEY) isn\'t set on the server.</div>';
+        renderQrReferrals();
+        document.getElementById('qrBody').style.display = 'block';
+      } catch (e) {
+        const box = document.getElementById('qrError'); box.textContent = e.message; box.style.display = 'block';
+      } finally {
+        document.getElementById('qrLoading').style.display = 'none';
+      }
+    }
+    function setQrFilter(k) { qrFilter = k; renderQrReferrals(); }
+    function renderQrReferrals() {
+      const all = qrData.referrals;
+      const open = r => r.status !== 'active' && r.status !== 'not_proceeding';
+      const n = k => all.filter(r => r.status === k).length;
+      const card = (label, value, sub, color) => `<div class="admin-table-card" style="padding:18px 20px"><div style="font-size:30px;font-weight:800;line-height:1.1;color:${value ? (color || 'var(--navy)') : '#9ca3af'}">${value}</div><div style="font-size:13px;font-weight:700;color:var(--navy);margin-top:6px">${label}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${sub}</div></div>`;
+      document.getElementById('qrStats').innerHTML =
+        card('Registrations', all.length, 'all time') +
+        card('Not contacted', n('new'), 'call these first', '#c0392b') +
+        card('Onboarding', n('onboarding') + n('contacted'), 'in progress') +
+        card('Active', n('active'), 'ready to work', '#15803d') +
+        card('Bonus eligible', all.filter(r => r.bonusEligible).length, '$100 on first shift');
+      const chips = [{ key: 'open', label: 'Open', n: all.filter(open).length }, { key: 'all', label: 'All', n: all.length }].concat(QR_STATUS.map(s => ({ key: s.key, label: s.label, n: n(s.key) })));
+      document.getElementById('qrFilters').innerHTML = chips.map(c => `<button type="button" onclick="setQrFilter('${c.key}')" style="border:1px solid var(--gray-200);border-radius:18px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;background:${qrFilter === c.key ? 'var(--navy)' : '#fff'};color:${qrFilter === c.key ? '#fff' : 'var(--navy)'}">${c.label} · ${c.n}</button>`).join('');
+      const rows = all.filter(r => qrFilter === 'all' ? true : qrFilter === 'open' ? open(r) : r.status === qrFilter);
+      if (!rows.length) {
+        document.getElementById('qrTable').innerHTML = `<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:13.5px">${all.length ? 'Nothing in this view.' : 'No QR code registrations yet.'}</div>`;
+        return;
+      }
+      const sel = (id, field, options, current) => `<select class="form-control" style="font-size:12.5px;padding:5px 8px" onchange="saveQrReferral(${id},'${field}',this.value)">${options.map(o => `<option value="${escHtml(o.value)}" ${String(o.value) === String(current ?? '') ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}</select>`;
+      const assignees = [{ value: '', label: 'Unassigned' }].concat(qrData.assignees.map(a => ({ value: a.email, label: a.name || a.email })));
+      const th = t => `<th style="padding:10px;text-align:left;font-size:12px;font-weight:700;color:var(--text-muted);white-space:nowrap">${t}</th>`;
+      document.getElementById('qrTable').innerHTML = `
+        <table style="width:100%;border-collapse:collapse;min-width:1250px">
+          <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Educator')}${th('Scanned at')}${th('RT onboarding')}${th('Status')}${th('Consultant')}${th('Current agency rate')}${th('Our rate')}${th('$100 bonus')}${th('Notes')}</tr></thead>
+          <tbody>${rows.map(r => {
+            const higher = r.currentAgencyRate != null && r.offeredRate != null ? (+r.offeredRate > +r.currentAgencyRate) : null;
+            const urgent = r.status === 'new' && r.daysWaiting >= 1;
+            return `<tr style="border-bottom:1px solid var(--gray-100);vertical-align:top;background:${urgent ? '#fef2f2' : 'transparent'}">
+              <td style="padding:12px 10px">
+                <div style="font-weight:700;color:var(--navy);font-size:13.5px">${escHtml([r.firstName, r.lastName].filter(Boolean).join(' '))}</div>
+                <div style="font-size:12px;color:var(--text-muted)">${r.phone ? `<a href="tel:${escHtml(r.phone)}" style="color:inherit">${escHtml(r.phone)}</a>` : ''}${r.phone && r.email ? ' · ' : ''}${escHtml(r.email || '')}</div>
+                <div style="font-size:12px;color:var(--text-muted)">${escHtml(r.qualification || 'Qualification not given')}${r.currentAgency ? ' · now with ' + escHtml(r.currentAgency) : ''}</div>
+                <div style="font-size:11.5px;color:${urgent ? '#b91c1c' : 'var(--text-muted)'};font-weight:${urgent ? 700 : 400}">Registered ${fmtDate(r.createdAt)}${urgent ? ' · not contacted yet' : ''}</div>
+              </td>
+              <td style="padding:12px 10px;max-width:240px">
+                <div style="font-size:13px;font-weight:600;color:var(--navy)">${r.centreKey ? `<a href="#" onclick="goToCentre360('${escHtml(r.centreKey)}');return false" style="color:inherit;text-decoration:underline">${escHtml(r.centreName || r.centreNameEntered)}</a>` : escHtml(r.centreNameEntered)}</div>
+                <div style="font-size:12px;color:var(--text-muted)">${r.centreKey ? (r.partner ? 'Workforce Partner: ' + escHtml(r.partner) : 'No partner on file') : 'Not matched to an RT centre yet'}</div>
+                ${r.centreKey ? '' : `<select class="form-control" style="font-size:12px;padding:4px 6px;margin-top:4px" onchange="saveQrReferral(${r.id},'centreKey',this.value)"><option value="">Match to centre…</option>${qrData.centres.map(c => `<option value="${escHtml(c.key)}">${escHtml(c.name)}</option>`).join('')}</select>`}
+              </td>
+              <td style="padding:12px 10px;font-size:12.5px">${r.rt ? `<div style="font-weight:600;color:var(--navy)">${escHtml(String(r.rt.status || ''))}</div><div style="color:var(--text-muted)">${r.rt.obStatus === 'Completed' ? 'Onboarding complete' : 'Step ' + ((r.rt.obStep ?? 0) + 1) + ' of 12' + (r.rt.obStepName ? ' (' + escHtml(r.rt.obStepName) + ')' : '')}</div><div style="color:var(--text-muted)">RT #${escHtml(r.rt.userId)}</div>` : '<span style="color:var(--text-muted)">Not in RT yet</span>'}</td>
+              <td style="padding:12px 10px">${sel(r.id, 'status', QR_STATUS.map(s => ({ value: s.key, label: s.label })), r.status)}</td>
+              <td style="padding:12px 10px">${sel(r.id, 'assignedToEmail', assignees, r.assignedToEmail)}</td>
+              <td style="padding:12px 10px"><input type="number" step="0.01" min="0" class="form-control" style="width:95px;font-size:12.5px;padding:5px 8px" placeholder="$/hr" value="${r.currentAgencyRate ?? ''}" onchange="saveQrReferral(${r.id},'currentAgencyRate',this.value)"></td>
+              <td style="padding:12px 10px"><input type="number" step="0.01" min="0" class="form-control" style="width:95px;font-size:12.5px;padding:5px 8px" placeholder="$/hr" value="${r.offeredRate ?? ''}" onchange="saveQrReferral(${r.id},'offeredRate',this.value)">
+                ${higher === false ? '<div style="font-size:11.5px;color:#b91c1c;font-weight:700;margin-top:3px">Not higher than their current rate</div>' : higher ? '<div style="font-size:11.5px;color:#15803d;margin-top:3px">Higher ✓</div>' : ''}</td>
+              <td style="padding:12px 10px">${sel(r.id, 'bonusEligible', [{ value: '', label: '—' }, { value: 'true', label: 'Eligible' }, { value: 'false', label: 'Not eligible' }], r.bonusEligible == null ? '' : String(r.bonusEligible))}</td>
+              <td style="padding:12px 10px"><input type="text" class="form-control" value="${escHtml(r.notes || '')}" placeholder="Add a note…" style="font-size:12.5px;padding:5px 8px;min-width:180px" onchange="saveQrReferral(${r.id},'notes',this.value)"></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+    }
+    async function saveQrReferral(id, field, value) {
+      const body = { [field]: field === 'bonusEligible' ? (value === '' ? null : value === 'true') : value };
+      try {
+        const res = await fetch(`/api/qr-referrals/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const row = await res.json();
+        if (!res.ok) throw new Error(row.error || 'Could not save');
+        if (field === 'centreKey') return loadQrReferrals();
+        const r = qrData.referrals.find(x => x.id === id);
+        Object.assign(r, { status: row.status, assignedToEmail: row.assigned_to_email, currentAgencyRate: row.current_agency_rate, offeredRate: row.offered_rate, bonusEligible: row.bonus_eligible, notes: row.notes });
+        renderQrReferrals();
+      } catch (e) {
+        toast(e.message || 'Network error', 'error');
+        renderQrReferrals();
+      }
+    }
 
     async function loadFirstShifts() {
       const days = document.getElementById('firstShiftDays').value;

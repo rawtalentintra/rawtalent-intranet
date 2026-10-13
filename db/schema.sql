@@ -2594,3 +2594,37 @@ CREATE TABLE IF NOT EXISTS lead_educators (
   UNIQUE (lead_id, candidate_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_lead_educators_lead ON lead_educators(lead_id);
+
+-- QR Code Educator Recruitment (Liam, 13 Oct 2026): educators who scan the
+-- recruitment poster QR code in a childcare centre and fill in the landing
+-- page form. They may already know that centre, so they are priority
+-- onboarding candidates. centre_name_entered is what they typed; centre_key is
+-- HeartBeat's best match to a real RT centre (null if none). rt_user_id is
+-- filled once they can be matched to an RT educator by email or phone.
+-- Pay-rate and bonus fields are recorded by the consultant during onboarding.
+-- Phase 1 only: activation / first-shift triggers come later (need RT events).
+CREATE TABLE IF NOT EXISTS qr_referrals (
+  id SERIAL PRIMARY KEY,
+  first_name TEXT NOT NULL,
+  last_name TEXT,
+  email CITEXT,
+  phone TEXT,
+  suburb TEXT,
+  state TEXT,
+  qualification TEXT,
+  centre_name_entered TEXT NOT NULL,
+  centre_key TEXT,
+  current_agency TEXT,
+  status TEXT NOT NULL DEFAULT 'new',          -- new | contacted | onboarding | active | not_proceeding
+  assigned_to_email CITEXT,
+  current_agency_rate NUMERIC(6,2),
+  offered_rate NUMERIC(6,2),
+  bonus_eligible BOOLEAN,
+  notes TEXT,
+  rt_user_id TEXT,
+  submitted_ip TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_qr_referrals_created ON qr_referrals(created_at);
+CREATE INDEX IF NOT EXISTS idx_qr_referrals_email ON qr_referrals(email);
