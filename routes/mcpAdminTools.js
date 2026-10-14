@@ -229,6 +229,50 @@ function registerAdminTools(server) {
     return text(`${email} (id ${id})\n` + Object.entries(a).slice(0, 40).map(([k, v]) => `  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
   });
 
+  // ── WFP Performance (same numbers as the WFP Performance page) ────────
+  server.registerTool('get_wfp_performance', {
+    title: 'WFP Performance by Partner',
+    description: 'Workforce Partner performance for a date range (YYYY-MM-DD, "to" exclusive; default last 30 days): calls and visits per partner (lead stage changes + logged lead activity + logged centre calls/visits, de-duplicated exactly like the WFP Performance page), leads created, unattributed activity, and the leads funnel by state. Use get_fill_rate for booking fill rate and get_call_insights for what centres told partners.',
+    inputSchema: { from: z.string().optional(), to: z.string().optional() }
+  }, async ({ from, to }) => {
+    const dayMs = 86400000;
+    const F = new Date((isDay(from) ? from : new Date(Date.now() - 30 * dayMs).toISOString().slice(0, 10)) + 'T00:00:00+10:00');
+    const T = new Date((isDay(to) ? to : new Date(Date.now() + dayMs).toISOString().slice(0, 10)) + 'T00:00:00+10:00');
+    const inP = d => { if (!d) return false; const x = new Date(d); return x >= F && x < T; };
+    const { buildStageEvents, buildActivitiesLog } = require('./leads');
+    const [ev, log] = await Promise.all([buildStageEvents(), buildActivitiesLog()]);
+    const dayKey = d => new Date(d).toLocaleDateString('en-AU', { timeZone: 'Australia/Melbourne' });
+    const when = a => a.occurred_at || a.created_at;
+    const logged = new Set(log.map(a => `${a.lead_id}|${a.channel}|${dayKey(when(a))}`));
+    const events = log.filter(a => inP(when(a))).map(a => ({ email: String(a.created_by_email || '').toLowerCase(), channel: a.channel }));
+    ev.forEach(e => { if (inP(e.at) && !logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) events.push({ email: e.email, channel: e.channel }); });
+    const db = getDb();
+    const centreActs = (await db.execute({ sql: "SELECT lower(created_by_email) email, channel, visit_date FROM centre_visits WHERE status = 'completed'", args: [] })).rows.filter(v => inP(v.visit_date));
+    const leadsCreated = (await db.execute({ sql: 'SELECT lower(submitted_by_email) email, created_at FROM leads', args: [] })).rows.filter(l => inP(l.created_at));
+    const partners = [['Justine', 'justine@rawtalent.com.au'], ['Gwen', 'gwen@rawtalent.com.au']];
+    const known = new Set(partners.map(p => p[1]));
+    const lines = partners.map(([n, e]) => {
+      const lc = events.filter(x => x.email === e && x.channel === 'call').length, lv = events.filter(x => x.email === e && x.channel === 'visit').length;
+      const cc = centreActs.filter(x => x.email === e && x.channel === 'call').length, cv = centreActs.filter(x => x.email === e && x.channel === 'visit').length;
+      return `${n}: ${lc + cc} calls (${lc} lead, ${cc} centre) · ${lv + cv} visits (${lv} lead, ${cv} centre) · ${leadsCreated.filter(l => l.email === e).length} leads created`;
+    });
+    const un = events.filter(x => !known.has(x.email));
+    const fmt = d => d.toLocaleDateString('en-AU', { timeZone: 'Australia/Melbourne' });
+    return text(`WFP Performance ${fmt(F)} to ${fmt(new Date(T.getTime() - 1))}\n${lines.join('\n')}\nUnattributed (no partner identifiable): ${un.filter(x => x.channel === 'call').length} calls, ${un.filter(x => x.channel === 'visit').length} visits\nCentre calls/visits at existing clients are only counted when logged, and logging has been low.`);
+  });
+
+  server.registerTool('get_call_insights', {
+    title: 'Call Analysis and Insights',
+    description: 'Industry insights pulled from Workforce Partner voice notes (bottom of WFP Performance): competitor agencies and pricing, centre needs, objections and opportunities, each with the centre, partner and date. Use search_voice_notes for full transcripts.',
+    inputSchema: { category: z.enum(['competitor_pricing', 'competitors', 'centre_needs', 'objections', 'opportunities', 'other']).optional() }
+  }, async ({ category }) => {
+    const d = await require('../services/voiceInsightsService').listInsights();
+    const groups = {};
+    d.recordings.forEach(r => r.insights.forEach(i => { if (!category || i.category === category) (groups[i.category] = groups[i.category] || []).push(`  - ${i.agency && !i.point.toLowerCase().includes(String(i.agency).toLowerCase()) ? i.agency + ': ' : ''}${i.point} (${[r.centre_name, r.state].filter(Boolean).join(', ')}; ${(r.uploaded_by_name || '').split(' ')[0]}, ${day(r.created_at)})`); }));
+    const body = Object.entries(groups).map(([k, v]) => `${d.categories[k]} (${v.length}):\n${v.join('\n')}`).join('\n\n');
+    return text(body || 'No insights yet.');
+  });
+
   // ── Voice notes / visit transcripts ──────────────────────────────────
   server.registerTool('search_voice_notes', {
     title: 'Voice Notes & Visit Transcripts',

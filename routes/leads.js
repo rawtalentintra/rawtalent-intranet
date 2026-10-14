@@ -457,6 +457,18 @@ router.get('/retention', leadsViewAccess, async (req, res) => {
 // /api/centres/visits-log. Only the columns that aggregation needs.
 // Registered ahead of GET /:id below so "activities-log" isn't read as a
 // lead id.
+async function buildActivitiesLog() {
+  const result = await getDb().execute({
+    sql: `SELECT a.lead_id, a.channel, a.created_by_email, a.created_by_name, a.created_at,
+            CASE WHEN a.notes = ? AND a.channel = 'call' AND l.lead_called_status = 'done' AND l.lead_called_at IS NOT NULL THEN l.lead_called_at
+                 WHEN a.notes = ? AND a.channel = 'visit' AND l.centre_visited_status = 'done' AND l.centre_visited_at IS NOT NULL THEN l.centre_visited_at
+                 ELSE a.created_at END AS occurred_at
+     FROM lead_activities a JOIN leads l ON l.id = a.lead_id
+     ORDER BY a.created_at DESC`,
+    args: [AUTO_STAGE_NOTE, AUTO_STAGE_NOTE]
+  });
+  return result.rows;
+}
 router.get('/activities-log', leadsViewAccess, async (req, res) => {
   try {
     // occurred_at = when the call/visit actually happened. For an entry made by
@@ -464,16 +476,7 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
     // they clicked save — partners back-fill (e.g. Gwen on 9 Oct marked QLD
     // leads Called on 24 Sep, 30 Sep and 6 Oct), and counting those on the day
     // of entry made WFP Performance disagree with the WFP Dashboard.
-    const result = await getDb().execute({
-      sql: `SELECT a.lead_id, a.channel, a.created_by_email, a.created_by_name, a.created_at,
-              CASE WHEN a.notes = ? AND a.channel = 'call' AND l.lead_called_status = 'done' AND l.lead_called_at IS NOT NULL THEN l.lead_called_at
-                   WHEN a.notes = ? AND a.channel = 'visit' AND l.centre_visited_status = 'done' AND l.centre_visited_at IS NOT NULL THEN l.centre_visited_at
-                   ELSE a.created_at END AS occurred_at
-       FROM lead_activities a JOIN leads l ON l.id = a.lead_id
-       ORDER BY a.created_at DESC`,
-      args: [AUTO_STAGE_NOTE, AUTO_STAGE_NOTE]
-    });
-    res.json(result.rows);
+    res.json(await buildActivitiesLog());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -501,35 +504,38 @@ router.get('/voice-insights', async (req, res) => {
   }
 });
 
+async function buildStageEvents() {
+  const db = getDb();
+  const leads = (await db.execute({
+    sql: `SELECT id, lower(submitted_by_email) AS submitter, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at
+          FROM leads
+          WHERE (lead_called_status = 'done' AND lead_called_at IS NOT NULL) OR (centre_visited_status = 'done' AND centre_visited_at IS NOT NULL)`,
+    args: []
+  })).rows;
+  const notes = (await db.execute({
+    sql: `SELECT lead_id, lower(author_email) AS author, created_at FROM lead_notes WHERE lower(author_email) = ANY(?)`,
+    args: [STAGE_EVENT_PARTNERS]
+  })).rows;
+  const notesByLead = new Map();
+  for (const n of notes) { if (!notesByLead.has(n.lead_id)) notesByLead.set(n.lead_id, []); notesByLead.get(n.lead_id).push(n); }
+  const actorFor = (lead, at) => {
+    if (STAGE_EVENT_PARTNERS.includes(lead.submitter)) return { email: lead.submitter, basis: 'submitter' };
+    const list = notesByLead.get(lead.id) || [];
+    if (!list.length) return { email: null, basis: 'none' };
+    const t = new Date(at).getTime();
+    const nearest = list.reduce((best, n) => (Math.abs(new Date(n.created_at).getTime() - t) < Math.abs(new Date(best.created_at).getTime() - t) ? n : best));
+    return { email: nearest.author, basis: 'notes' };
+  };
+  const events = [];
+  for (const l of leads) {
+    if (l.lead_called_status === 'done' && l.lead_called_at) events.push({ lead_id: l.id, channel: 'call', at: l.lead_called_at, ...actorFor(l, l.lead_called_at) });
+    if (l.centre_visited_status === 'done' && l.centre_visited_at) events.push({ lead_id: l.id, channel: 'visit', at: l.centre_visited_at, ...actorFor(l, l.centre_visited_at) });
+  }
+  return events;
+}
 router.get('/stage-events', leadsViewAccess, async (req, res) => {
   try {
-    const db = getDb();
-    const leads = (await db.execute({
-      sql: `SELECT id, lower(submitted_by_email) AS submitter, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at
-            FROM leads
-            WHERE (lead_called_status = 'done' AND lead_called_at IS NOT NULL) OR (centre_visited_status = 'done' AND centre_visited_at IS NOT NULL)`,
-      args: []
-    })).rows;
-    const notes = (await db.execute({
-      sql: `SELECT lead_id, lower(author_email) AS author, created_at FROM lead_notes WHERE lower(author_email) = ANY(?)`,
-      args: [STAGE_EVENT_PARTNERS]
-    })).rows;
-    const notesByLead = new Map();
-    for (const n of notes) { if (!notesByLead.has(n.lead_id)) notesByLead.set(n.lead_id, []); notesByLead.get(n.lead_id).push(n); }
-    const actorFor = (lead, at) => {
-      if (STAGE_EVENT_PARTNERS.includes(lead.submitter)) return { email: lead.submitter, basis: 'submitter' };
-      const list = notesByLead.get(lead.id) || [];
-      if (!list.length) return { email: null, basis: 'none' };
-      const t = new Date(at).getTime();
-      const nearest = list.reduce((best, n) => (Math.abs(new Date(n.created_at).getTime() - t) < Math.abs(new Date(best.created_at).getTime() - t) ? n : best));
-      return { email: nearest.author, basis: 'notes' };
-    };
-    const events = [];
-    for (const l of leads) {
-      if (l.lead_called_status === 'done' && l.lead_called_at) events.push({ lead_id: l.id, channel: 'call', at: l.lead_called_at, ...actorFor(l, l.lead_called_at) });
-      if (l.centre_visited_status === 'done' && l.centre_visited_at) events.push({ lead_id: l.id, channel: 'visit', at: l.centre_visited_at, ...actorFor(l, l.centre_visited_at) });
-    }
-    res.json(events);
+    res.json(await buildStageEvents());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1277,3 +1283,5 @@ router.delete('/recordings/:recordingId', requireRole('admin', 'super_admin', 'w
 });
 
 module.exports = router;
+module.exports.buildStageEvents = buildStageEvents;
+module.exports.buildActivitiesLog = buildActivitiesLog;
