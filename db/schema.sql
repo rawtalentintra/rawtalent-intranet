@@ -2637,3 +2637,9 @@ ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS insights JSONB;
 ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS insights_at TIMESTAMPTZ;
 ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS insights JSONB;
 ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS insights_at TIMESTAMPTZ;
+-- $100 welcome bonus (QR referrals, phase 2): once a bonus-eligible educator
+-- accepts their first shift, services/qrBonusService.js creates one Payroll
+-- task and records it here so it is never created twice.
+ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS bonus_task_id TEXT;
+ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS first_shift_booking_id TEXT;
+ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS first_shift_date DATE;

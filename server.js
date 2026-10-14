@@ -509,6 +509,13 @@ async function start() {
       .then(() => require('./services/voiceInsightsService').analysePending(10))
       .catch(err => console.error('Recording transcript job error:', err.message));
     setTimeout(runRecordingTranscripts, 90 * 1000);
+    // QR referral $100 welcome bonus: create a Payroll task once an eligible
+    // educator has accepted their first shift (services/qrBonusService.js).
+    const runQrBonusCheck = () => require('./services/qrBonusService').createBonusTasks()
+      .then(({ created }) => { if (created) console.log(`QR welcome bonus: ${created} payroll task(s) created.`); })
+      .catch(err => console.error('QR welcome bonus check error:', err.message));
+    setTimeout(runQrBonusCheck, 3 * 60 * 1000);
+    setInterval(runQrBonusCheck, 3 * 60 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);
 
     // Warm routes/centres.js's shared centres+bookings cache on boot, not

@@ -117,7 +117,7 @@ router.get('/', async (req, res) => {
         qualification: r.qualification, centreNameEntered: r.centre_name_entered, currentAgency: r.current_agency,
         centreKey: r.centre_key, centreName: c ? c.name : null, partner,
         status: r.status, assignedToEmail: r.assigned_to_email, currentAgencyRate: r.current_agency_rate, offeredRate: r.offered_rate,
-        bonusEligible: r.bonus_eligible, notes: r.notes, createdAt: r.created_at, daysWaiting,
+        bonusEligible: r.bonus_eligible, bonusTaskId: r.bonus_task_id, firstShiftDate: r.first_shift_date, notes: r.notes, createdAt: r.created_at, daysWaiting,
         rt: m ? { userId: m.uid, status: m.status_name || m.status, obStatus: m.ob_status, obStep: m.ob_step, obStepName: OB_STEPS[m.ob_step] || null } : null
       };
     });

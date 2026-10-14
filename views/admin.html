@@ -1039,7 +1039,7 @@
           <div id="qrFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
           <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="qrTable"></div></div>
           <div style="margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.6">
-            RT onboarding progress is matched by email or phone from HeartBeat's nightly copy of RT, so it can be up to a day behind. Changes save as you make them. Welcome bonus: $100 once the educator accepts their first shift (automatic payroll task comes in a later phase).
+            RT onboarding progress is matched by email or phone from HeartBeat's nightly copy of RT, so it can be up to a day behind. Changes save as you make them. Welcome bonus: once an Eligible educator accepts their first shift, a $100 task is created for Payroll automatically (checked every few hours).
           </div>
         </div>
       </div>
@@ -10741,7 +10741,7 @@
               <td style="padding:12px 10px"><input type="number" step="0.01" min="0" class="form-control" style="width:95px;font-size:12.5px;padding:5px 8px" placeholder="$/hr" value="${r.currentAgencyRate ?? ''}" onchange="saveQrReferral(${r.id},'currentAgencyRate',this.value)"></td>
               <td style="padding:12px 10px"><input type="number" step="0.01" min="0" class="form-control" style="width:95px;font-size:12.5px;padding:5px 8px" placeholder="$/hr" value="${r.offeredRate ?? ''}" onchange="saveQrReferral(${r.id},'offeredRate',this.value)">
                 ${higher === false ? '<div style="font-size:11.5px;color:#b91c1c;font-weight:700;margin-top:3px">Not higher than their current rate</div>' : higher ? '<div style="font-size:11.5px;color:#15803d;margin-top:3px">Higher ✓</div>' : ''}</td>
-              <td style="padding:12px 10px">${sel(r.id, 'bonusEligible', [{ value: '', label: '—' }, { value: 'true', label: 'Eligible' }, { value: 'false', label: 'Not eligible' }], r.bonusEligible == null ? '' : String(r.bonusEligible))}</td>
+              <td style="padding:12px 10px">${r.bonusTaskId ? `<div style="font-size:12px;color:#15803d;font-weight:700">Payroll task created</div><div style="font-size:11.5px;color:var(--text-muted)">First shift ${fmtDate(r.firstShiftDate)}</div>` : sel(r.id, 'bonusEligible', [{ value: '', label: '—' }, { value: 'true', label: 'Eligible' }, { value: 'false', label: 'Not eligible' }], r.bonusEligible == null ? '' : String(r.bonusEligible))}</td>
               <td style="padding:12px 10px"><input type="text" class="form-control" value="${escHtml(r.notes || '')}" placeholder="Add a note…" style="font-size:12.5px;padding:5px 8px;min-width:180px" onchange="saveQrReferral(${r.id},'notes',this.value)"></td>
             </tr>`;
           }).join('')}</tbody>
