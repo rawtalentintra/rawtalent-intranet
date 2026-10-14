@@ -505,6 +505,8 @@ async function start() {
     // has no transcript yet, a few at a time.
     const runRecordingTranscripts = () => recordingTranscriptService.transcribePending(5)
       .then(({ done, failed }) => { if (done || failed) console.log(`Recording transcripts: ${done} stored, ${failed} failed.`); })
+      // Then pull industry insights from any newly transcribed recordings (WFP Performance → Call Analysis and Insights).
+      .then(() => require('./services/voiceInsightsService').analysePending(10))
       .catch(err => console.error('Recording transcript job error:', err.message));
     setTimeout(runRecordingTranscripts, 90 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);

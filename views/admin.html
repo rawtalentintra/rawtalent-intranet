@@ -1004,6 +1004,12 @@
               <b>New leads</b> — leads created in the period. <b>Called / Visited / Signed</b> — leads that reached that stage in the period. <b>Centres</b> — completed calls and visits logged against existing centres. <b>Open leads</b> and <b>Priority items</b> are as of today, not period-based, and only count leads still being worked (not closed or archived). Priority items counts each lead once, however many things it needs. A lead marked done without a date can't be placed in a period.
             </div>
           </div>
+
+          <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
+            <div class="sd-card-title">Call Analysis and Insights</div>
+            <div class="sd-card-sub">What centres told our Workforce Partners, pulled from their voice notes: agencies used, pricing, needs, objections and opportunities. Each point links to its recording. Not limited to the period above.</div>
+            <div id="wfpPerfInsights" style="margin-top:16px"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>
+          </div>
         </div>
       </div>
       </template>
@@ -10438,6 +10444,39 @@
       renderWfpPerfPartners(from, to);
       renderWfpPerfStates(from, to);
       loadWfpFillRate(from, to);
+      if (!wfpInsightsLoaded) { wfpInsightsLoaded = true; loadWfpInsights(); }
+    }
+    let wfpInsightsLoaded = false;
+
+
+    async function loadWfpInsights() {
+      const box = document.getElementById('wfpPerfInsights');
+      if (!box) return;
+      try {
+        const res = await fetch('/api/leads/voice-insights');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load insights');
+        const groups = {};
+        data.recordings.forEach(r => r.insights.forEach(i => (groups[i.category] = groups[i.category] || []).push({ ...i, r })));
+        const order = Object.keys(data.categories).filter(k => groups[k]);
+        const src = r => {
+          const who = escHtml((r.uploaded_by_name || r.uploaded_by_email || '').split(' ')[0]);
+          const where = escHtml([r.centre_name, r.state].filter(Boolean).join(', '));
+          const open = r.kind === 'lead' ? `openLeadDetail('${r.lead_id}')` : `goToCentre360('${escHtml(r.centre_name)}')`;
+          const dl = `/api/${r.kind === 'lead' ? 'leads' : 'centres'}/recordings/${r.id}/download`;
+          return `<span style="color:var(--text-muted);font-size:12px"> — <a href="#" onclick="${open};return false" style="color:inherit;text-decoration:underline">${where}</a> · ${who} · ${fmtDate(r.created_at)} · <a href="${dl}" target="_blank" style="color:var(--orange)">▶ recording</a></span>`;
+        };
+        box.innerHTML = (order.length ? order.map(k => `
+          <div style="margin-bottom:16px">
+            <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${escHtml(data.categories[k])} <span style="color:var(--text-muted);font-weight:600">(${groups[k].length})</span></div>
+            <ul style="margin:0;padding-left:18px;line-height:1.6;font-size:13.5px;color:var(--text)">
+              ${groups[k].map(i => `<li>${i.agency && !i.point.toLowerCase().includes(i.agency.toLowerCase()) ? `<b>${escHtml(i.agency)}:</b> ` : ''}${escHtml(i.point)}${src(i.r)}</li>`).join('')}
+            </ul>
+          </div>`).join('') : `<div style="font-size:13px;color:var(--text-muted)">No insights yet. They appear here as Workforce Partners record voice notes on visits.</div>`)
+          + `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">From ${data.recordings.length} analysed recording${data.recordings.length === 1 ? '' : 's'}${data.pending ? ` · ${data.pending} more being analysed` : ''}. Pulled automatically from the transcripts; open the recording to check anything important.</div>`;
+      } catch (e) {
+        box.innerHTML = `<div style="font-size:13px;color:#b91c1c">${escHtml(e.message)}</div>`;
+      }
     }
 
     // Fill rate comes from the server (it needs every RT booking, not just

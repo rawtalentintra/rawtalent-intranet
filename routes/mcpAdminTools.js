@@ -229,6 +229,35 @@ function registerAdminTools(server) {
     return text(`${email} (id ${id})\n` + Object.entries(a).slice(0, 40).map(([k, v]) => `  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
   });
 
+  // ── Voice notes / visit transcripts ──────────────────────────────────
+  server.registerTool('search_voice_notes', {
+    title: 'Voice Notes & Visit Transcripts',
+    description: 'Workforce Partner voice notes recorded on centre visits/calls, with full transcripts, summaries and extracted insights (competitor agencies, pricing, objections, opportunities). Optional text search across transcripts, partner name, state and date range (YYYY-MM-DD).',
+    inputSchema: {
+      query: z.string().optional(), partner: z.string().optional(), state: z.string().optional(),
+      from: z.string().optional(), to: z.string().optional(), limit: z.number().int().min(1).max(30).optional()
+    }
+  }, async ({ query, partner, state, from, to, limit }) => {
+    const where = ['r.transcript IS NOT NULL']; const args = [];
+    if (query) { where.push('(r.transcript ILIKE ? OR l.centre_name ILIKE ?)'); args.push(`%${query}%`, `%${query}%`); }
+    if (partner) { where.push('(r.uploaded_by_name ILIKE ? OR r.uploaded_by_email ILIKE ?)'); args.push(`%${partner}%`, `%${partner}%`); }
+    if (state) { where.push('upper(l.state) = ?'); args.push(state.toUpperCase()); }
+    if (isDay(from)) { where.push('r.created_at >= CAST(? AS date)'); args.push(from); }
+    if (isDay(to)) { where.push('r.created_at < CAST(? AS date)'); args.push(to); }
+    const rows = (await getDb().execute({
+      sql: `SELECT r.created_at, r.uploaded_by_name, r.summary, r.transcript, r.insights, l.centre_name, l.suburb, l.state
+            FROM lead_recordings r JOIN leads l ON l.id = r.lead_id WHERE ${where.join(' AND ')} ORDER BY r.created_at DESC LIMIT ?`,
+      args: [...args, limit || 10]
+    })).rows;
+    if (!rows.length) return text('No voice notes matched.');
+    return text(rows.map(r => [
+      `■ ${r.centre_name} (${[r.suburb, r.state].filter(Boolean).join(', ')}) — ${r.uploaded_by_name || ''}, ${day(r.created_at)}`,
+      r.summary ? `Summary: ${r.summary}` : null,
+      Array.isArray(r.insights) && r.insights.length ? 'Insights:\n' + r.insights.map(i => `  - ${i.point}`).join('\n') : null,
+      `Transcript: ${r.transcript}`
+    ].filter(Boolean).join('\n')).join('\n\n'));
+  });
+
   // ── Meetings ──────────────────────────────────────────────────────────
   server.registerTool('search_meetings', {
     title: 'Search Meetings',

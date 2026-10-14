@@ -2628,3 +2628,12 @@ CREATE TABLE IF NOT EXISTS qr_referrals (
 );
 CREATE INDEX IF NOT EXISTS idx_qr_referrals_created ON qr_referrals(created_at);
 CREATE INDEX IF NOT EXISTS idx_qr_referrals_email ON qr_referrals(email);
+
+-- Call Analysis and Insights (Joy, 2026-10-14): industry intelligence pulled
+-- once per voice recording by services/voiceInsightsService.js — competitor
+-- agencies and their pricing, what centres need, objections, opportunities.
+-- insights = [{ category, point, agency, location }]; [] = nothing useful.
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS insights JSONB;
+ALTER TABLE lead_recordings ADD COLUMN IF NOT EXISTS insights_at TIMESTAMPTZ;
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS insights JSONB;
+ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS insights_at TIMESTAMPTZ;

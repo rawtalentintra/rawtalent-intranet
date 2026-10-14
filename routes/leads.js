@@ -490,6 +490,17 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
 // With neither, actor is null and the page reports it as unattributed rather
 // than guessing. Feeds WFP Performance's per-partner cards.
 const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
+// Call Analysis and Insights (bottom of WFP Performance). Same audience as that
+// page: super_admin and Liam (mcpTokenService.canUseMcp covers exactly those).
+router.get('/voice-insights', async (req, res) => {
+  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Not available for your account' });
+  try {
+    res.json(await require('../services/voiceInsightsService').listInsights());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stage-events', leadsViewAccess, async (req, res) => {
   try {
     const db = getDb();
