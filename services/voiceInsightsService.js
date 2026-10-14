@@ -96,7 +96,16 @@ async function listInsights() {
     args: []
   })).rows;
   const pending = (await getDb().execute({ sql: `SELECT (SELECT count(*) FROM lead_recordings WHERE transcript IS NOT NULL AND insights_at IS NULL) + (SELECT count(*) FROM centre_recordings WHERE transcript IS NOT NULL AND insights_at IS NULL) n`, args: [] })).rows[0].n;
-  return { categories: CATEGORIES, pending: Number(pending), recordings: rows.map(r => ({ ...r, insights: Array.isArray(r.insights) ? r.insights : [] })) };
+  // Centre recordings only store the centre key — show the real centre name and state.
+  let byKey = new Map();
+  if (rows.some(r => r.kind === 'centre')) {
+    const { centres } = await require('../routes/centres').getCentresAndBookings();
+    byKey = new Map(centres.map(c => [c.centreKey, c]));
+  }
+  return { categories: CATEGORIES, pending: Number(pending), recordings: rows.map(r => {
+    const c = r.kind === 'centre' ? byKey.get(r.centre_name) : null;
+    return { ...r, centre_key: r.kind === 'centre' ? r.centre_name : null, centre_name: c ? c.name : r.centre_name, state: c ? c.state : r.state, insights: Array.isArray(r.insights) ? r.insights : [] };
+  }) };
 }
 
 module.exports = { analysePending, listInsights, CATEGORIES };
