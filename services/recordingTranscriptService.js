@@ -21,6 +21,47 @@ const KINDS = {
     nameSql: 'NULL'
   }
 };
+const { v4: uuidv4 } = require('uuid');
+const VOICE_VISIT_NOTE = 'Logged from voice recording';
+const MIN_WORDS = 8; // a real visit note, not "Thank you" or an empty file
+
+// A voice note on a lead means the partner was at the centre (Joy, 2026-10-14):
+// if the lead isn't marked Visited yet, mark it, dated when the recording was
+// made, and credit the visit to whoever recorded it. Only when the transcript
+// has real content. HeartBeat data only — nothing goes to RT.
+async function markLeadVisitedFromRecording(recordingId) {
+  const db = getDb();
+  const r = (await db.execute({
+    sql: `SELECT r.id, r.lead_id, r.created_at, r.uploaded_by_email, r.uploaded_by_name, r.transcript, l.centre_visited_status
+          FROM lead_recordings r JOIN leads l ON l.id = r.lead_id WHERE r.id = ?`,
+    args: [recordingId]
+  })).rows[0];
+  if (!r || r.centre_visited_status === 'done') return false;
+  if (String(r.transcript || '').trim().split(/\s+/).filter(Boolean).length < MIN_WORDS) return false;
+  await db.execute({
+    sql: `UPDATE leads SET centre_visited_status = 'done', centre_visited_at = ?,
+                 lead_called_status = CASE WHEN lead_called_status = 'to_schedule' THEN 'n_a' ELSE lead_called_status END,
+                 updated_at = now()
+          WHERE id = ? AND centre_visited_status IS DISTINCT FROM 'done'`,
+    args: [r.created_at, r.lead_id]
+  });
+  await db.execute({
+    sql: `INSERT INTO lead_activities (id, lead_id, channel, notes, created_by_email, created_by_name, created_at)
+          VALUES (?, ?, 'visit', ?, ?, ?, ?)`,
+    args: [uuidv4(), r.lead_id, VOICE_VISIT_NOTE, r.uploaded_by_email, r.uploaded_by_name || r.uploaded_by_email, r.created_at]
+  });
+  return true;
+}
+
+// Runs the rule above over every transcribed lead recording (for recordings
+// made before this existed). Safe to re-run: a lead already Visited is skipped.
+async function markVisitsFromExistingRecordings() {
+  const ids = (await getDb().execute({ sql: 'SELECT id FROM lead_recordings WHERE transcript IS NOT NULL ORDER BY created_at', args: [] })).rows.map(x => x.id);
+  let marked = 0;
+  for (const id of ids) if (await markLeadVisitedFromRecording(id)) marked++;
+  return marked;
+}
+
 const MAX_BYTES = 24 * 1024 * 1024; // Groq's upload limit is 25MB
 let running = false;
 
@@ -36,6 +77,7 @@ async function transcribeOne(kind, row) {
       sql: `UPDATE ${k.table} SET transcript = ?, summary = ?, transcribed_at = now(), transcription_error = NULL WHERE id = ?`,
       args: [transcript, analysis.notesSummary, row.id]
     });
+    if (kind === 'lead') await markLeadVisitedFromRecording(row.id).catch(err => console.error('Voice-recording visit credit failed:', err.message));
     return true;
   } catch (err) {
     await db.execute({ sql: `UPDATE ${k.table} SET transcription_error = ? WHERE id = ?`, args: [String(err.message).slice(0, 300), row.id] });
@@ -68,4 +110,4 @@ async function transcribePending(limit = 10) {
   return { done, failed };
 }
 
-module.exports = { transcribePending };
+module.exports = { transcribePending, markLeadVisitedFromRecording, markVisitsFromExistingRecordings, VOICE_VISIT_NOTE };

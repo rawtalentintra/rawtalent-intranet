@@ -2547,6 +2547,14 @@
     function stopVoiceNote() {
       if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     }
+    async function markVisitedFromVoice(leadId) {
+      try {
+        await api(`/api/leads/${encodeURIComponent(leadId)}`, { method: 'PUT', body: JSON.stringify({ centreVisitedStatus: 'done', centreVisitedAt: new Date().toISOString() }) });
+        const el = document.getElementById('voiceVisitPrompt');
+        if (el) el.innerHTML = '<span style="font-size:13px">✓ Marked as Visited</span>';
+        ensureDataLoaded(true).catch(() => {});
+      } catch (e) { toast(e.message, 'error'); }
+    }
     async function finishVoiceNote(mimeType) {
       const box = document.getElementById('laRecorderBox');
       box.innerHTML = `<div class="recorder-box"><div class="spinner-wrap" style="padding:10px 0"><div class="spinner"></div></div><div class="recorder-status">Transcribing…</div></div>`;
@@ -2571,7 +2579,9 @@
           const notesEl = document.getElementById('laNotes');
           if (notesEl) notesEl.value = data.notesSummary;
         }
-        box.innerHTML = `<div class="recorder-box"><div class="recorder-status">${data.notesSummary ? 'Added to Notes above' : 'Saved'}</div></div>`;
+        const offerVisit = voiceTarget.type === 'lead' && data.leadVisited === false;
+        box.innerHTML = `<div class="recorder-box"><div class="recorder-status">${data.notesSummary ? 'Added to Notes above' : 'Saved'}</div>
+          ${offerVisit ? `<div class="action-row" id="voiceVisitPrompt"><span style="font-size:13px">You recorded this here. Mark the lead as Visited?</span><button class="btn btn-primary" onclick="markVisitedFromVoice('${escHtml(voiceTarget.id)}')">Yes, Visited</button></div>` : ''}</div>`;
       } catch (e) {
         box.innerHTML = `<div class="recorder-box"><div class="recorder-status" style="color:var(--red)">${escHtml(e.message)}</div></div>`;
       }

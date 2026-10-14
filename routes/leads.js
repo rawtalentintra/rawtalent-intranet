@@ -1205,7 +1205,7 @@ router.post('/:id/recordings/voice-note', requireRole('admin', 'super_admin', 'w
   if (!req.file) return res.status(400).json({ error: 'No recording received' });
   try {
     const db = getDb();
-    const lead = await db.execute({ sql: 'SELECT id, centre_name FROM leads WHERE id = ?', args: [req.params.id] });
+    const lead = await db.execute({ sql: 'SELECT id, centre_name, centre_visited_status FROM leads WHERE id = ?', args: [req.params.id] });
     if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
 
     const result = await db.execute({
@@ -1229,7 +1229,9 @@ router.post('/:id/recordings/voice-note', requireRole('admin', 'super_admin', 'w
       console.error(`Voice-note transcription/summary failed for lead ${req.params.id} (non-fatal — recording is still saved):`, err.message);
     }
 
-    res.json({ success: true, id: recordingId, filename: req.file.originalname, filesize: req.file.size, notesSummary });
+    // leadVisited lets the app offer "Mark as Visited?" right away. If the
+    // partner ignores it, the transcript job credits the visit anyway.
+    res.json({ success: true, id: recordingId, filename: req.file.originalname, filesize: req.file.size, notesSummary, leadVisited: lead.rows[0].centre_visited_status === 'done' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -18233,6 +18233,13 @@
         if (!res.ok) { toast(data.error || 'Could not save recording', 'error'); paintLeadVoiceRecorderUI('idle'); return; }
         loadLeadRecordings(currentLeadDetailId);
         leadVoiceLastRecordingId = data.id;
+        // A voice note means they were at the centre — offer to mark it Visited (Joy, 2026-10-14).
+        if (data.leadVisited === false && confirm('You recorded a note for this lead. Mark it as Visited?')) {
+          try {
+            const r = await fetch(`/api/leads/${currentLeadDetailId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ centreVisitedStatus: 'done', centreVisitedAt: new Date().toISOString() }) });
+            if (r.ok) toast('Marked as Visited', 'success'); else toast('Could not mark as Visited', 'error');
+          } catch { toast('Could not mark as Visited', 'error'); }
+        }
         if (data.notesSummary) {
           leadVoiceLastSummary = data.notesSummary;
           paintLeadVoiceRecorderUI('summary');
