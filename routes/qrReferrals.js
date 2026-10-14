@@ -169,6 +169,68 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── Reporting (Liam, 13 Oct, point 5) ──────────────────────────────────
+// Funnel for registrations in a date range (by registration date):
+// registered → in RT → active → first shift accepted, plus welcome bonuses
+// and partner follow-ups, and the same broken down by centre.
+async function buildReport(from, to) {
+  const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+  const db = getDb();
+  const where = [], args = [];
+  if (isDay(from)) { where.push('q.created_at >= CAST(? AS date)'); args.push(from); }
+  if (isDay(to)) { where.push('q.created_at < CAST(? AS date)'); args.push(to); }
+  const rows = (await db.execute({
+    sql: `SELECT q.*, c.status rt_status, c.raw->>'obStatus' ob_status, (c.raw->>'onBoardingStep')::int ob_step,
+                 t.status partner_task_status
+          FROM qr_referrals q
+          LEFT JOIN rt_candidates_cache c ON c.user_id::text = q.rt_user_id
+          LEFT JOIN tasks t ON t.id = q.partner_task_id
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
+    args
+  })).rows;
+  const { bookings, centres } = await getCentresAndBookings();
+  const byKey = new Map(centres.map(c => [c.centreKey, c]));
+  // Accepted shift dates per educator; "first shift" = any accepted shift on or after they registered.
+  const shiftDates = new Map();
+  for (const b of bookings) {
+    if (![3, 5].includes(b.statusId) || !b.assignedUserId) continue;
+    const k = String(b.assignedUserId);
+    if (!shiftDates.has(k)) shiftDates.set(k, []);
+    shiftDates.get(k).push((b.bookingDate || '').slice(0, 10));
+  }
+  const shiftAfterReg = r => {
+    if (!r.rt_user_id) return false;
+    const since = new Date(r.created_at).toISOString().slice(0, 10);
+    return (shiftDates.get(r.rt_user_id) || []).some(d => d >= since);
+  };
+  const tally = list => ({
+    registered: list.length,
+    inRt: list.filter(r => r.rt_user_id).length,
+    onboarding: list.filter(r => r.rt_user_id && !r.activated_at).length,
+    active: list.filter(r => r.activated_at).length,
+    firstShift: list.filter(shiftAfterReg).length,
+    bonusEligible: list.filter(r => r.bonus_eligible).length,
+    bonusTriggered: list.filter(r => r.bonus_task_id).length,
+    followUpsCreated: list.filter(r => r.partner_task_id).length,
+    followUpsDone: list.filter(r => r.partner_task_status === 'done').length,
+    notProceeding: list.filter(r => r.status === 'not_proceeding').length
+  });
+  const groups = new Map();
+  for (const r of rows) {
+    const c = r.centre_key ? byKey.get(r.centre_key) : null;
+    const key = r.centre_key || 'unmatched:' + String(r.centre_name_entered || '').toLowerCase().trim();
+    if (!groups.has(key)) groups.set(key, { centre: c ? c.name : (r.centre_name_entered || 'Unknown'), matched: !!c, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+  const byCentre = [...groups.values()].map(g => ({ centre: g.centre, matched: g.matched, ...tally(g.rows) })).sort((a, b) => b.registered - a.registered);
+  return { from: from || null, to: to || null, total: tally(rows), byCentre };
+}
+
+router.get('/report', async (req, res) => {
+  try { res.json(await buildReport(req.query.from, req.query.to)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 const EDITABLE = {
   status: v => (STATUSES.includes(v) ? v : undefined),
   assignedToEmail: v => (v ? String(v).slice(0, 200) : null),
@@ -199,4 +261,4 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-module.exports = { router, publicRouter, familiarRouter, partnerForCentre };
+module.exports = { router, publicRouter, familiarRouter, partnerForCentre, buildReport };

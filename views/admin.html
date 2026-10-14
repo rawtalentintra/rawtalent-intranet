@@ -1044,6 +1044,19 @@
         <div id="qrError" style="display:none;padding:12px 16px;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:13px;margin-bottom:16px"></div>
         <div id="qrBody" style="display:none">
           <div id="qrNotice"></div>
+          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+              <div>
+                <div class="sd-card-title">Reporting</div>
+                <div class="sd-card-sub">From registration to first shift, for people who registered in the period.</div>
+              </div>
+              <select id="qrReportRange" class="form-control" style="max-width:170px" onchange="loadQrReport()">
+                <option value="all" selected>All time</option><option value="30">Last 30 days</option><option value="7">Last 7 days</option><option value="month">This month</option>
+              </select>
+            </div>
+            <div id="qrReportFunnel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;margin-top:16px"></div>
+            <div id="qrReportByCentre" style="margin-top:18px;overflow-x:auto"></div>
+          </div>
           <div id="qrStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:20px"></div>
           <div id="qrFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
           <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="qrTable"></div></div>
@@ -10722,6 +10735,7 @@
         document.getElementById('qrNotice').innerHTML = data.formKeyConfigured ? '' :
           '<div style="padding:10px 14px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:13px;margin-bottom:14px">The landing page can\'t send registrations yet: the form key (QR_FORM_KEY) isn\'t set on the server.</div>';
         renderQrReferrals();
+        loadQrReport();
         document.getElementById('qrBody').style.display = 'block';
       } catch (e) {
         const box = document.getElementById('qrError'); box.textContent = e.message; box.style.display = 'block';
@@ -10730,6 +10744,39 @@
       }
     }
     function setQrFilter(k) { qrFilter = k; renderQrReferrals(); }
+    async function loadQrReport() {
+      const sel = document.getElementById('qrReportRange').value;
+      const now = new Date(); let from = '';
+      if (sel === '30' || sel === '7') from = ymd(new Date(now.getTime() - Number(sel) * 86400000));
+      if (sel === 'month') from = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      try {
+        const res = await fetch('/api/qr-referrals/report' + (from ? '?from=' + from : ''));
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Could not load report');
+        const t = d.total;
+        const pctOf = (n, of) => of ? Math.round(n / of * 100) + '%' : '—';
+        const tile = (label, value, sub) => `<div><div style="font-size:26px;font-weight:800;line-height:1.1;color:${value ? 'var(--navy)' : '#9ca3af'}">${value}</div><div style="font-size:12.5px;font-weight:700;color:var(--navy);margin-top:4px">${label}</div><div style="font-size:11.5px;color:var(--text-muted)">${sub}</div></div>`;
+        document.getElementById('qrReportFunnel').innerHTML =
+          tile('Registered', t.registered, 'scanned and signed up') +
+          tile('In RT', t.inRt, pctOf(t.inRt, t.registered) + ' of registered') +
+          tile('Active', t.active, pctOf(t.active, t.registered) + ' completion') +
+          tile('First shift', t.firstShift, pctOf(t.firstShift, t.active) + ' of active') +
+          tile('Bonuses', t.bonusTriggered, `${t.bonusEligible} eligible`) +
+          tile('Partner follow-ups', t.followUpsCreated, `${t.followUpsDone} done`);
+        const th = (x, left) => `<th style="padding:8px 10px;text-align:${left ? 'left' : 'center'};font-size:12px;font-weight:700;color:var(--text-muted);white-space:nowrap">${x}</th>`;
+        const td = v => `<td style="padding:9px 10px;text-align:center;font-size:13px;color:${v ? 'var(--navy)' : '#c0c4cc'};font-weight:${v ? 700 : 500}">${v}</td>`;
+        document.getElementById('qrReportByCentre').innerHTML = d.byCentre.length ? `
+          <table style="width:100%;border-collapse:collapse;min-width:720px">
+            <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Centre scanned', true)}${th('Registered')}${th('In RT')}${th('Active')}${th('First shift')}${th('Bonuses')}${th('Follow-ups done')}</tr></thead>
+            <tbody>${d.byCentre.map(c => `<tr style="border-bottom:1px solid var(--gray-100)">
+              <td style="padding:9px 10px;font-size:13px;font-weight:600;color:var(--navy)">${escHtml(c.centre)}${c.matched ? '' : ' <span style="color:var(--text-muted);font-weight:400">(not matched)</span>'}</td>
+              ${td(c.registered)}${td(c.inRt)}${td(c.active)}${td(c.firstShift)}${td(c.bonusTriggered)}${td(c.followUpsDone + '/' + c.followUpsCreated === '0/0' ? 0 : c.followUpsDone + '/' + c.followUpsCreated)}
+            </tr>`).join('')}</tbody>
+          </table>` : '<div style="font-size:13px;color:var(--text-muted)">No registrations in this period.</div>';
+      } catch (e) {
+        document.getElementById('qrReportFunnel').innerHTML = `<div style="font-size:13px;color:#b91c1c">${escHtml(e.message)}</div>`;
+      }
+    }
     function renderQrReferrals() {
       const all = qrData.referrals;
       const open = r => r.status !== 'active' && r.status !== 'not_proceeding';

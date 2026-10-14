@@ -273,6 +273,18 @@ function registerAdminTools(server) {
     return text(body || 'No insights yet.');
   });
 
+  // ── QR code recruitment report ──────────────────────────────────────
+  server.registerTool('get_qr_recruitment_report', {
+    title: 'QR Code Recruitment Report',
+    description: 'Educators recruited through the QR code posters in centres: registered, in RT, active (completion rate), first shift accepted, welcome bonuses triggered and Workforce Partner follow-ups, in total and by centre scanned. Optional registration date range (YYYY-MM-DD, "to" exclusive).',
+    inputSchema: { from: z.string().optional(), to: z.string().optional() }
+  }, async ({ from, to }) => {
+    const d = await require('./qrReferrals').buildReport(from, to);
+    const t = d.total;
+    const line = (n, x) => `${n}: ${x.registered} registered · ${x.inRt} in RT · ${x.active} active · ${x.firstShift} first shift · ${x.bonusTriggered} bonuses · ${x.followUpsDone}/${x.followUpsCreated} follow-ups done`;
+    return text([line('All centres', t), ...d.byCentre.map(c => line(c.centre, c))].join('\n') + (t.registered ? '' : '\n(No QR registrations yet.)'));
+  });
+
   // ── Voice notes / visit transcripts ──────────────────────────────────
   server.registerTool('search_voice_notes', {
     title: 'Voice Notes & Visit Transcripts',
