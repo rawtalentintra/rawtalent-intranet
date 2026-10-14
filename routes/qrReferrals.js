@@ -117,7 +117,12 @@ familiarRouter.get('/', requireRole('admin', 'super_admin', 'workforce_partner')
 
 // ── Operations view ──────────────────────────────────────────────────
 const router = express.Router();
-router.use(requireSuperAdmin);
+// super_admin plus Liam (Joy, 2026-10-14) — the same two accounts as the MCP connector.
+router.use((req, res, next) => {
+  if (!req.isAuthenticated || !req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'You do not have access to this' });
+  next();
+});
 
 const OB_STEPS = ['Register', 'About Us', 'Profile Image', 'Experience', 'Emergency Contact', 'Qualification Level', 'Reference', 'Visa', 'Finance', 'Tax', 'Documents', 'Completed'];
 

@@ -337,7 +337,7 @@
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('first-shift', this)">
           <span class="admin-nav-icon">📞</span> First Shift Follow-ups
         </div>
-        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('qr-referrals', this)">
+        <div class="admin-nav-item super-admin-only wfp-perf-viewer" style="display:none" onclick="showSection('qr-referrals', this)">
           <span class="admin-nav-icon">📱</span> QR Code Referrals
         </div>
         <div class="admin-nav-item" onclick="showSection('data-accuracy-check', this)">
@@ -6699,7 +6699,7 @@
           showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
-      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !(id === 'wfp-performance' && canSeeWfpPerformance())) {
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' || id === 'qr-referrals') && canSeeWfpPerformance())) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'payroll' && !currentUserIsPayrollAdmin) {
