@@ -66,4 +66,53 @@ async function createBonusTasks() {
   return { created };
 }
 
-module.exports = { createBonusTasks, BONUS_AMOUNT };
+// ── Activation → Workforce Partner follow-up (Liam, 13 Oct, point 4) ─────
+// When a QR-referred educator is Active in RT with onboarding Completed, stamp
+// activated_at (so they appear in the partner's Familiar Educators list) and
+// create one follow-up task for the partner who looks after the scanned centre.
+async function processActivations() {
+  const db = getDb();
+  const rows = (await db.execute({ sql: 'SELECT * FROM qr_referrals WHERE activated_at IS NULL OR partner_task_id IS NULL', args: [] })).rows;
+  if (!rows.length) return { activated: 0, tasks: 0 };
+  const { centres } = await getCentresAndBookings();
+  const byKey = new Map(centres.map(c => [c.centreKey, c]));
+  const { getCentrePartnerAssignments } = require('../routes/centres');
+  const { partnerForCentre } = require('../routes/qrReferrals');
+  const assignments = await getCentrePartnerAssignments();
+  const partnerEmail = new Map((await db.execute({ sql: "SELECT wfp_label, email FROM users WHERE wfp_label IS NOT NULL AND active = true", args: [] })).rows.map(u => [u.wfp_label, u.email]));
+  let activated = 0, tasks = 0;
+  for (const r of rows) {
+    const uid = await resolveRtUserId(db, r);
+    if (!uid) continue;
+    if (!r.rt_user_id) await db.execute({ sql: 'UPDATE qr_referrals SET rt_user_id = ? WHERE id = ?', args: [uid, r.id] });
+    const c = (await db.execute({ sql: "SELECT status, raw->>'obStatus' ob, raw->>'statusUpdateDate' since, raw->'qualifications'->0->>'qualificationName' qual FROM rt_candidates_cache WHERE user_id = ?", args: [uid] })).rows[0];
+    if (!c || c.status !== 1 || c.ob !== 'Completed') continue;
+    let activatedAt = r.activated_at;
+    if (!activatedAt) {
+      const since = c.since && !String(c.since).startsWith('0001') && new Date(c.since) >= new Date(r.created_at) ? c.since : new Date().toISOString();
+      await db.execute({ sql: 'UPDATE qr_referrals SET activated_at = ?, status = CASE WHEN status IN (\'new\',\'contacted\',\'onboarding\') THEN \'active\' ELSE status END WHERE id = ?', args: [since, r.id] });
+      activatedAt = since; activated++;
+    }
+    if (r.partner_task_id) continue;
+    const centre = byKey.get(r.centre_key);
+    const partner = partnerForCentre(centre, assignments);
+    const email = partner && partnerEmail.get(partner);
+    if (!centre || !email) continue; // no matched centre or no partner login to assign to yet
+    const name = [r.first_name, r.last_name].filter(Boolean).join(' ');
+    const taskId = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
+            VALUES (?, 'workforce_partners', NULL, ?, ?, 'to_do', 'normal', ?, NULL, 'system@rawtalent.internal', 'Auto — QR familiar educator', '[]', ?, ?)`,
+      args: [taskId, `New Familiar Educator Available – ${centre.name}`,
+        `${name}${c.qual ? ' (' + c.qual + ')' : ''} has completed onboarding and is now active with Raw Talent. They joined through the recruitment poster at ${centre.name}.\n\nPlease contact the centre to advise that the educator is available through Raw Talent and help them add the educator to their favourites or request them for future bookings.`,
+        JSON.stringify([email.toLowerCase()]),
+        JSON.stringify([{ userId: Number(uid), name, phone: r.phone || null, email: r.email || null }]),
+        JSON.stringify([{ centreKey: centre.centreKey, name: centre.name }])]
+    });
+    await db.execute({ sql: 'UPDATE qr_referrals SET partner_task_id = ? WHERE id = ?', args: [taskId, r.id] });
+    tasks++;
+  }
+  return { activated, tasks };
+}
+
+module.exports = { createBonusTasks, processActivations, BONUS_AMOUNT };

@@ -1640,6 +1640,7 @@
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="repaintKeepingFocus(paintToday)">
+        ${familiarEducatorsHtml()}
         ${centreContactReminderHtml()}
         ${routeTodayHtml()}
         ${b.attention.length ? `<div class="section-title">Needs Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
@@ -2287,6 +2288,32 @@
     // existing client centres, so Today now asks every day: "Spoken to any of
     // your centres?" with one-tap Called/Visited for the centres they own that
     // haven't been contacted lately. Dismissable for the rest of the day.
+    // Familiar Educators Available (QR referrals, Liam 13 Oct): educators who
+    // scanned a poster at one of this partner's centres and are now active.
+    let familiarEducators = [];
+    let familiarLoadedAt = 0;
+    function loadFamiliarEducators() {
+      if (Date.now() - familiarLoadedAt < 5 * 60 * 1000) return;
+      familiarLoadedAt = Date.now();
+      api('/api/qr-referrals/familiar').then(rows => {
+        familiarEducators = Array.isArray(rows) ? rows : [];
+        if (familiarEducators.length && viewStack[viewStack.length - 1] === 'today') paintToday();
+      }).catch(() => {});
+    }
+    function familiarEducatorsHtml() {
+      loadFamiliarEducators();
+      if (!familiarEducators.length) return '';
+      return `
+        <div class="card" style="border-left:4px solid #15803d;cursor:default">
+          <div class="name">Familiar educators now available</div>
+          <div style="font-size:12.5px;color:#6b7590;margin-top:2px">They scanned our poster at your centre and are now active. Let the centre know they can request them.</div>
+          ${familiarEducators.slice(0, 6).map(r => `
+            <div style="border-top:1px solid #eef0f5;margin-top:10px;padding-top:10px">
+              <div style="font-weight:600;font-size:13.5px">${escHtml(r.name)}${r.qualification ? ` <span style="color:#6b7590;font-weight:400">· ${escHtml(r.qualification)}</span>` : ''}</div>
+              <div style="font-size:12.5px;margin-top:2px">${r.centreKey ? `<a href="#" onclick="openCentre('${escHtml(r.centreKey)}');return false" style="color:var(--blue);font-weight:600">${escHtml(r.centreName)}</a>` : escHtml(r.centreName || '')} <span style="color:#6b7590">· active since ${new Date(r.activatedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span></div>
+            </div>`).join('')}
+        </div>`;
+    }
     function lastContactLabel(c) {
       if (!c.lastContactAt) return 'No contact logged yet';
       const days = Math.floor((Date.now() - new Date(c.lastContactAt).getTime()) / 86400000);

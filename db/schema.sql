@@ -2643,3 +2643,8 @@ ALTER TABLE centre_recordings ADD COLUMN IF NOT EXISTS insights_at TIMESTAMPTZ;
 ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS bonus_task_id TEXT;
 ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS first_shift_booking_id TEXT;
 ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS first_shift_date DATE;
+-- QR referrals phase 3: when the educator is Active in RT with onboarding
+-- Completed, they're shown to the centre's Workforce Partner and one
+-- follow-up task is created for that partner (Liam, 13 Oct 2026, points 3-4).
+ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS partner_task_id TEXT;

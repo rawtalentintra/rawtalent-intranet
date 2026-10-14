@@ -74,6 +74,47 @@ publicRouter.post('/', async (req, res) => {
   }
 });
 
+// Which Workforce Partner looks after a centre: explicit assignment, else the
+// VIC suburb split, else the state's default partner.
+function partnerForCentre(c, assignments) {
+  if (!c) return null;
+  return assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_DEFAULT_PARTNER[shortState(c.state)] || null;
+}
+
+// ── Familiar educators for Workforce Partners (Liam, 13 Oct, point 3) ─
+// QR-referred educators who are now Active in RT with onboarding Completed,
+// matched to the centre where they scanned the poster. A Workforce Partner
+// sees only their own centres; admins see everyone.
+const { requireRole } = require('../middleware/authMiddleware');
+const familiarRouter = express.Router();
+familiarRouter.get('/', requireRole('admin', 'super_admin', 'workforce_partner'), async (req, res) => {
+  try {
+    const db = getDb();
+    const rows = (await db.execute({
+      sql: `SELECT q.id, q.first_name, q.last_name, q.qualification, q.centre_key, q.centre_name_entered, q.activated_at, q.rt_user_id,
+                   c.raw->'qualifications'->0->>'qualificationName' AS rt_qualification
+            FROM qr_referrals q LEFT JOIN rt_candidates_cache c ON c.user_id::text = q.rt_user_id
+            WHERE q.activated_at IS NOT NULL ORDER BY q.activated_at DESC`,
+      args: []
+    })).rows;
+    const { centres } = await getCentresAndBookings();
+    const byKey = new Map(centres.map(c => [c.centreKey, c]));
+    const assignments = await getCentrePartnerAssignments();
+    let out = rows.map(r => {
+      const c = byKey.get(r.centre_key);
+      return {
+        id: r.id, name: [r.first_name, r.last_name].filter(Boolean).join(' '), qualification: r.rt_qualification || r.qualification,
+        status: 'Active', centreKey: r.centre_key, centreName: c ? c.name : r.centre_name_entered,
+        activatedAt: r.activated_at, partner: partnerForCentre(c, assignments), rtUserId: r.rt_user_id
+      };
+    });
+    if (req.user.role === 'workforce_partner') out = out.filter(x => x.partner && x.partner === req.user.wfp_label);
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Operations view ──────────────────────────────────────────────────
 const router = express.Router();
 router.use(requireSuperAdmin);
@@ -110,7 +151,7 @@ router.get('/', async (req, res) => {
     const out = rows.map(r => {
       const m = (r.rt_user_id && rt.find(c => c.uid === r.rt_user_id)) || byEmail.get((r.email || '').toLowerCase()) || byPhone.get(digits(r.phone).slice(-9)) || null;
       const c = r.centre_key ? centreByKey.get(r.centre_key) : null;
-      const partner = c ? (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_DEFAULT_PARTNER[shortState(c.state)] || null) : null;
+      const partner = partnerForCentre(c, assignments);
       const daysWaiting = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
       return {
         id: r.id, firstName: r.first_name, lastName: r.last_name, email: r.email, phone: r.phone, suburb: r.suburb, state: r.state,
@@ -158,4 +199,4 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-module.exports = { router, publicRouter };
+module.exports = { router, publicRouter, familiarRouter, partnerForCentre };
