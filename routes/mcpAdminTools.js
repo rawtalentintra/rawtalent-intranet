@@ -68,6 +68,7 @@ function registerAdminTools(server) {
     const lead = (await db.execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [id] })).rows[0];
     if (!lead) return text(`No lead with id ${id}.`);
     const notes = (await db.execute({ sql: 'SELECT note, author_name, created_at FROM lead_notes WHERE lead_id = ? ORDER BY created_at DESC LIMIT 15', args: [id] })).rows;
+    const recs = (await db.execute({ sql: 'SELECT uploaded_by_name, created_at, summary, transcript FROM lead_recordings WHERE lead_id = ? ORDER BY created_at DESC LIMIT 10', args: [id] })).rows;
     const acts = (await db.execute({ sql: 'SELECT channel, contact_name, outcome, notes, next_step, created_by_name, created_at FROM lead_activities WHERE lead_id = ? ORDER BY created_at DESC LIMIT 15', args: [id] })).rows;
     const lines = [
       `${lead.centre_name} (id ${lead.id}) — ${[lead.street_address, lead.suburb, lead.state].filter(Boolean).join(', ')}`,
@@ -75,6 +76,7 @@ function registerAdminTools(server) {
       `Submitted by ${lead.submitted_by_name || lead.submitted_by_email} on ${day(lead.created_at)} · assigned partner: ${lead.assigned_workforce_partner || 'unassigned'} · type: ${lead.entry_type}`,
       `Stages — called: ${lead.lead_called_status} ${day(lead.lead_called_at)} · visited: ${lead.centre_visited_status} ${day(lead.centre_visited_at)} · signed: ${lead.signed_status} ${day(lead.signed_at)}`,
       `Notes (${notes.length}):`, ...notes.map(n => `  - ${day(n.created_at)} ${n.author_name || ''}: ${n.note}`),
+      `Voice notes (${recs.length}):`, ...recs.map(v => `  - ${day(v.created_at)} ${v.uploaded_by_name || ''}: ${v.summary || (v.transcript ? String(v.transcript).slice(0, 600) : '(not transcribed yet)')}`),
       `Logged calls/visits (${acts.length}):`, ...acts.map(a => `  - ${day(a.created_at)} ${a.channel} by ${a.created_by_name || '—'}${a.contact_name ? ' with ' + a.contact_name : ''}${a.outcome ? ' [' + a.outcome + ']' : ''}${a.notes ? ': ' + a.notes : ''}${a.next_step ? ' → next: ' + a.next_step : ''}`)
     ];
     return text(lines.join('\n'));

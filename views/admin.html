@@ -18077,7 +18077,11 @@
               <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">${escHtml(r.uploaded_by_name || r.uploaded_by_email || '')} · ${fmtDateShort(r.created_at)}</span>
               ${canDelete ? `<button class="action-btn delete" style="padding:2px 8px;font-size:11px" onclick="deleteLeadRecording(${r.id})">Remove</button>` : ''}
             </div>
-          </div>`).join('');
+          </div>
+          ${r.summary || r.transcript ? `<div style="margin:-2px 0 10px 12px;padding:8px 12px;border-left:3px solid var(--gray-200);font-size:12.5px;color:var(--text);line-height:1.5">
+            ${r.summary ? `<div><strong>Summary:</strong> ${escHtml(r.summary)}</div>` : ''}
+            ${r.transcript ? `<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--text-muted);font-size:12px">Full transcript</summary><div style="white-space:pre-wrap;margin-top:4px">${escHtml(r.transcript)}</div></details>` : ''}
+          </div>` : (!r.transcribed_at && !r.transcription_error && /^(audio|video)\//.test(r.mimetype || '') ? `<div style="margin:-2px 0 10px 12px;font-size:11.5px;color:var(--text-muted)">Transcript on its way (usually within 10 minutes).</div>` : '')}`).join('');
       } catch {
         list.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Failed to load recordings.</div>`;
       }

@@ -1158,7 +1158,7 @@ router.delete('/:id/educators/:tagId', async (req, res) => {
 router.get('/:id/recordings', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute({
-      sql: 'SELECT id, filename, mimetype, filesize, uploaded_by_name, uploaded_by_email, created_at FROM lead_recordings WHERE lead_id = ? ORDER BY created_at DESC',
+      sql: 'SELECT id, filename, mimetype, filesize, uploaded_by_name, uploaded_by_email, created_at, summary, transcript, transcribed_at, transcription_error FROM lead_recordings WHERE lead_id = ? ORDER BY created_at DESC',
       args: [req.params.id]
     });
     res.json(result.rows);
