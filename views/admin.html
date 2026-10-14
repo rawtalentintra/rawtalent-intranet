@@ -10481,9 +10481,11 @@
     function wfpPerfLeadActivity(from, to) {
       const inPeriod = d => inDateRange(d, from, to);
       const dayKey = d => { const x = new Date(d); return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`; };
-      const logged = new Set(partnerActivityLeadLog.map(a => `${a.lead_id}|${a.channel}|${dayKey(a.created_at)}`));
+      // occurred_at: when it happened (a back-filled stage date), not when it was entered.
+      const when = a => a.occurred_at || a.created_at;
+      const logged = new Set(partnerActivityLeadLog.map(a => `${a.lead_id}|${a.channel}|${dayKey(when(a))}`));
       const events = [];
-      partnerActivityLeadLog.filter(a => inPeriod(a.created_at))
+      partnerActivityLeadLog.filter(a => inPeriod(when(a)))
         .forEach(a => events.push({ email: (a.created_by_email || '').toLowerCase(), channel: a.channel }));
       partnerStageEvents.forEach(e => {
         if (!inPeriod(e.at) || logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) return;

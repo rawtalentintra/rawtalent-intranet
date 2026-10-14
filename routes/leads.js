@@ -459,9 +459,20 @@ router.get('/retention', leadsViewAccess, async (req, res) => {
 // lead id.
 router.get('/activities-log', leadsViewAccess, async (req, res) => {
   try {
-    const result = await getDb().execute(
-      'SELECT lead_id, channel, created_by_email, created_by_name, created_at FROM lead_activities ORDER BY created_at DESC'
-    );
+    // occurred_at = when the call/visit actually happened. For an entry made by
+    // a stage change that's the date the partner picked on the lead, not when
+    // they clicked save — partners back-fill (e.g. Gwen on 9 Oct marked QLD
+    // leads Called on 24 Sep, 30 Sep and 6 Oct), and counting those on the day
+    // of entry made WFP Performance disagree with the WFP Dashboard.
+    const result = await getDb().execute({
+      sql: `SELECT a.lead_id, a.channel, a.created_by_email, a.created_by_name, a.created_at,
+              CASE WHEN a.notes = ? AND a.channel = 'call' AND l.lead_called_status = 'done' AND l.lead_called_at IS NOT NULL THEN l.lead_called_at
+                   WHEN a.notes = ? AND a.channel = 'visit' AND l.centre_visited_status = 'done' AND l.centre_visited_at IS NOT NULL THEN l.centre_visited_at
+                   ELSE a.created_at END AS occurred_at
+       FROM lead_activities a JOIN leads l ON l.id = a.lead_id
+       ORDER BY a.created_at DESC`,
+      args: [AUTO_STAGE_NOTE, AUTO_STAGE_NOTE]
+    });
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
