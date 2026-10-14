@@ -1640,6 +1640,7 @@
       main.innerHTML = `
         ${wfpFilterBarHtml()}
         <input type="text" class="search-box" id="todaySearchInput" placeholder="Search by centre, lead or suburb…" value="" oninput="repaintKeepingFocus(paintToday)">
+        ${centreContactReminderHtml()}
         ${routeTodayHtml()}
         ${b.attention.length ? `<div class="section-title">Needs Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
         ${alongRoute.length ? `<div class="section-title">Along Your Route</div>${alongRoute.map(todayItemRow).join('')}` : ''}
@@ -2044,6 +2045,10 @@
             <div class="name">${escHtml(c.name)}</div>
             ${c.isEscalated ? `<span class="badge bad" style="margin-left:6px">Escalated</span>` : ''}
             <div class="card-corner-badge">${c.health ? `<span class="badge neutral corner">${escHtml(CENTRE_HEALTH_LABELS[c.health] || c.health)}</span>` : ''}</div>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:8px" onclick="event.stopPropagation()">
+              ${quickBtnHtml(c.centreKey, 'call', 'qa-btn lightblue')}${quickBtnHtml(c.centreKey, 'visit', 'qa-btn lightblue')}
+              <span style="font-size:11.5px;color:#6b7590">${lastContactLabel(c)}</span>
+            </div>
           </div>
         `).join('') : `<div class="empty-state">No centres found.</div>`}
       `;
@@ -2276,6 +2281,54 @@
     function quickLogState(centreKey, channel) {
       const e = quickLogged[centreKey + '|' + channel];
       return e && Date.now() - e.at < QUICK_LOG_UNDO_WINDOW_MS ? e : null;
+    }
+    // ── Centre contact reminder (Joy, 2026-10-14) ──────────────────────────
+    // Partners log lead work (stage changes) but almost never log contact with
+    // existing client centres, so Today now asks every day: "Spoken to any of
+    // your centres?" with one-tap Called/Visited for the centres they own that
+    // haven't been contacted lately. Dismissable for the rest of the day.
+    function lastContactLabel(c) {
+      if (!c.lastContactAt) return 'No contact logged yet';
+      const days = Math.floor((Date.now() - new Date(c.lastContactAt).getTime()) / 86400000);
+      return days <= 0 ? 'Contact logged today' : `Last contact ${days} day${days === 1 ? '' : 's'} ago`;
+    }
+    function reminderDismissKey() { return 'centreReminderDismissed:' + todayDateStr(); }
+    function dismissCentreReminder() {
+      try { localStorage.setItem(reminderDismissKey(), '1'); } catch {}
+      paintToday();
+    }
+    function centreContactReminderHtml() {
+      try { if (localStorage.getItem(reminderDismissKey())) return ''; } catch {}
+      const label = currentUser?.wfpLabel;
+      // Owner = explicit assignment, else the state's partner (all VIC is Justine's, SA/QLD Gwen's).
+      const stateOwner = st => ({ victoria: 'Justine', vic: 'Justine', 'south australia': 'Gwen', sa: 'Gwen', queensland: 'Gwen', qld: 'Gwen' })[String(st || '').trim().toLowerCase()] || null;
+      const mine = allCentres.filter(c => !label || (c.assignedWorkforcePartner || stateOwner(c.state)) === label);
+      const loggedToday = mine.some(c => c.lastContactAt && new Date(c.lastContactAt).toDateString() === new Date().toDateString())
+        || Object.keys(quickLogged).length > 0;
+      if (!mine.length || loggedToday) return '';
+      const rank = { needs_attention: 0, declining: 0, dormant: 1, opportunity: 2, growing: 2, new_activating: 2, healthy: 3 };
+      const due = mine.slice().sort((a, b) =>
+        (a.lastContactAt ? new Date(a.lastContactAt).getTime() : 0) - (b.lastContactAt ? new Date(b.lastContactAt).getTime() : 0)
+        || (rank[a.health] ?? 4) - (rank[b.health] ?? 4)).slice(0, 5);
+      return `
+        <div class="card" style="border-left:4px solid var(--blue);cursor:default">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <div class="name">Spoken to any of your centres today?</div>
+              <div style="font-size:12.5px;color:#6b7590;margin-top:2px">One tap to log it. These haven't had contact logged lately.</div>
+            </div>
+            <button type="button" onclick="dismissCentreReminder()" style="border:none;background:none;color:#6b7590;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Not today</button>
+          </div>
+          ${due.map(c => `
+            <div style="border-top:1px solid #eef0f5;margin-top:10px;padding-top:10px">
+              <div style="font-weight:600;font-size:13.5px;cursor:pointer" onclick="openCentre('${c.centreKey}')">${escHtml(c.name)}</div>
+              <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+                ${quickBtnHtml(c.centreKey, 'call', 'qa-btn lightblue')}${quickBtnHtml(c.centreKey, 'visit', 'qa-btn lightblue')}
+                <span style="font-size:11.5px;color:#6b7590">${lastContactLabel(c)}</span>
+              </div>
+            </div>`).join('')}
+          <div style="font-size:12px;margin-top:10px"><a href="#" onclick="setTab('centres');return false" style="color:var(--blue);font-weight:600">See all your centres →</a></div>
+        </div>`;
     }
     function quickBtnHtml(centreKey, channel, cls) {
       const done = quickLogState(centreKey, channel);

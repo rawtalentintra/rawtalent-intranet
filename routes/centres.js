@@ -303,7 +303,10 @@ function healthForCentre(centre, bookings, visits, lastBookingDate = null) {
     scheduledVisitDates,
     bookings30dCount: buckets.bookings30d.length,
     bookingsPrev30dCount: buckets.bookingsPrev30d.length,
-    bookings90dCount: buckets.bookings90d.length
+    bookings90dCount: buckets.bookings90d.length,
+    // Latest completed call or visit logged for this centre (any partner) — mobile's
+    // "log your centre contact" reminder uses it to surface centres not touched lately.
+    lastContactAt: (visits || []).filter(v => v.status === 'completed').map(v => v.visit_date).sort().pop() || null
   };
 }
 
