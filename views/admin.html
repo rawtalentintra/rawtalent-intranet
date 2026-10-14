@@ -364,7 +364,7 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
-        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('wfp-performance', this)">
+        <div class="admin-nav-item super-admin-only wfp-perf-viewer" style="display:none" onclick="showSection('wfp-performance', this)">
           <span class="admin-nav-icon">🏆</span> WFP Performance
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -5248,6 +5248,8 @@
       if (IS_PARTNERS_VIEW) document.querySelector('.admin-sidebar')?.classList.add('wfp-restricted-view');
       if (currentUserRole === 'super_admin') {
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
+      } else if (canSeeWfpPerformance()) {
+        document.querySelectorAll('.wfp-perf-viewer').forEach(el => el.style.display = '');
       }
       // Build Training is a per-user grant (e.g. Sophia), not a role — shown
       // to super_admin plus whoever has can_build_training set, regardless
@@ -6633,6 +6635,12 @@
 
     // ── Navigation ────────────────────────────────────────────────
     // 'wfp-performance' is a super_admin-only preview (Joy, 2026-10-05) — not for Workforce Partners or anyone else until the numbers are signed off.
+    // WFP Performance released to Liam (Joy, 2026-10-14) once its numbers
+    // reconciled. Still hidden from the Workforce Partners themselves.
+    const WFP_PERFORMANCE_VIEWERS = ['liam@rawtalent.com.au'];
+    function canSeeWfpPerformance() {
+      return currentUserRole === 'super_admin' || WFP_PERFORMANCE_VIEWERS.includes(String(currentUserEmail || '').toLowerCase());
+    }
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals'];
 
     function showSection(id, el) {
@@ -6663,7 +6671,7 @@
           showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
-      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin') {
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !(id === 'wfp-performance' && canSeeWfpPerformance())) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'payroll' && !currentUserIsPayrollAdmin) {
