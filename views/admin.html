@@ -1015,8 +1015,8 @@
           </div>
 
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
-            <div class="sd-card-title">Call Analysis and Insights</div>
-            <div class="sd-card-sub">What centres told our Workforce Partners, pulled from their voice notes: agencies used, pricing, needs, objections and opportunities. Each point links to its recording. Not limited to the period above.</div>
+            <div class="sd-card-title">Intelligence Matrix</div>
+            <div class="sd-card-sub">What centres are telling our Workforce Partners, by state. Read it before a client meeting. Built from partners' visit voice notes; click a point to see where it came from.</div>
             <div id="wfpPerfInsights" style="margin-top:16px"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>
           </div>
         </div>
@@ -10496,31 +10496,42 @@
     let wfpInsightsLoaded = false;
 
 
-    async function loadWfpInsights() {
+    let wfpMatrixState = null;
+    async function loadWfpInsights(state) {
       const box = document.getElementById('wfpPerfInsights');
       if (!box) return;
+      if (state) wfpMatrixState = state;
+      box.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Loading…</div>';
       try {
-        const res = await fetch('/api/leads/voice-insights');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Could not load insights');
-        const groups = {};
-        data.recordings.forEach(r => r.insights.forEach(i => (groups[i.category] = groups[i.category] || []).push({ ...i, r })));
-        const order = Object.keys(data.categories).filter(k => groups[k]);
-        const src = r => {
-          const who = escHtml((r.uploaded_by_name || r.uploaded_by_email || '').split(' ')[0]);
-          const where = escHtml([r.centre_name, r.state].filter(Boolean).join(', '));
-          const open = r.kind === 'lead' ? `openLeadDetail('${r.lead_id}')` : `goToCentre360('${escHtml(r.centre_key)}')`;
-          const dl = `/api/${r.kind === 'lead' ? 'leads' : 'centres'}/recordings/${r.id}/download`;
-          return `<span style="color:var(--text-muted);font-size:12px"> — <a href="#" onclick="${open};return false" style="color:inherit;text-decoration:underline">${where}</a> · ${who} · ${fmtDate(r.created_at)} · <a href="${dl}" target="_blank" style="color:var(--orange)">▶ recording</a></span>`;
-        };
-        box.innerHTML = (order.length ? order.map(k => `
-          <div style="margin-bottom:16px">
-            <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${escHtml(data.categories[k])} <span style="color:var(--text-muted);font-weight:600">(${groups[k].length})</span></div>
-            <ul style="margin:0;padding-left:18px;line-height:1.6;font-size:13.5px;color:var(--text)">
-              ${groups[k].map(i => `<li>${i.agency && !i.point.toLowerCase().includes(i.agency.toLowerCase()) ? `<b>${escHtml(i.agency)}:</b> ` : ''}${escHtml(i.point)}${src(i.r)}</li>`).join('')}
-            </ul>
-          </div>`).join('') : `<div style="font-size:13px;color:var(--text-muted)">No insights yet. They appear here as Workforce Partners record voice notes on visits.</div>`)
-          + `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">From ${data.recordings.length} analysed recording${data.recordings.length === 1 ? '' : 's'}${data.pending ? ` · ${data.pending} more being analysed` : ''}. Pulled automatically from the transcripts; open the recording to check anything important.</div>`;
+        const res = await fetch('/api/leads/voice-insights/matrix' + (wfpMatrixState ? '?state=' + wfpMatrixState : ''));
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Could not load');
+        wfpMatrixState = d.state;
+        const tabs = d.states.map(s => `<button type="button" onclick="loadWfpInsights('${s.state}')" style="border:1px solid var(--gray-200);border-radius:18px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;background:${s.state === d.state ? 'var(--navy)' : '#fff'};color:${s.state === d.state ? '#fff' : 'var(--navy)'}">${s.state}${s.recordings ? ` <span style="opacity:.7;font-weight:600">${s.recordings}</span>` : ''}</button>`).join('');
+        const fmt = x => x ? new Date(x).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
+        let n = 0;
+        const card = c => `
+          <div style="border:1px solid var(--gray-200);border-radius:12px;padding:16px 18px;background:#fff">
+            <div style="font-size:14px;font-weight:800;color:var(--navy);margin-bottom:10px">${escHtml(c.title)}</div>
+            ${c.bullets.length ? c.bullets.map(b => { const id = 'mx' + (n++); return `
+              <div style="padding:8px 0;border-top:1px solid var(--gray-100)">
+                <div style="cursor:pointer;display:flex;gap:8px;align-items:flex-start" onclick="document.getElementById('${id}').style.display=document.getElementById('${id}').style.display==='none'?'block':'none'">
+                  <div style="flex:1;font-size:13.5px;color:var(--text);line-height:1.45">${escHtml(b.point)}${b.say ? `<div style="margin-top:4px;font-size:12.5px;color:#15803d"><b>Say:</b> ${escHtml(b.say)}</div>` : ''}</div>
+                  <div style="text-align:right;white-space:nowrap"><span style="background:var(--gray-100);border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700;color:var(--navy)">×${b.count}</span><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${fmt(b.lastHeard)}</div></div>
+                </div>
+                <div id="${id}" style="display:none;margin-top:6px;padding:6px 10px;background:var(--gray-100);border-radius:8px">
+                  ${b.sources.map(src => `<div style="font-size:12px;padding:3px 0">
+                    <a href="#" onclick="${src.kind === 'lead' ? `openLeadDetail('${src.leadId}')` : `goToCentre360('${escHtml(src.centreKey || '')}')`};return false" style="color:var(--navy);font-weight:700;text-decoration:underline">${escHtml(src.centreName || '')}</a>
+                    <span style="color:var(--text-muted)"> · ${escHtml(src.by || '')} · ${fmt(src.at)}</span>
+                    ${src.summary ? `<div style="color:var(--text-muted);margin-top:1px">${escHtml(src.summary.length > 180 ? src.summary.slice(0, 180) + '…' : src.summary)}</div>` : ''}
+                  </div>`).join('')}
+                </div>
+              </div>`; }).join('') : '<div style="font-size:12.5px;color:var(--text-muted)">Nothing heard yet in this state.</div>'}
+          </div>`;
+        box.innerHTML = `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${tabs}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">${d.cards.map(card).join('')}</div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">${d.recordings} voice note${d.recordings === 1 ? '' : 's'} in ${escHtml(d.state)}. ×N = how many visits it came up in. "Say" lines are suggestions.</div>`;
       } catch (e) {
         box.innerHTML = `<div style="font-size:13px;color:#b91c1c">${escHtml(e.message)}</div>`;
       }

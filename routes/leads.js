@@ -495,6 +495,19 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
 const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
 // Call Analysis and Insights (bottom of WFP Performance). Same audience as that
 // page: super_admin and Liam (mcpTokenService.canUseMcp covers exactly those).
+// Intelligence Matrix — same audience as Call Analysis and Insights.
+router.get('/voice-insights/matrix', async (req, res) => {
+  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Not available for your account' });
+  try {
+    const svc = require('../services/voiceInsightsService');
+    const states = await svc.matrixStates();
+    const state = ['VIC', 'SA', 'QLD', 'ACT', 'NT'].includes(String(req.query.state || '').toUpperCase()) ? String(req.query.state).toUpperCase() : (states.slice().sort((a, b) => b.recordings - a.recordings)[0] || {}).state || 'VIC';
+    res.json({ states, ...(await svc.buildMatrix(state)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/voice-insights', async (req, res) => {
   if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Not available for your account' });
   try {

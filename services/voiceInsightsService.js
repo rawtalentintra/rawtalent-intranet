@@ -108,4 +108,87 @@ async function listInsights() {
   }) };
 }
 
-module.exports = { analysePending, listInsights, CATEGORIES };
+// ── Intelligence Matrix (Liam, Ops Meeting 12 Oct) ─────────────────────
+// A per-state playbook a partner reads before a client meeting: 4 short cards
+// (competitors & pricing, centre needs, objections + what to say,
+// opportunities). Claude groups the raw insights into a few de-duplicated
+// bullets, each tied to the recordings it came from; count = how many visits
+// it came up in, lastHeard = newest of those. Cached until the set of insights
+// for that state changes, so it's only rebuilt when new voice notes arrive.
+const MATRIX_CARDS = [
+  { key: 'competitors', title: 'Competitors & pricing', from: ['competitors', 'competitor_pricing'] },
+  { key: 'needs', title: 'Top centre needs', from: ['centre_needs'] },
+  { key: 'objections', title: 'Objections & what to say', from: ['objections'] },
+  { key: 'opportunities', title: 'Opportunities', from: ['opportunities', 'other'] }
+];
+const matrixCache = new Map(); // state -> { signature, matrix }
+const STATE_OF = s => ({ victoria: 'VIC', vic: 'VIC', 'south australia': 'SA', sa: 'SA', queensland: 'QLD', qld: 'QLD', 'australian capital territory': 'ACT', act: 'ACT', 'northern territory': 'NT', nt: 'NT', 'new south wales': 'NSW', nsw: 'NSW' })[String(s || '').trim().toLowerCase()] || 'Other';
+
+const MATRIX_TOOL = {
+  name: 'record_matrix',
+  description: 'Group the numbered insights into a short playbook.',
+  input_schema: {
+    type: 'object',
+    properties: Object.fromEntries(MATRIX_CARDS.map(c => [c.key, {
+      type: 'array', maxItems: 5,
+      items: {
+        type: 'object',
+        properties: {
+          point: { type: 'string', description: 'One short, plain-English bullet (under 18 words). Merge insights that say the same thing. Keep exact figures and agency names.' },
+          say: { type: 'string', description: c.key === 'objections' ? 'A short suggested response a partner could give (under 25 words), consistent with RawTalent: no contracts, no upfront fees, qualified compliant educators, familiar educators.' : 'Leave empty.' },
+          sources: { type: 'array', items: { type: 'integer' }, description: 'Numbers of every insight this bullet is based on.' }
+        },
+        required: ['point', 'sources']
+      }
+    }])),
+    required: MATRIX_CARDS.map(c => c.key)
+  }
+};
+
+async function buildMatrix(state) {
+  const data = await listInsights();
+  const recs = data.recordings.filter(r => STATE_OF(r.state) === state);
+  const items = [];
+  recs.forEach(r => r.insights.forEach(i => items.push({ ...i, r })));
+  const signature = items.map(i => `${i.r.kind}${i.r.id}:${i.point}`).join('|');
+  const cached = matrixCache.get(state);
+  if (cached && cached.signature === signature) return cached.matrix;
+  const empty = { state, cards: MATRIX_CARDS.map(c => ({ key: c.key, title: c.title, bullets: [] })), recordings: recs.length };
+  const c = client();
+  if (!items.length || !c) { matrixCache.set(state, { signature, matrix: empty }); return empty; }
+  const lines = items.map((it, n) => `${n + 1}. [${it.category}] ${it.agency ? it.agency + ': ' : ''}${it.point}`).join('\n');
+  const res = await c.messages.create({
+    model: 'claude-haiku-4-5-20251001', max_tokens: 2000,
+    system: `You turn field notes from RawTalent Workforce Partners' visits to childcare centres in ${state} into a short pre-meeting playbook. Cards: competitors & pricing (from competitors/competitor_pricing), top centre needs (centre_needs), objections (objections), opportunities (opportunities/other). Merge duplicates, rank by how many insights support each bullet, max 5 per card, only facts in the notes. Call record_matrix once.`,
+    tools: [MATRIX_TOOL], tool_choice: { type: 'tool', name: 'record_matrix' },
+    messages: [{ role: 'user', content: lines }]
+  });
+  const out = res.content.find(b => b.type === 'tool_use')?.input || {};
+  const matrix = {
+    state, recordings: recs.length,
+    cards: MATRIX_CARDS.map(card => ({
+      key: card.key, title: card.title,
+      bullets: (out[card.key] || []).map(b => {
+        const src = [...new Set((b.sources || []).map(n => items[n - 1]).filter(Boolean).map(i => i.r))];
+        const uniq = [...new Map(src.map(r => [r.kind + r.id, r])).values()];
+        return {
+          point: String(b.point || '').slice(0, 200), say: b.say ? String(b.say).slice(0, 240) : null,
+          count: uniq.length,
+          lastHeard: uniq.reduce((m, r) => (!m || new Date(r.created_at) > new Date(m) ? r.created_at : m), null),
+          sources: uniq.map(r => ({ kind: r.kind, id: r.id, leadId: r.lead_id, centreKey: r.centre_key, centreName: r.centre_name, by: (r.uploaded_by_name || '').split(' ')[0], at: r.created_at, summary: r.summary || null }))
+        };
+      }).filter(b => b.count).sort((a, b) => b.count - a.count || new Date(b.lastHeard) - new Date(a.lastHeard))
+    }))
+  };
+  matrixCache.set(state, { signature, matrix });
+  return matrix;
+}
+
+async function matrixStates() {
+  const data = await listInsights();
+  const counts = {};
+  data.recordings.filter(r => r.insights.length).forEach(r => { const s = STATE_OF(r.state); counts[s] = (counts[s] || 0) + 1; });
+  return ['VIC', 'SA', 'QLD', 'ACT', 'NT'].map(s => ({ state: s, recordings: counts[s] || 0 }));
+}
+
+module.exports = { analysePending, listInsights, CATEGORIES, buildMatrix, matrixStates };
