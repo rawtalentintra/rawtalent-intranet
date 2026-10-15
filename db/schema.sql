@@ -2648,3 +2648,16 @@ ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS first_shift_date DATE;
 -- follow-up task is created for that partner (Liam, 13 Oct 2026, points 3-4).
 ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 ALTER TABLE qr_referrals ADD COLUMN IF NOT EXISTS partner_task_id TEXT;
+
+-- MCP usage log (Joy, 2026-10-15): which HeartBeat tools each connected user
+-- calls and with what arguments, so Joy can see what people look up and keep
+-- that data accurate. Records the request only — never chat text or results.
+-- Not exposed through any MCP tool.
+CREATE TABLE IF NOT EXISTS mcp_usage_log (
+  id SERIAL PRIMARY KEY,
+  user_email CITEXT,
+  tool TEXT,
+  arguments JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_usage_log_created ON mcp_usage_log(created_at);

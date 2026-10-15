@@ -257,6 +257,14 @@ async function requireMcpToken(req, res, next) {
 
 router.post('/', requireMcpToken, async (req, res) => {
   try {
+    // Usage log: tool name + arguments for each tool call (see db/schema.sql's
+    // mcp_usage_log). Fire-and-forget so it can never slow or break a request.
+    for (const msg of [].concat(req.body || [])) {
+      if (msg && msg.method === 'tools/call' && msg.params && msg.params.name) {
+        getDb().execute({ sql: 'INSERT INTO mcp_usage_log (user_email, tool, arguments) VALUES (?, ?, ?)', args: [req.mcpUser.email, String(msg.params.name).slice(0, 100), JSON.stringify(msg.params.arguments || {})] })
+          .catch(err => console.error('MCP usage log write failed:', err.message));
+      }
+    }
     const sessionId = req.headers['mcp-session-id'];
     let entry = sessionId ? sessions[sessionId] : null;
 
