@@ -2684,3 +2684,4 @@ CREATE TABLE IF NOT EXISTS first_booking_free_offers (
   booking_date DATE,
   pay_task_id TEXT
 );
+ALTER TABLE first_booking_free_offers ADD COLUMN IF NOT EXISTS state TEXT; -- VIC/SA/QLD… picks the partner shown in the email

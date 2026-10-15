@@ -34,7 +34,7 @@ async function sendOfferEmail(offerId) {
         transactional_message_id: msgId,
         to: o.contact_email,
         identifiers: { email: o.contact_email },
-        message_data: { centre_name: o.centre_name, contact_first_name: o.contact_first_name || '', partner_name: o.offered_by_name || '' }
+        message_data: { centre_name: o.centre_name, contact_first_name: o.contact_first_name || '', partner_name: o.offered_by_name || '', state: o.state || '' }
       })
     });
     if (!res.ok) throw new Error(`Customer.io ${res.status}: ${(await res.text()).slice(0, 200)}`);

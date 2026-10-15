@@ -31,23 +31,24 @@ router.post('/', async (req, res) => {
     const { leadId, centreKey } = req.body || {};
     if (!leadId && !centreKey) return res.status(400).json({ error: 'leadId or centreKey is required' });
     const db = getDb();
-    let centreName, contactEmail = null, contactFirst = null;
+    let centreName, contactEmail = null, contactFirst = null, state = null;
+    const short = s => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'australian capital territory': 'ACT', 'northern territory': 'NT' })[String(s || '').trim().toLowerCase()] || String(s || '').trim().toUpperCase() || null;
     if (leadId) {
-      const l = (await db.execute({ sql: 'SELECT centre_name, contact_email, contact_first_name FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+      const l = (await db.execute({ sql: 'SELECT centre_name, contact_email, contact_first_name, state FROM leads WHERE id = ?', args: [leadId] })).rows[0];
       if (!l) return res.status(404).json({ error: 'Lead not found' });
-      centreName = l.centre_name; contactEmail = l.contact_email || null; contactFirst = l.contact_first_name || null;
+      centreName = l.centre_name; contactEmail = l.contact_email || null; contactFirst = l.contact_first_name || null; state = short(l.state);
     } else {
       const { centres } = await getCentresAndBookings();
       const c = centres.find(x => x.centreKey === centreKey);
       if (!c) return res.status(404).json({ error: 'Centre not found' });
-      centreName = c.name; contactEmail = c.email || null; contactFirst = (c.contactName || '').split(' ')[0] || null;
+      centreName = c.name; contactEmail = c.email || null; contactFirst = (c.contactName || '').split(' ')[0] || null; state = short(c.state);
     }
     const existing = (await db.execute({ sql: `SELECT * FROM first_booking_free_offers WHERE ${leadId ? 'lead_id' : 'centre_key'} = ?`, args: [leadId || centreKey] })).rows[0];
     if (existing) return res.json(shape(existing));
     const row = (await db.execute({
-      sql: `INSERT INTO first_booking_free_offers (lead_id, centre_key, centre_name, contact_email, contact_first_name, offered_by_email, offered_by_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [leadId || null, leadId ? null : centreKey, centreName, contactEmail, contactFirst, req.user.email, req.user.name || req.user.email]
+      sql: `INSERT INTO first_booking_free_offers (lead_id, centre_key, centre_name, contact_email, contact_first_name, offered_by_email, offered_by_name, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      args: [leadId || null, leadId ? null : centreKey, centreName, contactEmail, contactFirst, req.user.email, req.user.name || req.user.email, state]
     })).rows[0];
     await sendOfferEmail(row.id).catch(() => {});
     const fresh = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [row.id] })).rows[0];
