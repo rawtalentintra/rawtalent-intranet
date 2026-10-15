@@ -137,7 +137,7 @@ async function getLatestCallDirections(db) {
   const res = await db.execute(`
     SELECT DISTINCT ON (user_email) user_email, direction, start_time
     FROM webex_cdrs
-    WHERE user_email IS NOT NULL
+    WHERE user_email IS NOT NULL AND start_time >= now() - interval '14 days'
     ORDER BY user_email, start_time DESC
   `);
   const map = new Map();
@@ -196,12 +196,16 @@ let cachedResult = null;
 let cachedAt = 0;
 const CACHE_TTL_MS = 20 * 1000;
 
+// Only one refresh at a time: if the previous poll is still running (slow
+// Webex or DB), callers share it instead of stacking up more DB queries.
+let inFlightStatuses = null;
 async function getAgentStatuses() {
   if (cachedResult && Date.now() - cachedAt < CACHE_TTL_MS) return cachedResult;
-  const result = await fetchAgentStatuses();
-  cachedResult = result;
-  cachedAt = Date.now();
-  return result;
+  if (inFlightStatuses) return inFlightStatuses;
+  inFlightStatuses = fetchAgentStatuses()
+    .then(result => { cachedResult = result; cachedAt = Date.now(); return result; })
+    .finally(() => { inFlightStatuses = null; });
+  return inFlightStatuses;
 }
 
 async function analyticsCall(path, params, accessToken) {

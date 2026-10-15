@@ -963,6 +963,9 @@ CREATE TABLE IF NOT EXISTS webex_cdrs (
 );
 CREATE INDEX IF NOT EXISTS idx_webex_cdrs_start_time ON webex_cdrs(start_time);
 CREATE INDEX IF NOT EXISTS idx_webex_cdrs_user_email ON webex_cdrs(user_email);
+-- Latest call per person (Workforce Queue, polled every 20s). Without this the
+-- query scanned all ~70k calls and took over a minute, piling up (16 Oct 2026).
+CREATE INDEX IF NOT EXISTS idx_webex_cdrs_user_start ON webex_cdrs(user_email, start_time DESC);
 
 CREATE TABLE IF NOT EXISTS webex_cdr_sync_state (
   id INTEGER PRIMARY KEY DEFAULT 1,
