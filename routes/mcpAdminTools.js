@@ -2,8 +2,7 @@
 // pipeline, bookings and fill rate, JobAdder, and meeting search. Added
 // 2026-10-09 so the company owner (Liam) can ask about the admin side from
 // his own AI client. Everything here only reads: no tool changes data in
-// HeartBeat, RT Portal or JobAdder. Payroll, payslips and timesheets are
-// deliberately NOT exposed. Only accounts that pass mcpTokenService.canUseMcp
+// HeartBeat, RT Portal or JobAdder. Only accounts that pass mcpTokenService.canUseMcp
 // ever reach this file (see requireMcpToken in routes/mcp.js).
 const { z } = require('zod');
 const { getDb } = require('../db/database');
@@ -271,6 +270,101 @@ function registerAdminTools(server) {
     d.recordings.forEach(r => r.insights.forEach(i => { if (!category || i.category === category) (groups[i.category] = groups[i.category] || []).push(`  - ${i.agency && !i.point.toLowerCase().includes(String(i.agency).toLowerCase()) ? i.agency + ': ' : ''}${i.point} (${[r.centre_name, r.state].filter(Boolean).join(', ')}; ${(r.uploaded_by_name || '').split(' ')[0]}, ${day(r.created_at)})`); }));
     const body = Object.entries(groups).map(([k, v]) => `${d.categories[k]} (${v.length}):\n${v.join('\n')}`).join('\n\n');
     return text(body || 'No insights yet.');
+  });
+
+  // ── General read access to HeartBeat data (Joy, 2026-10-15) ───────────
+  // One tool over HeartBeat's own tables so Liam can look up anything the app
+  // holds. Only the datasets listed in DATASETS are reachable. Columns that
+  // hold credentials, bank account numbers or file-storage internals are
+  // never returned.
+  const DATASETS = {
+    tasks: { table: 'tasks', date: 'created_at', about: 'All tasks across departments (title, status, priority, assignees, due date, linked educators/centres)' },
+    task_notes: { table: 'task_notes', date: 'created_at', about: 'Comments on tasks (filter with equals {"task_id": "..."})' },
+    task_departments: { table: 'task_departments', about: 'Task departments' },
+    task_classifications: { table: 'task_classifications', about: 'Task classifications per department' },
+    timesheets: { table: 'timesheet_weeks', date: 'week_start_date', about: 'Team timesheet weeks (hours, status, approvals)' },
+    timesheet_entries: { table: 'timesheet_entries', date: 'entry_date', about: 'Daily timesheet entries (filter equals {"week_id": "..."} or {"user_email": "..."})' },
+    payslips: { table: 'payslips', date: 'pay_period_start', about: 'Team payslips (period, days worked, line items, totals in AUD/PHP)' },
+    payroll_profiles: { table: 'employee_payroll_profiles', about: 'Team pay rates (hourly, fortnightly, overtime)' },
+    leave_requests: { table: 'leave_requests', date: 'start_date', about: 'Team leave requests and approvals' },
+    team: { table: 'team_members', about: 'Team directory: position, team, manager, start date, contact details, equipment' },
+    users: { table: 'users', about: 'HeartBeat user accounts (name, email, role, active, partner label)' },
+    projects: { table: 'projects', date: 'created_at', about: 'Projects' },
+    project_milestones: { table: 'project_milestones', about: 'Project milestones (filter equals {"project_id": "..."})' },
+    announcements: { table: 'announcements', date: 'created_at', about: 'Team announcements' },
+    articles: { table: 'articles', date: 'created_at', about: 'Knowledge base articles and SOPs' },
+    faqs: { table: 'faqs', about: 'FAQs' },
+    glossary: { table: 'glossary', about: 'Glossary terms' },
+    ideas: { table: 'ideas', date: 'created_at', about: 'Team ideas' },
+    article_feedback: { table: 'feedback', date: 'created_at', about: 'Suggested changes to articles' },
+    call_evaluations: { table: 'call_evaluations', date: 'call_date', about: 'Call quality grades per consultant call (scores, outcome, summary, reviewer feedback)' },
+    call_recordings: { table: 'call_recordings', date: 'start_time_iso', about: 'Dubber call recordings metadata and transcripts (rep, numbers, duration, sentiment)' },
+    webex_calls: { table: 'webex_cdrs', date: 'start_time', about: 'Webex call history (who, direction, answered, duration, numbers)' },
+    webex_agent_status: { table: 'webex_agent_status_history', date: 'started_at', about: 'Webex agent status history (available, busy, etc.)' },
+    centre_visits: { table: 'centre_visits', date: 'visit_date', about: 'Logged centre calls and visits by Workforce Partners' },
+    centre_partner_assignments: { table: 'centre_partner_assignments', about: 'Which Workforce Partner owns which centre' },
+    hidden_centres: { table: 'hidden_centres', about: 'Centres hidden from lists' },
+    planned_routes: { table: 'wfp_planned_routes', date: 'route_date', about: 'Workforce Partner planned visit routes' },
+    lead_activities: { table: 'lead_activities', date: 'created_at', about: 'Logged calls/visits on leads' },
+    lead_notes: { table: 'lead_notes', date: 'created_at', about: 'Notes on leads' },
+    lead_educators: { table: 'lead_educators', date: 'created_at', about: 'Educators tagged to leads' },
+    qr_referrals: { table: 'qr_referrals', date: 'created_at', about: 'QR code poster registrations' },
+    first_shift_followups: { table: 'first_shift_followups', date: 'created_at', about: 'First shift follow-up calls' },
+    document_checks: { table: 'document_checks', date: 'created_at', about: 'Educator document checks (First Aid/CPR etc.)' },
+    training_courses: { table: 'training_courses', about: 'Training courses' },
+    training_assignments: { table: 'training_assignments', about: 'Who is assigned which training' },
+    training_attempts: { table: 'training_attempts', about: 'Training attempts and scores' },
+    jobadder_reviews: { table: 'jobadder_application_reviews', date: 'created_at', about: 'Reviews of JobAdder applicants' },
+    acecqa_qualifications: { table: 'acecqa_approved_qualifications', about: 'ACECQA approved qualifications list' }
+  };
+  const HIDDEN_COLUMN = /password|hash|token|secret|google_id|bank_account_number|swift|storage_path|^raw$|audio|photo_storage/i;
+  const colCache = new Map();
+  async function columnsFor(table) {
+    if (!colCache.has(table)) {
+      const rows = (await getDb().execute({ sql: 'SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position', args: [table] })).rows;
+      colCache.set(table, rows.filter(r => !HIDDEN_COLUMN.test(r.column_name)));
+    }
+    return colCache.get(table);
+  }
+
+  server.registerTool('query_heartbeat_data', {
+    title: 'Query HeartBeat Data',
+    description: 'Read any HeartBeat dataset. Datasets: ' + Object.entries(DATASETS).map(([k, v]) => `${k} — ${v.about}`).join('; ') + '. Use "list_fields": true to see a dataset\'s fields first. Filters: from/to (YYYY-MM-DD, on the dataset\'s main date), search (text match across text fields), equals (exact field match, e.g. {"status":"to_do"}). Newest first, up to 100 rows.',
+    inputSchema: {
+      dataset: z.enum(Object.keys(DATASETS)),
+      list_fields: z.boolean().optional(),
+      from: z.string().optional(), to: z.string().optional(),
+      search: z.string().optional(),
+      equals: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+      limit: z.number().int().min(1).max(100).optional()
+    }
+  }, async ({ dataset, list_fields, from, to, search, equals, limit }) => {
+    const ds = DATASETS[dataset];
+    const cols = await columnsFor(ds.table);
+    if (!cols.length) return text('No data available for that dataset.');
+    if (list_fields) return text(`${dataset} fields: ` + cols.map(c => `${c.column_name} (${c.data_type})`).join(', '));
+    const names = new Set(cols.map(c => c.column_name));
+    const where = [], args = [];
+    if (ds.date && names.has(ds.date)) {
+      if (isDay(from)) { where.push(`${ds.date} >= CAST(? AS date)`); args.push(from); }
+      if (isDay(to)) { where.push(`${ds.date} < CAST(? AS date)`); args.push(to); }
+    }
+    for (const [k, v] of Object.entries(equals || {})) {
+      if (!names.has(k)) return text(`Unknown field "${k}" for ${dataset}. Use list_fields to see the fields.`);
+      where.push(`CAST(${k} AS text) = ?`); args.push(String(v));
+    }
+    if (search) {
+      const textCols = cols.filter(c => /text|character|json/i.test(c.data_type)).map(c => `CAST(${c.column_name} AS text)`);
+      if (textCols.length) { where.push('(' + textCols.map(c => `${c} ILIKE ?`).join(' OR ') + ')'); textCols.forEach(() => args.push(`%${search}%`)); }
+    }
+    const order = ds.date && names.has(ds.date) ? `${ds.date} DESC NULLS LAST` : (names.has('created_at') ? 'created_at DESC' : '1');
+    const rows = (await getDb().execute({
+      sql: `SELECT ${cols.map(c => c.column_name).join(', ')} FROM ${ds.table} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ?`,
+      args: [...args, limit || 25]
+    })).rows;
+    if (!rows.length) return text(`No ${dataset} rows matched.`);
+    const clip = v => { const s = typeof v === 'object' && v !== null && !(v instanceof Date) ? JSON.stringify(v) : String(v); return s.length > 600 ? s.slice(0, 600) + '…' : s; };
+    return text(`${rows.length} ${dataset} row(s):\n` + rows.map(r => Object.entries(r).filter(([, v]) => v !== null && v !== '').map(([k, v]) => `${k}: ${clip(v)}`).join(' | ')).join('\n'));
   });
 
   // ── QR code recruitment report ──────────────────────────────────────
