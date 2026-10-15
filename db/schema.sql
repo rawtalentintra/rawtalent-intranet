@@ -2661,3 +2661,26 @@ CREATE TABLE IF NOT EXISTS mcp_usage_log (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_usage_log_created ON mcp_usage_log(created_at);
+
+-- First Booking Free (Liam, 15 Oct 2026): Workforce Partners tag a lead or a
+-- centre when they offer "your first booking is free" (only for centres that
+-- use agency staff regularly). One row per lead / centre. Triggers a once-off
+-- Customer.io email and, when that centre's first booking comes in, a task
+-- for Nancy (accounts) so the booking isn't charged.
+CREATE TABLE IF NOT EXISTS first_booking_free_offers (
+  id SERIAL PRIMARY KEY,
+  lead_id TEXT UNIQUE,
+  centre_key TEXT UNIQUE,
+  centre_name TEXT,
+  contact_email CITEXT,
+  contact_first_name TEXT,
+  offered_by_email CITEXT,
+  offered_by_name TEXT,
+  offered_at TIMESTAMPTZ DEFAULT now(),
+  email_status TEXT DEFAULT 'pending',  -- pending | sent | no_email | failed
+  email_sent_at TIMESTAMPTZ,
+  email_error TEXT,
+  booking_id TEXT,
+  booking_date DATE,
+  pay_task_id TEXT
+);

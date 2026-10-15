@@ -192,6 +192,7 @@ app.use('/api/centres', require('./routes/centres'));
 app.use('/api/first-shift', require('./routes/firstShift'));
 // QR Code Educator Recruitment (Liam, 13 Oct 2026): public landing-page form + Operations view.
 app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter);
+app.use('/api/first-booking-free', require('./routes/firstBookingFree'));
 app.use('/api/qr-referrals/familiar', require('./routes/qrReferrals').familiarRouter);
 app.use('/api/qr-referrals', require('./routes/qrReferrals').router);
 app.use('/api/centre-ownership', require('./routes/centreOwnership'));
@@ -516,6 +517,8 @@ async function start() {
       .then(({ activated, tasks }) => { if (activated || tasks) console.log(`QR referrals: ${activated} newly active, ${tasks} partner follow-up task(s).`); })
       .then(() => require('./services/qrBonusService').createBonusTasks())
       .then(({ created }) => { if (created) console.log(`QR welcome bonus: ${created} payroll task(s) created.`); })
+      .then(() => require('./services/firstBookingFreeService').processFirstBookings())
+      .then(({ tasks }) => { if (tasks) console.log(`First booking free: ${tasks} task(s) created for accounts.`); })
       .catch(err => console.error('QR welcome bonus check error:', err.message));
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
     setInterval(runQrBonusCheck, 3 * 60 * 60 * 1000);

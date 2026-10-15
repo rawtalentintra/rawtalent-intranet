@@ -309,6 +309,7 @@ function registerAdminTools(server) {
     lead_notes: { table: 'lead_notes', date: 'created_at', about: 'Notes on leads' },
     lead_educators: { table: 'lead_educators', date: 'created_at', about: 'Educators tagged to leads' },
     qr_referrals: { table: 'qr_referrals', date: 'created_at', about: 'QR code poster registrations' },
+    first_booking_free: { table: 'first_booking_free_offers', date: 'offered_at', about: 'Leads/centres offered "first booking free" (who offered, email status, first booking received)' },
     first_shift_followups: { table: 'first_shift_followups', date: 'created_at', about: 'First shift follow-up calls' },
     document_checks: { table: 'document_checks', date: 'created_at', about: 'Educator document checks (First Aid/CPR etc.)' },
     training_courses: { table: 'training_courses', about: 'Training courses' },

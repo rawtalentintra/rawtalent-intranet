@@ -1701,6 +1701,51 @@
       catch { currentLeadEducators = { tagged: [], suggestion: null }; }
       paintLeadDetail();
     }
+    // ── First booking free tag (Liam, 15 Oct 2026) ─────────────────────────
+    // Partners tick this when they offer "your first booking is free" (only to
+    // centres that use agency regularly). Sends a once-off email and, when the
+    // centre's first booking comes in, a task for accounts not to charge it.
+    async function loadFbf(kind, id, boxId) {
+      const box = document.getElementById(boxId);
+      if (!box) return;
+      try {
+        const r = await fetch(`/api/first-booking-free?${kind === 'lead' ? 'leadId' : 'centreKey'}=${encodeURIComponent(id)}`);
+        const o = r.ok ? await r.json() : null;
+        box.innerHTML = fbfHtml(kind, id, boxId, o);
+      } catch { box.innerHTML = ''; }
+    }
+    function fbfHtml(kind, id, boxId, o) {
+      if (!o) return `<button type="button" class="btn btn-secondary" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
+        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>`;
+      const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const email = { sent: 'Offer email sent', pending: 'Offer email queued', no_email: 'No contact email on file, so no email was sent', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
+      const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
+      return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
+        <div style="font-weight:700;color:#15803d;font-size:13px">🎁 First booking free — offered</div>
+        <div style="font-size:12px;color:#374151;margin-top:2px">By ${escHtml(o.offeredBy || '')} on ${when}</div>
+        <div style="font-size:12px;color:#374151">${escHtml(email)}</div>
+        <div style="font-size:12px;color:#374151">${booking}</div>
+        ${canUndo ? `<a href="#" onclick="removeFbf(${o.id},'${kind}','${escHtml(id)}','${boxId}');return false" style="font-size:11.5px;color:#6b7590">Remove (tagged by mistake)</a>` : ''}
+      </div>`;
+    }
+    async function setFbf(kind, id, boxId) {
+      if (!confirm('Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
+      try {
+        const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'lead' ? { leadId: id } : { centreKey: id }) });
+        const o = await r.json();
+        if (!r.ok) throw new Error(o.error || 'Could not save');
+        document.getElementById(boxId).innerHTML = fbfHtml(kind, id, boxId, o);
+      } catch (e) { alert(e.message); }
+    }
+    async function removeFbf(offerId, kind, id, boxId) {
+      if (!confirm('Remove the first-booking-free tag?')) return;
+      const r = await fetch(`/api/first-booking-free/${offerId}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(d.error || 'Could not remove'); return; }
+      loadFbf(kind, id, boxId);
+    }
+
     function paintLeadDetail() {
       const l = allLeads.find(x => x.id === currentLeadId);
       const main = document.getElementById('mainContent');
@@ -1767,6 +1812,7 @@
 
         ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
       `;
+      loadFbf('lead', currentLeadId, 'fbfLeadBoxM');
     }
 
     // ── Educators tagged to a lead (Liam, 4 Sep) ─────────────────────
@@ -2192,6 +2238,7 @@
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="messageTeam(this)">Message Team</button>
         </div>
+        <div class="card" style="cursor:default" id="fbfLeadBoxM"></div>
         <div class="card" style="cursor:default;margin-top:12px">
           <div class="section-title" style="margin:0 0 8px">Quick log</div>
           <div class="action-row" style="margin:0">
@@ -2200,6 +2247,7 @@
           </div>
           <div class="sub" style="margin-top:8px" data-ql-status="${escHtml(currentCentreKey)}">${quickLogStatusHtml(currentCentreKey) || 'One tap, no form. Add notes with the buttons below.'}</div>
         </div>
+        <div class="card" style="cursor:default" id="fbfCentreBoxM"></div>
         <div class="action-row">
           <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">Call + Notes</button>
           <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'visit'})">Visit + Notes</button>
@@ -2229,6 +2277,7 @@
           ` : ''}
         </details>
       `;
+      loadFbf('centre', currentCentreKey, 'fbfCentreBoxM');
     }
     function toggleUpcoming() {
       upcomingExpanded = !upcomingExpanded;

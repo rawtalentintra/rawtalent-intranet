@@ -11824,6 +11824,7 @@
         currentCentre360Bookings = {};
         activity.events.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
         bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
+        loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
       }
@@ -11882,6 +11883,52 @@
       window.scrollTo({ top: 0 });
     }
 
+
+    // ── First booking free tag (Liam, 15 Oct 2026) ─────────────────────────
+    // Partners tick this when they offer "your first booking is free" (only to
+    // centres that use agency regularly). Sends a once-off email and, when the
+    // centre's first booking comes in, a task for accounts not to charge it.
+    async function loadFbf(kind, id, boxId) {
+      const box = document.getElementById(boxId);
+      if (!box) return;
+      try {
+        const r = await fetch(`/api/first-booking-free?${kind === 'lead' ? 'leadId' : 'centreKey'}=${encodeURIComponent(id)}`);
+        const o = r.ok ? await r.json() : null;
+        box.innerHTML = fbfHtml(kind, id, boxId, o);
+      } catch { box.innerHTML = ''; }
+    }
+    function fbfHtml(kind, id, boxId, o) {
+      if (!o) return `<button type="button" class="btn-add" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
+        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>`;
+      const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const email = { sent: 'Offer email sent', pending: 'Offer email queued', no_email: 'No contact email on file, so no email was sent', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
+      const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
+      return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
+        <div style="font-weight:700;color:#15803d;font-size:13px">🎁 First booking free — offered</div>
+        <div style="font-size:12px;color:#374151;margin-top:2px">By ${escHtml(o.offeredBy || '')} on ${when}</div>
+        <div style="font-size:12px;color:#374151">${escHtml(email)}</div>
+        <div style="font-size:12px;color:#374151">${booking}</div>
+        ${canUndo ? `<a href="#" onclick="removeFbf(${o.id},'${kind}','${escHtml(id)}','${boxId}');return false" style="font-size:11.5px;color:#6b7590">Remove (tagged by mistake)</a>` : ''}
+      </div>`;
+    }
+    async function setFbf(kind, id, boxId) {
+      if (!confirm('Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
+      try {
+        const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'lead' ? { leadId: id } : { centreKey: id }) });
+        const o = await r.json();
+        if (!r.ok) throw new Error(o.error || 'Could not save');
+        document.getElementById(boxId).innerHTML = fbfHtml(kind, id, boxId, o);
+      } catch (e) { alert(e.message); }
+    }
+    async function removeFbf(offerId, kind, id, boxId) {
+      if (!confirm('Remove the first-booking-free tag?')) return;
+      const r = await fetch(`/api/first-booking-free/${offerId}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(d.error || 'Could not remove'); return; }
+      loadFbf(kind, id, boxId);
+    }
+
     function renderCentre360(c, bookingsRes, educators, activity) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
       const effectivePartner = c.assignedWorkforcePartner || defaultCentrePartner(c.state, c.suburb);
@@ -11921,6 +11968,9 @@
             ${quickBtnHtml(c.centreKey, 'visit', 'btn-add')}
             <button class="btn-secondary" onclick="openVisitLogModal('${c.centreKey}')">Call/Visit + Notes</button>
           </div>
+        </div>
+        <div class="admin-table-card" style="padding:16px 24px;margin-bottom:16px">
+          <div id="fbfCentreBox"></div>
         </div>
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
@@ -18013,6 +18063,9 @@
           </select>
         </div>
 
+        <div class="lead-group-label" style="margin-top:14px">First booking free</div>
+        <div id="fbfLeadBox" style="margin-bottom:10px"></div>
+
         <div class="lead-group-label" style="margin-top:14px">Site Visit Recordings</div>
         ${canEditContact ? `
           <div class="file-dropzone" ondragover="handleLeadRecordingDragOver(event)" ondragleave="handleLeadRecordingDragLeave(event)" ondrop="handleLeadRecordingDrop(event)">
@@ -18050,6 +18103,7 @@
       updateLeadStatusCalendarIcon('centre_visited');
       loadLeadNotes(id);
       loadLeadRecordings(id);
+      loadFbf('lead', id, 'fbfLeadBox');
       loadLeadEducators(id);
       resetLeadVoiceRecorder();
     }
