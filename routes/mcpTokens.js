@@ -12,7 +12,14 @@ const mcpTokens = require('../services/mcpTokenService');
 // role generate their own token today. Widen this (or make it a
 // per-person grant, matching requireTrainingBuilder's pattern) if MCP
 // access is ever meant to reach past just her.
-router.use(requireSuperAdmin);
+// super_admin plus Liam (Joy, 2026-10-15) — the same accounts the /mcp endpoint
+// itself allows, so Liam can make his own token for apps that can't do the
+// OAuth sign-in (e.g. the Codex app). Tokens are only ever for the signed-in user.
+router.use((req, res, next) => {
+  if (!req.isAuthenticated || !req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
+  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Super admin access required' });
+  next();
+});
 
 router.get('/', async (req, res) => {
   try {
