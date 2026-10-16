@@ -12067,22 +12067,32 @@
       const box = document.getElementById(boxId);
       if (!box) return;
       try {
-        const r = await fetch(`/api/first-booking-free?${kind === 'lead' ? 'leadId' : 'centreKey'}=${encodeURIComponent(id)}`);
+        const q = `${kind === 'lead' ? 'leadId' : 'centreKey'}=${encodeURIComponent(id)}`;
+        const [r, rc] = await Promise.all([fetch(`/api/first-booking-free?${q}`), fetch(`/api/first-booking-free/contact?${q}`)]);
         const o = r.ok ? await r.json() : null;
+        window.__fbfContact = window.__fbfContact || {};
+        window.__fbfContact[boxId] = rc.ok ? await rc.json() : null;
         box.innerHTML = fbfHtml(kind, id, boxId, o);
       } catch { box.innerHTML = ''; }
     }
+    function fbfContactLine(boxId) {
+      const c = (window.__fbfContact || {})[boxId];
+      if (!c) return '';
+      return c.email
+        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
+        : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
+    }
     function fbfHtml(kind, id, boxId, o) {
       if (!o) return `<button type="button" class="btn-add" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
-        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>`;
+        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-      const email = { sent: 'Offer email sent', pending: 'Offer email queued', no_email: 'No contact email on file, so no email was sent', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
       const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
       const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
       return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
         <div style="font-weight:700;color:#15803d;font-size:13px">🎁 First booking free — offered</div>
         <div style="font-size:12px;color:#374151;margin-top:2px">By ${escHtml(o.offeredBy || '')} on ${when}</div>
-        <div style="font-size:12px;color:#374151">${escHtml(email)}</div>
+        <div style="font-size:12px;color:#374151">${escHtml(email)}</div>${fbfContactLine(boxId)}
         <div style="font-size:12px;color:#374151">${booking}</div>
         ${canUndo ? `<a href="#" onclick="removeFbf(${o.id},'${kind}','${escHtml(id)}','${boxId}');return false" style="font-size:11.5px;color:#6b7590">Remove (tagged by mistake)</a>` : ''}
       </div>`;
@@ -12093,7 +12103,7 @@
         const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'lead' ? { leadId: id } : { centreKey: id }) });
         const o = await r.json();
         if (!r.ok) throw new Error(o.error || 'Could not save');
-        document.getElementById(boxId).innerHTML = fbfHtml(kind, id, boxId, o);
+        loadFbf(kind, id, boxId);
       } catch (e) { alert(e.message); }
     }
     async function removeFbf(offerId, kind, id, boxId) {

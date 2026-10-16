@@ -1,9 +1,8 @@
 // First Booking Free (Liam, 15 Oct 2026). See db/schema.sql's
 // first_booking_free_offers. Three jobs:
-//  1. sendOfferEmail — once-off Customer.io transactional email to the centre
-//     contact. Needs CUSTOMERIO_APP_API_KEY and CIO_FIRST_FREE_MESSAGE_ID (the
-//     transactional message Joy builds in Customer.io). Until both are set the
-//     offer stays 'pending' and is retried automatically.
+//  1. sendOfferEmail — tells Customer.io (profile attributes + event) so its
+//     First Booking Free automation emails the centre contact. Behind the
+//     FBF_CIO_ENABLED flag (see cioTrackConfig); until on, offers stay 'pending'.
 //  2. processFirstBookings — when the tagged centre's first booking after the
 //     offer appears in RT, create one task for Nancy (accounts) to not charge it.
 //  3. resolveCentreKey — a lead is tied to its RT centre by phone/email match.
@@ -16,6 +15,20 @@ const centreMatchService = require('./centreMatchService');
 const NANCY = 'accounts@rawtalent.com.au';
 const LIVE_BOOKING_STATUSES = new Set([1, 2, 3, 5]); // open, requested, assigned, completed
 
+// Customer.io signal (Liam, Weekly Growth & Product Sync 15 Oct): tagging starts
+// the multi-email First Booking Free automation in Customer.io, so HeartBeat
+// updates the contact's profile and fires an event instead of a single
+// transactional send. OFF until Joy sets FBF_CIO_ENABLED=true in Railway; also
+// needs the Track API credentials CUSTOMERIO_SITE_ID + CUSTOMERIO_TRACK_API_KEY
+// (CUSTOMERIO_REGION=eu only if the workspace is in the EU region). While off
+// or unconfigured, offers stay 'pending' and nothing leaves HeartBeat.
+function cioTrackConfig() {
+  const enabled = String(process.env.FBF_CIO_ENABLED || '').toLowerCase() === 'true';
+  const siteId = process.env.CUSTOMERIO_SITE_ID, key = process.env.CUSTOMERIO_TRACK_API_KEY;
+  const host = String(process.env.CUSTOMERIO_REGION || '').toLowerCase() === 'eu' ? 'https://track-eu.customer.io' : 'https://track.customer.io';
+  return { enabled, ready: enabled && !!siteId && !!key, siteId, key, host };
+}
+
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
@@ -24,26 +37,40 @@ async function sendOfferEmail(offerId) {
     await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'no_email' WHERE id = ?", args: [offerId] });
     return 'no_email';
   }
-  const key = process.env.CUSTOMERIO_APP_API_KEY, msgId = process.env.CIO_FIRST_FREE_MESSAGE_ID;
-  if (!key || !msgId) return 'pending'; // not set up yet — retried by the scheduled job
+  const cfg = cioTrackConfig();
+  if (!cfg.ready) return 'pending'; // flag off or credentials missing — retried by the scheduled job
   try {
-    const res = await fetch('https://api.customer.io/v1/send/email', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        transactional_message_id: msgId,
-        to: o.contact_email,
-        identifiers: { email: o.contact_email },
-        message_data: { centre_name: o.centre_name, contact_first_name: o.contact_first_name || '', partner_name: o.offered_by_name || '', state: o.state || '' }
-      })
-    });
-    if (!res.ok) throw new Error(`Customer.io ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const auth = 'Basic ' + Buffer.from(`${cfg.siteId}:${cfg.key}`).toString('base64');
+    const base = `${cfg.host}/api/v1/customers/${encodeURIComponent(o.contact_email)}`;
+    const headers = { Authorization: auth, 'Content-Type': 'application/json' };
+    const data = { centre_name: o.centre_name, centre_key: o.centre_key || (o.lead_id ? `lead:${o.lead_id}` : ''), state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '' };
+    const r1 = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({
+      email: o.contact_email, first_booking_free: true, first_booking_free_tagged_at: Math.floor(new Date(o.offered_at).getTime() / 1000),
+      fbf_centre_name: data.centre_name, fbf_centre_key: data.centre_key, fbf_state: data.state, fbf_partner_name: data.partner_name
+    }) });
+    if (!r1.ok) throw new Error(`Customer.io profile ${r1.status}: ${(await r1.text()).slice(0, 200)}`);
+    const r2 = await fetch(`${base}/events`, { method: 'POST', headers, body: JSON.stringify({ name: 'first_booking_free_tagged', data }) });
+    if (!r2.ok) throw new Error(`Customer.io event ${r2.status}: ${(await r2.text()).slice(0, 200)}`);
     await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'sent', email_sent_at = now(), email_error = NULL WHERE id = ?", args: [offerId] });
     return 'sent';
   } catch (err) {
     await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'failed', email_error = ? WHERE id = ?", args: [String(err.message).slice(0, 300), offerId] });
     return 'failed';
   }
+}
+
+// Who the offer would go to: the lead's contact, or the RT centre's contact.
+const shortState = s => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'australian capital territory': 'ACT', 'northern territory': 'NT' })[String(s || '').trim().toLowerCase()] || String(s || '').trim().toUpperCase() || null;
+async function resolveContact({ leadId, centreKey }) {
+  if (leadId) {
+    const l = (await getDb().execute({ sql: 'SELECT centre_name, contact_email, contact_first_name, contact_last_name, state FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+    if (!l) return null;
+    return { centreName: l.centre_name, email: l.contact_email || null, firstName: l.contact_first_name || null, name: [l.contact_first_name, l.contact_last_name].filter(Boolean).join(' ') || null, state: shortState(l.state) };
+  }
+  const { centres } = await getCentresAndBookings();
+  const c = centres.find(x => x.centreKey === centreKey);
+  if (!c) return null;
+  return { centreName: c.name, email: c.email || null, firstName: (c.contactName || '').split(' ')[0] || null, name: c.contactName || null, state: shortState(c.state) };
 }
 
 async function resolveCentreKey(o, rawClients) {
@@ -89,4 +116,4 @@ async function processFirstBookings() {
   return { tasks };
 }
 
-module.exports = { sendOfferEmail, processFirstBookings, resolveCentreKey };
+module.exports = { cioTrackConfig, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey };
