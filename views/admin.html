@@ -298,6 +298,9 @@
         <div class="admin-nav-item" onclick="showSection('leave-requests', this)">
           <span class="admin-nav-icon">🏖️</span> Leave Requests
         </div>
+        <div class="admin-nav-item" id="navSignedContracts" style="display:none" onclick="showSection('signed-contracts', this)">
+          <span class="admin-nav-icon">📄</span> Signed Contracts
+        </div>
         <div class="admin-nav-item" id="navPayroll" style="display:none" onclick="showSection('payroll', this)">
           <span class="admin-nav-icon">💰</span> Payroll
         </div>
@@ -1063,6 +1066,33 @@
             RT onboarding progress is matched by email or phone from HeartBeat's nightly copy of RT, so it can be up to a day behind. Changes save as you make them. Welcome bonus: once an Eligible educator accepts their first shift, a $100 task is created for Payroll automatically (checked every few hours).
           </div>
         </div>
+      </div>
+      </template>
+
+      <!-- Signed Contracts (Liam 15 Oct, Joy 16 Oct): restricted to three people;
+           the server returns 404 to everyone else (routes/signedContracts.js). -->
+      <template id="__lazy_signed_contracts">
+      <div class="admin-section" id="section-signed-contracts">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Signed Contracts</div>
+            <div class="admin-page-sub">Signed contractor agreements. Files are private and open through a link that expires after a few minutes. Contracts can be replaced or archived, never deleted.</div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:18px 22px;margin-bottom:18px">
+          <div class="sd-card-title">Upload a signed contract</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:12px">
+            <input id="scName" class="form-control" placeholder="Consultant name">
+            <input id="scEmail" class="form-control" placeholder="Email">
+            <input id="scStart" class="form-control" type="date" title="Start date">
+            <input id="scFile" class="form-control" type="file" accept=".pdf,.doc,.docx">
+          </div>
+          <button class="btn-add" style="margin-top:12px" onclick="uploadSignedContract()">Upload</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <label style="font-size:13px"><input type="checkbox" id="scShowAll" onchange="loadSignedContracts()"> Show replaced and archived</label>
+        </div>
+        <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="scTable"></div></div>
       </div>
       </template>
 
@@ -5040,6 +5070,7 @@
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
     let currentUserEmail = '';
+    let currentUserCanViewContracts = false;
     let currentUserFirstName = '';
     let currentUserCanBuildTraining = false;
     let currentUserCanCreateOutreachLists = false;
@@ -5088,6 +5119,8 @@
         if (me.error || !roleAllowed) { location.href = '/'; return; }
         currentUserRole = me.role;
         currentUserEmail = me.email;
+        currentUserCanViewContracts = !!me.canViewContracts;
+        if (currentUserCanViewContracts) { const n = document.getElementById('navSignedContracts'); if (n) n.style.display = ''; }
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
         currentUserCanCalibrateCalls = !!me.canCalibrateCalls;
@@ -6706,6 +6739,9 @@
       } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()))) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
+      } else if (id === 'signed-contracts' && !currentUserCanViewContracts) {
+        showSection('articles', document.querySelector('[onclick*="articles"]'));
+        return;
       } else if (id === 'payroll' && !currentUserIsPayrollAdmin) {
         // Payroll is gated to the fixed Sophia/Joy pool server-side
         // (isFinalApprover), not a role — its nav item is already
@@ -6796,6 +6832,7 @@
       if (id === 'sales-dashboard') loadSalesDashboard();
       if (id === 'wfp-performance') loadWfpPerformance();
       if (id === 'first-shift') loadFirstShifts();
+      if (id === 'signed-contracts') loadSignedContracts();
       if (id === 'qr-referrals') loadQrReferrals();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
@@ -10852,6 +10889,66 @@
         toast(e.message || 'Network error', 'error');
         renderQrReferrals();
       }
+    }
+
+    // ── Signed Contracts ────────────────────────────────────────────────────
+    async function loadSignedContracts() {
+      const box = document.getElementById('scTable'); if (!box) return;
+      const all = document.getElementById('scShowAll')?.checked;
+      try {
+        const res = await fetch('/api/signed-contracts' + (all ? '?status=all' : ''));
+        const rows = await res.json();
+        if (!res.ok) throw new Error(rows.error || 'Could not load contracts');
+        if (!rows.length) { box.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13.5px">No signed contracts yet.</div>'; return; }
+        const th = t => `<th style="padding:10px;text-align:left;font-size:12px;font-weight:700;color:var(--text-muted)">${t}</th>`;
+        box.innerHTML = `<table style="width:100%;border-collapse:collapse;min-width:760px"><thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Consultant')}${th('Start date')}${th('File')}${th('Uploaded')}${th('Status')}${th('')}</tr></thead><tbody>
+          ${rows.map(c => `<tr style="border-bottom:1px solid var(--gray-100)">
+            <td style="padding:10px"><div style="font-weight:700;color:var(--navy)">${escHtml(c.person_name)}</div><div style="font-size:12px;color:var(--text-muted)">${escHtml(c.person_email || '')}</div></td>
+            <td style="padding:10px;font-size:13px">${c.start_date ? fmtDate(c.start_date) : '—'}</td>
+            <td style="padding:10px;font-size:13px">${escHtml(c.filename)}${Number(c.previous_versions) ? ` <span style="color:var(--text-muted)">(replaces an earlier version)</span>` : ''}</td>
+            <td style="padding:10px;font-size:12.5px">${escHtml(c.uploaded_by_name || '')}<div style="color:var(--text-muted)">${fmtDate(c.created_at)}</div></td>
+            <td style="padding:10px;font-size:12.5px;text-transform:capitalize">${escHtml(c.status)}</td>
+            <td style="padding:10px;white-space:nowrap">
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="openSignedContract(${c.id})">Open</button>
+              ${c.status === 'active' ? `<label class="btn-secondary" style="padding:4px 10px;font-size:12px;cursor:pointer">Replace<input type="file" accept=".pdf,.doc,.docx" style="display:none" onchange="replaceSignedContract(${c.id}, this)"></label>
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="archiveSignedContract(${c.id})">Archive</button>` : ''}
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="signedContractHistory(${c.id})">History</button>
+            </td></tr>`).join('')}</tbody></table>`;
+      } catch (e) { box.innerHTML = `<div style="padding:14px;color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    async function uploadSignedContract() {
+      const f = document.getElementById('scFile').files[0];
+      const name = document.getElementById('scName').value.trim();
+      if (!name || !f) { toast('Add the consultant name and choose a file', 'error'); return; }
+      const fd = new FormData(); fd.append('file', f); fd.append('personName', name);
+      fd.append('personEmail', document.getElementById('scEmail').value.trim()); fd.append('startDate', document.getElementById('scStart').value);
+      const res = await fetch('/api/signed-contracts', { method: 'POST', body: fd }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Upload failed', 'error'); return; }
+      ['scName', 'scEmail', 'scStart', 'scFile'].forEach(id => document.getElementById(id).value = '');
+      toast('Contract uploaded', 'success'); loadSignedContracts();
+    }
+    async function openSignedContract(id) {
+      const res = await fetch(`/api/signed-contracts/${id}/open`); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Could not open', 'error'); return; }
+      window.open(d.url, '_blank');
+    }
+    async function replaceSignedContract(id, input) {
+      const f = input.files[0]; if (!f) return;
+      if (!confirm('Replace this contract with the new file? The current one is kept as a previous version.')) { input.value = ''; return; }
+      const fd = new FormData(); fd.append('file', f);
+      const res = await fetch(`/api/signed-contracts/${id}/replace`, { method: 'POST', body: fd }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Replace failed', 'error'); return; }
+      toast('Contract replaced', 'success'); loadSignedContracts();
+    }
+    async function archiveSignedContract(id) {
+      if (!confirm('Archive this contract? It stays on file and can be seen with "Show replaced and archived".')) return;
+      const res = await fetch(`/api/signed-contracts/${id}/archive`, { method: 'POST' }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Archive failed', 'error'); return; }
+      loadSignedContracts();
+    }
+    async function signedContractHistory(id) {
+      const res = await fetch(`/api/signed-contracts/${id}/history`); const rows = await res.json().catch(() => []);
+      alert(rows.length ? rows.map(r => `${new Date(r.created_at).toLocaleString('en-AU')} — ${r.action} by ${r.user_name}`).join('\n') : 'No history yet.');
     }
 
     async function loadFirstShifts() {

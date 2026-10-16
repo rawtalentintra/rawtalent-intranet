@@ -2688,3 +2688,34 @@ CREATE TABLE IF NOT EXISTS first_booking_free_offers (
   pay_task_id TEXT
 );
 ALTER TABLE first_booking_free_offers ADD COLUMN IF NOT EXISTS state TEXT; -- VIC/SA/QLD… picks the partner shown in the email
+
+-- Signed contractor agreements (Liam 15 Oct, Joy 16 Oct): HR → Signed
+-- Contracts. Only Joy, Liam and Sophia can reach it (routes/signedContracts.js).
+-- Files live in the private `signed-contracts` bucket and are only opened via
+-- short-lived signed URLs. Never hard-deleted: replaced versions keep their
+-- row (replaced_by_id) and contracts can be archived. Every upload, view,
+-- replace and archive is written to signed_contract_events.
+CREATE TABLE IF NOT EXISTS signed_contracts (
+  id SERIAL PRIMARY KEY,
+  person_name TEXT NOT NULL,
+  person_email CITEXT,
+  start_date DATE,
+  filename TEXT NOT NULL,
+  mimetype TEXT,
+  filesize INTEGER,
+  storage_path TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',   -- active | replaced | archived
+  replaced_by_id INTEGER,
+  uploaded_by_email CITEXT,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS signed_contract_events (
+  id SERIAL PRIMARY KEY,
+  contract_id INTEGER,
+  action TEXT NOT NULL,                    -- uploaded | viewed | replaced | archived
+  user_email CITEXT,
+  user_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_signed_contract_events_contract ON signed_contract_events(contract_id);
