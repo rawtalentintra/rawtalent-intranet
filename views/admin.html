@@ -1251,6 +1251,22 @@
           </div>
         </div>
 
+        <!-- Educator indicators (Sophia's Micropod Proposal, Joy 16 Oct). The map and
+             pods below stay compliant-only; this panel is an optional extra view. -->
+        <div class="admin-table-card" id="educatorIndicatorsCard" style="padding:16px 20px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div>
+              <div class="sd-card-title">Educator indicators</div>
+              <div class="sd-card-sub">Engagement and compliance for Active educators, and onboarding progress. Hover a label for its definition. The map below still shows only Active, fully compliant educators.</div>
+            </div>
+            <select id="eiState" class="form-control" style="max-width:150px" onchange="renderEducatorIndicators()">
+              <option value="ALL">All states</option><option>VIC</option><option>SA</option><option>QLD</option><option>ACT</option><option>NSW</option><option>NT</option>
+            </select>
+          </div>
+          <div id="eiChips" style="margin-top:12px"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>
+          <div id="eiDetail" style="margin-top:12px"></div>
+        </div>
+
         <div id="micropodsListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -6825,7 +6841,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
-      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); }
+      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); loadEducatorIndicators(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
@@ -10949,6 +10965,58 @@
     async function signedContractHistory(id) {
       const res = await fetch(`/api/signed-contracts/${id}/history`); const rows = await res.json().catch(() => []);
       alert(rows.length ? rows.map(r => `${new Date(r.created_at).toLocaleString('en-AU')} — ${r.action} by ${r.user_name}`).join('\n') : 'No history yet.');
+    }
+
+
+    // ── Educator indicators (Micropods) ───────────────────────────────────
+    let eiData = null, eiSelected = null;
+    async function loadEducatorIndicators() {
+      try {
+        const r = await fetch('/api/micropods/indicators'); eiData = await r.json();
+        if (!r.ok) throw new Error(eiData.error || 'Could not load indicators');
+        renderEducatorIndicators();
+      } catch (e) { const c = document.getElementById('eiChips'); if (c) c.innerHTML = `<div style="font-size:13px;color:#b91c1c">${escHtml(e.message)}</div>`; }
+    }
+    function eiCount(key) {
+      const st = document.getElementById('eiState').value;
+      return Object.entries(eiData.counts).reduce((n, [s, c]) => n + ((st === 'ALL' || s === st) ? (c[key] || 0) : 0), 0);
+    }
+    function renderEducatorIndicators() {
+      if (!eiData) return;
+      const groups = [['engagement', 'Engagement (Active only)'], ['compliance', 'Compliance (Active only)'], ['onboarding', 'Onboarding (In Progress)']];
+      document.getElementById('eiChips').innerHTML = groups.map(([g, title]) => `
+        <div style="margin-bottom:8px"><div style="font-size:11.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">${title}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${Object.entries(eiData.definitions).filter(([, d]) => d.group === g).map(([k, d]) => `
+            <button type="button" title="${escHtml(d.desc)}" onclick="selectEducatorIndicator('${k}')" style="border:1px solid var(--gray-200);border-radius:16px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;background:${eiSelected === k ? 'var(--navy)' : '#fff'};color:${eiSelected === k ? '#fff' : 'var(--navy)'}">${escHtml(d.label)} · ${eiCount(k)}</button>`).join('')}</div></div>`).join('');
+      if (eiSelected) selectEducatorIndicator(eiSelected, true);
+    }
+    async function selectEducatorIndicator(key, keep) {
+      if (!keep && eiSelected === key) { eiSelected = null; document.getElementById('eiDetail').innerHTML = ''; renderEducatorIndicators(); return; }
+      eiSelected = key; if (!keep) renderEducatorIndicators();
+      const st = document.getElementById('eiState').value;
+      const box = document.getElementById('eiDetail'); box.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Loading…</div>';
+      const r = await fetch(`/api/micropods/indicators?indicator=${encodeURIComponent(key)}&state=${encodeURIComponent(st)}`); const d = await r.json();
+      const people = d.people || [];
+      const bySuburb = {}; people.forEach(p => { const k = p.suburb || 'Unknown'; bySuburb[k] = (bySuburb[k] || 0) + 1; });
+      const top = Object.entries(bySuburb).sort((a, b) => b[1] - a[1]).slice(0, 15);
+      window.__eiExport = people;
+      box.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${escHtml(d.definitions[key].label)}: ${people.length} educator${people.length === 1 ? '' : 's'}${st === 'ALL' ? '' : ' in ' + st}</div>
+          <button class="btn-secondary" style="padding:5px 12px;font-size:12.5px" onclick="exportEducatorIndicator()">Export CSV</button>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">Top suburbs: ${top.map(([s, n]) => `${escHtml(s)} (${n})`).join(', ') || '—'}</div>
+        <div style="max-height:320px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="border-bottom:1px solid var(--gray-200)">${['Name', 'Phone', 'Suburb', 'State', 'Qualification', 'Last shift'].map(h => `<th style="text-align:left;padding:6px">${h}</th>`).join('')}</tr></thead>
+          <tbody>${people.slice(0, 300).map(p => `<tr style="border-bottom:1px solid var(--gray-100)"><td style="padding:6px;font-weight:600">${escHtml(p.name)}</td><td style="padding:6px">${escHtml(p.phone || '')}</td><td style="padding:6px">${escHtml(p.suburb || '')}</td><td style="padding:6px">${escHtml(p.state || '')}</td><td style="padding:6px">${escHtml(p.qualification || '')}</td><td style="padding:6px">${p.lastShift || '—'}</td></tr>`).join('')}</tbody>
+        </table>${people.length > 300 ? `<div style="font-size:12px;color:var(--text-muted);padding:6px">Showing 300 of ${people.length}. Export for the full list.</div>` : ''}</div>`;
+    }
+    function exportEducatorIndicator() {
+      const rows = window.__eiExport || []; const label = eiData.definitions[eiSelected].label;
+      const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const csv = ['Name,Phone,Email,Suburb,State,Qualification,Last shift,Indicator'].concat(rows.map(p => [p.name, p.phone, p.email, p.suburb, p.state, p.qualification, p.lastShift, label].map(esc).join(','))).join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = `educators-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${document.getElementById('eiState').value}.csv`; a.click();
     }
 
     async function loadFirstShifts() {

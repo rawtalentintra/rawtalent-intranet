@@ -317,6 +317,24 @@ async function getPodsForParams(req) {
 
 // Pod summaries only — no candidate arrays. This is the "no full list
 // upfront" boundary the feature was explicitly asked for.
+// Educator indicators (Sophia's engagement / compliance / onboarding groups).
+// Counts per state and indicator, plus the people list for the selected state
+// and indicator (for the suburb breakdown and export). Read-only.
+router.get('/indicators', async (req, res) => {
+  try {
+    const { computeIndicators } = require('../services/educatorIndicatorsService');
+    const d = await computeIndicators();
+    const counts = {};
+    for (const p of d.people) for (const t of p.tags) { const st = p.state || 'Other'; counts[st] = counts[st] || {}; counts[st][t] = (counts[st][t] || 0) + 1; }
+    const state = String(req.query.state || '').toUpperCase();
+    const ind = String(req.query.indicator || '');
+    const people = ind && d.definitions[ind] ? d.people.filter(p => p.tags.includes(ind) && (!state || state === 'ALL' || p.state === state)) : [];
+    res.json({ definitions: d.definitions, counts, people, computedAt: d.computedAt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const result = await getPodsForParams(req);
