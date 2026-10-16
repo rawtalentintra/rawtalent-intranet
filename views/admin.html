@@ -364,7 +364,7 @@
         <div class="admin-nav-item" onclick="showSection('sales-dashboard', this)">
           <span class="admin-nav-icon">📈</span> WFP Dashboard
         </div>
-        <div class="admin-nav-item super-admin-only wfp-perf-viewer" style="display:none" onclick="showSection('wfp-performance', this)">
+        <div class="admin-nav-item super-admin-only wfp-perf-section" style="display:none" onclick="showSection('wfp-performance', this)">
           <span class="admin-nav-icon">🏆</span> WFP Performance
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -5035,7 +5035,7 @@
     // server.js — two different server-side gates behind these two URLs).
     const IS_WFP_PWA = location.pathname.startsWith('/wfp');
     const IS_PARTNERS_VIEW = location.pathname.startsWith('/partners') || IS_WFP_PWA;
-    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'leads', 'my-centres', 'micropods', 'route-planner'];
+    const PARTNERS_VIEW_SECTIONS = ['sales-dashboard', 'wfp-performance', 'leads', 'my-centres', 'micropods', 'route-planner'];
 
     // ── Init ──────────────────────────────────────────────────────
     let currentUserRole = '';
@@ -5244,7 +5244,7 @@
       // admin/super_admin-only before this section existed and this move
       // doesn't change that; qa_view/workforce_partner access can be added
       // later if Ops needs it.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'my-centres', 'route-planner', 'micropods']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
@@ -5278,6 +5278,7 @@
       } else if (canSeeWfpPerformance()) {
         document.querySelectorAll('.wfp-perf-viewer').forEach(el => el.style.display = '');
       }
+      if (canSeeWfpPerformanceSection()) document.querySelectorAll('.wfp-perf-section').forEach(el => el.style.display = '');
       // Build Training is a per-user grant (e.g. Sophia), not a role — shown
       // to super_admin plus whoever has can_build_training set, regardless
       // of their actual role.
@@ -6668,6 +6669,10 @@
     function canSeeWfpPerformance() {
       return currentUserRole === 'super_admin' || WFP_PERFORMANCE_VIEWERS.includes(String(currentUserEmail || '').toLowerCase());
     }
+    // WFP Performance opened to the Workforce Partners (Joy, 2026-10-16): they see
+    // the whole page (all partners' cards, fill rate, by state) except the
+    // Intelligence Matrix, which stays with canSeeWfpPerformance().
+    function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner'; }
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals'];
 
     function showSection(id, el) {
@@ -6698,7 +6703,7 @@
           showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
-      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' || id === 'qr-referrals') && canSeeWfpPerformance())) {
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()))) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'payroll' && !currentUserIsPayrollAdmin) {
@@ -10490,7 +10495,9 @@
       renderWfpPerfPartners(from, to);
       renderWfpPerfStates(from, to);
       loadWfpFillRate(from, to);
-      if (!wfpInsightsLoaded) { wfpInsightsLoaded = true; loadWfpInsights(); }
+      const insightsCard = document.getElementById('wfpPerfInsights')?.closest('.admin-table-card');
+      if (insightsCard) insightsCard.style.display = canSeeWfpPerformance() ? '' : 'none';
+      if (canSeeWfpPerformance() && !wfpInsightsLoaded) { wfpInsightsLoaded = true; loadWfpInsights(); }
     }
     let wfpInsightsLoaded = false;
 
