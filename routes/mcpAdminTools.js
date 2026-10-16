@@ -1,5 +1,5 @@
 // Read-only admin tools for HeartBeat's MCP server — leads and the WFP
-// pipeline, bookings and fill rate, JobAdder, and meeting search. Added
+// pipeline, bookings and fill rate, and JobAdder. Added
 // 2026-10-09 so the company owner (Liam) can ask about the admin side from
 // his own AI client. Everything here only reads: no tool changes data in
 // HeartBeat, RT Portal or JobAdder. Only accounts that pass mcpTokenService.canUseMcp
@@ -7,7 +7,6 @@
 const { z } = require('zod');
 const { getDb } = require('../db/database');
 const jobAdderService = require('../services/jobAdderService');
-const fathomService = require('../services/fathomService');
 const { getCentresAndBookings, computeFillRateByPartner } = require('./centres');
 
 const STATUS_NAMES = { 1: 'Open', 2: 'Requested', 3: 'Assigned', 5: 'Completed', 6: 'Cancelled', 7: 'Failed/Unfilled' };
@@ -293,7 +292,7 @@ function registerAdminTools(server) {
     project_milestones: { table: 'project_milestones', about: 'Project milestones (filter equals {"project_id": "..."})' },
     announcements: { table: 'announcements', date: 'created_at', about: 'Team announcements' },
     articles: { table: 'articles', date: 'created_at', about: 'Knowledge base articles and SOPs' },
-    faqs: { table: 'faqs', about: 'FAQs' },
+    faqs: { table: 'faqs', about: 'FAQs', where: "source IS DISTINCT FROM 'fathom'" },
     glossary: { table: 'glossary', about: 'Glossary terms' },
     ideas: { table: 'ideas', date: 'created_at', about: 'Team ideas' },
     article_feedback: { table: 'feedback', date: 'created_at', about: 'Suggested changes to articles' },
@@ -345,7 +344,7 @@ function registerAdminTools(server) {
     if (!cols.length) return text('No data available for that dataset.');
     if (list_fields) return text(`${dataset} fields: ` + cols.map(c => `${c.column_name} (${c.data_type})`).join(', '));
     const names = new Set(cols.map(c => c.column_name));
-    const where = [], args = [];
+    const where = ds.where ? [ds.where] : [], args = [];
     if (ds.date && names.has(ds.date)) {
       if (isDay(from)) { where.push(`${ds.date} >= CAST(? AS date)`); args.push(from); }
       if (isDay(to)) { where.push(`${ds.date} < CAST(? AS date)`); args.push(to); }
@@ -408,24 +407,7 @@ function registerAdminTools(server) {
       `Transcript: ${r.transcript}`
     ].filter(Boolean).join('\n')).join('\n\n'));
   });
-
-  // ── Meetings ──────────────────────────────────────────────────────────
-  server.registerTool('search_meetings', {
-    title: 'Search Meetings',
-    description: 'Search recorded team meetings (Fathom) by topic. Returns title, date, link and the meeting summary / action items where available.',
-    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(10).optional() }
-  }, async ({ query, limit }) => {
-    const hits = await fathomService.searchMeetings(query, limit || 5);
-    if (!hits.length) return text(`No meetings matched "${query}".`);
-    const ids = hits.map(h => h.recording_id);
-    const sums = (await getDb().execute({ sql: 'SELECT recording_id, default_summary, action_items FROM fathom_meetings WHERE recording_id = ANY(?)', args: [ids] })).rows;
-    const byId = new Map(sums.map(s => [String(s.recording_id), s]));
-    return text(hits.map(h => {
-      const s = byId.get(String(h.recording_id)) || {};
-      const summary = (s.default_summary || '').toString().slice(0, 700);
-      return `• ${h.title || 'Meeting'} — ${day(h.recording_start_time || h.fathom_created_at)}${h.share_url ? '\n  ' + h.share_url : ''}${summary ? '\n  Summary: ' + summary : ''}`;
-    }).join('\n\n'));
-  });
+  // No meetings tool: Fathom content must never be reachable through MCP (Joy 16 Oct).
 }
 
 module.exports = { registerAdminTools };

@@ -65,7 +65,7 @@ function buildServerForUser(email) {
     description: 'Ask a question about RawTalent policy/process and get an answer grounded in the internal knowledge base — the same Ask AI feature inside HeartBeat itself.',
     inputSchema: { question: z.string() }
   }, async ({ question }) => {
-    const { answer, sources } = await aiService.askQuestion(question, email, []);
+    const { answer, sources } = await aiService.askQuestion(question, email, [], { excludeFathom: true });
     const sourceLine = sources?.length ? `\n\nSources: ${sources.map(s => s.title).join(', ')}` : '';
     return { content: [{ type: 'text', text: answer + sourceLine }] };
   });
@@ -221,7 +221,7 @@ function buildServerForUser(email) {
     return { content: [{ type: 'text', text: lines.filter(Boolean).join('\n') }] };
   });
 
-  // Leads/WFP pipeline, bookings and fill rate, JobAdder and meetings — read-only,
+  // Leads/WFP pipeline, bookings and fill rate, and JobAdder — read-only,
   // for the company owner (see routes/mcpAdminTools.js).
   registerAdminTools(server);
 

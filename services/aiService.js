@@ -24,7 +24,9 @@ async function getGlossaryBlock(db) {
   }
 }
 
-async function searchKnowledge(db, question, limit = 6) {
+// opts.excludeFathom drops FAQs approved from Fathom meetings (the MCP
+// connector must never return Fathom content, Joy 16 Oct).
+async function searchKnowledge(db, question, limit = 6, opts = {}) {
   async function query(sql, args) {
     try { return (await db.execute({ sql, args })).rows; } catch { return []; }
   }
@@ -128,6 +130,7 @@ async function searchKnowledge(db, question, limit = 6) {
     }
   }
 
+  if (opts.excludeFathom) results = results.filter(r => !(r.source_type === 'faq' && String(r.faq_source || '').toLowerCase() === 'fathom'));
   return results.slice(0, limit);
 }
 
@@ -305,7 +308,7 @@ async function streamQuestion(question, askedBy, history, res) {
   res.end();
 }
 
-async function askQuestion(question, askedBy, history = []) {
+async function askQuestion(question, askedBy, history = [], opts = {}) {
   const client = getClient();
   if (!client) throw new Error('AI is not configured. Please contact your administrator.');
 
@@ -314,7 +317,7 @@ async function askQuestion(question, askedBy, history = []) {
   let messages;
 
   if (history.length === 0) {
-    const matches = await searchKnowledge(db, question);
+    const matches = await searchKnowledge(db, question, 6, opts);
     const built = buildMessages(matches, question);
     sources = built.sources;
     messages = built.messages;
