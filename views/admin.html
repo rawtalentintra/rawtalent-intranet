@@ -6720,7 +6720,7 @@
     }
     // WFP Performance opened to the Workforce Partners (Joy, 2026-10-16): they see
     // the whole page (all partners' cards, fill rate, by state) except the
-    // Intelligence Matrix, which stays with canSeeWfpPerformance().
+    // Intelligence Matrix, opened to partners too on 16 Oct (Joy).
     function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner'; }
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals'];
 
@@ -10549,8 +10549,8 @@
       renderWfpPerfStates(from, to);
       loadWfpFillRate(from, to);
       const insightsCard = document.getElementById('wfpPerfInsights')?.closest('.admin-table-card');
-      if (insightsCard) insightsCard.style.display = canSeeWfpPerformance() ? '' : 'none';
-      if (canSeeWfpPerformance() && !wfpInsightsLoaded) { wfpInsightsLoaded = true; loadWfpInsights(); }
+      if (insightsCard) insightsCard.style.display = canSeeWfpPerformanceSection() ? '' : 'none';
+      if (canSeeWfpPerformanceSection() && !wfpInsightsLoaded) { wfpInsightsLoaded = true; loadWfpInsights(); }
     }
     let wfpInsightsLoaded = false;
 

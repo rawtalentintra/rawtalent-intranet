@@ -495,9 +495,10 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
 const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
 // Call Analysis and Insights (bottom of WFP Performance). Same audience as that
 // page: super_admin and Liam (mcpTokenService.canUseMcp covers exactly those).
-// Intelligence Matrix — same audience as Call Analysis and Insights.
+// Intelligence Matrix — also opened to the Workforce Partners (Justine, Gwen) on
+// 16 Oct (Joy) so they can review it. The raw insights list below stays restricted.
 router.get('/voice-insights/matrix', async (req, res) => {
-  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Not available for your account' });
+  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role) && req.user.role !== 'workforce_partner') return res.status(403).json({ error: 'Not available for your account' });
   try {
     const svc = require('../services/voiceInsightsService');
     const states = await svc.matrixStates();
