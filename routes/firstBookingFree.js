@@ -31,7 +31,7 @@ router.get('/contact', async (req, res) => {
     const { leadId, centreKey } = req.query;
     const ct = await resolveContact({ leadId, centreKey });
     if (!ct) return res.status(404).json({ error: 'Not found' });
-    res.json({ name: ct.name, email: ct.email, live: cioTrackConfig().ready });
+    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

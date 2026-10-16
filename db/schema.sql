@@ -2687,6 +2687,8 @@ CREATE TABLE IF NOT EXISTS first_booking_free_offers (
   booking_date DATE,
   pay_task_id TEXT
 );
+ALTER TABLE first_booking_free_offers ADD COLUMN IF NOT EXISTS cio_identifier TEXT;   -- RT person id, or cio_<id>
+ALTER TABLE first_booking_free_offers ADD COLUMN IF NOT EXISTS cio_centre_key TEXT;   -- one event per person per centre
 ALTER TABLE first_booking_free_offers ADD COLUMN IF NOT EXISTS state TEXT; -- VIC/SA/QLD… picks the partner shown in the email
 
 -- Signed contractor agreements (Liam 15 Oct, Joy 16 Oct): HR → Signed

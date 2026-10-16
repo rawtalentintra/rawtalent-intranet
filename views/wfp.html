@@ -1721,14 +1721,14 @@
       const c = (window.__fbfContact || {})[boxId];
       if (!c) return '';
       return c.email
-        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
+        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.inRt ? '' : ' <span style="color:#b45309">(not an RT client yet, emails only if Customer.io already knows them)</span>'}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
         : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
     }
     function fbfHtml(kind, id, boxId, o) {
       if (!o) return `<button type="button" class="btn btn-secondary" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
       const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
       const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
       return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
