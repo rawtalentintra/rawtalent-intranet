@@ -165,4 +165,65 @@ async function syncAllCandidates(triggeredBy) {
   return { count: candidates.length, durationMs: finishedAt.getTime() - startedAt.getTime(), failedPages };
 }
 
-module.exports = { syncAllCandidates, getSyncState, isSyncRunning };
+// RT's paged candidate list fails on the same ~80 pages every night (see
+// rtApiReportService.fetchAllPages), so about a third of candidates never
+// refreshed and Micropods drifted from RT (found 2026-10-21: 1,807 of 4,865
+// Active/In Progress educators were 3+ days stale, some since mid-September).
+// RT's by-id endpoint serves those same people fine, so after each sync every
+// row the paged fetch missed is re-fetched one by one. Upserts only into our
+// own cache; never writes to RT.
+async function upsertCandidates(list) {
+  const db = getDb();
+  for (const c of list) {
+    await db.execute({
+      sql: `INSERT INTO rt_candidates_cache
+              (user_id, first_name, last_name, email, contact_no, is_active, is_deleted, status, suburb, created_date, expiring_docs_count, raw)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (user_id) DO UPDATE SET
+              first_name = excluded.first_name, last_name = excluded.last_name, email = excluded.email,
+              contact_no = excluded.contact_no, is_active = excluded.is_active, is_deleted = excluded.is_deleted,
+              status = excluded.status, suburb = excluded.suburb, created_date = excluded.created_date,
+              expiring_docs_count = excluded.expiring_docs_count, raw = excluded.raw, synced_at = now()`,
+      args: [c.userId, c.firstName || null, c.lastName || null, c.email || null, c.contactNo || null,
+        !!c.isActive, !!c.isDeleted, c.status ?? null, firstSuburb(c), c.createdDate || null, expiringDocsCount(c), JSON.stringify(c)]
+    });
+  }
+}
+
+// Fetch a list of candidates live from RT by id (a few at a time), refresh
+// them in the cache, and return the fresh records.
+async function fetchCandidatesLive(ids, { concurrency = 6, onProgress } = {}) {
+  const out = [], failed = [];
+  let i = 0, done = 0;
+  async function worker() {
+    while (i < ids.length) {
+      const id = ids[i++];
+      try { const c = await rtApi.fetchById('candidates', id); if (c) out.push(c); }
+      catch (err) { failed.push(id); }
+      done++; if (onProgress && done % 25 === 0) onProgress(done, ids.length);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  for (let k = 0; k < out.length; k += 200) await upsertCandidates(out.slice(k, k + 200));
+  return { candidates: out, failed };
+}
+
+let staleRefreshRunning = false;
+async function refreshStaleCandidates({ olderThanHours = 20 } = {}) {
+  if (staleRefreshRunning) return { skipped: true };
+  staleRefreshRunning = true;
+  try {
+    const ids = (await getDb().execute({
+      sql: `SELECT user_id FROM rt_candidates_cache
+            WHERE is_deleted IS NOT TRUE AND synced_at < now() - make_interval(hours => ?)
+            ORDER BY (status = 8), synced_at`,
+      args: [olderThanHours]
+    })).rows.map(r => r.user_id);
+    const started = Date.now();
+    const { candidates, failed } = await fetchCandidatesLive(ids);
+    console.log(`RT stale candidate refresh: ${candidates.length}/${ids.length} refreshed by id, ${failed.length} failed, ${Math.round((Date.now() - started) / 1000)}s.`);
+    return { stale: ids.length, refreshed: candidates.length, failed: failed.length };
+  } finally { staleRefreshRunning = false; }
+}
+
+module.exports = { syncAllCandidates, getSyncState, isSyncRunning, refreshStaleCandidates, fetchCandidatesLive };

@@ -320,6 +320,51 @@ async function getPodsForParams(req) {
 // Educator indicators (Sophia's engagement / compliance / onboarding groups).
 // Counts per state and indicator, plus the people list for the selected state
 // and indicator (for the suburb breakdown and export). Read-only.
+// Export ready-to-roster list (Joy, 21 Oct): live RT re-check of one state,
+// built as a background job (VIC takes a few minutes) and downloaded when done.
+// Joy only for now, released to others when she says so.
+const readyExports = new Map();
+const READY_EXPORT_STATES = ['VIC', 'SA', 'QLD', 'NT', 'NSW', 'ACT', 'WA', 'TAS'];
+function canExportReady(req) { return req.user && req.user.role === 'super_admin'; }
+router.post('/ready-export', async (req, res) => {
+  if (!canExportReady(req)) return res.status(404).json({ error: 'Not found' });
+  const state = String((req.body || {}).state || '').toUpperCase();
+  if (!READY_EXPORT_STATES.includes(state)) return res.status(400).json({ error: 'Pick a state' });
+  const running = [...readyExports.values()].find(j => j.state === state && j.status === 'running');
+  if (running) return res.json({ id: running.id });
+  const id = require('crypto').randomUUID();
+  const job = { id, state, status: 'running', progress: { phase: 'starting', done: 0, total: 0 }, by: req.user.email, startedAt: Date.now() };
+  readyExports.set(id, job);
+  for (const [k, j] of readyExports) if (Date.now() - j.startedAt > 6 * 3600 * 1000) readyExports.delete(k);
+  require('../services/readyRosterExportService').buildReadyRosterExport(state, { onProgress: p => { job.progress = p; } })
+    .then(r => { Object.assign(job, { status: 'done', result: r }); })
+    .catch(err => { Object.assign(job, { status: 'failed', error: err.message }); console.error('Ready-roster export failed:', err.message); });
+  res.json({ id });
+});
+router.get('/ready-export/:id', (req, res) => {
+  if (!canExportReady(req)) return res.status(404).json({ error: 'Not found' });
+  const j = readyExports.get(req.params.id);
+  if (!j || j.by !== req.user.email) return res.status(404).json({ error: 'Not found' });
+  const r = j.result;
+  res.json({ status: j.status, state: j.state, progress: j.progress, error: j.error || null,
+    summary: r ? { date: r.date, checked: r.checked, failed: r.failed, ready: r.ready, excluded: r.excluded, areas: r.areas, hasMap: !!r.html } : null });
+});
+router.get('/ready-export/:id/:file(xlsx|html)', (req, res) => {
+  if (!canExportReady(req)) return res.status(404).json({ error: 'Not found' });
+  const j = readyExports.get(req.params.id);
+  if (!j || j.by !== req.user.email || j.status !== 'done') return res.status(404).json({ error: 'Not found' });
+  const r = j.result;
+  if (req.params.file === 'xlsx') {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.state}_audited_compliant_educators_${r.date}.xlsx"`);
+    return res.send(r.xlsx);
+  }
+  if (!r.html) return res.status(404).json({ error: 'No map for this state' });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${r.state}_audited_educators_map_${r.date}.html"`);
+  res.send(r.html);
+});
+
 router.get('/indicators', async (req, res) => {
   try {
     const { computeIndicators } = require('../services/educatorIndicatorsService');

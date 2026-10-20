@@ -98,7 +98,9 @@ router.post('/candidates/sync', requireSuperAdmin, async (req, res) => {
     if (rtCandidatesSync.isSyncRunning(state)) {
       return res.status(409).json({ error: 'A sync is already in progress.' });
     }
-    rtCandidatesSync.syncAllCandidates(req.user.email).catch(err => console.error('Manual RT candidates sync error:', err.message));
+    rtCandidatesSync.syncAllCandidates(req.user.email)
+      .then(() => rtCandidatesSync.refreshStaleCandidates())
+      .catch(err => console.error('Manual RT candidates sync error:', err.message));
     res.json({ started: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

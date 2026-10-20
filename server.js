@@ -374,6 +374,8 @@ async function maybeRunNightlyCandidatesSync() {
   try {
     const { count, durationMs } = await rtCandidatesSync.syncAllCandidates('schedule');
     console.log(`Nightly RT candidates sync complete — ${count} candidates in ${Math.round(durationMs / 1000)}s.`);
+    // Then re-fetch, one by one, everyone RT's paged list skipped (see refreshStaleCandidates).
+    await rtCandidatesSync.refreshStaleCandidates().catch(err => console.error('RT stale candidate refresh failed:', err.message));
   } catch (err) {
     console.error('Nightly RT candidates sync failed:', err.message);
   }

@@ -1253,6 +1253,24 @@
 
         <!-- Educator indicators (Sophia's Micropod Proposal, Joy 16 Oct). The map and
              pods below stay compliant-only; this panel is an optional extra view. -->
+        <!-- Export ready-to-roster list (Joy, 21 Oct): live RT re-check of one state, downloaded as
+             the audited workbook (list, Map, Area summary, Excluded, How audited) + interactive map. -->
+        <div class="admin-table-card" id="readyExportCard" style="padding:16px 20px;margin-bottom:16px;display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div>
+              <div class="sd-card-title">Export ready-to-roster list</div>
+              <div class="sd-card-sub">Re-checks every Active educator in the state live with RT, then downloads the audited Excel file (list, map, area summary, everyone excluded and why) and an interactive map. VIC takes a few minutes; smaller states take seconds.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="readyExportState" class="form-control" style="max-width:120px">
+                <option>VIC</option><option>SA</option><option>QLD</option><option>NT</option><option>NSW</option><option>ACT</option><option>WA</option><option>TAS</option>
+              </select>
+              <button class="btn-primary" id="readyExportBtn" onclick="startReadyExport()">Export</button>
+            </div>
+          </div>
+          <div id="readyExportStatus" style="margin-top:10px;font-size:13px"></div>
+        </div>
+
         <div class="admin-table-card" id="educatorIndicatorsCard" style="padding:16px 20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
             <div>
@@ -6841,7 +6859,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
-      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); loadEducatorIndicators(); }
+      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); loadEducatorIndicators(); initReadyExport(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
@@ -10967,6 +10985,48 @@
       alert(rows.length ? rows.map(r => `${new Date(r.created_at).toLocaleString('en-AU')} — ${r.action} by ${r.user_name}`).join('\n') : 'No history yet.');
     }
 
+
+
+    // ── Export ready-to-roster list (Micropods) ───────────────────────────
+    let readyExportPoll = null;
+    function initReadyExport() {
+      const card = document.getElementById('readyExportCard');
+      if (card) card.style.display = currentUserRole === 'super_admin' ? '' : 'none';
+    }
+    async function startReadyExport() {
+      const state = document.getElementById('readyExportState').value;
+      const box = document.getElementById('readyExportStatus'), btn = document.getElementById('readyExportBtn');
+      btn.disabled = true; box.innerHTML = `Starting ${escHtml(state)}…`;
+      try {
+        const r = await fetch('/api/micropods/ready-export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not start the export');
+        clearInterval(readyExportPoll);
+        readyExportPoll = setInterval(() => pollReadyExport(d.id), 3000);
+        pollReadyExport(d.id);
+      } catch (e) { box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; btn.disabled = false; }
+    }
+    async function pollReadyExport(id) {
+      const box = document.getElementById('readyExportStatus'), btn = document.getElementById('readyExportBtn');
+      try {
+        const r = await fetch(`/api/micropods/ready-export/${id}`); const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Export not found');
+        if (j.status === 'running') {
+          const p = j.progress || {};
+          box.innerHTML = p.phase === 'building' ? `Building the ${escHtml(j.state)} file and map…`
+            : `Checking ${escHtml(j.state)} educators live with RT… ${p.total ? `${p.done} of ${p.total}` : ''}`;
+          return;
+        }
+        clearInterval(readyExportPoll); btn.disabled = false;
+        if (j.status === 'failed') { box.innerHTML = `<span style="color:#b91c1c">Export failed: ${escHtml(j.error || '')}</span>`; return; }
+        const s = j.summary;
+        box.innerHTML = `<div style="font-weight:700;color:var(--navy)">${escHtml(j.state)}: ${s.ready} ready to roster, ${s.excluded} excluded (${s.checked} checked live${s.failed ? `, ${s.failed} couldn't be fetched from RT` : ''})</div>
+          ${s.areas.length ? `<div style="color:var(--text-muted);margin:4px 0">${s.areas.map(escHtml).join(' · ')}</div>` : ''}
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <a class="btn-secondary" style="padding:5px 12px;font-size:12.5px;text-decoration:none" href="/api/micropods/ready-export/${id}/xlsx">Download Excel</a>
+            ${s.hasMap ? `<a class="btn-secondary" style="padding:5px 12px;font-size:12.5px;text-decoration:none" href="/api/micropods/ready-export/${id}/html">Download interactive map</a>` : ''}
+          </div>`;
+      } catch (e) { clearInterval(readyExportPoll); btn.disabled = false; box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; }
+    }
 
     // ── Educator indicators (Micropods) ───────────────────────────────────
     let eiData = null, eiSelected = null;
