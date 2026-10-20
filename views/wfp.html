@@ -1424,6 +1424,9 @@
           attention.push({ kind: 'centre', centre: c, reason: c.escalationNote ? `${c.escalationNote}` : 'Issue raised — needs attention', _tier: 2 });
         } else if (c.nurture?.status === 'follow_up_overdue') {
           attention.push({ kind: 'centre', centre: c, reason: `Your follow-up was due ${fmtDate(c.nurture.dueDate)}`, _tier: 3 });
+        } else if (c.dormantNeedsContact) {
+          // 4. Dormant call list (Liam, 19 Oct): no booking for 6+ months, no touch point since.
+          attention.push({ kind: 'centre', centre: c, reason: `Centre dormant — no booking since ${fmtDate(c.lastBookingDate)}`, _tier: 4 });
         }
       }
       attention.sort((a, b) => a._tier - b._tier);
@@ -1721,14 +1724,14 @@
       const c = (window.__fbfContact || {})[boxId];
       if (!c) return '';
       return c.email
-        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.inRt ? '' : ' <span style="color:#b45309">(not an RT client yet, emails only if Customer.io already knows them)</span>'}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
+        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.inRt ? '' : ' <span style="color:#b45309">(not set up in RT yet: the email sends once this lead becomes an RT centre)</span>'}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
         : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
     }
     function fbfHtml(kind, id, boxId, o) {
       if (!o) return `<button type="button" class="btn btn-secondary" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', waiting_for_centre: 'Waiting for this lead to be set up as a centre in RT', via_dormant: 'Included in the Dormant journey', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
       const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
       const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
       return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
@@ -2211,6 +2214,52 @@
     // are derived from these same filtered arrays so the number and the
     // list underneath always agree.
     const OPEN_BOOKING_STATUS_IDS = new Set([1, 2, 3]);
+
+    // ── Dormant touch point + compact Centre history (Liam, 19 Oct) ───────
+    function dormantPanelM(c) {
+      if (!c.dormantNeedsContact) {
+        const tp = c.lastDormantTouchpoint;
+        return `<div class="card" style="cursor:default;border-left:4px solid #15803d"><div style="font-weight:700;color:#15803d">Dormant touch point done</div>
+          <div class="sub">${tp ? `By ${escHtml(tp.by || '')} on ${fmtDate(tp.at)}${tp.firstBookingFree ? ' · first booking free' : ''}. ` : ''}Still dormant until they book.</div></div>`;
+      }
+      return `<div class="card" style="cursor:default;border-left:4px solid #b45309">
+        <div style="font-weight:700;color:#b45309">Centre dormant — no booking since ${fmtDate(c.lastBookingDate)}</div>
+        <div class="sub" style="margin:4px 0 8px">Log your call or visit first, then complete the touch point.</div>
+        <select id="dtpTypeM" style="width:100%;margin-bottom:8px"><option value="call">Call</option><option value="visit">Visit</option></select>
+        <label class="sub" style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="dtpFbfM"> First booking free (only if they'll use agency consistently)</label>
+        <input id="dtpDiscountM" type="text" inputmode="decimal" placeholder="Discount agreed $/hr (optional)" style="width:100%;margin-bottom:8px">
+        <textarea id="dtpPricingM" rows="2" placeholder="Pricing discussed (optional)" style="width:100%"></textarea>
+        <div class="sub" style="margin:4px 0 8px">Under $5/hr needs no approval. $5/hr or more goes to Liam.</div>
+        <button class="btn btn-primary" style="width:100%" onclick="completeDormantM('${escHtml(c.centreKey)}')">Dormant touch point complete</button>
+      </div>`;
+    }
+    async function completeDormantM(centreKey) {
+      const body = { touchpointType: document.getElementById('dtpTypeM').value, firstBookingFree: document.getElementById('dtpFbfM').checked,
+        discountPerHour: document.getElementById('dtpDiscountM').value, pricingNote: document.getElementById('dtpPricingM').value };
+      if (!confirm('Mark the dormant touch point complete?')) return;
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/dormant-touchpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        const c = allCentres.find(x => x.centreKey === centreKey);
+        if (c) { c.dormantNeedsContact = false; c.lastDormantTouchpoint = { at: d.completedAt, by: 'you', firstBookingFree: d.firstBookingFree }; }
+        toast(d.discountNeedsApproval ? 'Done. Discount sent to Liam to approve.' : 'Dormant touch point complete');
+        paintCentreDetail();
+      } catch (e) { alert(e.message); }
+    }
+    const HIST_ICON_M = { booking: '📅', call: '📞', visit: '🚗', note: '📝', voice: '🎙️', email: '✉️', fbf: '🎁', dormant: '💤', lead: '🌱', stage: '➡️' };
+    async function loadCentreHistoryM(det) {
+      const box = det.querySelector('.hist-body');
+      if (box.dataset.loaded) return; box.dataset.loaded = '1';
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(currentCentreKey)}/history?mobile=1`); const h = await r.json();
+        if (!r.ok) throw new Error(h.error || 'Could not load');
+        const b = h.bookings;
+        box.innerHTML = `<div class="sub" style="margin-bottom:6px">First booking ${fmtDate(b.first)} · last ${fmtDate(b.last)} · ${b.last4Weeks} in the last 4 weeks</div>
+          ${h.educators.slice(0, 5).map(e => `<div class="note-line">${escHtml(e.name)}${e.favourite ? ' ⭐' : ''} — ${e.shifts} shifts</div>`).join('')}
+          ${h.timeline.slice(0, 30).map(e => `<div class="note-line">${HIST_ICON_M[e.type] || '•'} <b>${escHtml(e.title)}</b> · ${fmtDate(e.at)}${e.by ? ' · ' + escHtml(e.by) : ''}${e.detail ? `<div class="sub">${escHtml(e.detail.slice(0, 220))}</div>` : ''}</div>`).join('') || '<div class="sub">Nothing recorded yet.</div>'}`;
+      } catch (e) { box.innerHTML = `<div class="sub">${escHtml(e.message)}</div>`; }
+    }
+
     function paintCentreDetail() {
       const main = document.getElementById('mainContent');
       const s = currentSnapshot;
@@ -2257,6 +2306,7 @@
           </div>
           <div class="sub" style="margin-top:8px" data-ql-status="${escHtml(currentCentreKey)}">${quickLogStatusHtml(currentCentreKey) || 'One tap, no form. Add notes with the buttons below.'}</div>
         </div>
+        ${c && c.isDormant ? dormantPanelM(c) : ''}
         <div class="card" style="cursor:default" id="fbfCentreBoxM"></div>
         <div class="action-row">
           <button class="btn btn-secondary" onclick="openLogActivityFor('centre','${currentCentreKey}',{channel:'call'})">Call + Notes</button>
@@ -2265,6 +2315,11 @@
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="addStopToRoute('centre','${currentCentreKey}')">Add to Route</button>
         </div>
+
+        <details style="margin-top:10px" ontoggle="if(this.open)loadCentreHistoryM(this)">
+          <summary class="section-title" style="display:list-item;cursor:pointer">Centre history</summary>
+          <div class="hist-body"><div class="sub">Loading…</div></div>
+        </details>
 
         <details style="margin-top:10px" ${centreDetailOpen.educators ? 'open' : ''} ontoggle="centreDetailOpen.educators=this.open">
           <summary class="section-title" style="display:list-item;cursor:pointer">Educators</summary>

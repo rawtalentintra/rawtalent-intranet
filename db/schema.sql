@@ -2721,3 +2721,32 @@ CREATE TABLE IF NOT EXISTS signed_contract_events (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_signed_contract_events_contract ON signed_contract_events(contract_id);
+
+-- Dormant touch points (Liam, 19 Oct 2026 strategy meeting). A centre with no
+-- booking for 6 months shows as "Centre dormant" in Action Required until a
+-- partner logs a call/visit and presses "Dormant touch point complete". That
+-- row takes it off the list (it stays dormant until it books) and, when
+-- FBF_CIO_ENABLED is on, sends dormant_touchpoint_complete to Customer.io to
+-- start the Dormant journey. Optional pricing note: a discount of $5/hr or
+-- more creates an approval task for Liam. See services/dormantService.js.
+CREATE TABLE IF NOT EXISTS dormant_touchpoints (
+  id SERIAL PRIMARY KEY,
+  centre_key TEXT NOT NULL,
+  centre_name TEXT,
+  state TEXT,
+  partner_label TEXT,
+  last_booking_date DATE,
+  touchpoint_type TEXT,                 -- call | visit
+  first_booking_free BOOLEAN DEFAULT false,
+  pricing_note TEXT,
+  discount_per_hour NUMERIC,
+  approval_task_id TEXT,
+  completed_by_email CITEXT,
+  completed_by_name TEXT,
+  completed_at TIMESTAMPTZ DEFAULT now(),
+  cio_status TEXT DEFAULT 'pending',    -- pending | sent | no_profile | failed
+  cio_identifier TEXT,
+  cio_sent_at TIMESTAMPTZ,
+  cio_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dormant_touchpoints_centre ON dormant_touchpoints (centre_key, completed_at DESC);

@@ -503,7 +503,9 @@ router.get('/', async (req, res) => {
       latitude: geocodes[c.centreKey]?.lat ?? null,
       longitude: geocodes[c.centreKey]?.lng ?? null
     }));
-    res.json(withHealth);
+    // Dormant call list (Liam, 19 Oct): 6+ months since the last booking, and
+    // whether a dormant touch point has been done since. See dormantService.
+    res.json(await require('../services/dormantService').annotateDormancy(withHealth, lastBookingByCentreKey));
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -681,6 +683,38 @@ router.get('/fill-rate-by-partner', async (req, res) => {
 // live" principle as Candidates/Document Checker), but reuses the cached
 // bulk bookings fetch for the trend computation since RT has no
 // per-client booking filter to fetch just this one centre's bookings.
+// "Dormant touch point complete" (Liam, 19 Oct). Body: { touchpointType:
+// 'call'|'visit', firstBookingFree, pricingNote, discountPerHour }.
+router.post('/:centreKey/dormant-touchpoint', async (req, res) => {
+  try {
+    const { centres, bookings } = await getCentresAndBookings();
+    const c = centres.find(x => x.centreKey === req.params.centreKey);
+    if (!c) return res.status(404).json({ error: 'Centre not found' });
+    const [assignments, lastByKey] = await Promise.all([getCentrePartnerAssignments(), getLastBookingDates(centres, bookings)]);
+    const last = lastByKey[c.centreKey] || null;
+    const days = last ? (Date.now() - new Date(last).getTime()) / 864e5 : null;
+    const dormant = require('../services/dormantService');
+    if (days == null || days < dormant.DORMANT_DAYS) return res.status(409).json({ error: 'This centre isn\'t dormant (it has booked in the last 6 months).' });
+    const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || null;
+    const row = await dormant.completeTouchpoint({ ...c, stateShort: shortState(c.state), partnerLabel: label, lastBookingDate: new Date(last).toISOString().slice(0, 10) }, req.user, req.body || {});
+    res.status(201).json({ id: row.id, completedAt: row.completed_at, firstBookingFree: row.first_booking_free, discountNeedsApproval: !!row.approval_task_id, emailStatus: row.cio_status });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Centre History tab (Liam, 19 Oct): one timeline per centre. See
+// services/centreHistoryService.js.
+router.get('/:centreKey/history', async (req, res) => {
+  try {
+    const out = await require('../services/centreHistoryService').buildCentreHistory(req.params.centreKey, { noTranscripts: req.query.mobile === '1' });
+    if (!out) return res.status(404).json({ error: 'Centre not found' });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:centreKey', async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
@@ -698,10 +732,11 @@ router.get('/:centreKey', async (req, res) => {
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates([centre], bookings);
-    res.json({
+    const [withDormancy] = await require('../services/dormantService').annotateDormancy([{
       ...healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null),
       assignedWorkforcePartner: assignments[centre.centreKey] || null
-    });
+    }], lastBookingByCentreKey);
+    res.json(withDormancy);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

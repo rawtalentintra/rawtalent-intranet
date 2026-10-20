@@ -10338,6 +10338,10 @@
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue', outcome: centreAttentionOutcome('declining') });
         } else if (c.health === 'needs_attention') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Needs attention', urgency: 30, cls: 'attn-stale', outcome: centreAttentionOutcome('needs_attention') });
+        } else if (c.dormantNeedsContact) {
+          // Dormant call list (Liam, 19 Oct): no booking for 6+ months and no
+          // dormant touch point since. Leaves once the touch point is completed.
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: `Centre dormant — no booking since ${fmtShortDate(c.lastBookingDate)}`, urgency: 20, cls: 'attn-stale', outcome: 'Call or visit, then press "Dormant touch point complete" on the centre.' });
         }
       });
       items.sort((a, b) => b.urgency - a.urgency);
@@ -12020,9 +12024,86 @@
     // attention queue) — navigates to the section first, then opens the
     // centre, done as real JS rather than a nested-quote CSS selector
     // string inside an inline onclick attribute.
-    function goToCentre360(centreKey) {
+    async function goToCentre360(centreKey, tab) {
       showSection('my-centres', document.querySelector('[onclick*="my-centres"]'));
-      openCentre360(centreKey);
+      await openCentre360(centreKey);
+      if (tab) switchCentre360Tab(tab);
+    }
+
+
+    // ── Centre 360: tabs, dormant touch point, Centre History (Liam, 19 Oct) ──
+    const c360TabStyle = on => `border:none;background:none;padding:8px 14px;font-size:14px;font-weight:700;cursor:pointer;color:${on ? 'var(--navy)' : 'var(--text-muted)'};border-bottom:3px solid ${on ? 'var(--navy)' : 'transparent'};margin-bottom:-1px`;
+    function switchCentre360Tab(tab) {
+      document.querySelectorAll('.c360-tab').forEach(b => b.setAttribute('style', c360TabStyle(b.dataset.tab === tab)));
+      document.getElementById('c360Overview').style.display = tab === 'overview' ? '' : 'none';
+      const h = document.getElementById('c360History');
+      h.style.display = tab === 'history' ? '' : 'none';
+      if (tab === 'history' && !h.dataset.loaded) { h.dataset.loaded = '1'; loadCentreHistory(currentCentreKey, h, false); }
+    }
+    function fmtShortDate(d) { return d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
+    function dormantPanelHtml(c) {
+      const tp = c.lastDormantTouchpoint;
+      if (!c.dormantNeedsContact) {
+        return `<div class="admin-table-card" style="padding:12px 16px;margin-bottom:14px;border-left:4px solid #15803d">
+          <div style="font-weight:700;color:#15803d">Dormant touch point done</div>
+          <div style="font-size:12.5px;color:var(--text-muted)">${tp ? `By ${escHtml(tp.by || '')} on ${fmtShortDate(tp.at)}${tp.firstBookingFree ? ' · first booking free offered' : ''}. ` : ''}Still dormant until they book (last booking ${fmtShortDate(c.lastBookingDate)}).</div></div>`;
+      }
+      return `<div class="admin-table-card" id="dormantPanel" style="padding:14px 18px;margin-bottom:14px;border-left:4px solid #b45309">
+        <div style="font-weight:700;color:#b45309;font-size:14.5px">Centre dormant — no booking since ${fmtShortDate(c.lastBookingDate)} (${c.daysSinceLastBooking} days)</div>
+        <div style="font-size:12.5px;color:var(--text-muted);margin:4px 0 10px">1. Log your call or visit below (notes and voice notes as usual). 2. Tick first booking free if it applies. 3. Press complete. This starts the Dormant email journey once emails are switched on.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;align-items:end">
+          <label style="font-size:12.5px">Touch point<select id="dtpType" class="form-control"><option value="call">Call</option><option value="visit">Visit</option></select></label>
+          <label style="font-size:12.5px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="dtpFbf"> First booking free <span style="color:var(--text-muted)">(only if they'll use agency consistently)</span></label>
+          <label style="font-size:12.5px">Discount agreed ($/hr, optional)<input id="dtpDiscount" class="form-control" type="number" min="0" step="0.5" placeholder="e.g. 3"></label>
+        </div>
+        <label style="font-size:12.5px;display:block;margin-top:8px">Pricing discussed (optional)<textarea id="dtpPricing" class="form-control" rows="2" placeholder="What was discussed about price"></textarea></label>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Discounts under $5/hr don't need approval. $5/hr or more goes to Liam to approve.</div>
+        <button class="btn-primary" style="margin-top:10px" onclick="completeDormantTouchpoint('${escHtml(c.centreKey)}')">Dormant touch point complete</button>
+      </div>`;
+    }
+    async function completeDormantTouchpoint(centreKey) {
+      const body = { touchpointType: document.getElementById('dtpType').value, firstBookingFree: document.getElementById('dtpFbf').checked,
+        discountPerHour: document.getElementById('dtpDiscount').value, pricingNote: document.getElementById('dtpPricing').value };
+      if (!confirm(`Mark the dormant touch point complete${body.firstBookingFree ? ' with first booking free' : ''}?`)) return;
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/dormant-touchpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        toast(d.discountNeedsApproval ? 'Done. The discount was sent to Liam to approve.' : 'Dormant touch point complete');
+        const i = myCentresData.findIndex(x => x.centreKey === centreKey); if (i >= 0) myCentresData[i].dormantNeedsContact = false;
+        openCentre360(centreKey);
+      } catch (e) { alert(e.message); }
+    }
+    const HISTORY_ICON = { booking: '📅', call: '📞', visit: '🚗', note: '📝', voice: '🎙️', email: '✉️', fbf: '🎁', dormant: '💤', lead: '🌱', stage: '➡️' };
+    async function loadCentreHistory(centreKey, el, compact) {
+      el.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Building this centre\'s history…</div>';
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/history`); const h = await r.json();
+        if (!r.ok) throw new Error(h.error || 'Could not load history');
+        el.innerHTML = centreHistoryHtml(h, compact);
+      } catch (e) { el.innerHTML = `<div style="color:#b91c1c">${escHtml(e.message)}</div>`; }
+    }
+    function centreHistoryHtml(h, compact) {
+      const b = h.bookings, maxM = Math.max(1, ...b.perMonth.map(m => m.booked));
+      const months = b.perMonth.map(m => `<div title="${m.month}: ${m.booked} booked, ${m.filled} filled, ${m.cancelled} cancelled" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+          <div style="width:100%;max-width:26px;height:${Math.round(60 * m.booked / maxM)}px;background:var(--navy);border-radius:3px 3px 0 0;min-height:${m.booked ? 2 : 0}px"></div>
+          <div style="font-size:10px;color:var(--text-muted)">${new Date(m.month + '-01').toLocaleDateString('en-AU', { month: 'short' })}</div></div>`).join('');
+      const stat = (v, l) => `<div><div style="font-size:20px;font-weight:800;color:var(--navy)">${v}</div><div style="font-size:11.5px;color:var(--text-muted)">${l}</div></div>`;
+      return `<div class="admin-table-card" style="padding:16px 20px;margin-bottom:14px">
+          <div class="sd-card-title">Bookings</div>
+          <div style="display:flex;gap:28px;flex-wrap:wrap;margin:8px 0 12px">${stat(fmtShortDate(b.first), 'First booking*')}${stat(fmtShortDate(b.last), 'Last booking')}${stat(b.total, 'Shifts to date*')}${stat(b.last4Weeks, 'Last 4 weeks')}${stat(b.upcoming, 'Upcoming')}</div>
+          <div style="display:flex;align-items:flex-end;gap:4px;height:80px">${months}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">*HeartBeat holds RT bookings from ${fmtShortDate(b.historyFrom)}, so anything older isn't shown.</div>
+        </div>
+        ${h.educators.length ? `<div class="admin-table-card" style="padding:16px 20px;margin-bottom:14px"><div class="sd-card-title">Regular educators</div>
+          ${h.educators.map(e => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--gray-100)"><span>${escHtml(e.name)}${e.favourite ? ' <span title="Favourite / requested by the centre">⭐</span>' : ''}</span><span style="color:var(--text-muted)">${e.shifts} shifts · last ${fmtShortDate(e.last)}</span></div>`).join('')}</div>` : ''}
+        <div class="admin-table-card" style="padding:16px 20px">
+          <div class="sd-card-title">Timeline</div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">${h.emails.connected ? (h.emails.note ? escHtml(h.emails.note) : `${h.emails.count} Customer.io email(s) included.`) : 'Customer.io emails: not connected yet.'}</div>
+          ${h.timeline.length ? h.timeline.slice(0, compact ? 40 : 400).map(e => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100)">
+              <div style="width:26px;text-align:center">${HISTORY_ICON[e.type] || '•'}</div>
+              <div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--navy)">${escHtml(e.title)} <span style="font-weight:400;color:var(--text-muted)">· ${fmtShortDate(e.at)}${e.by ? ' · ' + escHtml(e.by) : ''}</span></div>
+              ${e.detail ? `<div style="font-size:12.5px;color:#374151;white-space:pre-wrap">${escHtml(e.detail)}</div>` : ''}</div></div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">Nothing recorded yet.</div>'}
+        </div>`;
     }
 
     async function openCentre360(centreKey) {
@@ -12058,7 +12139,12 @@
         educators.forEach(e => { candidateNameById[e.userId] = e.name; });
         currentCentre360Bookings = {};
         activity.events.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
-        bodyEl.innerHTML = renderCentre360(centre, bookingsRes, educators, activity);
+        bodyEl.innerHTML = `<div class="c360-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--gray-200)">
+            <button type="button" class="c360-tab" data-tab="overview" onclick="switchCentre360Tab('overview')" style="${c360TabStyle(true)}">Overview</button>
+            <button type="button" class="c360-tab" data-tab="history" onclick="switchCentre360Tab('history')" style="${c360TabStyle(false)}">Centre History</button>
+          </div>
+          <div id="c360Overview">${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
+          <div id="c360History" style="display:none"></div>`;
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -12139,14 +12225,14 @@
       const c = (window.__fbfContact || {})[boxId];
       if (!c) return '';
       return c.email
-        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.inRt ? '' : ' <span style="color:#b45309">(not an RT client yet, emails only if Customer.io already knows them)</span>'}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
+        ? `<div style="font-size:12px;color:#374151;margin-top:2px">Will email: <b>${escHtml(c.name || 'Centre contact')}</b> / ${escHtml(c.email)}${c.inRt ? '' : ' <span style="color:#b45309">(not set up in RT yet: the email sends once this lead becomes an RT centre)</span>'}${c.live ? '' : ' <span style="color:#6b7590">(emails not switched on yet)</span>'}</div>`
         : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
     }
     function fbfHtml(kind, id, boxId, o) {
       if (!o) return `<button type="button" class="btn-add" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', waiting_for_centre: 'Waiting for this lead to be set up as a centre in RT', via_dormant: 'Included in the Dormant journey', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
       const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
       const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
       return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
@@ -18308,6 +18394,9 @@
           </select>
         </div>
 
+        ${leadsCentreMatches[lead.id] ? (() => { const m = leadsCentreMatches[lead.id]; const k = m.rtLocationId ? `loc:${m.rtLocationId}` : `client:${m.rtClientId}`;
+          return `<div class="lead-group-label" style="margin-top:14px">Centre History</div>
+          <button type="button" class="btn-secondary" style="margin-bottom:10px" onclick="goToCentre360('${k}','history')">Open this centre's full history (bookings, calls, emails, notes)</button>`; })() : ''}
         <div class="lead-group-label" style="margin-top:14px">First booking free</div>
         <div id="fbfLeadBox" style="margin-bottom:10px"></div>
 

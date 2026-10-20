@@ -522,6 +522,7 @@ async function start() {
       .then(({ created }) => { if (created) console.log(`QR welcome bonus: ${created} payroll task(s) created.`); })
       .then(() => require('./services/firstBookingFreeService').processFirstBookings())
       .then(({ tasks }) => { if (tasks) console.log(`First booking free: ${tasks} task(s) created for accounts.`); })
+      .then(() => require('./services/dormantService').retryPendingSignals())
       .catch(err => console.error('QR welcome bonus check error:', err.message));
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
     setInterval(runQrBonusCheck, 3 * 60 * 60 * 1000);

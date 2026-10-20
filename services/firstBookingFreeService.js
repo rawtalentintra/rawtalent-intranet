@@ -35,8 +35,9 @@ function cioTrackConfig() {
 // (App API) and uses cio_<cio_id>. It never creates a profile by email: that
 // would clash with RT Portal's own identify later. No profile → 'no_profile',
 // retried by the scheduled job. One event per person per centre.
-async function cioIdentifierFor(o, ct) {
+async function cioIdentifierFor(o, ct, { allowEmailLookup = true } = {}) {
   if (ct && ct.rtPersonId) return String(ct.rtPersonId);
+  if (!allowEmailLookup) return null;
   const appKey = process.env.CUSTOMERIO_APP_API_KEY;
   if (!appKey || !o.contact_email) return null;
   const r = await fetch(`https://api.customer.io/v1/customers?email=${encodeURIComponent(o.contact_email)}`, { headers: { Authorization: `Bearer ${appKey}` } });
@@ -46,14 +47,34 @@ async function cioIdentifierFor(o, ct) {
   return hit && hit.cio_id ? `cio_${hit.cio_id}` : null;
 }
 
+// Shared Customer.io signal (profile attributes + one event), used by First
+// Booking Free and the dormant touch point (services/dormantService.js).
+async function sendCioSignal(ident, attributes, eventName, data) {
+  const cfg = cioTrackConfig();
+  if (!cfg.ready) throw new Error('Customer.io signals are switched off');
+  const auth = 'Basic ' + Buffer.from(`${cfg.siteId}:${cfg.key}`).toString('base64');
+  const base = `${cfg.host}/api/v1/customers/${encodeURIComponent(ident)}`;
+  const headers = { Authorization: auth, 'Content-Type': 'application/json' };
+  const r1 = await fetch(base, { method: 'PUT', headers, body: JSON.stringify(attributes) });
+  if (!r1.ok) throw new Error(`Customer.io profile ${r1.status}: ${(await r1.text()).slice(0, 200)}`);
+  const r2 = await fetch(`${base}/events`, { method: 'POST', headers, body: JSON.stringify({ name: eventName, data }) });
+  if (!r2.ok) throw new Error(`Customer.io event ${r2.status}: ${(await r2.text()).slice(0, 200)}`);
+}
+
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
-  if (!o || ['sent', 'duplicate'].includes(o.email_status)) return o && o.email_status;
+  if (!o || ['sent', 'duplicate', 'via_dormant'].includes(o.email_status)) return o && o.email_status;
   const cfg = cioTrackConfig();
   if (!cfg.ready) return 'pending'; // flag off or credentials missing — retried by the scheduled job
   try {
     const ct = await resolveContact({ leadId: o.lead_id, centreKey: o.centre_key });
+    // Emails only go to centres set up in RT (Liam, 19 Oct). A lead tagged FBF
+    // waits until it matches an RT centre, then the signal fires.
+    if (o.lead_id && !(ct && ct.rtPersonId)) {
+      await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'waiting_for_centre' WHERE id = ?", args: [offerId] });
+      return 'waiting_for_centre';
+    }
     const ident = await cioIdentifierFor(o, ct);
     if (!ident) {
       await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = ? WHERE id = ?", args: [o.contact_email || (ct && ct.rtPersonId) ? 'no_profile' : 'no_email', offerId] });
@@ -117,7 +138,7 @@ async function resolveCentreKey(o, rawClients) {
 async function processFirstBookings() {
   const db = getDb();
   // retry emails that couldn't go yet
-  const pendingEmails = (await db.execute({ sql: "SELECT id FROM first_booking_free_offers WHERE email_status IN ('pending','failed','no_profile')", args: [] })).rows;
+  const pendingEmails = (await db.execute({ sql: "SELECT id FROM first_booking_free_offers WHERE email_status IN ('pending','failed','no_profile','waiting_for_centre')", args: [] })).rows;
   for (const p of pendingEmails) await sendOfferEmail(p.id);
 
   const open = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE pay_task_id IS NULL', args: [] })).rows;
@@ -149,4 +170,4 @@ async function processFirstBookings() {
   return { tasks };
 }
 
-module.exports = { cioTrackConfig, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey };
+module.exports = { cioTrackConfig, sendCioSignal, cioIdentifierFor, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey };
