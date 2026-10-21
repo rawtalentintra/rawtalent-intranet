@@ -143,6 +143,14 @@ async function upsertEntry({ id, userEmail, userName, entryDate, hours, notes })
   return getWeek(userEmail, weekStartDate);
 }
 
+// Keep a copy of anything deleted or overwritten (timesheet_change_archive).
+async function archiveTimesheetChange(db, action, row, changedBy) {
+  await db.execute({
+    sql: `INSERT INTO timesheet_change_archive (action, user_email, week_start_date, entry_date, hours, snapshot, changed_by) VALUES (?,?,?,?,?,?,?)`,
+    args: [action, row.user_email || null, row.week_start_date || null, row.entry_date || null, row.total_hours ?? row.hours ?? null, JSON.stringify(row), changedBy || null]
+  });
+}
+
 async function deleteEntry(entryId, userEmail) {
   const db = getDb();
   const res = await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE id = ? AND user_email = ?', args: [entryId, userEmail] });
@@ -151,6 +159,7 @@ async function deleteEntry(entryId, userEmail) {
   const weekRes = await db.execute({ sql: 'SELECT * FROM timesheet_weeks WHERE id = ?', args: [entry.week_id] });
   const week = weekRes.rows[0];
   if (week && week.status !== 'draft') throw new Error('This week has already been submitted — recall it before editing');
+  await archiveTimesheetChange(db, 'entry_deleted', entry, userEmail);
   await db.execute({ sql: 'DELETE FROM timesheet_entries WHERE id = ?', args: [entryId] });
   await recomputeWeekTotal(db, entry.week_id);
   return getWeek(userEmail, toDateOnly(entry.entry_date));
@@ -180,6 +189,8 @@ async function adminAdjustDayHours(userEmail, userName, weekStartDate, approverE
   const validHours = validateHours(hours);
   const db = getDb();
   const week = await getOrCreateDraftWeek(db, { id: uuidv4(), userEmail, userName, weekStartDate });
+  const prev = (await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE user_email = ? AND entry_date = ?', args: [userEmail, entryDate] })).rows[0];
+  if (prev && Number(prev.hours) !== Number(validHours)) await archiveTimesheetChange(db, 'hours_overwritten', prev, approverEmail);
   // notes is deliberately left alone on conflict — this corrects the
   // hours number, not whatever the employee themselves already wrote for
   // that day (e.g. "half sick day"); only a brand-new entry gets no note.
@@ -477,8 +488,14 @@ async function listAll() {
   return normalizeWeeks(res.rows);
 }
 
-async function deleteWeek(id) {
-  await getDb().execute({ sql: 'DELETE FROM timesheet_weeks WHERE id = ?', args: [id] });
+async function deleteWeek(id, deletedBy) {
+  const db = getDb();
+  const week = (await db.execute({ sql: 'SELECT * FROM timesheet_weeks WHERE id = ?', args: [id] })).rows[0];
+  if (week) {
+    const entries = (await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE week_id = ? ORDER BY entry_date', args: [id] })).rows;
+    await archiveTimesheetChange(db, 'week_deleted', { ...week, entries }, deletedBy);
+  }
+  await db.execute({ sql: 'DELETE FROM timesheet_weeks WHERE id = ?', args: [id] });
 }
 
 module.exports = {

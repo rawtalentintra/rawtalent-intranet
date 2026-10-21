@@ -2750,3 +2750,19 @@ CREATE TABLE IF NOT EXISTS dormant_touchpoints (
   cio_error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dormant_touchpoints_centre ON dormant_touchpoints (centre_key, completed_at DESC);
+
+-- Copy of every timesheet row before it is deleted or overwritten (Joy,
+-- 22 Oct 2026, after deleted weeks for leavers couldn't be recovered for final
+-- pay). Written by services/timesheetService.js; nothing reads it in the app yet.
+CREATE TABLE IF NOT EXISTS timesheet_change_archive (
+  id SERIAL PRIMARY KEY,
+  action TEXT NOT NULL,          -- week_deleted | entry_deleted | hours_overwritten
+  user_email CITEXT,
+  week_start_date DATE,
+  entry_date DATE,
+  hours NUMERIC(6,2),
+  snapshot JSONB NOT NULL,       -- the week row + its entries, or the entry row
+  changed_by CITEXT,
+  changed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_timesheet_change_archive_user ON timesheet_change_archive (user_email, changed_at DESC);

@@ -25,7 +25,7 @@ router.get('/admin/all', requireAdmin, async (req, res) => {
 
 router.delete('/admin/:id', requireSuperAdmin, async (req, res) => {
   try {
-    await timesheet.deleteWeek(req.params.id);
+    await timesheet.deleteWeek(req.params.id, req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
