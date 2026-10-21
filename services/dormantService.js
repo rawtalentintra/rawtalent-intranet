@@ -10,7 +10,7 @@
 //    books and then goes dormant again.
 //  - On complete, Customer.io gets dormant_touchpoint_complete (behind
 //    FBF_CIO_ENABLED, OFF by default), which starts the Dormant journey with or
-//    without First Booking Free. FBF ticked here does NOT also send
+//    without First Booking Free (attribute dormant_touchpoint_fbf set first). FBF ticked here does NOT also send
 //    first_booking_free_tagged, so the centre isn't emailed twice.
 // Reads RT only; never writes to RT.
 const { v4: uuidv4 } = require('uuid');
@@ -147,14 +147,13 @@ async function sendTouchpointSignal(id) {
       await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'no_profile' WHERE id = ?", args: [id] });
       return 'no_profile';
     }
-    const at = Math.floor(new Date(t.completed_at).getTime() / 1000);
-    const attrs = { dormant_touchpoint_at: at, dormant_fbf: !!t.first_booking_free };
-    if (t.first_booking_free) Object.assign(attrs, { first_booking_free: true, first_booking_free_tagged_at: at, fbf_centre_name: t.centre_name, fbf_centre_key: t.centre_key, fbf_state: t.state || '', fbf_partner_name: t.completed_by_name || '' });
-    const days = t.last_booking_date ? Math.floor((new Date(t.completed_at) - new Date(t.last_booking_date)) / 864e5) : null;
-    await fbf.sendCioSignal(ident, attrs, 'dormant_touchpoint_complete', {
-      centre_name: t.centre_name, centre_key: t.centre_key, state: t.state || '', partner_name: t.completed_by_name || '',
-      first_booking_free: !!t.first_booking_free, days_since_last_booking: days, last_booking_date: t.last_booking_date ? dayStr(t.last_booking_date) : '',
-      touchpoint_type: t.touchpoint_type, contact_first_name: (ct && ct.firstName) || ''
+    // Event contract agreed with RT - Customer.io (22 Oct): set the attribute
+    // FIRST (automations filter on it), THEN send the event. No
+    // first_booking_free_tagged here, even with FBF ticked: the dormant FBF
+    // journey (#38) sends those emails. sendCioSignal does the profile update
+    // before the event.
+    await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!t.first_booking_free }, 'dormant_touchpoint_complete', {
+      first_booking_free: !!t.first_booking_free, centre_key: t.centre_key, centre_name: t.centre_name, state: t.state || '', partner_name: t.completed_by_name || ''
     });
     await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'sent', cio_sent_at = now(), cio_identifier = ?, cio_error = NULL WHERE id = ?", args: [ident, id] });
     if (t.first_booking_free) await db.execute({ sql: "UPDATE first_booking_free_offers SET email_sent_at = COALESCE(email_sent_at, now()), cio_identifier = ?, cio_centre_key = ? WHERE centre_key = ? AND email_status = 'via_dormant'", args: [ident, t.centre_key, t.centre_key] });
