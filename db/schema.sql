@@ -2766,3 +2766,15 @@ CREATE TABLE IF NOT EXISTS timesheet_change_archive (
   changed_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_timesheet_change_archive_user ON timesheet_change_archive (user_email, changed_at DESC);
+
+-- Row Level Security on every public table (Supabase security alert, 22 Oct
+-- 2026). No policies on purpose: the Data API stays fully locked, and the app
+-- connects as the table owner so it is unaffected. Every NEW table must get its
+-- own "ALTER TABLE ... ENABLE ROW LEVEL SECURITY;" line.
+ALTER TABLE qr_referrals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE first_booking_free_offers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mcp_usage_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE signed_contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE signed_contract_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dormant_touchpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE timesheet_change_archive ENABLE ROW LEVEL SECURITY;
