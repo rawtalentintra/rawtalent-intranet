@@ -1251,40 +1251,6 @@
           </div>
         </div>
 
-        <!-- Educator indicators (Sophia's Micropod Proposal, Joy 16 Oct). The map and
-             pods below stay compliant-only; this panel is an optional extra view. -->
-        <!-- Export ready-to-roster list (Joy, 21 Oct): live RT re-check of one state, downloaded as
-             the audited workbook (list, Map, Area summary, Excluded, How audited) + interactive map. -->
-        <div class="admin-table-card" id="readyExportCard" style="padding:16px 20px;margin-bottom:16px;display:none">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-            <div>
-              <div class="sd-card-title">Export ready-to-roster list</div>
-              <div class="sd-card-sub">Re-checks every Active educator in the state live with RT, then downloads the audited Excel file (list, map, area summary, everyone excluded and why) and an interactive map. VIC takes a few minutes; smaller states take seconds.</div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <select id="readyExportState" class="form-control" style="max-width:120px">
-                <option>VIC</option><option>SA</option><option>QLD</option><option>NT</option><option>NSW</option><option>ACT</option><option>WA</option><option>TAS</option>
-              </select>
-              <button class="btn-primary" id="readyExportBtn" onclick="startReadyExport()">Export</button>
-            </div>
-          </div>
-          <div id="readyExportStatus" style="margin-top:10px;font-size:13px"></div>
-        </div>
-
-        <div class="admin-table-card" id="educatorIndicatorsCard" style="padding:16px 20px;margin-bottom:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-            <div>
-              <div class="sd-card-title">Educator indicators</div>
-              <div class="sd-card-sub">Engagement and compliance for Active educators, and onboarding progress. Hover a label for its definition. The map below still shows only Active, fully compliant educators.</div>
-            </div>
-            <select id="eiState" class="form-control" style="max-width:150px" onchange="renderEducatorIndicators()">
-              <option value="ALL">All states</option><option>VIC</option><option>SA</option><option>QLD</option><option>ACT</option><option>NSW</option><option>NT</option>
-            </select>
-          </div>
-          <div id="eiChips" style="margin-top:12px"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>
-          <div id="eiDetail" style="margin-top:12px"></div>
-        </div>
-
         <div id="micropodsListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1299,7 +1265,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
                 <div class="report-multiselect" style="position:relative;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
-                  <label>Educator Segment</label>
+                  <label>Educator type</label>
                   <button type="button" id="micropodsSegmentFilter_btn" class="form-control" style="width:190px;text-align:left;cursor:pointer;background:white" onclick="toggleMicropodsSegmentFilterPanel()">All candidates</button>
                   <div id="micropodsSegmentFilter_panel" style="display:none;position:fixed;background:white;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);z-index:1000;min-width:200px;padding:6px 0"></div>
                 </div>
@@ -1322,7 +1288,7 @@
                 </div>
               </div>
             </div>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)"><strong>Currently Working</strong>: worked shift in the last 28 days. <strong>Newly Activated</strong>: created in the last 28 days, no shift history yet. <strong>Available &amp; Engaged</strong>: has upcoming availability set in RT, no recent shift. <strong>Warm Reactivation</strong>: last shift was 29–90 days ago. <strong>Dormant / Lapsed</strong>: no shift in over 90 days (or never). <strong>Onboarding Supply</strong>: no longer used. Micropods only shows educators who are Active in RT, with onboarding complete and every document in date.</div>
+            <div id="micropodsLegend" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-100)"></div>
             <div id="micropodsTerritoryNote" style="display:none;font-size:11.5px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100)"><strong>Territory Strategy</strong> compares each pod's Active Supply (Currently Working + Newly Activated + Available &amp; Engaged) against nearby centres' booking demand (within 15km, last 30 days) to flag where to <strong>Recruit</strong> (demand > supply), <strong>Develop Business</strong> (supply > demand), <strong>Grow</strong> (both strong), or <strong>Monitor</strong> (both quiet) — relative to the other pods shown, not a fixed target. First-time load geocodes centre addresses and can take a few seconds; it's cached after that.</div>
           </div>
 
@@ -1349,6 +1315,36 @@
               </table>
             </div>
           </div>
+                  <div class="admin-table-card" id="findEducatorsCard" style="padding:16px 20px;margin-top:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div>
+                <div class="sd-card-title">Find educators</div>
+                <div class="sd-card-sub" id="feSub">Pick a group to list everyone in it for the state selected above, then export.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select id="feGroup" class="form-control" style="min-width:230px" onchange="loadFindEducators()"></select>
+                <button class="btn-secondary" id="feExport" style="padding:6px 14px;font-size:12.5px" onclick="exportFindEducators()" disabled>Export CSV</button>
+              </div>
+            </div>
+            <div id="feBody" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <!-- Export ready-to-roster list (Joy, 21 Oct): live RT re-check of one state, downloaded as
+             the audited workbook (list, Map, Area summary, Excluded, How audited) + interactive map. -->
+        <div class="admin-table-card" id="readyExportCard" style="padding:16px 20px;margin-bottom:16px;display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div>
+              <div class="sd-card-title">Export ready-to-roster list</div>
+              <div class="sd-card-sub">Re-checks every Active educator in the state live with RT, then downloads the audited Excel file (list, map, area summary, everyone excluded and why) and an interactive map. VIC takes a few minutes; smaller states take seconds.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="readyExportState" class="form-control" style="max-width:120px">
+                <option>VIC</option><option>SA</option><option>QLD</option><option>NT</option><option>NSW</option><option>ACT</option><option>WA</option><option>TAS</option>
+              </select>
+              <button class="btn-primary" id="readyExportBtn" onclick="startReadyExport()">Export</button>
+            </div>
+          </div>
+          <div id="readyExportStatus" style="margin-top:10px;font-size:13px"></div>
         </div>
 
         <div id="micropodDetailScreen" style="display:none">
@@ -6859,7 +6855,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
-      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); loadEducatorIndicators(); initReadyExport(); }
+      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); initFindEducators(); initReadyExport(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
@@ -11032,55 +11028,63 @@
       } catch (e) { clearInterval(readyExportPoll); btn.disabled = false; box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; }
     }
 
-    // ── Educator indicators (Micropods) ───────────────────────────────────
-    let eiData = null, eiSelected = null;
-    async function loadEducatorIndicators() {
+    // ── Micropods legend + Find educators (Joy, 22 Oct: simpler page, Sophia's labels) ──
+    function renderMicropodsLegend() {
+      const el = document.getElementById('micropodsLegend');
+      if (!el) return;
+      el.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">What the labels mean <span style="font-weight:400;color:var(--text-muted)">(every educator on this page is Active, onboarded and fully compliant)</span></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+          ${SEGMENT_ORDER.map(k => { const m = SEGMENT_META[k]; return `<div style="display:flex;gap:10px;align-items:flex-start;background:${m.bg};border-radius:8px;padding:10px 12px">
+            <span style="flex:none;width:14px;height:14px;border-radius:50%;background:${m.dot};margin-top:2px"></span>
+            <div><div style="font-size:13.5px;font-weight:800;color:${m.color}">${m.label}</div><div style="font-size:12.5px;color:#1f2937;line-height:1.35">${escHtml(m.desc)}</div></div></div>`; }).join('')}
+        </div>`;
+    }
+    let feDefs = null, feRows = [];
+    async function initFindEducators() {
+      renderMicropodsLegend();
+      const sel = document.getElementById('feGroup');
+      if (!sel) return;
       try {
-        const r = await fetch('/api/micropods/indicators'); eiData = await r.json();
-        if (!r.ok) throw new Error(eiData.error || 'Could not load indicators');
-        renderEducatorIndicators();
-      } catch (e) { const c = document.getElementById('eiChips'); if (c) c.innerHTML = `<div style="font-size:13px;color:#b91c1c">${escHtml(e.message)}</div>`; }
+        if (!feDefs) { const r = await fetch('/api/micropods/indicators'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not load'); feDefs = d; }
+        const st = (micropodsState && micropodsState !== 'all') ? micropodsState : null;
+        const count = k => Object.entries(feDefs.counts).reduce((n, [s, c]) => n + ((!st || s === st) ? (c[k] || 0) : 0), 0);
+        const groups = [['engagement', 'How often they work (all Active educators)'], ['compliance', 'Documents (all Active educators)'], ['onboarding', 'Still onboarding (In Progress)']];
+        const keep = sel.value;
+        sel.innerHTML = '<option value="">Choose a group…</option>' + groups.map(([g, t]) => `<optgroup label="${t}">${Object.entries(feDefs.definitions).filter(([, d]) => d.group === g).map(([k, d]) => `<option value="${k}">${escHtml(d.label)} (${count(k)})</option>`).join('')}</optgroup>`).join('');
+        sel.value = keep;
+        document.getElementById('feSub').textContent = `Pick a group to list everyone in it${st ? ' in ' + st : ' across all states'}, then export. Change the state with the buttons above.`;
+        if (keep) loadFindEducators();
+      } catch (e) { document.getElementById('feBody').innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
     }
-    function eiCount(key) {
-      const st = document.getElementById('eiState').value;
-      return Object.entries(eiData.counts).reduce((n, [s, c]) => n + ((st === 'ALL' || s === st) ? (c[key] || 0) : 0), 0);
+    async function loadFindEducators() {
+      const key = document.getElementById('feGroup').value, body = document.getElementById('feBody'), btn = document.getElementById('feExport');
+      feRows = []; btn.disabled = true;
+      if (!key) { body.innerHTML = ''; return; }
+      const st = (micropodsState && micropodsState !== 'all') ? micropodsState : 'ALL';
+      body.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Loading…</div>';
+      try {
+        const r = await fetch(`/api/micropods/indicators?indicator=${encodeURIComponent(key)}&state=${encodeURIComponent(st)}`); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load');
+        feRows = d.people || []; btn.disabled = !feRows.length;
+        const def = d.definitions[key];
+        const sub = {}; feRows.forEach(p => { const k = p.suburb || 'Unknown'; sub[k] = (sub[k] || 0) + 1; });
+        const top = Object.entries(sub).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        body.innerHTML = `<div style="font-size:13px;margin-bottom:6px"><b style="color:var(--navy)">${feRows.length} educator${feRows.length === 1 ? '' : 's'}</b> · <span style="color:var(--text-muted)">${escHtml(def.desc)}</span></div>
+          ${top.length ? `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">Most in: ${top.map(([s, n]) => `${escHtml(s)} (${n})`).join(', ')}</div>` : ''}
+          <div style="max-height:360px;overflow:auto;border:1px solid var(--gray-100);border-radius:8px"><table class="data-table data-table-compact" style="margin:0">
+            <thead><tr><th>Name</th><th>Phone</th><th>Suburb</th><th>State</th><th>Qualification</th><th>Last shift</th></tr></thead>
+            <tbody>${feRows.slice(0, 300).map(p => `<tr><td style="font-weight:600">${escHtml(p.name)}</td><td>${escHtml(p.phone || '')}</td><td>${escHtml(p.suburb || '')}</td><td>${escHtml(p.state || '')}</td><td>${escHtml(p.qualification || '')}</td><td>${p.lastShift ? fmtShortDate(p.lastShift) : '—'}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No one in this group.</td></tr>'}</tbody>
+          </table></div>
+          ${feRows.length > 300 ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px">Showing 300 of ${feRows.length}. Export CSV for everyone.</div>` : ''}`;
+      } catch (e) { body.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
     }
-    function renderEducatorIndicators() {
-      if (!eiData) return;
-      const groups = [['engagement', 'Engagement (Active only)'], ['compliance', 'Compliance (Active only)'], ['onboarding', 'Onboarding (In Progress)']];
-      document.getElementById('eiChips').innerHTML = groups.map(([g, title]) => `
-        <div style="margin-bottom:8px"><div style="font-size:11.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">${title}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">${Object.entries(eiData.definitions).filter(([, d]) => d.group === g).map(([k, d]) => `
-            <button type="button" title="${escHtml(d.desc)}" onclick="selectEducatorIndicator('${k}')" style="border:1px solid var(--gray-200);border-radius:16px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;background:${eiSelected === k ? 'var(--navy)' : '#fff'};color:${eiSelected === k ? '#fff' : 'var(--navy)'}">${escHtml(d.label)} · ${eiCount(k)}</button>`).join('')}</div></div>`).join('');
-      if (eiSelected) selectEducatorIndicator(eiSelected, true);
-    }
-    async function selectEducatorIndicator(key, keep) {
-      if (!keep && eiSelected === key) { eiSelected = null; document.getElementById('eiDetail').innerHTML = ''; renderEducatorIndicators(); return; }
-      eiSelected = key; if (!keep) renderEducatorIndicators();
-      const st = document.getElementById('eiState').value;
-      const box = document.getElementById('eiDetail'); box.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Loading…</div>';
-      const r = await fetch(`/api/micropods/indicators?indicator=${encodeURIComponent(key)}&state=${encodeURIComponent(st)}`); const d = await r.json();
-      const people = d.people || [];
-      const bySuburb = {}; people.forEach(p => { const k = p.suburb || 'Unknown'; bySuburb[k] = (bySuburb[k] || 0) + 1; });
-      const top = Object.entries(bySuburb).sort((a, b) => b[1] - a[1]).slice(0, 15);
-      window.__eiExport = people;
-      box.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${escHtml(d.definitions[key].label)}: ${people.length} educator${people.length === 1 ? '' : 's'}${st === 'ALL' ? '' : ' in ' + st}</div>
-          <button class="btn-secondary" style="padding:5px 12px;font-size:12.5px" onclick="exportEducatorIndicator()">Export CSV</button>
-        </div>
-        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">Top suburbs: ${top.map(([s, n]) => `${escHtml(s)} (${n})`).join(', ') || '—'}</div>
-        <div style="max-height:320px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-          <thead><tr style="border-bottom:1px solid var(--gray-200)">${['Name', 'Phone', 'Suburb', 'State', 'Qualification', 'Last shift'].map(h => `<th style="text-align:left;padding:6px">${h}</th>`).join('')}</tr></thead>
-          <tbody>${people.slice(0, 300).map(p => `<tr style="border-bottom:1px solid var(--gray-100)"><td style="padding:6px;font-weight:600">${escHtml(p.name)}</td><td style="padding:6px">${escHtml(p.phone || '')}</td><td style="padding:6px">${escHtml(p.suburb || '')}</td><td style="padding:6px">${escHtml(p.state || '')}</td><td style="padding:6px">${escHtml(p.qualification || '')}</td><td style="padding:6px">${p.lastShift || '—'}</td></tr>`).join('')}</tbody>
-        </table>${people.length > 300 ? `<div style="font-size:12px;color:var(--text-muted);padding:6px">Showing 300 of ${people.length}. Export for the full list.</div>` : ''}</div>`;
-    }
-    function exportEducatorIndicator() {
-      const rows = window.__eiExport || []; const label = eiData.definitions[eiSelected].label;
+    function exportFindEducators() {
+      const key = document.getElementById('feGroup').value; if (!feRows.length) return;
+      const label = feDefs.definitions[key].label, st = (micropodsState && micropodsState !== 'all') ? micropodsState : 'all-states';
       const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const csv = ['Name,Phone,Email,Suburb,State,Qualification,Last shift,Indicator'].concat(rows.map(p => [p.name, p.phone, p.email, p.suburb, p.state, p.qualification, p.lastShift, label].map(esc).join(','))).join('\n');
+      const csv = ['Name,Phone,Email,Suburb,State,Qualification,Last shift,Group'].concat(feRows.map(p => [p.name, p.phone, p.email, p.suburb, p.state, p.qualification, p.lastShift, label].map(esc).join(','))).join('\n');
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      a.download = `educators-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${document.getElementById('eiState').value}.csv`; a.click();
+      a.download = `educators-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${st}.csv`; a.click();
     }
 
     async function loadFirstShifts() {
@@ -12666,6 +12670,7 @@
       micropodsState = state;
       updateMicropodsStateToggle();
       loadMicropods();
+      initFindEducators();
     }
 
     function updateMicropodsStateToggle() {
@@ -12747,7 +12752,7 @@
       const { state, partner } = micropodsApiStateParams();
       const territoryMode = document.getElementById('micropodsTerritoryToggle').checked;
       document.getElementById('micropodsTerritoryNote').style.display = territoryMode ? 'block' : 'none';
-      const colspan = territoryMode ? 4 : 9;
+      const colspan = territoryMode ? 4 : 8;
       const tbody = document.getElementById('micropodsTableBody');
       tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>`;
       document.getElementById('micropodsSummary').textContent = '';
@@ -12785,7 +12790,7 @@
 
     function renderMicropodsTable(data, territoryMode) {
       const tbody = document.getElementById('micropodsTableBody');
-      const colspan = territoryMode ? 4 : 9;
+      const colspan = territoryMode ? 4 : 8;
       if (!data || !data.pods.length) {
         document.getElementById('micropodsSummary').innerHTML = data ? `0 pods · ${unclusteredSummaryHtml(data.unclusteredCount)}` : '';
         tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px">No pods meet the current minimum size — try lowering it, or see the candidates outside any pod above.</td></tr>`;
@@ -15978,7 +15983,14 @@
     // desc mirrors classifyEducator()'s real precedence order in
     // services/educatorEngagementService.js (first match wins) — keep
     // both in sync if that logic ever changes.
+    // Sophia's Micropod Proposal labels (Joy, 22 Oct). The older keys below are
+    // only kept so outreach lists saved before then still show a label.
     const SEGMENT_META = {
+      actively_working: { label: 'Actively Working', bg: '#dcfce7', color: '#15803d', dot: '#16a34a', desc: '3 or more shifts completed in the past 7 days.' },
+      actively_engaged: { label: 'Actively Engaged', bg: '#dbeafe', color: '#1d4ed8', dot: '#2563eb', desc: 'At least 1 shift completed in the past month.' },
+      engaged: { label: 'Engaged', bg: '#ccfbf1', color: '#0f766e', dot: '#0d9488', desc: 'At least 1 shift completed in the past 3 months.' },
+      disengaged: { label: 'Disengaged', bg: '#fef3c7', color: '#b45309', dot: '#d97706', desc: 'Has worked with us before, but no shift in the past 3 months.' },
+      dormant: { label: 'Dormant', bg: '#fee2e2', color: '#b91c1c', dot: '#dc2626', desc: 'No completed shift in the last 12 months (or never worked).' },
       currently_working: { label: 'Currently Working', bg: '#dcfce7', color: '#15803d', desc: 'Accepted at least one shift in the last 28 days.' },
       newly_activated: { label: 'Newly Activated', bg: '#dbeafe', color: '#1d4ed8', desc: 'No shift in the last 28 days, but became active in RT within the last 28 days.' },
       available_engaged: { label: 'Available & Engaged', bg: '#ccfbf1', color: '#0f766e', desc: 'No recent shift and not newly activated, but has listed availability and is fully compliant on required documents.' },
@@ -15986,7 +15998,7 @@
       dormant_lapsed: { label: 'Dormant / Lapsed', bg: '#fee2e2', color: '#b91c1c', desc: 'Last worked more than 90 days ago — or never worked, and isn\'t newly activated or currently available/compliant.' },
       onboarding_supply: { label: 'Onboarding Supply', bg: '#ede9fe', color: '#6d28d9', desc: 'Never had a real shift, and either isn\'t fully compliant yet or is still in an onboarding-track status with RT.' }
     };
-    const SEGMENT_ORDER = ['currently_working', 'newly_activated', 'available_engaged', 'warm_reactivation', 'dormant_lapsed', 'onboarding_supply'];
+    const SEGMENT_ORDER = ['actively_working', 'actively_engaged', 'engaged', 'disengaged', 'dormant'];
     function segmentBadge(segment) {
       const meta = SEGMENT_META[segment];
       if (!meta) return '<span style="color:var(--text-muted)">—</span>';

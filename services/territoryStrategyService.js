@@ -5,7 +5,7 @@
 // supply, and what a Workforce Partner should do about it today.
 //
 // Deliberately reuses whatever supply definition is already live — Active
-// Supply (currently_working + newly_activated + available_engaged, see
+// Supply (actively_working + actively_engaged + engaged, see
 // educatorEngagementService's classifyEducator / Decision Area 1) — rather
 // than introducing a new one. The quadrant split itself is self-calibrating
 // (median supply/demand across the pods in view) rather than a fixed

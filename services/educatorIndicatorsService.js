@@ -17,11 +17,11 @@ const { complianceReasons } = require('./educatorComplianceService');
 const { normalizeStateToShort } = require('./micropodService');
 
 const DEFINITIONS = {
-  actively_working: { label: 'Actively Working', group: 'engagement', desc: 'Active, with 3 or more shifts completed in the past 7 days.' },
-  actively_engaged: { label: 'Actively Engaged', group: 'engagement', desc: 'Active, with at least 1 shift completed in the past month (and not Actively Working).' },
-  engaged: { label: 'Engaged', group: 'engagement', desc: 'Active, with at least 1 shift completed in the past 3 months (and not above).' },
-  disengaged: { label: 'Disengaged', group: 'engagement', desc: 'Active and has worked before, but no completed shift in the past 3 months. Re-engagement target.' },
-  dormant: { label: 'Dormant', group: 'engagement', desc: 'Active profile but no completed shift in the booking history we hold (about the last 12 months).' },
+  actively_working: { label: 'Actively Working', group: 'engagement', desc: '3 or more shifts completed in the past 7 days.' },
+  actively_engaged: { label: 'Actively Engaged', group: 'engagement', desc: 'At least 1 shift completed in the past month.' },
+  engaged: { label: 'Engaged', group: 'engagement', desc: 'At least 1 shift completed in the past 3 months.' },
+  disengaged: { label: 'Disengaged', group: 'engagement', desc: 'Has worked with us before, but no shift in the past 3 months.' },
+  dormant: { label: 'Dormant', group: 'engagement', desc: 'No completed shift in the last 12 months (or never worked).' },
   compliant: { label: 'Active – Compliant', group: 'compliance', desc: 'Active, and every mandatory document is current and valid.' },
   not_compliant: { label: 'Active – Not Compliant', group: 'compliance', desc: 'Active, but one or more mandatory documents are missing, expired or invalid.' },
   ob_lt20: { label: 'In Progress <20%', group: 'onboarding', desc: 'Onboarding In Progress, under 20% complete.' },
@@ -31,6 +31,26 @@ const DEFINITIONS = {
   ob_80: { label: 'In Progress 80–99%', group: 'onboarding', desc: 'Onboarding In Progress, 80–99% complete.' },
   ob_100: { label: 'In Progress 100%', group: 'onboarding', desc: 'All onboarding steps done but RT status not yet Active.' }
 };
+
+// Shared with Micropods (routes/micropods.js): completed-shift dates per
+// educator from HeartBeat's cached RT bookings, and Sophia's engagement label.
+function completedShiftsByUser(bookings, now = Date.now()) {
+  const shifts = new Map();
+  for (const b of bookings) {
+    if (b.statusId !== 5 || !b.assignedUserId || !b.bookingDate) continue;
+    const t = new Date(b.bookingDate).getTime();
+    if (t > now) continue;
+    const k = String(b.assignedUserId);
+    if (!shifts.has(k)) shifts.set(k, []);
+    shifts.get(k).push(t);
+  }
+  return shifts;
+}
+function engagementTag(list, now = Date.now()) {
+  const DAY = 864e5;
+  const in7 = list.filter(t => now - t <= 7 * DAY).length, in30 = list.filter(t => now - t <= 30 * DAY).length, in90 = list.filter(t => now - t <= 91 * DAY).length;
+  return in7 >= 3 ? 'actively_working' : in30 >= 1 ? 'actively_engaged' : in90 >= 1 ? 'engaged' : list.length ? 'disengaged' : 'dormant';
+}
 
 let cache = { at: 0, value: null };
 async function computeIndicators() {
@@ -81,4 +101,4 @@ async function computeIndicators() {
   return value;
 }
 
-module.exports = { computeIndicators, DEFINITIONS };
+module.exports = { computeIndicators, DEFINITIONS, completedShiftsByUser, engagementTag };

@@ -525,6 +525,10 @@ async function start() {
       .then(() => require('./services/dormantService').retryPendingSignals())
       .catch(err => console.error('QR welcome bonus check error:', err.message));
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
+    // Micropods: build the educator points once at start-up and every 50 min,
+    // so nobody waits on a cold 10–30s build (routes/micropods.js).
+    setTimeout(() => require('./routes/micropods').warmMicropods(), 60 * 1000);
+    setInterval(() => require('./routes/micropods').warmMicropods(), 50 * 60 * 1000);
     setInterval(runQrBonusCheck, 3 * 60 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);
 

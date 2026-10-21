@@ -17,8 +17,8 @@ const { complianceReasons } = require('../services/educatorComplianceService');
 // precedent for Workforce-Partner-territory features.
 router.use(requireAuth, requireRole('admin', 'super_admin', 'workforce_partner'));
 
-const CANDIDATES_CACHE_TTL_MS = 10 * 60 * 1000; // underlying data only changes on the nightly RT sync
-const PODS_CACHE_TTL_MS = 10 * 60 * 1000;
+const CANDIDATES_CACHE_TTL_MS = 60 * 60 * 1000; // underlying data only changes on the nightly RT sync
+const PODS_CACHE_TTL_MS = 60 * 60 * 1000;
 
 let candidatesCache = { points: null, totalActive: 0, totalGeocoded: 0, expiresAt: 0 };
 const podsCache = new Map(); // `${state}:${gridKm}:${minPodSize}:${segment}` -> { result, expiresAt }
@@ -28,8 +28,23 @@ const podsCache = new Map(); // `${state}:${gridKm}:${minPodSize}:${segment}` ->
 // availability/compliance) via jsonb path expressions rather than pulling
 // the full `raw` payload — no reason to move megabytes of JSON just to
 // cluster ~13k points by coordinate and classify them.
+// Building the points takes 10–30s (a big jsonb read plus the RT bookings
+// cache), which made the page time out with "Failed to load micropods"
+// (Joy, 22 Oct). The data only changes with the nightly RT sync, so a stale
+// copy is served instantly while a fresh one is built in the background, and
+// the cache is warmed when the server starts (see warmMicropods below).
+let candidatesBuild = null;
 async function getCandidatePoints() {
   if (candidatesCache.points && Date.now() < candidatesCache.expiresAt) return candidatesCache;
+  if (!candidatesBuild) candidatesBuild = buildCandidatePoints().finally(() => { candidatesBuild = null; });
+  if (candidatesCache.points) { candidatesBuild.catch(() => {}); return candidatesCache; }
+  return candidatesBuild;
+}
+function warmMicropods() {
+  return getCandidatePoints().then(() => { podsCache.clear(); }).catch(err => console.error('Micropods warm-up failed:', err.message));
+}
+
+async function buildCandidatePoints() {
 
   // is_deleted = true alongside is_active = true is a rare RT data
   // inconsistency (confirmed live: 1 of 12,950 "active" rows) — excluded
@@ -102,7 +117,12 @@ async function getCandidatePoints() {
   // educatorEngagementService.js for the full definition and rationale.
   // bookingAggregates comes from the exact same 6-month RT bookings fetch
   // the original engagement split already used — no second RT call.
-  const { bookingAggregates } = await engagement.getEngagedUserIds();
+  // Sophia's engagement labels (Micropod Proposal, Joy 22 Oct), from the RT
+  // bookings HeartBeat already caches for My Centres — replaces the old
+  // segments and their separate ~30s RT bookings fetch that made pods time out.
+  const { completedShiftsByUser, engagementTag } = require('../services/educatorIndicatorsService');
+  const { bookings: cachedBookings } = await require('./centres').getCentresAndBookings();
+  const shiftsByUser = completedShiftsByUser(cachedBookings);
 
   // Compliance is decided in JS by services/educatorComplianceService.js (newest
   // copy of every document, core documents present, visa in date) — the old SQL
@@ -113,7 +133,8 @@ async function getCandidatePoints() {
   rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today).length === 0; });
 
   const points = rows.map(r => {
-    const agg = bookingAggregates.get(String(r.user_id));
+    const shiftList = shiftsByUser.get(String(r.user_id)) || [];
+    const lastShift = shiftList.length ? Math.max(...shiftList) : null;
     const facts = {
       status: r.status,
       fullyCompliant: r.fully_compliant,
@@ -129,7 +150,7 @@ async function getCandidatePoints() {
       state: normalizeStateToShort(r.addr_state),
       lat: r.lat,
       lng: r.lng,
-      segment: engagement.classifyEducator(facts, agg),
+      segment: engagementTag(shiftList),
       fullyCompliant: r.fully_compliant,
       // Active in RT, onboarding Completed and fully compliant: the people who can be
       // rostered today. Whatever segment they sit in (a lapsed Active educator is still
@@ -137,10 +158,8 @@ async function getCandidatePoints() {
       readyToRoster: r.status === 1 && r.ob_status === 'Completed' && r.fully_compliant,
       hasCurrentAvailability: r.has_current_availability,
       qualification: r.qualification_name || null,
-      shifts28d: agg?.shiftsIn28Days || 0,
-      daysSinceLastShift: agg?.lastWorkedDate
-        ? Math.floor((Date.now() - new Date(agg.lastWorkedDate).getTime()) / 86400000)
-        : null
+      shifts28d: shiftList.filter(t => Date.now() - t <= 28 * 864e5).length,
+      daysSinceLastShift: lastShift ? Math.floor((Date.now() - lastShift) / 86400000) : null
     };
   }).filter(p =>
     // Exact (0,0) is RT's "never actually geocoded" sentinel ("null
@@ -174,7 +193,7 @@ function clamp(n, min, max, fallback) {
 // everywhere else in this file.
 function parseSegmentFilter(raw) {
   if (!raw) return [];
-  return String(raw).split(',').map(s => s.trim()).filter(s => Object.prototype.hasOwnProperty.call(engagement.SEGMENTS, s));
+  return String(raw).split(',').map(s => s.trim()).filter(s => Object.prototype.hasOwnProperty.call(MP_SEGMENTS, s));
 }
 
 // '', 'all' (case-insensitive), or missing all mean no state filter —
@@ -211,9 +230,10 @@ function median(numbers) {
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
+const MP_SEGMENTS = { actively_working: 1, actively_engaged: 1, engaged: 1, disengaged: 1, dormant: 1 };
 function emptySegmentCounts() {
   const counts = {};
-  for (const key of Object.keys(engagement.SEGMENTS)) counts[key] = 0;
+  for (const key of Object.keys(MP_SEGMENTS)) counts[key] = 0;
   return counts;
 }
 
@@ -233,7 +253,7 @@ function computePodAggregates(memberPoints) {
     shifts28d += p.shifts28d || 0;
     if (p.daysSinceLastShift != null) daysSinceValues.push(p.daysSinceLastShift);
   }
-  const activeSupplyCount = segmentCounts.currently_working + segmentCounts.newly_activated + segmentCounts.available_engaged;
+  const activeSupplyCount = segmentCounts.actively_working + segmentCounts.actively_engaged + segmentCounts.engaged;
   return { segmentCounts, activeSupplyCount, availableNowCount, readyToRosterCount, shifts28d, medianDaysSinceLastShift: median(daysSinceValues) };
 }
 
@@ -577,3 +597,4 @@ router.get('/:podId', async (req, res) => {
 
 module.exports = router;
 module.exports.getCandidatePoints = getCandidatePoints;
+module.exports.warmMicropods = warmMicropods;
