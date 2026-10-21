@@ -501,7 +501,8 @@ router.get('/', async (req, res) => {
       ...healthForCentre(c, bookingsForCentre(bookingsIndex, c), visits[c.centreKey] || [], lastBookingByCentreKey[c.centreKey] || null),
       assignedWorkforcePartner: assignments[c.centreKey] || null,
       latitude: geocodes[c.centreKey]?.lat ?? null,
-      longitude: geocodes[c.centreKey]?.lng ?? null
+      longitude: geocodes[c.centreKey]?.lng ?? null,
+      bookingTrend: require('../services/dormantService').computeTrend(bookingsForCentre(bookingsIndex, c))
     }));
     // Dormant call list (Liam, 19 Oct): 6+ months since the last booking, and
     // whether a dormant touch point has been done since. See dormantService.
@@ -732,9 +733,11 @@ router.get('/:centreKey', async (req, res) => {
     const visits = (await visitsByCentreKey([centre.centreKey]))[centre.centreKey] || [];
     const assignments = await getCentrePartnerAssignments();
     const lastBookingByCentreKey = await getLastBookingDates([centre], bookings);
-    const [withDormancy] = await require('../services/dormantService').annotateDormancy([{
+    const dormantSvc = require('../services/dormantService');
+    const [withDormancy] = await dormantSvc.annotateDormancy([{
       ...healthForCentre(centre, bookings, visits, lastBookingByCentreKey[centre.centreKey] || null),
-      assignedWorkforcePartner: assignments[centre.centreKey] || null
+      assignedWorkforcePartner: assignments[centre.centreKey] || null,
+      bookingTrend: dormantSvc.computeTrend(bookingsForCentre(indexBookingsByCentre(bookings), centre))
     }], lastBookingByCentreKey);
     res.json(withDormancy);
   } catch (err) {

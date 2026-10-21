@@ -10328,8 +10328,14 @@
         // top") always outranks everything else in this queue, regardless
         // of health category — an escalated Healthy or Growing centre is
         // still more urgent right now than an ordinary Declining one.
+        const firstBookingDays = c.bookingTrend?.firstBookingDaysAgo;
+        const visitedSinceFirst = c.lastContactAt && c.bookingTrend?.firstBookingDate && c.lastContactAt.slice(0, 10) >= c.bookingTrend.firstBookingDate;
         if (c.isEscalated) {
-          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Issue raised at last visit', urgency: 1000, cls: 'attn-overdue', outcome: 'Escalated — an issue or allegation was raised. Call or visit today.' });
+          // Unhappy client (Liam, 19 Oct): a call/visit logged as "Issue raised", or an ops escalation.
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: `Action required: unhappy client${c.escalationNote ? ' — ' + c.escalationNote : ''}`, urgency: 1000, cls: 'attn-overdue', outcome: 'View the notes on the centre, then contact them today.' });
+        } else if (firstBookingDays != null && firstBookingDays <= 21 && c.bookingTrend.status === 'new' && !visitedSinceFirst) {
+          // First ever booking (Liam, 19 Oct). "Ever" = first in the ~12 months of RT bookings HeartBeat holds.
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: `Action required: go visit centre — first booking ${fmtShortDate(c.bookingTrend.firstBookingDate)}`, urgency: 900, cls: 'attn-overdue', outcome: 'They just made their first booking. Visit to welcome them and make sure it goes well.' });
         } else if (c.health === 'declining') {
           items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: c.healthReasons[0] || 'Bookings declining', urgency: 60, cls: 'attn-overdue', outcome: centreAttentionOutcome('declining') });
         } else if (c.health === 'needs_attention') {
@@ -10337,7 +10343,7 @@
         } else if (c.dormantNeedsContact) {
           // Dormant call list (Liam, 19 Oct): no booking for 6+ months and no
           // dormant touch point since. Leaves once the touch point is completed.
-          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: `Centre dormant — no booking since ${fmtShortDate(c.lastBookingDate)}`, urgency: 20, cls: 'attn-stale', outcome: 'Call or visit, then press "Dormant touch point complete" on the centre.' });
+          items.push({ type: 'centre', centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, health: c.health, reason: `Action required: centre dormant — no booking since ${fmtShortDate(c.lastBookingDate)}`, urgency: 20, cls: 'attn-stale', outcome: 'Call or visit, then press "Dormant touch point complete" on the centre.' });
         }
       });
       items.sort((a, b) => b.urgency - a.urgency);
@@ -12003,7 +12009,7 @@
           <td class="td-truncate" style="max-width:220px" title="${escHtml(c.name)}">${escHtml(c.name)}</td>
           <td>${escHtml(c.suburb || '—')}</td>
           <td>${escHtml(c.state || '—')}</td>
-          <td>${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}</td>
+          <td>${centreStatusBadge(c.bookingTrend) || centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}${c.isEscalated ? ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:10.5px">Unhappy client</span>' : ''}</td>
           <td>${c.bookings30dCount}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
         </tr>`;
@@ -12037,12 +12043,37 @@
 
     // ── Centre 360: tabs, dormant touch point, Centre History (Liam, 19 Oct) ──
     const c360TabStyle = on => `border:none;background:none;padding:8px 14px;font-size:14px;font-weight:700;cursor:pointer;color:${on ? 'var(--navy)' : 'var(--text-muted)'};border-bottom:3px solid ${on ? 'var(--navy)' : 'transparent'};margin-bottom:-1px`;
-    function switchCentre360Tab(tab) {
+    // Centre status badge — rule in services/dormantService.js computeTrend.
+    const CENTRE_STATUS_META = {
+      growing: ['Growing', '#dcfce7', '#15803d', 'Last 4 weeks are booking at least 25% more per week than the 8 weeks before.'],
+      declining: ['Declining', '#fee2e2', '#b91c1c', 'Last 4 weeks are booking at least 25% less per week than the 8 weeks before.'],
+      steady: ['Steady', '#e0f2fe', '#0369a1', 'Booking at about the same rate as the 8 weeks before.'],
+      new: ['New', '#ede9fe', '#6d28d9', 'First booking was within the last 8 weeks.'],
+      quiet: ['Quiet', '#fef3c7', '#b45309', 'No booking in the last 12 weeks, but not yet 6 months.'],
+      dormant: ['Dormant', '#f3f4f6', '#374151', 'No booking for 6 months or more.']
+    };
+    function centreStatusBadge(t) {
+      const m = t && CENTRE_STATUS_META[t.status];
+      if (!m) return '';
+      return `<span class="badge" title="${escHtml(m[3])}${t.status !== 'dormant' && t.status !== 'new' ? ` (last 4 weeks: ${t.last4Weeks}, prior 8 weeks: ${t.prior8Weeks})` : ''}" style="background:${m[1]};color:${m[2]};font-weight:800;font-size:11.5px;cursor:help">${m[0]}</span>`;
+    }
+    let currentCentreHistory = null;
+    async function switchCentre360Tab(tab) {
       document.querySelectorAll('.c360-tab').forEach(b => b.setAttribute('style', c360TabStyle(b.dataset.tab === tab)));
       document.getElementById('c360Overview').style.display = tab === 'overview' ? '' : 'none';
-      const h = document.getElementById('c360History');
-      h.style.display = tab === 'history' ? '' : 'none';
-      if (tab === 'history' && !h.dataset.loaded) { h.dataset.loaded = '1'; loadCentreHistory(currentCentreKey, h, false); }
+      document.querySelectorAll('.c360-pane').forEach(p => { p.style.display = p.id === 'c360Tab_' + tab ? '' : 'none'; });
+      if (tab === 'overview') return;
+      const pane = document.getElementById('c360Tab_' + tab);
+      if (pane.dataset.loaded) return;
+      pane.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Loading…</div>';
+      try {
+        if (!currentCentreHistory) {
+          const r = await fetch(`/api/centres/${encodeURIComponent(currentCentreKey)}/history`); const h = await r.json();
+          if (!r.ok) throw new Error(h.error || 'Could not load');
+          currentCentreHistory = h;
+        }
+        pane.innerHTML = centreHistoryPaneHtml(currentCentreHistory, tab); pane.dataset.loaded = '1';
+      } catch (e) { pane.innerHTML = `<div style="color:#b91c1c">${escHtml(e.message)}</div>`; }
     }
     function fmtShortDate(d) { return d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
     function dormantPanelHtml(c) {
@@ -12078,32 +12109,31 @@
       } catch (e) { alert(e.message); }
     }
     const HISTORY_ICON = { booking: '📅', call: '📞', visit: '🚗', note: '📝', voice: '🎙️', email: '✉️', fbf: '🎁', dormant: '💤', lead: '🌱', stage: '➡️' };
-    async function loadCentreHistory(centreKey, el, compact) {
-      el.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Building this centre\'s history…</div>';
-      try {
-        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/history`); const h = await r.json();
-        if (!r.ok) throw new Error(h.error || 'Could not load history');
-        el.innerHTML = centreHistoryHtml(h, compact);
-      } catch (e) { el.innerHTML = `<div style="color:#b91c1c">${escHtml(e.message)}</div>`; }
-    }
-    function centreHistoryHtml(h, compact) {
-      const b = h.bookings, maxM = Math.max(1, ...b.perMonth.map(m => m.booked));
-      const months = b.perMonth.map(m => `<div title="${m.month}: ${m.booked} booked, ${m.filled} filled, ${m.cancelled} cancelled" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
-          <div style="width:100%;max-width:26px;height:${Math.round(60 * m.booked / maxM)}px;background:var(--navy);border-radius:3px 3px 0 0;min-height:${m.booked ? 2 : 0}px"></div>
-          <div style="font-size:10px;color:var(--text-muted)">${new Date(m.month + '-01').toLocaleDateString('en-AU', { month: 'short' })}</div></div>`).join('');
-      const stat = (v, l) => `<div><div style="font-size:20px;font-weight:800;color:var(--navy)">${v}</div><div style="font-size:11.5px;color:var(--text-muted)">${l}</div></div>`;
-      return `<div class="admin-table-card" style="padding:16px 20px;margin-bottom:14px">
-          <div class="sd-card-title">Bookings</div>
-          <div style="display:flex;gap:28px;flex-wrap:wrap;margin:8px 0 12px">${stat(fmtShortDate(b.first), 'First booking*')}${stat(fmtShortDate(b.last), 'Last booking')}${stat(b.total, 'Shifts to date*')}${stat(b.last4Weeks, 'Last 4 weeks')}${stat(b.upcoming, 'Upcoming')}</div>
-          <div style="display:flex;align-items:flex-end;gap:4px;height:80px">${months}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">*HeartBeat holds RT bookings from ${fmtShortDate(b.historyFrom)}, so anything older isn't shown.</div>
-        </div>
-        ${h.educators.length ? `<div class="admin-table-card" style="padding:16px 20px;margin-bottom:14px"><div class="sd-card-title">Regular educators</div>
-          ${h.educators.map(e => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--gray-100)"><span>${escHtml(e.name)}${e.favourite ? ' <span title="Favourite / requested by the centre">⭐</span>' : ''}</span><span style="color:var(--text-muted)">${e.shifts} shifts · last ${fmtShortDate(e.last)}</span></div>`).join('')}</div>` : ''}
-        <div class="admin-table-card" style="padding:16px 20px">
-          <div class="sd-card-title">Timeline</div>
-          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">${h.emails.connected ? (h.emails.note ? escHtml(h.emails.note) : `${h.emails.count} Customer.io email(s) included.`) : 'Customer.io emails: not connected yet.'}</div>
-          ${h.timeline.length ? h.timeline.slice(0, compact ? 40 : 400).map(e => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100)">
+    function centreHistoryPaneHtml(h, tab) {
+      const b = h.bookings;
+      if (tab === 'bookings') {
+        const maxM = Math.max(1, ...b.perMonth.map(m => m.booked));
+        const months = b.perMonth.map(m => `<div title="${m.month}: ${m.booked} booked, ${m.filled} filled, ${m.cancelled} cancelled" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+            <div style="font-size:10px;color:var(--text-muted)">${m.booked || ''}</div>
+            <div style="width:100%;max-width:28px;height:${Math.round(80 * m.booked / maxM)}px;background:var(--navy);border-radius:3px 3px 0 0;min-height:${m.booked ? 2 : 0}px"></div>
+            <div style="font-size:10px;color:var(--text-muted)">${new Date(m.month + '-01').toLocaleDateString('en-AU', { month: 'short' })}</div></div>`).join('');
+        const stat = (v, l) => `<div><div style="font-size:20px;font-weight:800;color:var(--navy)">${v}</div><div style="font-size:11.5px;color:var(--text-muted)">${l}</div></div>`;
+        return `<div class="admin-table-card" style="padding:16px 20px">
+          <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">${stat(fmtShortDate(b.first), 'First booking*')}${stat(fmtShortDate(b.last), 'Last booking')}${stat(b.total, 'Shifts to date*')}${stat(b.last4Weeks, 'Last 4 weeks')}${stat(b.upcoming, 'Upcoming')}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:4px">Shifts booked per month</div>
+          <div style="display:flex;align-items:flex-end;gap:4px;height:110px">${months}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px">*HeartBeat holds RT bookings from ${fmtShortDate(b.historyFrom)}, so anything older isn't shown. Hover a month for filled and cancelled counts.</div>
+        </div>`;
+      }
+      if (tab === 'educators') {
+        return `<div class="admin-table-card" style="padding:16px 20px">
+          <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">Educators who have worked here most. ⭐ = marked favourite or requested by the centre.</div>
+          ${h.educators.length ? h.educators.map(e => `<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:8px 0;border-bottom:1px solid var(--gray-100)"><span style="font-weight:600">${escHtml(e.name)}${e.favourite ? ' <span title="Favourite / requested by the centre">⭐</span>' : ''}</span><span style="color:var(--text-muted)">${e.shifts} shifts · last ${fmtShortDate(e.last)}</span></div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No educators have worked here in the history we hold.</div>'}
+        </div>`;
+      }
+      return `<div class="admin-table-card" style="padding:16px 20px">
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px">Newest first: emails, calls, visits, notes, voice notes, first booking free offers and dormant touch points. ${h.emails.connected ? (h.emails.note ? escHtml(h.emails.note) : `${h.emails.count} Customer.io email(s) included.`) : 'Customer.io emails: not connected yet.'}</div>
+          ${h.timeline.filter(e => e.type !== 'booking').length ? h.timeline.filter(e => e.type !== 'booking').map(e => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100)">
               <div style="width:26px;text-align:center">${HISTORY_ICON[e.type] || '•'}</div>
               <div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--navy)">${escHtml(e.title)} <span style="font-weight:400;color:var(--text-muted)">· ${fmtShortDate(e.at)}${e.by ? ' · ' + escHtml(e.by) : ''}</span></div>
               ${e.detail ? `<div style="font-size:12.5px;color:#374151;white-space:pre-wrap">${escHtml(e.detail)}</div>` : ''}</div></div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">Nothing recorded yet.</div>'}
@@ -12145,10 +12175,16 @@
         activity.events.forEach(ev => { if (ev.type === 'booking') currentCentre360Bookings[ev.data.clientBookingId] = ev.data; });
         bodyEl.innerHTML = `<div class="c360-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--gray-200)">
             <button type="button" class="c360-tab" data-tab="overview" onclick="switchCentre360Tab('overview')" style="${c360TabStyle(true)}">Overview</button>
-            <button type="button" class="c360-tab" data-tab="history" onclick="switchCentre360Tab('history')" style="${c360TabStyle(false)}">Centre History</button>
+            <button type="button" class="c360-tab" data-tab="bookings" onclick="switchCentre360Tab('bookings')" style="${c360TabStyle(false)}">Booking history</button>
+            <button type="button" class="c360-tab" data-tab="educators" onclick="switchCentre360Tab('educators')" style="${c360TabStyle(false)}">Favourite educators</button>
+            <button type="button" class="c360-tab" data-tab="account" onclick="switchCentre360Tab('account')" style="${c360TabStyle(false)}">Account history</button>
+            <span style="margin-left:auto;align-self:center">${centreStatusBadge(centre.bookingTrend)}</span>
           </div>
           <div id="c360Overview">${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
-          <div id="c360History" style="display:none"></div>`;
+          <div id="c360Tab_bookings" class="c360-pane" style="display:none"></div>
+          <div id="c360Tab_educators" class="c360-pane" style="display:none"></div>
+          <div id="c360Tab_account" class="c360-pane" style="display:none"></div>`;
+        currentCentreHistory = null;
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -12279,15 +12315,24 @@
             <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${escHtml([c.streetAddress, c.suburb, c.state].filter(Boolean).join(', ') || 'No address on file')}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-            ${centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
+            ${centreStatusBadge(c.bookingTrend) || centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}
             <button class="btn-secondary" style="padding:4px 10px;font-size:11.5px;white-space:nowrap" onclick="openEscalateCentreModal('${c.centreKey}')" title="Raise a note that shows up as an escalation on this centre's Workforce Partner's Today">Escalate</button>
           </div>
         </div>
 
-        <div style="padding:14px 20px;margin-bottom:16px;background:${healthMeta.bg};border-left:4px solid ${healthMeta.color};border-radius:var(--radius)">
-          <div style="font-size:12px;font-weight:700;color:${healthMeta.color};text-transform:uppercase;letter-spacing:.4px">${healthMeta.label}</div>
-          <div style="font-size:15px;font-weight:600;color:var(--navy);margin-top:4px">${escHtml((c.healthReasons && c.healthReasons[0]) || 'No specific reason recorded.')}</div>
-        </div>
+        ${(() => {
+          // Status block follows the simple booking-trend rule (Liam, 19 Oct); an
+          // unhappy-client escalation still takes the block, since it matters more.
+          const st = c.bookingTrend && CENTRE_STATUS_META[c.bookingTrend.status];
+          if (c.isEscalated || !st) return `<div style="padding:14px 20px;margin-bottom:16px;background:${c.isEscalated ? '#fee2e2' : healthMeta.bg};border-left:4px solid ${c.isEscalated ? '#b91c1c' : healthMeta.color};border-radius:var(--radius)">
+            <div style="font-size:12px;font-weight:700;color:${c.isEscalated ? '#b91c1c' : healthMeta.color};text-transform:uppercase;letter-spacing:.4px">${c.isEscalated ? 'Unhappy client' : healthMeta.label}</div>
+            <div style="font-size:15px;font-weight:600;color:var(--navy);margin-top:4px">${escHtml((c.isEscalated && c.escalationNote) || (c.healthReasons && c.healthReasons[0]) || 'No specific reason recorded.')}</div></div>`;
+          const t = c.bookingTrend;
+          return `<div style="padding:14px 20px;margin-bottom:16px;background:${st[1]};border-left:4px solid ${st[2]};border-radius:var(--radius)">
+            <div style="font-size:12px;font-weight:700;color:${st[2]};text-transform:uppercase;letter-spacing:.4px">${st[0]}</div>
+            <div style="font-size:15px;font-weight:600;color:var(--navy);margin-top:4px">${escHtml(st[3])}</div>
+            <div style="font-size:12.5px;color:#374151;margin-top:2px">Shifts in the last 4 weeks: ${t.last4Weeks} · in the 8 weeks before: ${t.prior8Weeks}${c.lastBookingDate ? ` · last booking ${fmtShortDate(c.lastBookingDate)}` : ''}</div></div>`;
+        })()}
 
         <!-- One-click Called / Visited (2026-10-07) — same as /wfp's Quick
              log: the full Log Call/Visit form was so heavy that only 11
@@ -18407,8 +18452,8 @@
         </div>
 
         ${leadsCentreMatches[lead.id] ? (() => { const m = leadsCentreMatches[lead.id]; const k = m.rtLocationId ? `loc:${m.rtLocationId}` : `client:${m.rtClientId}`;
-          return `<div class="lead-group-label" style="margin-top:14px">Centre History</div>
-          <button type="button" class="btn-secondary" style="margin-bottom:10px" onclick="goToCentre360('${k}','history')">Open this centre's full history (bookings, calls, emails, notes)</button>`; })() : ''}
+          return `<div class="lead-group-label" style="margin-top:14px">Account history</div>
+          <button type="button" class="btn-secondary" style="margin-bottom:10px" onclick="goToCentre360('${k}','account')">Open this centre's account history (bookings, calls, emails, notes)</button>`; })() : ''}
         <div class="lead-group-label" style="margin-top:14px">First booking free</div>
         <div id="fbfLeadBox" style="margin-bottom:10px"></div>
 

@@ -71,7 +71,8 @@ async function buildCentreHistory(centreKey, { noTranscripts = false } = {}) {
   // Regular / favourite educators
   const eds = {};
   for (const b of mine) {
-    if (!FILLED.has(b.statusId) || !b.assignedUserId) continue;
+    // Shifts already worked (up to today); booked-ahead shifts aren't counted here.
+    if (!FILLED.has(b.statusId) || !b.assignedUserId || !b.bookingDate || new Date(b.bookingDate) > new Date()) continue;
     const k = String(b.assignedUserId);
     eds[k] = eds[k] || { userId: k, name: b.assignedCandidateName || `Educator ${k}`, shifts: 0, favourite: false, last: null };
     eds[k].shifts++;

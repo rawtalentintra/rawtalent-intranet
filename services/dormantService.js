@@ -24,6 +24,32 @@ const CLIENT_FOLLOW_UP = '4c6ae463-b50e-43b5-934a-a81572c024e9'; // management â
 
 const dayStr = d => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
+// Centre status badge (Liam, 19 Oct): one simple, explainable rule on the
+// centre's own bookings (shift dates, booked/assigned/completed, up to today):
+//  - Dormant:   no booking for 6+ months (DORMANT_DAYS).
+//  - New:       first booking we hold is within the last 8 weeks.
+//  - Growing:   last 4 weeks' weekly rate is at least 25% above the prior 8 weeks' (and 2+ bookings in the last 4 weeks).
+//  - Declining: last 4 weeks' weekly rate is at least 25% below the prior 8 weeks' (and 2+ bookings in the prior 8).
+//  - Steady:    anything else that booked in the last 12 weeks; Quiet: no booking in 12 weeks but under 6 months.
+const LIVE_STATUSES = new Set([1, 2, 3, 5]);
+function computeTrend(centreBookings, now = Date.now()) {
+  const DAY = 864e5;
+  const ts = (centreBookings || []).filter(b => LIVE_STATUSES.has(b.statusId) && b.bookingDate)
+    .map(b => new Date(b.bookingDate).getTime()).filter(t => t <= now).sort((a, b) => a - b);
+  const last4 = ts.filter(t => now - t < 28 * DAY).length;
+  const prior8 = ts.filter(t => now - t >= 28 * DAY && now - t < 84 * DAY).length;
+  const first = ts[0] || null, last = ts[ts.length - 1] || null;
+  const r4 = last4 / 4, r8 = prior8 / 8;
+  let status;
+  if (!last || now - last >= DORMANT_DAYS * DAY) status = last ? 'dormant' : 'none';
+  else if (now - first < 56 * DAY) status = 'new';
+  else if (last4 >= 2 && r4 >= r8 * 1.25) status = 'growing';
+  else if (prior8 >= 2 && r4 <= r8 * 0.75) status = 'declining';
+  else if (now - last >= 84 * DAY) status = 'quiet';
+  else status = 'steady';
+  return { status, last4Weeks: last4, prior8Weeks: prior8, firstBookingDate: first ? dayStr(first) : null, firstBookingDaysAgo: first ? Math.floor((now - first) / DAY) : null };
+}
+
 async function latestTouchpoints(keys) {
   if (!keys.length) return {};
   const rows = (await getDb().execute({
@@ -60,6 +86,7 @@ async function annotateDormancy(centres, lastBookingByKey) {
       daysSinceLastBooking: days,
       isDormant,
       dormantNeedsContact: isDormant && !touchedSinceLastBooking,
+      bookingTrend: c.bookingTrend ? { ...c.bookingTrend, status: isDormant ? 'dormant' : (c.bookingTrend.status === 'dormant' ? 'quiet' : c.bookingTrend.status) } : c.bookingTrend,
       lastDormantTouchpoint: tp ? { at: tp.completed_at, by: tp.completed_by_name, firstBookingFree: tp.first_booking_free } : null
     };
   });
@@ -146,4 +173,4 @@ async function retryPendingSignals() {
   return rows.length;
 }
 
-module.exports = { DORMANT_DAYS, annotateDormancy, completeTouchpoint, sendTouchpointSignal, retryPendingSignals, latestTouchpoints };
+module.exports = { computeTrend, DORMANT_DAYS, annotateDormancy, completeTouchpoint, sendTouchpointSignal, retryPendingSignals, latestTouchpoints };

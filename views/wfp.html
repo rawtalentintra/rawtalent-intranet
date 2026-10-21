@@ -2316,11 +2316,6 @@
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="addStopToRoute('centre','${currentCentreKey}')">Add to Route</button>
         </div>
 
-        <details style="margin-top:10px" ontoggle="if(this.open)loadCentreHistoryM(this)">
-          <summary class="section-title" style="display:list-item;cursor:pointer">Centre history</summary>
-          <div class="hist-body"><div class="sub">Loading…</div></div>
-        </details>
-
         <details style="margin-top:10px" ${centreDetailOpen.educators ? 'open' : ''} ontoggle="centreDetailOpen.educators=this.open">
           <summary class="section-title" style="display:list-item;cursor:pointer">Educators</summary>
           ${sortedEducators.length ? sortedEducators.map(e => educatorRow(e)).join('') : `<div class="sub">No educators with shifts here yet.</div>`}
