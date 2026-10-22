@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Onboarding Quick Links — RawTalent HeartBeat</title>
+  <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { background: var(--gray-50, #f6f7fb); }
+    .ql-wrap { max-width: 1100px; margin: 0 auto; padding: 28px 16px 60px; }
+    .ql-title { font-size: 26px; font-weight: 800; color: var(--navy); margin: 0 0 4px; }
+    .ql-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 18px; }
+    .ql-search { width: 100%; max-width: 420px; padding: 10px 14px; border: 1px solid var(--gray-200); border-radius: 10px; font: inherit; margin-bottom: 20px; }
+    .ql-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 16px; }
+    .ql-card { background: #fff; border-radius: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.06); padding: 16px 18px; }
+    .ql-card h2 { font-size: 15px; font-weight: 800; color: var(--navy); margin: 0 0 10px; }
+    .ql-card a { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--gray-100, #eef0f4); color: #1f2937; text-decoration: none; font-size: 13.5px; }
+    .ql-card a:last-child { border-bottom: none; }
+    .ql-card a:hover { color: var(--orange); }
+    .ql-card a span.k { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+    .ql-state { font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; margin: 10px 0 2px; }
+    .ql-hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="nav-brand" href="/">
+      <img src="/images/logo-transparent.png" alt="RawTalent" height="34" style="display:block">
+      <span class="nav-tag">HeartBeat</span>
+    </a>
+    <div class="nav-actions">
+      <button class="nav-btn ghost" onclick="location.href='/'">← Home</button>
+    </div>
+  </nav>
+
+  <div class="ql-wrap">
+    <h1 class="ql-title">Onboarding Quick Links</h1>
+    <div class="ql-sub">Everything the onboarding team opens day to day, in one place. SOPs and scripts come straight from the Knowledge Base (Onboarding category), so new ones appear here automatically.</div>
+    <input class="ql-search" id="qlSearch" placeholder="Search links… (e.g. WWCC, VEVO, blue card)" oninput="filterLinks()">
+
+    <div class="ql-grid" id="qlGrid">
+      <div class="ql-card" data-group>
+        <h2>✅ Checklists, SOPs &amp; scripts</h2>
+        <div id="qlArticles"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>🛡️ Working with Children checks</h2>
+        <div class="ql-state">Victoria</div>
+        <a href="https://www.service.vic.gov.au/services/working-with-children-check-status-checker/home" target="_blank" rel="noopener">VIC WWCC status checker <span class="k">check</span></a>
+        <a href="https://service.vic.gov.au/find-services/work-and-volunteering/working-with-children-check/change-from-volunteer-to-employee" target="_blank" rel="noopener">VIC change volunteer → employee <span class="k">how-to</span></a>
+        <div class="ql-state">South Australia</div>
+        <a href="https://www.dcsiscreening.sa.gov.au/scuserhome" target="_blank" rel="noopener">SA DHS screening portal <span class="k">check</span></a>
+        <a href="https://www.sa.gov.au/topics/rights-and-law/rights-and-responsibilities/screening-checks/screening-wwcc/for-individuals/apply-for-a-check" target="_blank" rel="noopener">SA apply for a WWCC <span class="k">apply</span></a>
+        <div class="ql-state">Queensland</div>
+        <a href="https://orgportal.bluecard.qld.gov.au/Login" target="_blank" rel="noopener">QLD Blue Card organisation portal <span class="k">check</span></a>
+        <a href="https://www.qld.gov.au/jobs/blue-card/applications/apply" target="_blank" rel="noopener">QLD apply for a Blue Card <span class="k">apply</span></a>
+        <div class="ql-state">NSW · ACT · NT · WA</div>
+        <a href="https://wwccemployer.ocg.nsw.gov.au/VerifyEmployee" target="_blank" rel="noopener">NSW verify an employee's WWCC <span class="k">check</span></a>
+        <a href="https://www.accesscanberra.act.gov.au/business-and-work/working-with-vulnerable-people/apply-for-or-renew-a-wwvp-registration" target="_blank" rel="noopener">ACT WWVP registration <span class="k">apply</span></a>
+        <a href="https://forms.pfes.nt.gov.au/safent/CheckValidity.aspx?IsValidityCheck=true" target="_blank" rel="noopener">NT Ochre Card validity check <span class="k">check</span></a>
+        <a href="https://workingwithchildren.wa.gov.au/online-services/" target="_blank" rel="noopener">WA WWC online services <span class="k">check</span></a>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>🎓 Qualifications &amp; training</h2>
+        <a href="https://www.acecqa.gov.au/qualifications/nqf-approved" target="_blank" rel="noopener">ACECQA approved qualifications <span class="k">check</span></a>
+        <a href="https://www.acecqa.gov.au/qualifications/assessment/apply/early-childhood" target="_blank" rel="noopener">ACECQA qualification assessment <span class="k">apply</span></a>
+        <a href="https://training.gov.au/search" target="_blank" rel="noopener">training.gov.au: RTO &amp; course search <span class="k">check</span></a>
+        <a href="https://www.teqsa.gov.au/national-register" target="_blank" rel="noopener">TEQSA National Register (universities) <span class="k">check</span></a>
+        <a href="https://protectngstraining.education.vic.gov.au/" target="_blank" rel="noopener">VIC Protecting Children (PCC) training <span class="k">course</span></a>
+        <a href="https://www.plink.sa.edu.au/ilp/pages/login.jsf" target="_blank" rel="noopener">SA RRHAN-EC (Plink) <span class="k">course</span></a>
+        <a href="https://cprfirstaid.com.au/courses/hltaid012-childcare-first-aid-course/" target="_blank" rel="noopener">Childcare First Aid (HLTAID012) course <span class="k">course</span></a>
+        <a href="https://dofoodsafely.health.vic.gov.au/index.php/en/assessment" target="_blank" rel="noopener">Do Food Safely (cooks) <span class="k">course</span></a>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>👩‍🏫 Teacher registration</h2>
+        <a href="https://www.vit.vic.edu.au/search-the-register" target="_blank" rel="noopener">VIC: VIT register search <span class="k">check</span></a>
+        <a href="https://crmpub.trb.sa.edu.au/Home/TeacherSearch" target="_blank" rel="noopener">SA: TRB teacher search <span class="k">check</span></a>
+        <a href="https://services.qct.edu.au/registersearch" target="_blank" rel="noopener">QLD: QCT register search <span class="k">check</span></a>
+        <a href="https://etams.nesa.nsw.edu.au/PublicRegisterSearch" target="_blank" rel="noopener">NSW: NESA public register <span class="k">check</span></a>
+        <a href="https://trbsearch.ntschools.net/" target="_blank" rel="noopener">NT: TRB search <span class="k">check</span></a>
+        <a href="https://login.trb.wa.gov.au/Register-of-Teachers" target="_blank" rel="noopener">WA: Register of Teachers <span class="k">check</span></a>
+        <a href="http://www.tqi.act.edu.au/" target="_blank" rel="noopener">ACT: TQI <span class="k">info</span></a>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>🪪 ID, visa &amp; police check</h2>
+        <a href="https://online.immi.gov.au/evo/firstParty?actionType=query" target="_blank" rel="noopener">VEVO visa check <span class="k">check</span></a>
+        <a href="http://cited.ly/xjqgomk" target="_blank" rel="noopener">VIC police check (RawTalent link) <span class="k">apply</span></a>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>📱 Educator apps &amp; portals</h2>
+        <a href="https://apps.apple.com/au/app/raw-talent/id1556179215?platform=iphone" target="_blank" rel="noopener">RawTalent app: iPhone <span class="k">app</span></a>
+        <a href="https://play.google.com/store/apps/details?id=com.dot.rawtalent" target="_blank" rel="noopener">RawTalent app: Android <span class="k">app</span></a>
+        <a href="https://backoffice.rawtalent.com.au/" target="_blank" rel="noopener">RT Portal (backoffice) <span class="k">portal</span></a>
+      </div>
+
+      <div class="ql-card" data-group>
+        <h2>🧰 Team tools</h2>
+        <a href="https://admin.hireflix.com/en/jobs/" target="_blank" rel="noopener">HireFlix video interviews <span class="k">tool</span></a>
+        <a href="https://www.workerscreening.sa.gov.au/Organisation/s/login/" target="_blank" rel="noopener">SA worker screening (organisation login) <span class="k">portal</span></a>
+        <a href="https://startingblocks.gov.au/find-child-care" target="_blank" rel="noopener">Find Child Care (Starting Blocks) <span class="k">lookup</span></a>
+        <a href="https://docs.google.com/spreadsheets/d/1UY9pAxaEXtQ28LPHNAC_6-1Iw90y3zbK84w8PYMNceE/edit?usp=sharing" target="_blank" rel="noopener">Favourite Educators &amp; Centres sheet <span class="k">sheet</span></a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    async function loadArticles() {
+      const box = document.getElementById('qlArticles');
+      try {
+        const r = await fetch('/api/onboarding-links/articles');
+        const list = await r.json();
+        if (!r.ok) throw new Error(list.error || 'Could not load');
+        box.innerHTML = list.map(a => `<a href="/article?id=${encodeURIComponent(a.id)}">${escHtml(a.title)} <span class="k">KB</span></a>`).join('') || '<div style="color:var(--text-muted);font-size:13px">No onboarding articles yet.</div>';
+        filterLinks();
+      } catch (e) { box.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    function filterLinks() {
+      const q = document.getElementById('qlSearch').value.trim().toLowerCase();
+      document.querySelectorAll('.ql-card').forEach(card => {
+        let any = false;
+        card.querySelectorAll('a').forEach(a => { const hit = !q || a.textContent.toLowerCase().includes(q); a.classList.toggle('ql-hidden', !hit); any = any || hit; });
+        card.querySelectorAll('.ql-state').forEach(s => s.classList.toggle('ql-hidden', !!q));
+        card.classList.toggle('ql-hidden', !any);
+      });
+    }
+    loadArticles();
+  </script>
+</body>
+</html>

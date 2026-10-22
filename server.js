@@ -272,6 +272,15 @@ app.get('/', (req, res) => {
   guardRoute(req, res, 'index.html');
 });
 app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
+// Onboarding Quick Links (Joy's task "HB | Onboarding Quick Links", 23 Oct): one page for the onboarding team.
+app.get('/onboarding-links', (req, res) => guardRoute(req, res, 'onboarding-links.html'));
+app.get('/api/onboarding-links/articles', async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not signed in' });
+  try {
+    const rows = (await getDb().execute({ sql: "SELECT id, title FROM articles WHERE published = true AND category = 'Onboarding' ORDER BY title", args: [] })).rows;
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.get('/admin', (req, res) => guardRoute(req, res, 'admin.html', true));
 app.get('/admin/*', (req, res) => guardRoute(req, res, 'admin.html', true));
 
