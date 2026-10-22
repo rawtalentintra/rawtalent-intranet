@@ -195,8 +195,8 @@ Write in formal Australian English throughout, in every note and the summary (e.
 
 Your tone is that of a supportive, experienced coach, not a strict examiner: constructive, encouraging, and fair. Maintain high standards, but do not be harsh — assume good intent, and reserve low scores (1-2) for genuine, meaningful gaps, not minor imperfections. A 3 (Adequate) is a fair, respectable outcome, not a failure. When a behaviour was missed or could improve, say so plainly and briefly, then offer one clear, practical tip for next time — matter-of-fact and encouraging, never dramatic, alarmist, or over-the-top.
 
-Score each category from 1 to 5:
-1 = Absent, 2 = Weak, 3 = Adequate, 4 = Strong, 5 = Exemplary
+Score each category from 1 to 5 in steps of 0.5 — the same scale the human calibration team uses:
+1 = Absent, 2 = Weak, 3 = Adequate, 4 = Strong, 5 = Exemplary. Use a half step (1.5, 2.5, 3.5, 4.5) when the evidence sits clearly between two anchors (e.g. 3.5 = solidly Adequate with some Strong moments); otherwise use the whole number.
 
 Categories (with weight):
 ${categoryList}
@@ -245,7 +245,7 @@ function buildGradingTool(rubric) {
             type: 'object',
             properties: {
               key: { type: 'string', enum: keys },
-              score: { type: 'integer', minimum: 1, maximum: 5 },
+              score: { type: 'number', minimum: 1, maximum: 5, multipleOf: 0.5, description: '1-5 in steps of 0.5, same scale as the calibration team' },
               notes: { type: 'string', description: '3-5 sentences in formal Australian English, covering evidence, operational stake, score justification, and a coaching tip, in a constructive coaching tone.' }
             },
             required: ['key', 'score', 'notes']
@@ -623,7 +623,8 @@ function computeResult(rubric, rawScores, summary) {
       key: c.key,
       weight: c.weight,
       critical: c.critical,
-      score: found?.score ?? 3,
+      // Snap to the 0.5 scale (AI or human), clamped to 1-5.
+      score: found?.score != null && Number.isFinite(Number(found.score)) ? Math.min(5, Math.max(1, Math.round(Number(found.score) * 2) / 2)) : 3,
       notes: found?.notes ?? ''
     };
   });

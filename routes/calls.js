@@ -629,7 +629,8 @@ router.post('/:recordingId/evaluate-manual', async (req, res) => {
   for (const s of scores) {
     if (!validKeys.has(s.key)) return res.status(400).json({ error: `Unknown category key: ${s.key}` });
     const n = Number(s.score);
-    if (!Number.isInteger(n) || n < 1 || n > 5) return res.status(400).json({ error: `Score for ${s.key} must be an integer 1-5` });
+    // 0.5 steps allowed (Joy's "Update Rubric to Include 0.5 Rating Increments", 23 Oct).
+    if (!Number.isFinite(n) || n < 1 || n > 5 || Math.round(n * 2) !== n * 2) return res.status(400).json({ error: `Score for ${s.key} must be 1-5 in steps of 0.5` });
   }
   try {
     const db = getDb();
@@ -899,7 +900,8 @@ router.post('/calibrations/:id/evaluate-manual', requireCalibrationAccess, async
   for (const s of scores) {
     if (!validKeys.has(s.key)) return res.status(400).json({ error: `Unknown category key: ${s.key}` });
     const n = Number(s.score);
-    if (!Number.isInteger(n) || n < 1 || n > 5) return res.status(400).json({ error: `Score for ${s.key} must be an integer 1-5` });
+    // 0.5 steps allowed (Joy's "Update Rubric to Include 0.5 Rating Increments", 23 Oct).
+    if (!Number.isFinite(n) || n < 1 || n > 5 || Math.round(n * 2) !== n * 2) return res.status(400).json({ error: `Score for ${s.key} must be 1-5 in steps of 0.5` });
   }
   try {
     const db = getDb();

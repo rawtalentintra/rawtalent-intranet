@@ -22941,11 +22941,8 @@
           </ul>
           <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
             <select id="manual-score-${c.key}" class="form-control" style="width:170px;flex-shrink:0">
-              <option value="1" ${existingScore === 1 ? 'selected' : ''}>1 — Absent</option>
-              <option value="2" ${existingScore === 2 ? 'selected' : ''}>2 — Weak</option>
-              <option value="3" ${existingScore === 3 ? 'selected' : ''}>3 — Adequate</option>
-              <option value="4" ${existingScore === 4 ? 'selected' : ''}>4 — Strong</option>
-              <option value="5" ${existingScore === 5 ? 'selected' : ''}>5 — Exemplary</option>
+              ${[[1, '1 — Absent'], [1.5, '1.5'], [2, '2 — Weak'], [2.5, '2.5'], [3, '3 — Adequate'], [3.5, '3.5'], [4, '4 — Strong'], [4.5, '4.5'], [5, '5 — Exemplary']]
+                .map(([v, l]) => `<option value="${v}" ${Number(existingScore) === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
             <textarea id="manual-notes-${c.key}" class="form-control textarea" placeholder="Your comments on this category — what specifically did you hear?" style="flex:1;min-width:220px;min-height:60px">${escHtml(existing?.notes || '')}</textarea>
           </div>
