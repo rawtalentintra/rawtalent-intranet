@@ -2778,3 +2778,8 @@ ALTER TABLE signed_contracts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE signed_contract_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dormant_touchpoints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE timesheet_change_archive ENABLE ROW LEVEL SECURITY;
+
+-- Leavers still owed a final pay (Joy, 22 Oct 2026): their login is deleted,
+-- but Payroll keeps listing them until this date so the final payslip can be
+-- generated. After it passes they drop off by themselves.
+ALTER TABLE employee_payroll_profiles ADD COLUMN IF NOT EXISTS payroll_until DATE;

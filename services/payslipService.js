@@ -70,9 +70,11 @@ async function listProfiles() {
            epp.hourly_rate_aud, epp.fortnightly_rate_aud, epp.overtime_rate_aud,
            epp.pays_in_php, epp.bank_name, epp.bank_account_name, epp.bank_account_number, epp.bank_swift_code
     FROM team_members tm
-    JOIN users u ON LOWER(u.email) = LOWER(tm.email) AND u.active = true
+    LEFT JOIN users u ON LOWER(u.email) = LOWER(tm.email) AND u.active = true
     LEFT JOIN employee_payroll_profiles epp ON LOWER(epp.user_email) = LOWER(tm.email)
     WHERE tm.status = 'active'
+      -- an active login, or a leaver kept on until their final pay (payroll_until)
+      AND (u.email IS NOT NULL OR (epp.payroll_until IS NOT NULL AND epp.payroll_until >= (now() AT TIME ZONE 'Australia/Melbourne')::date))
     ORDER BY tm.name ASC
   `);
   return res.rows.filter(r => !PAYROLL_EXCLUDED_EMAILS.has((r.user_email || '').toLowerCase()));
