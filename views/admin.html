@@ -8767,8 +8767,10 @@
           // adminAdjustDayHours's own comment for why this corrects a
           // real day rather than the week total in isolation.
           const weekPill = (s, hours, weekNum) => `
-            <span style="cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="editPayrollWeekHours('${r.userEmail}',${weekNum})" title="Click to correct a day's hours">
-              <span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${Number(hours).toFixed(2)} hrs${s !== 'draft' ? ` · ${s === 'approved' ? 'Approved' : s.replace('_', ' ')}` : ''}</span>
+            <span style="cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="editPayrollWeekHours('${r.userEmail}',${weekNum})" title="${r['week' + weekNum + 'NoTimesheet'] ? 'No timesheet this week (joined or left mid-fortnight) — counts as 0 hours. ' : ''}Click to correct a day's hours">
+              ${r['week' + weekNum + 'NoTimesheet']
+                ? `<span style="font-size:11px;font-weight:700;color:var(--text-muted)">no timesheet (0h)</span>`
+                : `<span style="font-size:11px;font-weight:700;color:${s === 'approved' ? '#15803d' : '#b45309'}">${Number(hours).toFixed(2)} hrs${s !== 'draft' ? ` · ${s === 'approved' ? 'Approved' : s.replace('_', ' ')}` : ''}</span>`}
               <span style="font-size:10px;color:var(--gray-400)">✏️</span>
             </span>`;
           let statusText, actions;

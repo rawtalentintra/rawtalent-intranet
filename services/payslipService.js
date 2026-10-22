@@ -137,7 +137,13 @@ async function listEligibleForPeriod(payPeriodStart) {
       timesheet.getWeek(person.user_email, week2Start),
       db.execute({ sql: 'SELECT id, published_at FROM payslips WHERE LOWER(user_email) = LOWER(?) AND pay_period_start = ?', args: [person.user_email, payPeriodStart] })
     ]);
-    const bothApproved = w1.week.status === 'approved' && w2.week.status === 'approved';
+    // Joiners/leavers mid-fortnight (Sophia, 22 Oct): a week with no timesheet
+    // (no row, or a draft with 0 hours and no entries) counts as 0 hours and
+    // doesn't block. A week that HAS hours still has to be approved. Both
+    // weeks empty isn't payable, so that still blocks.
+    const noTimesheet = w => w.week.status === 'draft' && Number(w.week.total_hours || 0) === 0 && !(w.entries || []).length;
+    const w1NoTs = noTimesheet(w1), w2NoTs = noTimesheet(w2);
+    const bothApproved = (w1.week.status === 'approved' || w1NoTs) && (w2.week.status === 'approved' || w2NoTs) && !(w1NoTs && w2NoTs);
     // Either pay model counts as "has a profile" — hourly_rate_aud for
     // the normal path, fortnightly_rate_aud for a fixed-salary employee
     // (see buildLineItemsFromTimesheets) — never both at once in practice
@@ -152,6 +158,7 @@ async function listEligibleForPeriod(payPeriodStart) {
       // comment for why those need to be different fields.
       userEmail: person.user_email, userName: person.legal_name || person.name, userShortName: person.name, position: person.position,
       week1Status: w1.week.status, week2Status: w2.week.status, bothApproved, hasProfile,
+      week1NoTimesheet: w1NoTs, week2NoTimesheet: w2NoTs,
       // Exposed so the admin table can show/edit the actual number, not
       // just the status pill — see routes/timesheets.js's
       // admin/weeks/adjust-day (Sophia/Joy only).
