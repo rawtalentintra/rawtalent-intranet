@@ -2329,9 +2329,16 @@
     const TASK_PRIORITY_META = {
       low:    { label: 'Low',    color: '#64748b', desc: 'Nice to get to, no rush.' },
       normal: { label: 'Normal', color: '#2563eb', desc: 'Standard priority — the default for most tasks.' },
-      high:   { label: 'High',   color: '#d97706', desc: 'Important — should be picked up soon.' },
-      urgent: { label: 'Urgent', color: '#dc2626', desc: 'Time-critical — needs attention right away.' }
+      high:   { label: 'High',   color: '#ea580c', solid: true, desc: 'Important — should be picked up soon.' },
+      urgent: { label: 'Urgent', color: '#dc2626', solid: true, desc: 'Time-critical — needs attention right away.' }
     };
+    // High = solid orange, Urgent = solid red (Joy's "Task Priority" task, 23 Oct);
+    // Low/Normal stay as the light outlined chip.
+    function taskPriorityChipHtml(pr) {
+      return pr.solid
+        ? `<span class="task-chip" style="background:${pr.color};color:#fff;border-color:${pr.color};font-weight:700">${pr.label}</span>`
+        : `<span class="task-chip" style="background:${pr.color}1a;color:${pr.color};border-color:${pr.color}">${pr.label}</span>`;
+    }
     const TASK_STATUS_ORDER = ['to_do', 'in_progress', 'in_review', 'done'];
 
     // Status order for a specific department context (the New/Edit Task
@@ -2475,7 +2482,7 @@
           </div>
           <div>
             <div class="task-legend-heading">Priority</div>
-            ${Object.keys(TASK_PRIORITY_META).map(p => `<div class="task-legend-row"><span class="task-chip" style="background:${TASK_PRIORITY_META[p].color}1a;color:${TASK_PRIORITY_META[p].color};border-color:${TASK_PRIORITY_META[p].color}">${TASK_PRIORITY_META[p].label}</span> ${TASK_PRIORITY_META[p].desc}</div>`).join('')}
+            ${Object.keys(TASK_PRIORITY_META).map(p => `<div class="task-legend-row">${taskPriorityChipHtml(TASK_PRIORITY_META[p])} ${TASK_PRIORITY_META[p].desc}</div>`).join('')}
           </div>
           <div>
             <div class="task-legend-heading">Department &amp; Classification</div>
@@ -2541,7 +2548,7 @@
         <div class="task-card" draggable="true" ondragstart="handleTaskDragStart(event,'${t.id}')" ondragend="handleTaskDragEnd()" onclick="openTaskDetail('${t.id}')">
           <div class="task-card-top">
             <span class="task-chip" style="background:${dept.color}1a;color:${dept.color};border-color:${dept.color}">${dept.icon || ''} ${escHtml(dept.name)}</span>
-            <span class="task-priority-dot" title="${pr.label} priority" style="background:${pr.color}"></span>
+            ${pr.solid ? taskPriorityChipHtml(pr) : `<span class="task-priority-dot" title="${pr.label} priority" style="background:${pr.color}"></span>`}
           </div>
           <div class="task-card-title">${escHtml(t.title)}</div>
           ${t.classification_name ? `<div class="task-card-class">🏷️ ${escHtml(t.classification_name)}</div>` : ''}
@@ -2685,7 +2692,7 @@
             <td>${escHtml(t.created_by_name || t.created_by)}</td>
             <td>👤 ${escHtml(assigneeLabelFor(t))}</td>
             <td>${t.due_date ? `<span class="task-card-due ${overdue ? 'overdue' : dueSoon ? 'soon' : ''}">${overdue ? '🔴' : dueSoon ? '🟠' : '📅'} ${fmtDate(t.due_date)}</span>` : '<span style="color:var(--gray-400)">—</span>'}</td>
-            <td><span class="task-chip" style="background:${pr.color}1a;color:${pr.color};border-color:${pr.color}">${pr.label}</span></td>
+            <td>${taskPriorityChipHtml(pr)}</td>
             <td><span class="task-chip" style="background:${st.bg};color:${st.color};border-color:${st.border}">${st.label}</span></td>
           </tr>
         `;
