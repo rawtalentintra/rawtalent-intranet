@@ -109,7 +109,9 @@ async function sendOfferEmail(offerId) {
 // an RT centre's profile is its client's primary user (RT person id).
 const shortState = s => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'australian capital territory': 'ACT', 'northern territory': 'NT' })[String(s || '').trim().toLowerCase()] || String(s || '').trim().toUpperCase() || null;
 async function resolveContact({ leadId, centreKey }) {
-  const { centres, rawClients } = await getCentresAndBookings();
+  // RT down: a lead still resolves to its own contact (no RT centre match), a centre can't.
+  let centres = [], rawClients = [];
+  try { ({ centres, rawClients } = await getCentresAndBookings()); } catch (err) { if (!leadId) throw err; }
   const fromCentre = (c, extra = {}) => {
     const client = rawClients.find(x => String(x.clientId) === String(c.rtClientId));
     return { centreName: c.name, centreKey: c.centreKey, email: (client && client.email) || c.email || null, firstName: (c.contactName || '').split(' ')[0] || null, name: c.contactName || null, state: shortState(c.state), rtPersonId: client && client.primaryUserId ? String(client.primaryUserId) : null, ...extra };
@@ -121,7 +123,7 @@ async function resolveContact({ leadId, centreKey }) {
     const key = m ? (m.rtLocationId ? `loc:${m.rtLocationId}` : `client:${m.rtClientId}`) : null;
     const c = key && centres.find(x => x.centreKey === key);
     if (c) return fromCentre(c, { centreName: l.centre_name || c.name });
-    return { centreName: l.centre_name, centreKey: null, email: l.contact_email || null, firstName: l.contact_first_name || null, name: [l.contact_first_name, l.contact_last_name].filter(Boolean).join(' ') || null, state: shortState(l.state), rtPersonId: null };
+    return { centreName: l.centre_name, centreKey: null, email: l.contact_email || null, firstName: l.contact_first_name || null, name: [l.contact_first_name, l.contact_last_name].filter(x => x && !/not provided/i.test(x)).join(' ') || null, state: shortState(l.state), rtPersonId: null };
   }
   const c = centres.find(x => x.centreKey === centreKey);
   return c ? fromCentre(c) : null;

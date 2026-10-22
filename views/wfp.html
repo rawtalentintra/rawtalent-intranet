@@ -401,12 +401,17 @@
     // the sandbox label was never offered as a browsing filter choice to
     // begin with, only ever used for SAVING a test route (see
     // activeWfpLabelForPlanning, fully decoupled from this filter now).
+    let centresLoadFailed = false;
     async function ensureDataLoaded(force) {
       if (!force && allLeads.length + allCentres.length && Date.now() - dataLoadedAt < 60000) return;
       const q = wfpFilterLabel ? '?state=' + encodeURIComponent(wfpFilterLabel) : '';
+      // Leads come from HeartBeat; centres come from RT. Load them separately so an
+      // RT outage doesn't also hide the partner's leads, and so Today can say the
+      // centres didn't load instead of "nothing needs attention" (QA, 23 Oct).
       try {
         const [leads, centres, matches] = await Promise.all([
-          api('/api/leads' + q), api('/api/centres' + q),
+          api('/api/leads' + q),
+          api('/api/centres' + q).then(c => { centresLoadFailed = false; return c; }).catch(() => { centresLoadFailed = true; return allCentres; }),
           // "Existing Centre?" match — Desktop's leads list already shows
           // this (phone/email match against a real RT client), but mobile
           // never surfaced it at all, so a lead that's actually a
@@ -421,7 +426,8 @@
         allCentres = centres;
         existingCentreMatches = matches || {};
         dataLoadedAt = Date.now();
-      } catch { toast('Could not load your leads/centres', 'error'); }
+        if (centresLoadFailed) toast('Centres could not load right now. Leads are up to date.', 'error');
+      } catch { toast('Could not load your leads. Check your connection and try again.', 'error'); }
     }
 
     // ── Territory filter ─────────────────────────────────────────────
@@ -1648,7 +1654,9 @@
         ${routeTodayHtml()}
         ${b.attention.length ? `<div class="section-title">Needs Attention (${b.attention.length})</div>${b.attention.map(todayItemRow).join('')}` : ''}
         ${alongRoute.length ? `<div class="section-title">Along Your Route</div>${alongRoute.map(todayItemRow).join('')}` : ''}
-        ${!b.attention.length && !alongRoute.length ? `<div class="empty-state">Nothing needs attention right now.</div>` : ''}
+        ${!b.attention.length && !alongRoute.length ? (centresLoadFailed
+          ? `<div class="empty-state">Your centres couldn't load just now, so this list may be incomplete. <a href="#" onclick="ensureDataLoaded(true).then(() => setView('today', false));return false">Try again</a></div>`
+          : `<div class="empty-state">Nothing needs attention right now.</div>`) : ''}
       `;
     }
 
@@ -1804,6 +1812,7 @@
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="addStopToRoute('lead','${l.id}')">Add to Route</button>
         </div>
+        <div class="card" style="cursor:default" id="fbfLeadBoxM"></div>
 
         <div class="section-title">Update Stage</div>
         <select id="stagePicker" onchange="applyLeadStage(this.value)">
@@ -2297,7 +2306,6 @@
         <div class="action-row">
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="messageTeam(this)">Message Team</button>
         </div>
-        <div class="card" style="cursor:default" id="fbfLeadBoxM"></div>
         <div class="card" style="cursor:default;margin-top:12px">
           <div class="section-title" style="margin:0 0 8px">Quick log</div>
           <div class="action-row" style="margin:0">
