@@ -370,6 +370,9 @@
         <div class="admin-nav-item super-admin-only wfp-perf-section" style="display:none" onclick="showSection('wfp-performance', this)">
           <span class="admin-nav-icon">🏆</span> WFP Performance
         </div>
+        <div class="admin-nav-item super-admin-only wfp-perf-viewer" style="display:none;padding-left:34px" onclick="showSection('wfp-report', this)">
+          <span class="admin-nav-icon">🗓️</span> Weekly Report
+        </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
@@ -1033,6 +1036,28 @@
       <!-- QR Code Educator Recruitment (Liam, 13 Oct 2026), Phase 1: educators who
            scanned a recruitment poster in a centre. Priority onboarding list with
            pay-rate and welcome-bonus fields. Preview: super_admin only. -->
+      <!-- Weekly / monthly Workforce Partner report (Joy's "Proposals for Liam" §1, 23 Oct).
+           super_admin + Liam only. Data from /api/wfp-reports (services/wfpReportService.js). -->
+      <template id="__lazy_wfp_report">
+      <div class="admin-section" id="section-wfp-report">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Weekly Report</div>
+            <div class="admin-page-sub">Workforce Partner activity, funnel, centre health, bookings and what centres are saying, for a week or a month. Saved automatically every Monday 8am (last week) and on the 1st (last month).</div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select id="wrType" class="form-control" style="width:120px" onchange="wrPeriodChanged()"><option value="week">Week</option><option value="month">Month</option></select>
+          <input type="date" id="wrStart" class="form-control" style="width:170px" onchange="loadWfpReport()">
+          <span id="wrRange" style="font-size:12.5px;color:var(--text-muted)"></span>
+          <span style="flex:1"></span>
+          <button class="btn-secondary" onclick="loadWfpReport(true)">Rebuild now</button>
+          <button class="btn-primary" onclick="downloadWfpReportPdf()">Download PDF</button>
+          <label title="Not switched on yet" style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center;cursor:not-allowed"><input type="checkbox" disabled> Email to Liam (off)</label>
+        </div>
+        <div id="wrBody"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+      </div>
+      </template>
       <template id="__lazy_qr_referrals">
       <div class="admin-section" id="section-qr-referrals">
         <div class="admin-header">
@@ -6736,7 +6761,7 @@
     // the whole page (all partners' cards, fill rate, by state) except the
     // Intelligence Matrix, opened to partners too on 16 Oct (Joy).
     function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner'; }
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals', 'wfp-report'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
@@ -6766,7 +6791,7 @@
           showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
-      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()))) {
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()) || (id === 'wfp-report' && canSeeWfpPerformance()))) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'signed-contracts' && !currentUserCanViewContracts) {
@@ -6864,6 +6889,7 @@
       if (id === 'first-shift') loadFirstShifts();
       if (id === 'signed-contracts') loadSignedContracts();
       if (id === 'qr-referrals') loadQrReferrals();
+      if (id === 'wfp-report') initWfpReport();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -11034,6 +11060,48 @@
             ${s.hasMap ? `<a class="btn-secondary" style="padding:5px 12px;font-size:12.5px;text-decoration:none" href="/api/micropods/ready-export/${id}/html">Download interactive map</a>` : ''}
           </div>`;
       } catch (e) { clearInterval(readyExportPoll); btn.disabled = false; box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; }
+    }
+
+
+    // ── Weekly / monthly Workforce Partner report ─────────────────────────
+    const WR_LABELS = { leadCalls: 'Lead calls', centreCalls: 'Centre calls', leadVisits: 'Lead visits', centreVisits: 'Centre visits', leadsCreated: 'Leads created', dormantTouchpoints: 'Dormant touch points', fbfOffers: 'First booking free offers', voiceNotes: 'Voice notes' };
+    function wrDefaultStart(type) {
+      const t = new Date(new Date().toLocaleString('en-US', { timeZone: 'Australia/Melbourne' }));
+      if (type === 'month') { const d = new Date(t.getFullYear(), t.getMonth() - 1, 1); return d.toLocaleDateString('en-CA'); }
+      const dow = (t.getDay() + 6) % 7; const d = new Date(t); d.setDate(t.getDate() - dow - 7); return d.toLocaleDateString('en-CA');
+    }
+    function initWfpReport() { const s = document.getElementById('wrStart'); if (s && !s.value) s.value = wrDefaultStart('week'); loadWfpReport(); }
+    function wrPeriodChanged() { document.getElementById('wrStart').value = wrDefaultStart(document.getElementById('wrType').value); loadWfpReport(); }
+    function downloadWfpReportPdf() { location.href = `/api/wfp-reports/pdf?type=${document.getElementById('wrType').value}&start=${document.getElementById('wrStart').value}`; }
+    async function loadWfpReport(refresh) {
+      const body = document.getElementById('wrBody'); if (!body) return;
+      const type = document.getElementById('wrType').value, start = document.getElementById('wrStart').value;
+      body.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Building the report…</div>';
+      try {
+        const r = await fetch(`/api/wfp-reports?type=${type}&start=${start}${refresh ? '&refresh=1' : ''}`); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not build the report');
+        document.getElementById('wrRange').textContent = `${fmtShortDate(d.period.start)} – ${fmtShortDate(new Date(new Date(d.period.end) - 864e5))} · generated ${new Date(d.generatedAt).toLocaleString('en-AU')}`;
+        body.innerHTML = wfpReportHtml(d);
+      } catch (e) { body.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    function wfpReportHtml(d) {
+      const card = (title, inner) => `<div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px"><div class="sd-card-title" style="margin-bottom:10px">${title}</div>${inner}</div>`;
+      const arrow = (c, p) => c > p ? '<span style="color:#15803d">▲</span>' : c < p ? '<span style="color:#b91c1c">▼</span>' : '';
+      const A = `<div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th></th>${d.activity.map(a => `<th>${escHtml(a.partner)}<div style="font-weight:400;font-size:10.5px">this · last · 4-avg</div></th>`).join('')}</tr></thead><tbody>
+        ${Object.keys(WR_LABELS).map(k => `<tr><td style="font-weight:600">${WR_LABELS[k]}</td>${d.activity.map(a => { const m = a.metrics.find(x => x.key === k); return `<td><b>${m.current}</b> ${arrow(m.current, m.previous)} <span style="color:var(--text-muted)">· ${m.previous} · ${m.avg4}</span></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+      const B = `<div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>Partner</th><th>Leads</th><th>Called</th><th>Visited</th><th>Centre set up</th><th>First booking</th><th>Repeat</th><th>Days visit → set-up</th><th>Visits followed up ≤2 days</th></tr></thead><tbody>
+        ${d.funnel.map(f => `<tr${f.partner === 'All partners' ? ' style="font-weight:700"' : ''}><td>${escHtml(f.partner)}</td><td>${f.leads}</td><td>${f.called}</td><td>${f.visited}</td><td>${f.setUp}</td><td>${f.firstBooking}</td><td>${f.repeat}</td><td>${f.avgDaysVisitToSetUp ?? '—'}</td><td>${f.visitsInPeriod ? `${f.followedUp2d}/${f.visitsInPeriod} (${f.followedUp2dPct}%)` : '—'}</td></tr>`).join('')}</tbody></table></div>
+        <div style="font-size:12.5px;margin-top:8px">First booking free (all offers to date): <b>${d.fbf.offered}</b> offered → <b>${d.fbf.firstBooking}</b> first booking → <b>${d.fbf.rebooked30d}</b> rebooked within 30 days.</div>`;
+      const C = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${d.health.statuses.map(s => { const m = CENTRE_STATUS_META[s.status]; return `<div style="background:${m[1]};color:${m[2]};border-radius:8px;padding:8px 12px;font-size:12.5px"><b style="font-size:16px">${s.count}</b> ${m[0]} <span style="opacity:.8">(${s.change >= 0 ? '+' : ''}${s.change} vs last week)</span></div>`; }).join('')}</div>
+        <div style="font-size:12.5px;margin-bottom:8px">Outstanding Action Required: <b>${d.health.actionRequired.unhappyClient}</b> unhappy client · <b>${d.health.actionRequired.goVisit}</b> go visit (first booking) · <b>${d.health.actionRequired.dormant}</b> centre dormant</div>
+        <table class="data-table data-table-compact"><thead><tr><th>Top declining centres</th><th>State</th><th>Owner</th><th>Last 4 weeks</th><th>Prior 8 weeks</th></tr></thead><tbody>${d.health.topDeclining.map(c => `<tr><td>${escHtml(c.name)}</td><td>${escHtml(c.state || '')}</td><td>${escHtml(c.owner)}</td><td>${c.last4}</td><td>${c.prior8}</td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--text-muted)">None</td></tr>'}</tbody></table>`;
+      const D = `<div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>State</th><th>Booked</th><th>Filled</th><th>Unfilled</th><th>Still open</th><th>Fill rate</th><th>Cancelled by centre</th><th>by educator</th><th>admin</th><th>unclear</th></tr></thead><tbody>
+        ${d.fill.map(s => `<tr><td style="font-weight:600">${escHtml(s.state)}</td><td>${s.booked}</td><td>${s.filled}</td><td>${s.unfilled}</td><td>${s.open}</td><td>${s.fillRate != null ? s.fillRate + '%' : '—'}</td><td>${s.cancelled.centre}</td><td>${s.cancelled.educator}</td><td>${s.cancelled.admin}</td><td>${s.cancelled.unclear}</td></tr>`).join('')}</tbody></table></div>
+        <div style="font-size:11.5px;color:#b45309;margin-top:6px">Cancellation split is provisional until Sophia confirms the RT reason codes.</div>`;
+      const E = d.matrix.filter(m => m.state).map(m => `<div style="margin-bottom:10px"><div style="font-weight:700;color:var(--navy)">${m.state} <span style="font-weight:400;color:var(--text-muted);font-size:12px">${m.recordings} recordings</span></div>
+        ${[['Competitors & pricing', m.competitors], ['Needs', m.needs], ['Objections', m.objections]].map(([t, l]) => `<div style="font-size:12.5px"><b>${t}:</b> ${l.length ? l.map(escHtml).join(' · ') : '—'}</div>`).join('')}</div>`).join('') || (d.matrix.find(m => m.error) ? `<div style="color:#b45309;font-size:12.5px">The Intelligence Matrix couldn't be built for this report (${escHtml(d.matrix.find(m => m.error).error.slice(0, 120))}).</div>` : '<div style="color:var(--text-muted)">No voice-note insights yet.</div>');
+      return card('A. Activity by partner', A) + card('B. Funnel (leads created this period)', B) + card('C. Centre health', C) + card('D. Bookings and fill by state', D) + card('E. What centres are telling us', E)
+        + `<div style="font-size:11.5px;color:var(--text-muted)">${d.notes.map(escHtml).join(' ')}</div>`;
     }
 
     // ── Micropods legend + Find educators (Joy, 22 Oct: simpler page, Sophia's labels) ──

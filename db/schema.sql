@@ -2783,3 +2783,49 @@ ALTER TABLE timesheet_change_archive ENABLE ROW LEVEL SECURITY;
 -- but Payroll keeps listing them until this date so the final payslip can be
 -- generated. After it passes they drop off by themselves.
 ALTER TABLE employee_payroll_profiles ADD COLUMN IF NOT EXISTS payroll_until DATE;
+
+-- Compliance safeguards (Liam via Joy, 23 Oct 2026). Nightly copy of key
+-- compliance fields per Active / In Progress educator (from HeartBeat's own RT
+-- cache, read-only), kept 90 days, plus the day-on-day changes found. See
+-- services/complianceSafeguardService.js.
+CREATE TABLE IF NOT EXISTS compliance_snapshots (
+  snapshot_date DATE NOT NULL,
+  user_id BIGINT NOT NULL,
+  name TEXT,
+  status INTEGER,
+  ob_status TEXT,
+  wwcc_number TEXT,
+  wwcc_expiry DATE,
+  wwcc_reviewed BOOLEAN,
+  first_aid_expiry DATE,
+  police_expiry DATE,
+  child_safety_expiry DATE,
+  qualification TEXT,
+  qualification_reviewed BOOLEAN,
+  doc_count INTEGER,
+  PRIMARY KEY (snapshot_date, user_id)
+);
+CREATE TABLE IF NOT EXISTS compliance_change_log (
+  id SERIAL PRIMARY KEY,
+  detected_on DATE NOT NULL,
+  user_id BIGINT,
+  name TEXT,
+  field TEXT,
+  before_value TEXT,
+  after_value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_compliance_change_log_day ON compliance_change_log (detected_on);
+ALTER TABLE compliance_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE compliance_change_log ENABLE ROW LEVEL SECURITY;
+
+-- Weekly / monthly Workforce Partner report (services/wfpReportService.js).
+CREATE TABLE IF NOT EXISTS wfp_reports (
+  id SERIAL PRIMARY KEY,
+  period_type TEXT NOT NULL,      -- week | month
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,       -- exclusive
+  data JSONB NOT NULL,
+  generated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (period_type, period_start)
+);
+ALTER TABLE wfp_reports ENABLE ROW LEVEL SECURITY;

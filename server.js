@@ -194,6 +194,7 @@ app.use('/api/first-shift', require('./routes/firstShift'));
 app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter);
 app.use('/api/first-booking-free', require('./routes/firstBookingFree'));
 app.use('/api/signed-contracts', require('./routes/signedContracts'));
+app.use('/api/wfp-reports', require('./routes/wfpReports'));
 app.use('/api/qr-referrals/familiar', require('./routes/qrReferrals').familiarRouter);
 app.use('/api/qr-referrals', require('./routes/qrReferrals').router);
 app.use('/api/centre-ownership', require('./routes/centreOwnership'));
@@ -376,6 +377,8 @@ async function maybeRunNightlyCandidatesSync() {
     console.log(`Nightly RT candidates sync complete — ${count} candidates in ${Math.round(durationMs / 1000)}s.`);
     // Then re-fetch, one by one, everyone RT's paged list skipped (see refreshStaleCandidates).
     await rtCandidatesSync.refreshStaleCandidates().catch(err => console.error('RT stale candidate refresh failed:', err.message));
+    // Compliance safeguards: nightly snapshot + overnight-change alert (services/complianceSafeguardService.js).
+    await require('./services/complianceSafeguardService').runNightly().catch(err => console.error('Compliance snapshot failed:', err.message));
   } catch (err) {
     console.error('Nightly RT candidates sync failed:', err.message);
   }
@@ -528,6 +531,22 @@ async function start() {
     // Micropods: build the educator points once at start-up and every 50 min,
     // so nobody waits on a cold 10–30s build (routes/micropods.js).
     setTimeout(() => require('./routes/micropods').warmMicropods(), 60 * 1000);
+    // Weekly/monthly WFP report (Mondays 8am → last week; the 1st 8am → last month) and the
+    // Monday Bot activity summary for Joy. Checked every 20 min; each only runs once per period.
+    let lastBotSummaryDay = null;
+    setInterval(async () => {
+      try {
+        const done = await require('./services/wfpReportService').runScheduled();
+        if (done.length) console.log('WFP report generated:', done.join(', '));
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', weekday: 'short', hour: 'numeric', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map(p => [p.type, p.value]));
+        const today = `${parts.year}-${parts.month}-${parts.day}`;
+        if (parts.weekday === 'Mon' && Number(parts.hour) === 8 && lastBotSummaryDay !== today) {
+          const already = (await getDb().execute({ sql: "SELECT 1 FROM tasks WHERE created_by_name = 'Auto — Bot activity' AND created_at > now() - interval '20 hours'", args: [] })).rows.length;
+          lastBotSummaryDay = today;
+          if (!already) await require('./services/complianceSafeguardService').weeklyBotActivity();
+        }
+      } catch (err) { console.error('Scheduled report error:', err.message); }
+    }, 20 * 60 * 1000);
     setInterval(() => require('./routes/micropods').warmMicropods(), 50 * 60 * 1000);
     setInterval(runQrBonusCheck, 3 * 60 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);

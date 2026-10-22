@@ -1427,3 +1427,12 @@ module.exports.getCentreStopsByKeys = getCentreStopsByKeys;
 module.exports.indexBookingsByCentre = indexBookingsByCentre;
 module.exports.bookingsForCentre = bookingsForCentre;
 module.exports.getCentrePartnerAssignments = getCentrePartnerAssignments;
+// Shared with services/wfpReportService.js (weekly/monthly partner report).
+module.exports.centresWithNurture = centresWithNurture;
+module.exports.partnerLabelForCentre = (c, assignments) => {
+  const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned';
+  return label === 'Liam' ? 'Justine' : label;
+};
+module.exports.shortState = shortState;
+module.exports.getLastBookingDates = getLastBookingDates;
+module.exports.lastCancelReason = lastCancelReason;
