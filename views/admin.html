@@ -337,6 +337,9 @@
         <div class="admin-nav-item" onclick="showSection('document-checker', this)">
           <span class="admin-nav-icon">🛡️</span> Document Checker
         </div>
+        <div class="admin-nav-item" onclick="showSection('rto-lookup', this)">
+          <span class="admin-nav-icon">🎓</span> RTO Lookup
+        </div>
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('first-shift', this)">
           <span class="admin-nav-icon">📞</span> First Shift Follow-ups
         </div>
@@ -1038,6 +1041,25 @@
            pay-rate and welcome-bonus fields. Preview: super_admin only. -->
       <!-- Weekly / monthly Workforce Partner report (Joy's "Proposals for Liam" §1, 23 Oct).
            super_admin + Liam only. Data from /api/wfp-reports (services/wfpReportService.js). -->
+      <!-- RTO Lookup (Sophia, 21 Oct): training.gov.au data inside HeartBeat, read-only. -->
+      <template id="__lazy_rto_lookup">
+      <div class="admin-section" id="section-rto-lookup">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">RTO Lookup</div>
+            <div class="admin-page-sub">Check a training provider without leaving HeartBeat: status, registration dates, whether ASQA cancelled it or its certificates, and whether it could issue the educator's qualification. Live from training.gov.au.</div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input id="rtoQ" class="form-control" style="max-width:320px" placeholder="RTO number or college name" onkeydown="if(event.key==='Enter')rtoSearch()">
+          <input id="rtoQual" class="form-control" style="max-width:220px" placeholder="Qualification code (optional), e.g. CHC30121" onkeydown="if(event.key==='Enter')rtoSearch()">
+          <button class="btn-primary" onclick="rtoSearch()">Search</button>
+          <span style="font-size:12px;color:var(--text-muted)">Universities (TEQSA) aren't on training.gov.au. That lookup comes next.</span>
+        </div>
+        <div id="rtoResults"></div>
+        <div id="rtoDetail"></div>
+      </div>
+      </template>
       <template id="__lazy_wfp_report">
       <div class="admin-section" id="section-wfp-report">
         <div class="admin-header">
@@ -11062,6 +11084,48 @@
       } catch (e) { clearInterval(readyExportPoll); btn.disabled = false; box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; }
     }
 
+
+
+    // ── RTO Lookup ────────────────────────────────────────────────────────
+    async function rtoSearch() {
+      const q = document.getElementById('rtoQ').value.trim(), res = document.getElementById('rtoResults'), det = document.getElementById('rtoDetail');
+      det.innerHTML = '';
+      if (!q) return;
+      if (/^\d{1,6}$/.test(q)) { res.innerHTML = ''; return rtoOpen(q); }
+      res.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Searching training.gov.au…</div>';
+      try {
+        const r = await fetch('/api/rto-lookup/search?q=' + encodeURIComponent(q)); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Search failed');
+        res.innerHTML = d.length ? `<div class="admin-table-card" style="padding:6px 0;margin-bottom:16px">${d.map(o => `<div onclick="rtoOpen('${o.code}')" style="cursor:pointer;padding:10px 20px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;gap:10px">
+            <span><b>${escHtml(o.legalName || '')}</b> <span style="color:var(--text-muted)">· RTO ${escHtml(o.code)}${o.tradingNames.length ? ' · ' + escHtml(o.tradingNames.slice(0, 2).join(', ')) : ''}</span></span>
+            <span style="font-size:12px;font-weight:700;color:${o.isCurrent ? '#15803d' : '#b45309'}">${o.isCurrent ? 'Current' : 'Not current'}${o.flagged ? ' · ⚠️ regulatory decision' : ''}</span></div>`).join('')}</div>`
+          : '<div style="color:var(--text-muted);font-size:13px">No RTO matched. Try the RTO number, or part of the name.</div>';
+      } catch (e) { res.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    async function rtoOpen(code) {
+      const det = document.getElementById('rtoDetail'), qual = document.getElementById('rtoQual').value.trim();
+      det.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>Loading from training.gov.au…</div>';
+      try {
+        const r = await fetch(`/api/rto-lookup/${encodeURIComponent(code)}${qual ? '?qualification=' + encodeURIComponent(qual) : ''}`); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Lookup failed');
+        const col = { good: ['#dcfce7', '#15803d', '✅'], ok: ['#fef3c7', '#b45309', '🟡'], bad: ['#fee2e2', '#b91c1c', '⛔'] }[d.verdict.level];
+        const q = d.qualification;
+        det.innerHTML = `<div class="admin-table-card" style="padding:18px 22px">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${escHtml(d.legalName || 'RTO ' + d.code)}</div>
+              <div style="font-size:12.5px;color:var(--text-muted)">RTO ${escHtml(d.code)}${d.tradingNames.length ? ' · trading as ' + escHtml(d.tradingNames.join(', ')) : ''}${d.abn ? ' · ABN ' + escHtml(d.abn) : ''}</div></div>
+            <a href="${d.link}" target="_blank" rel="noopener" style="font-size:12.5px">Open on training.gov.au ↗</a>
+          </div>
+          <div style="margin:12px 0;padding:12px 14px;border-radius:8px;background:${col[0]};color:${col[1]};font-weight:700;font-size:13.5px">${col[2]} ${escHtml(d.status)}: ${escHtml(d.verdict.text)}</div>
+          ${q ? `<div style="margin-bottom:12px;padding:10px 14px;border-radius:8px;background:${q.onScope ? '#f0fdf4' : '#fef2f2'};font-size:13px"><b>${escHtml(q.code)}:</b> ${q.onScope ? q.periods.map(p => `${escHtml(p.title)}, on scope ${fmtShortDate(p.start)} – ${fmtShortDate(p.end)} (${escHtml(p.extent || '')})`).join('<br>') : 'not on this RTO\'s scope, so they could not issue it.'}</div>` : ''}
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-top:6px">Registration</div>
+          ${d.registrations.map(r => `<div style="font-size:12.5px">${fmtShortDate(r.start)} – ${fmtShortDate(r.end)}${r.endReason ? ` · <span style="color:#b91c1c">${escHtml(r.endReason)}</span>` : ''}</div>`).join('') || '<div style="font-size:12.5px;color:var(--text-muted)">None listed</div>'}
+          ${d.decisions.length ? `<div style="font-size:12px;font-weight:700;color:var(--navy);margin-top:10px">Regulatory decisions</div>${d.decisions.map(x => `<div style="font-size:12.5px;margin-top:4px"><b>${escHtml(x.type)}</b> · effective ${fmtShortDate(x.effective)} · ${escHtml(x.status)}${x.review ? ' · review: ' + escHtml(x.review) : ''}${x.details ? `<div style="color:#374151">${escHtml(x.details.slice(0, 400))}</div>` : ''}</div>`).join('')}` : ''}
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-top:10px">Childcare qualifications on scope (${d.childcareQualifications.length} of ${d.totalQualificationsOnScope} total)</div>
+          ${d.childcareQualifications.slice(0, 12).map(x => `<div style="font-size:12.5px">${escHtml(x.code)} ${escHtml(x.title)} · ${fmtShortDate(x.start)} – ${fmtShortDate(x.end)}</div>`).join('') || '<div style="font-size:12.5px;color:var(--text-muted)">None</div>'}
+        </div>`;
+      } catch (e) { det.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
 
     // ── Weekly / monthly Workforce Partner report ─────────────────────────
     const WR_LABELS = { leadCalls: 'Lead calls', centreCalls: 'Centre calls', leadVisits: 'Lead visits', centreVisits: 'Centre visits', leadsCreated: 'Leads created', dormantTouchpoints: 'Dormant touch points', fbfOffers: 'First booking free offers', voiceNotes: 'Voice notes' };

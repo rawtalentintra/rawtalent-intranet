@@ -195,6 +195,7 @@ app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter
 app.use('/api/first-booking-free', require('./routes/firstBookingFree'));
 app.use('/api/signed-contracts', require('./routes/signedContracts'));
 app.use('/api/wfp-reports', require('./routes/wfpReports'));
+app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/qr-referrals/familiar', require('./routes/qrReferrals').familiarRouter);
 app.use('/api/qr-referrals', require('./routes/qrReferrals').router);
 app.use('/api/centre-ownership', require('./routes/centreOwnership'));
