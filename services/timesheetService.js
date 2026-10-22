@@ -25,7 +25,11 @@ const SAT_TRANSITION_DATE = '2026-09-26'; // also serves as pay-period-2 anchor 
 // then Sophia/Joy" — nothing more.
 const TEAM_APPROVAL_CONFIG = {
   'AM Team': { l1: 'lorie@rawtalent.com.au', l2: 'sophia@rawtalent.com.au' },
-  'PM Team': { l1: 'adrianne@rawtalent.com.au', l2: 'joy@rawtalent.com.au' }
+  // Sophia, 22 Oct (Joy agreed): PM Team's final approver is Sophia, and anyone
+  // in PM Team who reports straight to a final approver in the org chart
+  // (Adzi herself, new hires like Desiree/Jacqueline) goes directly to that
+  // person instead of via Adzi.
+  'PM Team': { l1: 'adrianne@rawtalent.com.au', l2: 'sophia@rawtalent.com.au', directIfManagerIsFinal: true }
 };
 
 // pg returns DATE columns as JS Date objects built from the server's local
@@ -245,6 +249,21 @@ async function submitWeek(userEmail, userName, weekStartDate) {
 
   const team = await resolveTeam(db, userEmail);
   const config = TEAM_APPROVAL_CONFIG[team];
+
+  // Reports straight to Sophia/Joy in the org chart → straight to them (PM Team rule above).
+  if (config && config.directIfManagerIsFinal) {
+    const mgr = (await db.execute({
+      sql: `SELECT m.email FROM team_members t JOIN team_members m ON m.id = t.manager_id WHERE LOWER(t.email) = LOWER(?) LIMIT 1`, args: [userEmail]
+    })).rows[0];
+    if (mgr?.email && isFinalApprover(mgr.email)) {
+      await db.execute({
+        sql: `UPDATE timesheet_weeks SET status = 'pending_final', l1_approver_email = NULL, l1_approver_name = NULL, final_approver_email = ?,
+              submitted_at = now(), rejection_note = NULL, updated_at = now() WHERE id = ?`,
+        args: [mgr.email.toLowerCase(), week.id]
+      });
+      return getWeek(userEmail, weekStartDate);
+    }
+  }
 
   if (config && userEmail.toLowerCase() !== config.l1.toLowerCase()) {
     // Regular team member — goes to their team's manager first. The final
