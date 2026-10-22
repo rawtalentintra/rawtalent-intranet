@@ -351,10 +351,30 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Lost-update fix (Joy's overdue tasks "Task Assignee Issue" + "Linked Educator
+// Option", 23 Oct 2026). The task list is loaded once per page, so a person
+// with an older copy open could save (or drag a card) and overwrite
+// assignees / linked educators / linked centres a colleague had added since.
+// 14 assignee wipes were found in task_assignee_history. Now the client also
+// sends what the task looked like when it was opened (`original`), and the
+// server applies only THIS person's adds and removes on top of what's in the
+// database. A field that's left out of the request keeps its current value.
+function mergeList(current, original, next, keyOf) {
+  if (next === undefined) return current;                  // field not sent → keep
+  if (!Array.isArray(original)) return next;               // old client → previous behaviour
+  const k = x => String(keyOf(x));
+  const origKeys = new Set(original.map(k)), nextKeys = new Set(next.map(k));
+  const removed = new Set([...origKeys].filter(x => !nextKeys.has(x)));
+  const added = next.filter(x => !origKeys.has(k(x)));
+  const kept = current.filter(x => !removed.has(k(x)));
+  const keptKeys = new Set(kept.map(k));
+  return [...kept, ...added.filter(x => !keptKeys.has(k(x)))];
+}
+
 router.put('/:id', async (req, res) => {
   const {
     department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date,
-    linked_candidates, linked_centres
+    linked_candidates, linked_centres, original
   } = req.body;
   if (!department_id?.trim()) return res.status(400).json({ error: 'Department is required' });
   if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -369,7 +389,7 @@ router.put('/:id', async (req, res) => {
   if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
     const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails FROM tasks WHERE id = ?', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres FROM tasks WHERE id = ?', args: [req.params.id] });
     if (!existing.rows[0]) return res.status(404).json({ error: 'Task not found' });
     if (!canAccessDepartment(req.user, existing.rows[0].department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
     const finalStatus = status || existing.rows[0].status;
@@ -380,7 +400,15 @@ router.put('/:id', async (req, res) => {
     else if (finalStatus !== 'done') completedAt = null;
     const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
     const previousAssignees = Array.isArray(existing.rows[0].assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
-    const newAssignees = normalizeAssignees(assigned_to_emails);
+    const orig = original && typeof original === 'object' ? original : {};
+    const newAssignees = normalizeAssignees(mergeList(previousAssignees, orig.assigned_to_emails === undefined ? undefined : normalizeAssignees(orig.assigned_to_emails),
+      assigned_to_emails === undefined ? undefined : normalizeAssignees(assigned_to_emails), e => e));
+    const currentCandidates = Array.isArray(existing.rows[0].linked_candidates) ? existing.rows[0].linked_candidates : [];
+    const currentCentres = Array.isArray(existing.rows[0].linked_centres) ? existing.rows[0].linked_centres : [];
+    const finalCandidates = mergeList(currentCandidates, orig.linked_candidates === undefined ? undefined : normalizeLinkedCandidates(orig.linked_candidates),
+      linked_candidates === undefined ? undefined : normalizeLinkedCandidates(linked_candidates), c => c.userId);
+    const finalCentres = mergeList(currentCentres, orig.linked_centres === undefined ? undefined : normalizeLinkedCentres(orig.linked_centres),
+      linked_centres === undefined ? undefined : normalizeLinkedCentres(linked_centres), c => c.centreKey || ('name:' + c.name));
 
     await db.execute({
       sql: `UPDATE tasks SET
@@ -392,8 +420,8 @@ router.put('/:id', async (req, res) => {
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
         priority || 'normal', JSON.stringify(newAssignees), due_date || null, completedAt, JSON.stringify(mentioned),
-        JSON.stringify(normalizeLinkedCandidates(linked_candidates)),
-        JSON.stringify(normalizeLinkedCentres(linked_centres)),
+        JSON.stringify(finalCandidates),
+        JSON.stringify(finalCentres),
         req.params.id
       ]
     });

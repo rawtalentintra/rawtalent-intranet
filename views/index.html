@@ -2373,6 +2373,9 @@
     // linked_centres comment for why the old "stays singular on purpose"
     // reasoning got reversed. Each entry: { centreKey, name, suburb, state, phone }.
     let taskLinkedCandidates = [];
+    // What the task looked like when the modal opened, sent with the save so the
+    // server only applies this person's own adds/removes (routes/tasks.js mergeList).
+    let taskOriginalLinks = null;
     let taskLinkedCentres = [];
     // Tracks ids explicitly removed (✕) from a linked list this modal
     // session — stops the very next debounced title lookup from silently
@@ -2625,7 +2628,10 @@
             // task's Linked Educators and linked centres back to empty on
             // its very next drag between board columns. Always echo back
             // whatever the task already had; a drag only ever changes status.
-            linked_candidates: t.linked_candidates, linked_centres: t.linked_centres
+            linked_candidates: t.linked_candidates, linked_centres: t.linked_centres,
+            // A drag only changes status: sending the same lists as "original" means the
+            // server keeps whatever the task has now, even if this page's copy is stale.
+            original: { assigned_to_emails: t.assigned_to_emails, linked_candidates: t.linked_candidates, linked_centres: t.linked_centres }
           })
         });
         if (!res.ok) throw new Error();
@@ -3260,6 +3266,7 @@
         renderTaskLinkedCandidateChips();
         taskLinkedCentres = Array.isArray(t.linked_centres) ? [...t.linked_centres] : [];
         renderTaskLinkedCentreChips();
+        taskOriginalLinks = { assigned_to_emails: [...taskAssignees], linked_candidates: [...taskLinkedCandidates], linked_centres: [...taskLinkedCentres] };
         renderTaskPersonMatchPanel(null);
         // Content already exists — show it as plain text by default (not
         // an open textarea) with an explicit way to edit it; an empty
@@ -3618,7 +3625,8 @@
         assigned_to_emails: taskAssignees,
         due_date: document.getElementById('taskDueInput').value || null,
         linked_candidates: taskLinkedCandidates,
-        linked_centres: taskLinkedCentres
+        linked_centres: taskLinkedCentres,
+        ...(editingTaskId && taskOriginalLinks ? { original: taskOriginalLinks } : {})
       };
       const originalLabel = saveBtn.textContent;
       saveBtn.disabled = true;
