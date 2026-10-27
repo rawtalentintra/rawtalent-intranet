@@ -2907,3 +2907,37 @@ CREATE TABLE IF NOT EXISTS security_reports (
 ALTER TABLE auth_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE key_rotation_schedule ENABLE ROW LEVEL SECURITY;
 ALTER TABLE security_reports ENABLE ROW LEVEL SECURITY;
+
+-- Consultant monthly call list (Liam, 26 Oct 2026). services/consultantCallService.js.
+-- Every centre (and pre-booking lead) gets a consultant call about monthly.
+CREATE TABLE IF NOT EXISTS consultant_calls (
+  id SERIAL PRIMARY KEY,
+  lead_id TEXT,
+  centre_key TEXT,
+  target_name TEXT,
+  outcome TEXT NOT NULL,
+  notes TEXT,
+  call_back_on DATE,
+  called_by_email TEXT,
+  called_by_name TEXT,
+  called_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_consultant_calls_lead ON consultant_calls (lead_id, called_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultant_calls_centre ON consultant_calls (centre_key, called_at DESC);
+-- "Available educators" Customer.io emails (contract agreed with RT - Customer.io,
+-- automations #40/#41). One row per attempt; drives the 7-day rule. OFF behind
+-- FBF_CIO_ENABLED + AVAILABLE_EDUCATORS_CIO_ENABLED (weekly run: AVAILABLE_EDUCATORS_WEEKLY).
+CREATE TABLE IF NOT EXISTS available_educator_sends (
+  id SERIAL PRIMARY KEY,
+  target_key TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  educator_ids JSONB,
+  status TEXT NOT NULL,
+  detail TEXT,
+  source TEXT,
+  requested_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_avail_sends_target ON available_educator_sends (target_key, created_at DESC);
+ALTER TABLE consultant_calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE available_educator_sends ENABLE ROW LEVEL SECURITY;

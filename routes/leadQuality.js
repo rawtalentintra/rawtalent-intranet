@@ -46,4 +46,21 @@ router.get('/funnel', canCategorise, async (req, res) => {
   try { res.json(await funnel.computeStages({ fresh: req.query.fresh === '1' })); } catch (err) { fail(res, err); }
 });
 
+// Consultant monthly call list (services/consultantCallService.js)
+const calls = require('../services/consultantCallService');
+const avail = require('../services/availableEducatorsService');
+router.get('/calls/due', canWash, async (req, res) => {
+  const st = String(req.query.state || '').toUpperCase();
+  try { res.json(await calls.dueList({ state: st && st !== 'ALL' ? st : null, includeAll: req.query.all === '1' })); } catch (err) { fail(res, err); }
+});
+router.post('/calls', canWash, async (req, res) => { try { res.status(201).json(await calls.logCall(req.body || {}, req.user)); } catch (err) { fail(res, err); } });
+// Available-educators email (services/availableEducatorsService.js), OFF by default.
+const target = q => (q.centreKey ? { centreKey: String(q.centreKey) } : q.leadId ? { leadId: String(q.leadId) } : null);
+router.get('/available-educators/preview', canWash, async (req, res) => {
+  try { const t = target(req.query); if (!t) return res.status(400).json({ error: 'centreKey or leadId required' }); const p = await avail.preview(t); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(p); } catch (err) { fail(res, err); }
+});
+router.post('/available-educators/send', canWash, async (req, res) => {
+  try { const t = target(req.body || {}); if (!t) return res.status(400).json({ error: 'centreKey or leadId required' }); res.json(await avail.send(t, { source: 'button', user: req.user })); } catch (err) { fail(res, err); }
+});
+
 module.exports = router;

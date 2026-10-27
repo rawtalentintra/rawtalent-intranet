@@ -2,11 +2,12 @@
 // services/firstBookingFreeService.js.
 const express = require('express');
 const router = express.Router();
-const { requireRole } = require('../middleware/authMiddleware');
 const { getDb } = require('../db/database');
 const { sendOfferEmail, resolveContact, cioTrackConfig } = require('../services/firstBookingFreeService');
 
-router.use(requireRole('admin', 'super_admin', 'workforce_partner'));
+// Admins and partners, plus consultants with Lead Wash access (Call List button, Liam 26 Oct).
+router.use((req, res, next) => (req.user && (['admin', 'super_admin', 'workforce_partner'].includes(req.user.role) || require('../services/leadWashService').canWash(req.user)))
+  ? next() : res.status(403).json({ error: 'Not allowed' }));
 
 const shape = o => o && ({
   id: o.id, leadId: o.lead_id, centreKey: o.centre_key, centreName: o.centre_name, offeredBy: o.offered_by_name, offeredAt: o.offered_at,

@@ -880,6 +880,7 @@
       <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
       <button class="mode-tab" id="tabWash" onclick="setMode('wash')" style="display:none">🧽 Lead Wash</button>
+      <button class="mode-tab" id="tabCalls" onclick="setMode('calls')" style="display:none">📞 Call List</button>
       <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
@@ -1337,6 +1338,101 @@
     let currentUserRestrictedAppSection = null;
 
 
+
+    // ── Consultant Call List (Liam, 26 Oct): about one call a month per centre ──
+    let callsState = { state: 'ALL', showAll: false, data: null, openKey: null };
+    async function loadCallsView() {
+      const box = document.getElementById('resultsList');
+      box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        const r = await fetch(`/api/lead-quality/calls/due?state=${callsState.state}${callsState.showAll ? '&all=1' : ''}`); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load the call list');
+        callsState.data = d; renderCalls();
+      } catch (e) { box.innerHTML = `<div class="empty-wrap"><div class="empty-title">${escHtml(e.message)}</div></div>`; }
+    }
+    function renderCalls() {
+      const d = callsState.data, items = d.items.filter(i => i.kind !== 'error'), err = d.items.find(i => i.kind === 'error');
+      const due = items.filter(i => i.due).length;
+      document.getElementById('resultsList').innerHTML = `
+        <style>.call-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
+          .call-head{display:flex;justify-content:space-between;gap:10px;padding:12px 16px;cursor:pointer}
+          .call-form{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
+          .call-form select,.call-form textarea,.call-form input{padding:8px 10px;border:1px solid var(--gray-200);border-radius:8px;font:inherit;font-size:13px}
+          .call-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--gray-200);background:#fff;font-weight:700;font-size:12.5px;cursor:pointer}
+          .call-btn.primary{background:var(--orange);color:#fff;border-color:var(--orange)}</style>
+        <div class="call-card" style="padding:14px 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <div style="font-size:15px;font-weight:800;color:var(--navy)">${due} due for a call</div>
+          <select style="padding:7px 10px;border:1px solid var(--gray-200);border-radius:8px;font:inherit;font-size:13px" onchange="callsState.state=this.value;loadCallsView()">${['ALL', 'VIC', 'SA', 'QLD', 'NT', 'ACT'].map(s => `<option ${callsState.state === s ? 'selected' : ''} value="${s}">${s === 'ALL' ? 'All states' : s}</option>`).join('')}</select>
+          <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${callsState.showAll ? 'checked' : ''} onchange="callsState.showAll=this.checked;loadCallsView()"> Show ones not due yet</label>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:auto">Centres that booked in the last 6 months, plus leads a Workforce Partner has already contacted. About once a month each.</span>
+          ${err ? `<div style="width:100%;font-size:12.5px;color:#b45309">${escHtml(err.name)}. Only leads are shown.</div>` : ''}
+        </div>
+        ${items.length ? items.map(callCardHtml).join('') : '<div class="empty-wrap"><div class="empty-title">All caught up</div></div>'}`;
+    }
+    function callCardHtml(i) {
+      const open = callsState.openKey === i.key, d = callsState.data;
+      const last = i.lastCall ? `Last call ${new Date(i.lastCall.at).toLocaleDateString('en-AU')} by ${escHtml(i.lastCall.by || '')} (${escHtml(d.outcomes[i.lastCall.outcome] || i.lastCall.outcome)})` : 'No consultant call yet';
+      return `<div class="call-card" id="call-${CSS.escape(i.key)}">
+        <div class="call-head" onclick="callsToggle('${escHtml(i.key)}')">
+          <div><div style="font-weight:800;color:var(--navy);font-size:14px">${escHtml(i.name || '')} <span style="font-size:11px;font-weight:700;color:var(--text-muted)">${i.kind === 'centre' ? 'CENTRE' : 'LEAD'}</span></div>
+            <div style="font-size:12.5px;color:var(--text-muted)">${escHtml([i.suburb, i.state].filter(Boolean).join(', '))}${i.phone ? ` · <a href="tel:${escHtml(i.phone)}" onclick="event.stopPropagation()">${escHtml(i.phone)}</a>` : ''}${i.contact ? ' · ' + escHtml(i.contact) : ''}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${last}${i.nextDue ? ` · next due ${new Date(i.nextDue).toLocaleDateString('en-AU')}` : ''}</div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span style="font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;background:${i.due ? '#fef3c7' : '#dcfce7'};color:${i.due ? '#b45309' : '#15803d'}">${i.due ? (i.lastCall ? `Due${i.overdueDays > 0 ? ' · ' + i.overdueDays + 'd overdue' : ''}` : 'Due') : 'Not due'}</span>
+            ${i.category ? `<span style="font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;background:var(--gray-100)">${escHtml(i.category)}</span>` : ''}
+          </div>
+        </div>
+        ${open ? `<div class="call-form">
+          <select id="c-outcome" onchange="document.getElementById('c-cbwrap').style.display=this.value==='call_back'?'':'none'"><option value="">How did the call go?</option>${Object.entries(d.outcomes).map(([k, v]) => `<option value="${k}">${escHtml(v)}</option>`).join('')}</select>
+          <label id="c-cbwrap" style="display:none;font-size:12px;font-weight:700">Call back on <input type="date" id="c-cb"></label>
+          <textarea id="c-notes" rows="2" placeholder="Notes (what they said, who you spoke to)"></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="call-btn primary" onclick="saveConsultantCall('${escHtml(i.key)}')">Log consultant call</button>
+            ${!i.fbfOffered ? `<button class="call-btn" onclick="sendFbfFromCalls('${escHtml(i.key)}')" title="Records the offer. The email only sends once First Booking Free emails are switched on.">🎁 Send First Booking Free email</button>` : '<span style="font-size:12px;color:var(--text-muted);align-self:center">First booking free already offered</span>'}
+            <button class="call-btn" onclick="previewAvailableEducators('${escHtml(i.key)}')">👩‍🏫 Send available educators email</button>
+          </div>
+          <div id="c-avail" style="font-size:12.5px"></div>
+        </div>` : ''}
+      </div>`;
+    }
+    function callsToggle(key) { callsState.openKey = callsState.openKey === key ? null : key; renderCalls(); }
+    const callTarget = key => key.startsWith('lead:') ? { leadId: key.slice(5) } : { centreKey: key };
+    async function saveConsultantCall(key) {
+      const outcome = document.getElementById('c-outcome').value; if (!outcome) { toast('Pick how the call went', 'error'); return; }
+      try {
+        const r = await fetch('/api/lead-quality/calls', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...callTarget(key), outcome, notes: document.getElementById('c-notes').value, callBackOn: document.getElementById('c-cb')?.value || null }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        toast('Call logged', 'success'); callsState.openKey = null; loadCallsView();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function sendFbfFromCalls(key) {
+      if (!confirm('Record that First Booking Free was offered to this centre? The email only sends once those emails are switched on.')) return;
+      try {
+        const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(callTarget(key)) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        toast('First booking free recorded', 'success'); loadCallsView();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function previewAvailableEducators(key) {
+      const box = document.getElementById('c-avail'); box.innerHTML = 'Checking who we could show…';
+      try {
+        const q = new URLSearchParams(callTarget(key));
+        const r = await fetch('/api/lead-quality/available-educators/preview?' + q); const p = await r.json(); if (!r.ok) throw new Error(p.error || 'Could not check');
+        const list = p.educators.map(e => `<li>${escHtml(e.fullName)} · ${escHtml(e.qualification || '')}${e.shiftsCompleted ? ` · ${e.shiftsCompleted} shifts` : ''}${e.availability ? ` · free ${escHtml(e.availability)}` : ''}</li>`).join('');
+        box.innerHTML = `<div style="background:var(--gray-50,#f6f7fb);border-radius:8px;padding:10px 12px">
+          <b>${p.event === 'available_educators_favourites' ? 'Their favourites' : 'Educators near them'}</b>${list ? `<ul style="margin:6px 0 6px 18px">${list}</ul>` : ''}
+          ${p.blockedReason ? `<div style="color:#b45309">${escHtml(p.blockedReason)}</div>` : `<button class="call-btn primary" onclick="sendAvailableEducators('${escHtml(key)}')">Send it</button>`}
+          ${p.switchedOn ? '' : '<div style="color:var(--text-muted);margin-top:4px">These emails are switched off for now, so nothing will actually be sent.</div>'}</div>`;
+      } catch (e) { box.innerHTML = `<span style="color:#b91c1c">${escHtml(e.message)}</span>`; }
+    }
+    async function sendAvailableEducators(key) {
+      try {
+        const r = await fetch('/api/lead-quality/available-educators/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(callTarget(key)) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not send');
+        toast(d.status === 'sent' ? 'Email sent' : (d.reason || 'Not sent'), d.status === 'sent' ? 'success' : '');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
     // ── Lead Wash (Liam, 26 Oct): consultants re-call every existing lead ──
     let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigFirst: true }, data: null, opts: null, openId: null };
     async function loadWashView() {
@@ -1447,7 +1543,7 @@
         currentUserEmail = me.email;
         currentUserName = me.name || me.email;
         currentUserRestrictedAppSection = me.restrictedAppSection || null;
-        if (me.canWashLeads) document.getElementById('tabWash').style.display = '';
+        if (me.canWashLeads) { document.getElementById('tabWash').style.display = ''; document.getElementById('tabCalls').style.display = ''; }
         // Per-user restriction (Joy, 2026-09-11 — Nancy: sees nothing but
         // Tasks) — hide every other sidebar tab so there's nothing to even
         // click into; setMode() itself is the actual enforcement (guards
@@ -2322,7 +2418,9 @@
       const isHome = mode === 'home';
       const isLeads = mode === 'leads';
       const isWash = mode === 'wash';
+      const isCalls = mode === 'calls';
       document.getElementById('tabWash').classList.toggle('active', isWash);
+      document.getElementById('tabCalls').classList.toggle('active', isCalls);
       const isTasks = mode === 'tasks';
       const isHours = mode === 'hours';
       document.getElementById('tabHome').classList.toggle('active', isHome);
@@ -2338,7 +2436,7 @@
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
       document.getElementById('tabLeads').classList.toggle('active', isLeads);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours || isWash);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours || isWash || isCalls);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -2353,6 +2451,7 @@
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
         : isWash ? 'Lead Wash'
+        : isCalls ? 'Call List'
         : isTasks ? 'Tasks'
         : isHours ? 'Log My Hours'
         : 'How can we help you?';
@@ -2367,6 +2466,7 @@
         : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
         : isLeads ? 'Log a potential client centre from an educator vetting call'
         : isWash ? 'Re-call every existing lead as if it were brand new, and keep only the solid ones'
+        : isCalls ? 'Every centre gets a call from us about once a month. These are due now.'
         : isTasks ? 'Everything the team is working on, by department'
         : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
@@ -2377,6 +2477,8 @@
         loadLeadsView();
       } else if (isWash) {
         loadWashView();
+      } else if (isCalls) {
+        loadCallsView();
       } else if (isTasks) {
         loadTasksView();
       } else if (isHours) {

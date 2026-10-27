@@ -569,6 +569,8 @@ async function start() {
     let lastBotSummaryDay = null;
     setInterval(async () => {
       try {
+        const avail = await require('./services/availableEducatorsService').runWeekly();
+        if (avail) console.log('Available-educators weekly run:', JSON.stringify(avail));
         const sec = await require('./services/securityReportService').runScheduled();
         if (sec) console.log(`Security report generated for ${sec.periodStart}–${sec.periodEnd}.`);
         const done = await require('./services/wfpReportService').runScheduled();

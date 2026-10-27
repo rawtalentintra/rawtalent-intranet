@@ -1436,3 +1436,4 @@ module.exports.partnerLabelForCentre = (c, assignments) => {
 module.exports.shortState = shortState;
 module.exports.getLastBookingDates = getLastBookingDates;
 module.exports.lastCancelReason = lastCancelReason;
+module.exports.getHiddenCentreKeys = getHiddenCentreKeys;
