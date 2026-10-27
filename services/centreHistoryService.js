@@ -201,8 +201,10 @@ async function talkingPoints(centreKey, { weeks = 6, minShifts = 4 } = {}) {
   }).filter(Boolean).sort((a, b) => b.times - a.times).slice(0, 5);
   let script = null;
   if (notFavourited.length) {
-    const top2 = notFavourited.slice(0, 2), counts = top2.map(e => `${String(e.name).split(' ')[0]} ${e.shiftsRecent} times`);
-    script = `I can see ${counts.join(' and ')} with you in the last ${weeks} weeks, but ${top2.length > 1 ? "they aren't" : "they aren't"} on your favourites yet. Would you like to favourite ${top2.length > 1 ? 'them' : 'them'}? Favourites get priority for your bookings.`;
+    const top2 = notFavourited.slice(0, 2), first = e => String(e.name).split(' ')[0];
+    script = top2.length > 1
+      ? `I can see ${first(top2[0])} has worked with you ${top2[0].shiftsRecent} times and ${first(top2[1])} ${top2[1].shiftsRecent} times in the last ${weeks} weeks, but they aren't on your favourites yet. Would you like to favourite them? Favourites get priority for your bookings.`
+      : `I can see ${first(top2[0])} has worked with you ${top2[0].shiftsRecent} times in the last ${weeks} weeks, but isn't on your favourites yet. Would you like to favourite them? Favourites get priority for your bookings.`;
   }
   return { weeks, minShifts, notFavourited, rebooks, script };
 }
