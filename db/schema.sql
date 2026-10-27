@@ -2829,3 +2829,48 @@ CREATE TABLE IF NOT EXISTS wfp_reports (
   UNIQUE (period_type, period_start)
 );
 ALTER TABLE wfp_reports ENABLE ROW LEVEL SECURITY;
+
+-- Lead quality (Liam, Liam/Sophia/Joy meeting 26 Oct 2026). See
+-- services/leadCategoryService.js, services/leadWashService.js and
+-- services/leadFunnelService.js.
+-- 1) Service type + group category on each lead (consultants and WFPs set it;
+--    "unknown" until they look the group up). Copied to the RT centre the lead
+--    matches (centre_categories) so the centre shows the same category.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS service_type TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS group_category TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS category_set_by TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS category_set_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS centre_categories (
+  centre_key TEXT PRIMARY KEY,
+  service_type TEXT,
+  group_category TEXT,
+  source_lead_id TEXT,
+  set_by TEXT,
+  set_at TIMESTAMPTZ DEFAULT now()
+);
+-- 2) Lead Wash: consultants re-call existing leads as if new. One row per wash
+--    attempt (history kept); the newest row is the lead's current result. Never
+--    touches lead_called_status (that's the WFP call). NOT VIABLE archives the
+--    lead with the reason (archived_at/archived_reason), never deletes it.
+CREATE TABLE IF NOT EXISTS lead_washes (
+  id SERIAL PRIMARY KEY,
+  lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  reached TEXT,
+  uses_agency TEXT,
+  dm_name TEXT,
+  dm_role TEXT,
+  dm_phone TEXT,
+  dm_email TEXT,
+  knows_referrer TEXT,
+  verdict TEXT,
+  not_viable_reason TEXT,
+  notes TEXT,
+  washed_by_email TEXT,
+  washed_by_name TEXT,
+  washed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_washes_lead ON lead_washes (lead_id, washed_at DESC);
+-- Per-person access to the Lead Wash screen (same pattern as can_build_training).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_wash_leads BOOLEAN DEFAULT false;
+ALTER TABLE centre_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_washes ENABLE ROW LEVEL SECURITY;

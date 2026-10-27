@@ -379,6 +379,9 @@
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
+        <div class="admin-nav-item" onclick="location.href='/?tab=wash'" title="Opens the Lead Wash queue the consultants use">
+          <span class="admin-nav-icon">🧽</span> Lead Wash ↗
+        </div>
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
@@ -1520,6 +1523,10 @@
           <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
         </div>
 
+        <div class="admin-table-card" style="padding:14px 20px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">Lead funnel <span style="font-weight:400;color:var(--text-muted);font-size:12px">· a new lead stays with the Workforce Partners until they've called or visited; then consultants nurture it. Click a stage to filter.</span></div>
+          <div id="leadsFunnelBar"><div style="font-size:12.5px;color:var(--text-muted)">Loading…</div></div>
+        </div>
         <div class="admin-table-card">
           <div class="leads-filter-bar">
             <input type="text" id="leadsFilterCentre" class="form-control" placeholder="Search centre name…" oninput="filterLeadsTable()">
@@ -1554,6 +1561,20 @@
             </select>
             <select id="leadsFilterSubmittedBy" onchange="filterLeadsTable()">
               <option value="">Submitted by: any</option>
+            </select>
+            <select id="leadsFilterGroup" onchange="filterLeadsTable()">
+              <option value="">Group: any</option>
+              <option value="early_childhood:">Early Childhood (any)</option>
+              <option value="early_childhood:big">EC · Big group</option><option value="early_childhood:medium">EC · Medium group</option><option value="early_childhood:small">EC · Small group</option>
+              <option value="early_childhood:independent">EC · Independent / Private</option><option value="early_childhood:community">EC · Community / Co-op</option><option value="early_childhood:council">EC · Council</option>
+              <option value="oshc:">OSHC (any)</option>
+              <option value="oshc:big">OSHC · Big group</option><option value="oshc:medium">OSHC · Medium group</option><option value="oshc:independent">OSHC · Independent</option>
+              <option value="unknown">Not set / Unknown</option>
+            </select>
+            <select id="leadsFilterFunnel" onchange="filterLeadsTable()">
+              <option value="">Funnel stage: any</option>
+              <option value="new_wfp">New (WFP only)</option><option value="contacted_wfp">Contacted by WFP</option><option value="consultant">In consultant nurture</option>
+              <option value="set_up">Set up as centre</option><option value="first_booking">First booking</option><option value="repeat">Repeat bookings</option>
             </select>
             <select id="leadsFilterAgencyUsage" onchange="filterLeadsTable()">
               <option value="">Agency Usage: any</option>
@@ -9385,7 +9406,64 @@
       return `<span class="lead-badge ${info.cls}" title="${escHtml(leadStageTooltip(lead))}" ${editAttr}>${escHtml(info.label)}</span>`;
     }
 
+    // ── Lead funnel + category (Liam, 26 Oct) ─────────────────────────────
+    let leadFunnel = { byLead: {}, stages: [] };
+    const FUNNEL_META = { new_wfp: ['New (WFP only)', '#eef2ff', '#3730a3'], contacted_wfp: ['Contacted by WFP', '#e0f2fe', '#0369a1'], consultant: ['Consultant nurture', '#fef3c7', '#b45309'],
+      set_up: ['Set up as centre', '#dcfce7', '#15803d'], first_booking: ['First booking', '#bbf7d0', '#166534'], repeat: ['Repeat bookings', '#86efac', '#14532d'], archived: ['Archived', '#f3f4f6', '#6b7280'] };
+    const LEAD_GROUP_SHORT = { big: 'Big group', medium: 'Medium group', small: 'Small group', independent: 'Independent', community: 'Community / Co-op', council: 'Council', unknown: 'Group unknown' };
+    const LEAD_CATEGORY_SHORT = l => `${l.service_type === 'oshc' ? 'OSHC' : 'EC'} · ${LEAD_GROUP_SHORT[l.group_category || 'unknown']}`;
+    function leadFunnelTag(l) {
+      const st = leadFunnel.byLead?.[l.id]?.stage; const m = st && FUNNEL_META[st];
+      return m ? `<span title="Funnel stage" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;background:${m[1]};color:${m[2]}">${m[0]}</span>` : '';
+    }
+    const LEAD_GROUP_OPTIONS = {
+      early_childhood: [['big', 'Big group (e.g. Goodstart, Guardian, G8)'], ['medium', 'Medium group'], ['small', 'Small group'], ['independent', 'Independent / Private'], ['community', 'Community-based / Co-op'], ['council', 'Council'], ['unknown', 'Unknown (look it up)']],
+      oshc: [['big', 'Big group'], ['medium', 'Medium group'], ['independent', 'Independent'], ['unknown', 'Unknown (look it up)']]
+    };
+    function leadCatGroupOptions(st, gc) {
+      if (!st) return '<option value="">Pick service type first</option>';
+      return LEAD_GROUP_OPTIONS[st].map(([k, v]) => `<option value="${k}" ${(gc || 'unknown') === k ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
+    }
+    async function loadCentreCategory(key) {
+      const box = document.getElementById('c360Category'); if (!box) return;
+      let c = null; try { const r = await fetch(`/api/lead-quality/category/centre/${encodeURIComponent(key)}`); if (r.ok) c = await r.json(); } catch {}
+      box.innerHTML = `<div class="admin-table-card" style="padding:10px 16px;margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:12px;font-weight:800;color:var(--navy)">Type &amp; group</span>
+        <select id="centreCatService" class="form-control" style="max-width:170px" onchange="document.getElementById('centreCatGroup').innerHTML=leadCatGroupOptions(this.value,'unknown')">
+          <option value="">Service type…</option><option value="early_childhood" ${c?.service_type === 'early_childhood' ? 'selected' : ''}>Early Childhood</option><option value="oshc" ${c?.service_type === 'oshc' ? 'selected' : ''}>OSHC</option></select>
+        <select id="centreCatGroup" class="form-control" style="max-width:230px">${leadCatGroupOptions(c?.service_type, c?.group_category)}</select>
+        <button class="btn-secondary" style="padding:6px 12px;font-size:12px" onclick="saveCentreCategory('${escHtml(key)}')">Save</button>
+        <span style="font-size:11.5px;color:var(--text-muted)">${c?.set_by ? `Set by ${escHtml(c.set_by)}` : 'Copied from the matching lead when one is categorised.'}</span></div>`;
+    }
+    async function saveCentreCategory(key) {
+      try {
+        const r = await fetch(`/api/lead-quality/category/centre/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceType: document.getElementById('centreCatService').value, groupCategory: document.getElementById('centreCatGroup').value }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save'); toast('Type & group saved', 'success'); loadCentreCategory(key);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    function leadCatServiceChanged() { document.getElementById('leadCatGroup').innerHTML = leadCatGroupOptions(document.getElementById('leadCatService').value, 'unknown'); }
+    async function saveLeadCategory(id) {
+      const serviceType = document.getElementById('leadCatService').value, groupCategory = document.getElementById('leadCatGroup').value;
+      try {
+        const r = await fetch(`/api/lead-quality/category/lead/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceType, groupCategory }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        const l = allLeads.find(x => x.id === id); if (l) Object.assign(l, d);
+        toast('Type & group saved', 'success'); filterLeadsTable();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function loadLeadFunnel() {
+      try {
+        const r = await fetch('/api/lead-quality/funnel'); if (!r.ok) return;
+        leadFunnel = await r.json();
+        const bar = document.getElementById('leadsFunnelBar');
+        if (bar) bar.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:stretch">${leadFunnel.stages.map((s, i) => { const m = FUNNEL_META[s.key];
+          return `${i ? '<span style="align-self:center;color:var(--gray-300)">→</span>' : ''}<div onclick="document.getElementById('leadsFilterFunnel').value='${s.key}';filterLeadsTable()" title="Show only these leads" style="cursor:pointer;background:${m[1]};color:${m[2]};border-radius:8px;padding:8px 12px;min-width:110px"><div style="font-size:18px;font-weight:800">${s.count}</div><div style="font-size:11.5px;font-weight:700">${m[0]}</div></div>`; }).join('')}
+          <span style="align-self:center;font-size:11.5px;color:var(--text-muted);margin-left:8px">${leadFunnel.archived} archived/closed${leadFunnel.rtAvailable ? '' : ' · RT unavailable, later stages may be low'}</span></div>`;
+        if (typeof filterLeadsTable === 'function') filterLeadsTable();
+      } catch { /* funnel is optional */ }
+    }
     async function loadLeadsTable() {
+      if (!leadFunnel.stages.length) loadLeadFunnel();
       const body = document.getElementById('leadsTableBody');
       // Only flash the spinner on the very first load — allLeads is often
       // already populated by the time this runs (WFP Dashboard/Route
@@ -9546,6 +9624,16 @@
         if (leadCalled && l.lead_called_status !== leadCalled) return false;
         if (centreVisited && l.centre_visited_status !== centreVisited) return false;
         if (profileCreated && l.signed_status !== profileCreated) return false;
+        const grp = document.getElementById('leadsFilterGroup')?.value || '';
+        if (grp === 'unknown') {
+          if (l.service_type && l.group_category && l.group_category !== 'unknown') return false;
+        } else if (grp) {
+          const [st, gc] = grp.split(':');
+          if (l.service_type !== st) return false;
+          if (gc && l.group_category !== gc) return false;
+        }
+        const fun = document.getElementById('leadsFilterFunnel')?.value || '';
+        if (fun && leadFunnel.byLead?.[l.id]?.stage !== fun) return false;
         return true;
       };
       const nonPeriodFiltered = allLeads.filter(matchesNonPeriodFilters);
@@ -9867,6 +9955,7 @@
           <td>${fmtDateShort(l.created_at)}</td>
           <td class="td-truncate" style="font-weight:600;color:var(--navy);max-width:295px" title="${escHtml(l.centre_name)}">
             ${escHtml(l.centre_name)}
+            ${leadFunnelTag(l)}${l.service_type ? `<span title="Service type and group" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;background:var(--gray-100);color:#374151">${escHtml(LEAD_CATEGORY_SHORT(l))}</span>` : ''}
             ${l.entry_type === 'centre' ? '<span title="Added directly by a Workforce Partner/Admin, not submitted from a vetting call" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#7c3aed;background:#f3e8ff;padding:1px 6px;border-radius:20px;vertical-align:middle">CENTRE</span>' : ''}
             ${l.closed_at ? `<span title="Closed ${escHtml(fmtDate(l.closed_at))}${l.closed_by_email ? ' by ' + escHtml(l.closed_by_email) : ''}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:var(--gray-800);background:var(--gray-200);padding:1px 6px;border-radius:20px;vertical-align:middle">CLOSED</span>` : ''}
             ${l.archived_at && l.archived_reason === 'regional' ? `<span title="Outside the metro radius — archived ${escHtml(fmtDate(l.archived_at))}" style="display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;color:#9a3412;background:#ffedd5;padding:1px 6px;border-radius:20px;vertical-align:middle">REGIONAL</span> <button type="button" onclick="unarchiveLead(event,'${l.id}')" style="margin-left:4px;font-size:9.5px;font-weight:700;color:var(--orange);background:none;border:1px solid var(--gray-200);border-radius:20px;padding:1px 8px;cursor:pointer">Unarchive</button>` : ''}
@@ -12314,11 +12403,12 @@
             <button type="button" class="c360-tab" data-tab="account" onclick="switchCentre360Tab('account')" style="${c360TabStyle(false)}">Account history</button>
             <span style="margin-left:auto;align-self:center">${centreStatusBadge(centre.bookingTrend)}</span>
           </div>
-          <div id="c360Overview">${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
+          <div id="c360Overview"><div id="c360Category"></div>${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
           <div id="c360Tab_bookings" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_educators" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_account" class="c360-pane" style="display:none"></div>`;
         currentCentreHistory = null;
+        loadCentreCategory(centre.centreKey);
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -18588,6 +18678,19 @@
         ${leadsCentreMatches[lead.id] ? (() => { const m = leadsCentreMatches[lead.id]; const k = m.rtLocationId ? `loc:${m.rtLocationId}` : `client:${m.rtClientId}`;
           return `<div class="lead-group-label" style="margin-top:14px">Account history</div>
           <button type="button" class="btn-secondary" style="margin-bottom:10px" onclick="goToCentre360('${k}','account')">Open this centre's account history (bookings, calls, emails, notes)</button>`; })() : ''}
+        <div class="lead-group-label" style="margin-top:14px">Type &amp; group</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+          <select id="leadCatService" class="form-control" style="max-width:170px" onchange="leadCatServiceChanged()">
+            <option value="">Service type…</option>
+            <option value="early_childhood" ${lead.service_type === 'early_childhood' ? 'selected' : ''}>Early Childhood</option>
+            <option value="oshc" ${lead.service_type === 'oshc' ? 'selected' : ''}>OSHC</option>
+          </select>
+          <select id="leadCatGroup" class="form-control" style="max-width:230px">${leadCatGroupOptions(lead.service_type, lead.group_category)}</select>
+          <button class="btn-secondary" style="padding:6px 12px;font-size:12px" onclick="saveLeadCategory('${lead.id}')">Save</button>
+          ${leadFunnelTag(lead)}
+        </div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Look the group up online after the call. "Unknown" is fine until then.${lead.category_set_by ? ` Last set by ${escHtml(lead.category_set_by)}.` : ''}</div>
+
         <div class="lead-group-label" style="margin-top:14px">First booking free</div>
         <div id="fbfLeadBox" style="margin-bottom:10px"></div>
 

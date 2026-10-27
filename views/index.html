@@ -879,6 +879,7 @@
       <button class="mode-tab" id="tabGlossary" onclick="setMode('glossary')">📖 Glossary</button>
       <button class="mode-tab" id="tabFaq" onclick="setMode('faq')">❓ FAQ</button>
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
+      <button class="mode-tab" id="tabWash" onclick="setMode('wash')" style="display:none">🧽 Lead Wash</button>
       <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
@@ -1335,6 +1336,109 @@
     let currentUserName = '';
     let currentUserRestrictedAppSection = null;
 
+
+    // ── Lead Wash (Liam, 26 Oct): consultants re-call every existing lead ──
+    let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigFirst: true }, data: null, opts: null, openId: null };
+    async function loadWashView() {
+      const box = document.getElementById('resultsList');
+      box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+      try {
+        if (!washState.opts) washState.opts = await fetch('/api/lead-quality/options').then(r => r.json());
+        const f = washState.filters;
+        const qs = new URLSearchParams({ state: f.state, service: f.service, group: f.group, status: f.status, bigFirst: f.bigFirst ? '1' : '0' });
+        const r = await fetch('/api/lead-quality/wash/queue?' + qs); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load the Lead Wash');
+        washState.data = d; renderWash();
+      } catch (e) { box.innerHTML = `<div class="empty-wrap"><div class="empty-title">${escHtml(e.message)}</div></div>`; }
+    }
+    function washSetFilter(k, v) { washState.filters[k] = v; if (k === 'service') washState.filters.group = ''; loadWashView(); }
+    function renderWash() {
+      const { data: d, opts: o, filters: f } = washState, t = d.tally;
+      const pct = t.inScope ? Math.round(t.washed / t.inScope * 100) : 0;
+      const sel = (k, opts, val) => `<select class="wash-sel" onchange="washSetFilter('${k}', this.value)">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? 'selected' : ''}>${escHtml(l)}</option>`).join('')}</select>`;
+      const groupOpts = f.service ? Object.entries(o.short).filter(([k]) => o.groups[f.service][k]) : Object.entries(o.short);
+      document.getElementById('resultsList').innerHTML = `
+        <style>.wash-sel{padding:7px 10px;border:1px solid var(--gray-200);border-radius:8px;font:inherit;font-size:13px;background:#fff}
+          .wash-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
+          .wash-head{display:flex;justify-content:space-between;gap:10px;padding:12px 16px;cursor:pointer}
+          .wash-form{padding:0 16px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+          .wash-form label{font-size:12px;font-weight:700;color:var(--navy);display:flex;flex-direction:column;gap:4px}
+          .wash-form input,.wash-form select,.wash-form textarea{padding:8px 10px;border:1px solid var(--gray-200);border-radius:8px;font:inherit;font-size:13px;font-weight:400}
+          .wash-pill{font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}</style>
+        <div class="wash-card" style="padding:16px 18px">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+            <div style="font-size:15px;font-weight:800;color:var(--navy)">Washed ${t.washed} of ${t.inScope} leads</div>
+            <div style="font-size:13px"><span style="color:#15803d;font-weight:700">${t.solid} solid</span> · <span style="color:#b91c1c;font-weight:700">${t.notViable} not viable</span> · ${t.remaining} to go${t.attemptedOnly ? ` (${t.attemptedOnly} tried, no answer yet)` : ''}</div>
+          </div>
+          <div style="height:8px;background:var(--gray-100);border-radius:6px;margin:10px 0 4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--orange)"></div></div>
+          <div style="font-size:11.5px;color:var(--text-muted)">Covers leads that existed on ${escHtml(d.cutoff.split('-').reverse().join('/'))}. New leads stay with the Workforce Partners until they've called or visited.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">
+            ${sel('status', [['unwashed', 'Still to wash'], ['solid', 'Solid'], ['not_viable', 'Not viable'], ['all', 'All']], f.status)}
+            ${sel('state', [['ALL', 'All states'], ['VIC', 'VIC'], ['SA', 'SA'], ['QLD', 'QLD'], ['NT', 'NT'], ['ACT', 'ACT'], ['NSW', 'NSW']], f.state)}
+            ${sel('service', [['', 'Any service'], ...Object.entries(o.serviceTypes)], f.service)}
+            ${sel('group', [['', 'Any group'], ...groupOpts], f.group)}
+            <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${f.bigFirst ? 'checked' : ''} onchange="washSetFilter('bigFirst', this.checked)"> Big groups first</label>
+            <span style="font-size:12.5px;color:var(--text-muted);margin-left:auto">${d.leads.length} shown</span>
+          </div>
+        </div>
+        ${d.leads.length ? d.leads.map(washCardHtml).join('') : '<div class="empty-wrap"><div class="empty-title">Nothing here</div><p>Try another filter.</p></div>'}`;
+    }
+    function washCardHtml(l) {
+      const o = washState.opts, open = washState.openId === l.id;
+      const status = { unwashed: ['To wash', '#eef2ff', '#3730a3'], attempted: ['Tried, no answer', '#fef3c7', '#b45309'], solid: ['SOLID', '#dcfce7', '#15803d'], not_viable: ['NOT VIABLE', '#fee2e2', '#b91c1c'] }[l.washStatus];
+      const opt = (map, val) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
+      const groupsFor = st => st ? o.groups[st] : {};
+      return `<div class="wash-card" id="wash-${l.id}">
+        <div class="wash-head" onclick="washToggle('${l.id}')">
+          <div><div style="font-weight:800;color:var(--navy);font-size:14px">${escHtml(l.centreName || 'Unnamed centre')}</div>
+            <div style="font-size:12.5px;color:var(--text-muted)">${escHtml(l.address || '')}${l.phone ? ` · <a href="tel:${escHtml(l.phone)}" onclick="event.stopPropagation()">${escHtml(l.phone)}</a>` : ''}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${l.contact ? 'Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') + ' · ' : ''}${l.educatorName ? 'Referred by educator ' + escHtml(l.educatorName) + ' · ' : ''}${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span class="wash-pill" style="background:${status[1]};color:${status[2]}">${status[0]}</span>
+            ${l.categoryLabel ? `<span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(l.categoryLabel)}</span>` : '<span class="wash-pill" style="background:var(--gray-100);color:var(--text-muted)">No category yet</span>'}
+          </div>
+        </div>
+        ${open ? `<div class="wash-form">
+          <label>Reached them?<select id="w-reached"><option value="">Choose…</option>${opt(o.wash.reached)}</select></label>
+          <label>Do they use agency?<select id="w-agency"><option value="">Choose…</option>${opt(o.wash.uses_agency)}</select></label>
+          <label>Know the educator who referred them?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
+          <label>Decision-maker name<input id="w-dmname"></label>
+          <label>Their role<input id="w-dmrole" placeholder="e.g. Centre Director"></label>
+          <label>Their phone<input id="w-dmphone"></label>
+          <label>Their email<input id="w-dmemail" type="email"></label>
+          <label>Service type<select id="w-service" onchange="washServiceChanged(this.value)"><option value="">Choose…</option>${opt(o.serviceTypes, l.serviceType)}</select></label>
+          <label>Group category<select id="w-group">${l.serviceType ? opt(groupsFor(l.serviceType), l.groupCategory || 'unknown') : '<option value="unknown">Pick the service type first</option>'}</select></label>
+          <label>Verdict<select id="w-verdict" onchange="document.getElementById('w-reasonwrap').style.display=this.value==='not_viable'?'':'none'"><option value="">Choose…</option>${opt(o.wash.verdict)}</select></label>
+          <label id="w-reasonwrap" style="display:none">Why not viable?<select id="w-reason"><option value="">Choose…</option>${opt(o.wash.not_viable_reason)}</select></label>
+          <label style="grid-column:1/-1">Notes<textarea id="w-notes" rows="2" placeholder="Anything useful for next time"></textarea></label>
+          <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-primary" style="padding:9px 18px;border:none;border-radius:8px;background:var(--orange);color:#fff;font-weight:700;cursor:pointer" onclick="saveWash('${l.id}')">Save wash</button>
+            <span style="font-size:12px;color:var(--text-muted)">No answer? Pick "No answer" and save. The lead stays in your list to try again. NOT VIABLE archives the lead with the reason (never deleted).</span>
+          </div>
+          ${l.lastWash ? `<div style="grid-column:1/-1;font-size:12px;color:var(--text-muted)">Last washed by ${escHtml(l.lastWash.by || '')} on ${new Date(l.lastWash.at).toLocaleDateString('en-AU')}: ${escHtml(o.wash.reached[l.lastWash.reached] || '')}${l.lastWash.verdict ? ' · ' + escHtml(o.wash.verdict[l.lastWash.verdict]) : ''}${l.lastWash.reason ? ' (' + escHtml(o.wash.not_viable_reason[l.lastWash.reason]) + ')' : ''}</div>` : ''}
+        </div>` : ''}
+      </div>`;
+    }
+    function washServiceChanged(st) {
+      const g = (washState.opts.groups[st] || {});
+      document.getElementById('w-group').innerHTML = st
+        ? Object.entries(g).map(([k, v]) => `<option value="${k}" ${k === 'unknown' ? 'selected' : ''}>${escHtml(v)}</option>`).join('')
+        : '<option value="unknown">Pick the service type first</option>';
+    }
+    function washToggle(id) { washState.openId = washState.openId === id ? null : id; renderWash(); if (washState.openId) document.getElementById('wash-' + id)?.scrollIntoView({ block: 'nearest' }); }
+    async function saveWash(id) {
+      const v = k => document.getElementById(k)?.value || '';
+      const body = { reached: v('w-reached'), usesAgency: v('w-agency'), knowsReferrer: v('w-ref'), dmName: v('w-dmname'), dmRole: v('w-dmrole'), dmPhone: v('w-dmphone'), dmEmail: v('w-dmemail'),
+        serviceType: v('w-service') || undefined, groupCategory: v('w-service') ? v('w-group') : undefined, verdict: v('w-verdict'), notViableReason: v('w-reason'), notes: v('w-notes') };
+      if (body.verdict === 'not_viable' && !confirm('Mark this lead NOT VIABLE? It will be archived with the reason (not deleted).')) return;
+      try {
+        const r = await fetch('/api/lead-quality/wash/' + encodeURIComponent(id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        toast(body.verdict === 'solid' ? 'Saved as SOLID' : body.verdict === 'not_viable' ? 'Saved as NOT VIABLE (archived)' : 'Saved. Try again later.', 'success');
+        washState.openId = null; loadWashView();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
     async function init() {
       try {
         const me = await fetch('/auth/me').then(r => r.json());
@@ -1343,6 +1447,7 @@
         currentUserEmail = me.email;
         currentUserName = me.name || me.email;
         currentUserRestrictedAppSection = me.restrictedAppSection || null;
+        if (me.canWashLeads) document.getElementById('tabWash').style.display = '';
         // Per-user restriction (Joy, 2026-09-11 — Nancy: sees nothing but
         // Tasks) — hide every other sidebar tab so there's nothing to even
         // click into; setMode() itself is the actual enforcement (guards
@@ -2216,6 +2321,8 @@
       const isIdeas = mode === 'ideas';
       const isHome = mode === 'home';
       const isLeads = mode === 'leads';
+      const isWash = mode === 'wash';
+      document.getElementById('tabWash').classList.toggle('active', isWash);
       const isTasks = mode === 'tasks';
       const isHours = mode === 'hours';
       document.getElementById('tabHome').classList.toggle('active', isHome);
@@ -2231,7 +2338,7 @@
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
       document.getElementById('tabLeads').classList.toggle('active', isLeads);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours || isWash);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -2245,6 +2352,7 @@
         : isLeave ? 'Leave Request'
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
+        : isWash ? 'Lead Wash'
         : isTasks ? 'Tasks'
         : isHours ? 'Log My Hours'
         : 'How can we help you?';
@@ -2258,6 +2366,7 @@
         : isLeave ? 'Request leave, track approvals, and see who\'s off'
         : isIdeas ? 'Got an idea to make things better? We\'re looking at every one.'
         : isLeads ? 'Log a potential client centre from an educator vetting call'
+        : isWash ? 'Re-call every existing lead as if it were brand new, and keep only the solid ones'
         : isTasks ? 'Everything the team is working on, by department'
         : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
@@ -2266,6 +2375,8 @@
         loadHomeView();
       } else if (isLeads) {
         loadLeadsView();
+      } else if (isWash) {
+        loadWashView();
       } else if (isTasks) {
         loadTasksView();
       } else if (isHours) {

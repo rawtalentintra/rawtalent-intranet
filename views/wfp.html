@@ -1767,6 +1767,35 @@
       loadFbf(kind, id, boxId);
     }
 
+
+    // ── Lead type & group + funnel stage (Liam, 26 Oct) ───────────────────
+    const LEAD_GROUP_OPTIONS_M = {
+      early_childhood: [['big', 'Big group (e.g. Goodstart, Guardian, G8)'], ['medium', 'Medium group'], ['small', 'Small group'], ['independent', 'Independent / Private'], ['community', 'Community-based / Co-op'], ['council', 'Council'], ['unknown', 'Unknown (look it up)']],
+      oshc: [['big', 'Big group'], ['medium', 'Medium group'], ['independent', 'Independent'], ['unknown', 'Unknown (look it up)']]
+    };
+    const FUNNEL_LABEL_M = { new_wfp: 'New (WFP only)', contacted_wfp: 'Contacted by WFP', consultant: 'Consultant nurture', set_up: 'Set up as centre', first_booking: 'First booking', repeat: 'Repeat bookings', archived: 'Archived' };
+    let leadFunnelM = null;
+    function leadCatGroupOptionsM(st, gc) {
+      if (!st) return '<option value="">Pick service type first</option>';
+      return LEAD_GROUP_OPTIONS_M[st].map(([k, v]) => `<option value="${k}" ${(gc || 'unknown') === k ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
+    }
+    function leadCatServiceChangedM() { document.getElementById('leadCatGroupM').innerHTML = leadCatGroupOptionsM(document.getElementById('leadCatServiceM').value, 'unknown'); }
+    async function saveLeadCategoryM(id) {
+      const serviceType = document.getElementById('leadCatServiceM').value, groupCategory = document.getElementById('leadCatGroupM').value;
+      try {
+        const d = await api(`/api/lead-quality/category/lead/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ serviceType, groupCategory }) });
+        const l = allLeads.find(x => x.id === id); if (l) Object.assign(l, d);
+        toast('Type & group saved');
+      } catch (e) { toast(e.message || 'Could not save', 'error'); }
+    }
+    async function showLeadFunnelStageM(id) {
+      try {
+        if (!leadFunnelM) leadFunnelM = await api('/api/lead-quality/funnel');
+        const st = leadFunnelM.byLead?.[id]?.stage, el = document.getElementById('leadFunnelStageM');
+        if (el && st) el.textContent = '· ' + FUNNEL_LABEL_M[st];
+      } catch { /* optional */ }
+    }
+
     function paintLeadDetail() {
       const l = allLeads.find(x => x.id === currentLeadId);
       const main = document.getElementById('mainContent');
@@ -1813,6 +1842,17 @@
           <button class="btn btn-secondary" style="flex:none;width:100%" onclick="addStopToRoute('lead','${l.id}')">Add to Route</button>
         </div>
         <div class="card" style="cursor:default" id="fbfLeadBoxM"></div>
+        <div class="card" style="cursor:default">
+          <div class="section-title" style="margin:0 0 6px">Type &amp; group <span id="leadFunnelStageM" style="font-weight:600;text-transform:none;letter-spacing:0"></span></div>
+          <select id="leadCatServiceM" onchange="leadCatServiceChangedM()" style="width:100%;margin-bottom:8px">
+            <option value="">Service type…</option>
+            <option value="early_childhood" ${l.service_type === 'early_childhood' ? 'selected' : ''}>Early Childhood</option>
+            <option value="oshc" ${l.service_type === 'oshc' ? 'selected' : ''}>OSHC</option>
+          </select>
+          <select id="leadCatGroupM" style="width:100%;margin-bottom:8px">${leadCatGroupOptionsM(l.service_type, l.group_category)}</select>
+          <button class="btn btn-secondary" style="width:100%" onclick="saveLeadCategoryM('${l.id}')">Save type &amp; group</button>
+          <div class="sub" style="margin-top:6px">"Unknown" is fine until you've looked the group up.</div>
+        </div>
 
         <div class="section-title">Update Stage</div>
         <select id="stagePicker" onchange="applyLeadStage(this.value)">
@@ -1835,6 +1875,7 @@
         ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
       `;
       loadFbf('lead', currentLeadId, 'fbfLeadBoxM');
+      showLeadFunnelStageM(currentLeadId);
     }
 
     // ── Educators tagged to a lead (Liam, 4 Sep) ─────────────────────
