@@ -49,6 +49,9 @@ function complianceReasons(raw, today) {
     if (!matching.length) { reasons.push(`${label}: missing`); continue; }
     if (!matching.some(([k, d]) => (isQual(k) ? d.isReviewed === true : valid(d))) && !reasons.some(x => matching.some(([k]) => x.startsWith(k)))) reasons.push(`${label}: not valid`);
   }
+  // Fail safe (28 Oct): RT stopped sending visaDetails with the new key. Missing
+  // visa data must read as "unknown", never as a pass.
+  if (raw.visaDetails === undefined || raw.visaDetails === null) reasons.push('Visa status unknown (RT isn\'t sending visa details)');
   const visa = [].concat(...(raw.visaDetails || [])).filter(Boolean)[0];
   if (visa && visa.isCitizen === false) {
     const e = dateOf(visa.expiryDate);

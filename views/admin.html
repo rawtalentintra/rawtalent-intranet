@@ -1016,6 +1016,7 @@
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
             <div class="sd-card-title">Fill Rate by Partner</div>
             <div class="sd-card-sub">How many shifts at each partner's centres were filled the first time. Counted by booking date.</div>
+<div class="rt-data-banner" data-rt-banner="history" style="display:none"></div>
             <div id="wfpPerfFillRate" style="margin-top:18px;overflow-x:auto"><div style="font-size:13px;color:var(--text-muted);padding:10px 0">Loading…</div></div>
             <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
               <b>Filled</b> — Assigned or Completed. <b>Unfilled</b> — shifts ops couldn't fill and tagged Unfilled in RT; this includes shifts later re-posted as another qualification and filled, so it reads lower than the weekly figure ops quote. <b>Fill rate</b> = filled ÷ (filled + unfilled). Other cancellations and bookings still open are shown but not counted in the rate. A centre belongs to the partner it's assigned to, otherwise its state's default partner.
@@ -1082,6 +1083,7 @@
           <button class="btn-secondary" onclick="exportOshcReady()">Export CSV</button>
           <div id="oshcCounts" style="font-size:13px;margin-left:auto"></div>
         </div>
+        <div class="rt-data-banner" data-rt-banner="visa" style="display:none"></div>
         <div class="admin-table-card"><div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>Name</th><th>Phone</th><th>Suburb</th><th>State</th><th>Qualification</th><th>Do Food Safely</th><th>Note</th></tr></thead><tbody id="oshcBody"></tbody></table></div></div>
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:8px">RT currently isn't sending onboarding status or visa details (since 28 Oct), so those two checks can't be applied until RT restores them.</div>
       </div>
@@ -1121,6 +1123,7 @@
           <button class="btn-primary" onclick="downloadWfpReportPdf()">Download PDF</button>
           <label title="Not switched on yet" style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center;cursor:not-allowed"><input type="checkbox" disabled> Email to Liam (off)</label>
         </div>
+<div class="rt-data-banner" data-rt-banner="history,onboarding" style="display:none"></div>
         <div id="wrBody"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
       </div>
       </template>
@@ -1342,6 +1345,7 @@
           </div>
         </div>
 
+        <div class="rt-data-banner" data-rt-banner="onboarding,visa" style="display:none"></div>
         <div id="micropodsListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1435,6 +1439,7 @@
               <button class="btn-primary" id="readyExportBtn" onclick="startReadyExport()">Export</button>
             </div>
           </div>
+<div class="rt-data-banner" data-rt-banner="onboarding,visa" style="display:none"></div>
           <div id="readyExportStatus" style="margin-top:10px;font-size:13px"></div>
         </div>
 
@@ -6977,6 +6982,7 @@
       if (id === 'wfp-report') initWfpReport();
       if (id === 'security-report') loadSecurityReport();
       if (id === 'oshc-ready') loadOshcReady();
+      setTimeout(applyRtBanners, 0);
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -11373,6 +11379,26 @@
         ${[['Competitors & pricing', m.competitors], ['Needs', m.needs], ['Objections', m.objections]].map(([t, l]) => `<div style="font-size:12.5px"><b>${t}:</b> ${l.length ? l.map(escHtml).join(' · ') : '—'}</div>`).join('')}</div>`).join('') || (d.matrix.find(m => m.error) ? `<div style="color:#b45309;font-size:12.5px">The Intelligence Matrix couldn't be built for this report (${escHtml(d.matrix.find(m => m.error).error.slice(0, 120))}).</div>` : '<div style="color:var(--text-muted)">No voice-note insights yet.</div>');
       return card('A. Activity by partner', A) + card('B. Funnel (leads created this period)', B) + card('C. Centre health', C) + card('D. Bookings and fill by state', D) + card('E. What centres are telling us', E)
         + `<div style="font-size:11.5px;color:var(--text-muted)">${d.notes.map(escHtml).join(' ')}</div>`;
+    }
+
+
+    // ── RT data health banners (28 Oct): RT's new key returns slimmed data ──
+    let rtHealth = null, rtHealthLoading = null;
+    async function applyRtBanners() {
+      try {
+        if (!rtHealth) { rtHealthLoading = rtHealthLoading || fetch('/api/rt-data-health').then(r => r.ok ? r.json() : null); rtHealth = await rtHealthLoading; }
+        if (!rtHealth) return;
+        const msg = {
+          onboarding: rtHealth.onboardingMissing && 'RT hasn\'t sent onboarding status since 27 Oct, so "ready to roster" and onboarding numbers show 0 or are incomplete. They\'ll come back when RT restores it. Don\'t read these zeros as real.',
+          visa: rtHealth.visaMissing && 'RT hasn\'t sent visa details since 27 Oct, so every educator\'s visa status is "unknown" and no one can pass the compliance check. This returns when RT restores it.',
+          history: rtHealth.bookingHistoryMissing && 'RT hasn\'t sent booking status history since 27 Oct, so cancellations can\'t be split by reason and "unfilled" shifts can\'t be told apart. The fill rate reads too high. It returns when RT restores it.'
+        };
+        document.querySelectorAll('.rt-data-banner').forEach(el => {
+          const lines = el.dataset.rtBanner.split(',').map(k => msg[k]).filter(Boolean);
+          el.style.display = lines.length ? '' : 'none';
+          el.innerHTML = lines.length ? `<div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;font-size:12.5px;margin:0 0 12px">⚠️ <b>RT data incomplete.</b> ${lines.map(escHtml).join(' ')}</div>` : '';
+        });
+      } catch { /* banners are best effort */ }
     }
 
     // ── Micropods legend + Find educators (Joy, 22 Oct: simpler page, Sophia's labels) ──
