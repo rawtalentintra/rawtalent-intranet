@@ -9441,6 +9441,19 @@
       if (!st) return '<option value="">Pick service type first</option>';
       return LEAD_GROUP_OPTIONS[st].map(([k, v]) => `<option value="${k}" ${(gc || 'unknown') === k ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
     }
+    async function loadTalkingPoints(key) {
+      const box = document.getElementById('c360Talking'); if (!box) return;
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(key)}/talking-points`); if (!r.ok) return; const t = await r.json();
+        if (!t.notFavourited.length && !t.rebooks.length) { box.innerHTML = ''; return; }
+        box.innerHTML = `<div class="admin-table-card" style="padding:12px 16px;margin-bottom:14px;border-left:4px solid #2563eb">
+          <div style="font-weight:800;color:var(--navy);font-size:13.5px">💬 Talking points for your check-in call</div>
+          ${t.script ? `<div style="font-size:13px;margin:6px 0;padding:8px 10px;background:#eff6ff;border-radius:8px">"${escHtml(t.script)}"</div>` : ''}
+          ${t.notFavourited.length ? `<div style="font-size:12px;font-weight:700;margin-top:6px">Worked ${t.minShifts}+ shifts here in the last ${t.weeks} weeks, not a favourite yet</div>${t.notFavourited.map(e => `<div style="font-size:12.5px">• ${escHtml(e.name)}: ${e.shiftsRecent} shifts</div>`).join('')}` : ''}
+          ${t.rebooks.length ? `<div style="font-size:12px;font-weight:700;margin-top:6px">Rebooked recently</div>${t.rebooks.map(e => `<div style="font-size:12.5px">• ${escHtml(e.name)}: ${e.times} shifts here, latest ${fmtShortDate(e.lastShift)}</div>`).join('')}` : ''}
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Favouriting is done by the centre in RT. HeartBeat never changes favourites itself.</div></div>`;
+      } catch { box.innerHTML = ''; }
+    }
     async function loadCentreCategory(key) {
       const box = document.getElementById('c360Category'); if (!box) return;
       let c = null; try { const r = await fetch(`/api/lead-quality/category/centre/${encodeURIComponent(key)}`); if (r.ok) c = await r.json(); } catch {}
@@ -12457,12 +12470,13 @@
             <button type="button" class="c360-tab" data-tab="account" onclick="switchCentre360Tab('account')" style="${c360TabStyle(false)}">Account history</button>
             <span style="margin-left:auto;align-self:center">${centreStatusBadge(centre.bookingTrend)}</span>
           </div>
-          <div id="c360Overview"><div id="c360Category"></div>${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
+          <div id="c360Overview"><div id="c360Category"></div><div id="c360Talking"></div>${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
           <div id="c360Tab_bookings" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_educators" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_account" class="c360-pane" style="display:none"></div>`;
         currentCentreHistory = null;
         loadCentreCategory(centre.centreKey);
+        loadTalkingPoints(centre.centreKey);
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';

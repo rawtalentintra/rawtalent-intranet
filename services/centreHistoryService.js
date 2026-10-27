@@ -79,7 +79,9 @@ async function buildCentreHistory(centreKey, { noTranscripts = false } = {}) {
     if (b.isFavouriteBooking || (b.requestedCandidateId && String(b.requestedCandidateId) === k)) eds[k].favourite = true;
     if (!eds[k].last || b.bookingDate > eds[k].last) eds[k].last = b.bookingDate;
   }
-  const educators = Object.values(eds).sort((a, b) => b.shifts - a.shifts).slice(0, 10).map(e => ({ ...e, last: day(e.last) }));
+  const top = Object.values(eds).sort((a, b) => b.shifts - a.shifts).slice(0, 10);
+  const edNames = await educatorNames(top.map(e => e.userId));
+  const educators = top.map(e => ({ ...e, name: edNames[e.userId] || e.name, last: day(e.last) }));
 
   // Linked lead(s): HeartBeat doesn't store a lead→centre link, so match the
   // same way as the Leads page's "Existing Centre?" column (centreMatchService),
@@ -157,4 +159,52 @@ async function buildCentreHistory(centreKey, { noTranscripts = false } = {}) {
   };
 }
 
-module.exports = { buildCentreHistory };
+// Check-in call prompts (Liam, 26 Oct): "I can see Sophia and Joy have worked
+// there every day for 3 weeks but they're not favourites — would you like to
+// favourite them?" Read-only from HeartBeat's RT copy; never favourites
+// anything in RT. "Favourite" here = tagged favourite in HeartBeat or requested
+// by name on a booking (RT's own favourites list isn't in the API).
+// RT's booking feed stopped including educator names (28 Oct), so names come
+// from HeartBeat's own copy of RT educators.
+async function educatorNames(ids) {
+  const list = [...new Set(ids.filter(Boolean).map(String))];
+  if (!list.length) return {};
+  const rows = (await getDb().execute({ sql: 'SELECT user_id::text uid, first_name, last_name FROM rt_candidates_cache WHERE user_id::text = ANY(?)', args: [list] })).rows;
+  return Object.fromEntries(rows.map(r => [r.uid, `${r.first_name || ''} ${r.last_name || ''}`.trim()]));
+}
+
+async function talkingPoints(centreKey, { weeks = 6, minShifts = 4 } = {}) {
+  const db = getDb();
+  const { getCentresAndBookings } = require('../routes/centres');
+  const { bookings } = await getCentresAndBookings();
+  const [kind, idStr] = centreKey.split(':');
+  const now = Date.now(), since = now - weeks * 7 * 864e5;
+  const mine = bookings.filter(b => (kind === 'loc' ? String(b.locationId) === idStr : String(b.clientId) === idStr) && b.bookingDate);
+  const favTagged = new Set((await db.execute({ sql: "SELECT candidate_user_id FROM centre_educator_relationships WHERE centre_key = ? AND relationship_type = 'favourite'", args: [centreKey] })).rows.map(r => String(r.candidate_user_id)));
+  const requested = new Set(mine.map(b => b.requestedCandidateId).filter(Boolean).map(String));
+  const by = {};
+  for (const b of mine) {
+    if (b.statusId !== 5 || !b.assignedUserId) continue;
+    const t = new Date(b.bookingDate).getTime(); if (t > now) continue;
+    const k = String(b.assignedUserId);
+    by[k] = by[k] || { userId: k, name: b.assignedCandidateName || `Educator ${k}`, recent: 0, total: 0, dates: [] };
+    by[k].total++; by[k].dates.push(t); if (t >= since) by[k].recent++;
+  }
+  const names = await educatorNames(Object.keys(by));
+  Object.values(by).forEach(e => { if (names[e.userId]) e.name = names[e.userId]; });
+  const notFavourited = Object.values(by).filter(e => e.recent >= minShifts && !favTagged.has(e.userId) && !requested.has(e.userId))
+    .sort((a, b) => b.recent - a.recent).slice(0, 6)
+    .map(e => ({ name: e.name, shiftsRecent: e.recent }));
+  const rebooks = Object.values(by).map(e => {
+    const ds = e.dates.sort((a, b) => b - a);
+    return ds.length >= 2 && now - ds[0] <= 14 * 864e5 ? { name: e.name, lastShift: day(ds[0]), times: ds.length } : null;
+  }).filter(Boolean).sort((a, b) => b.times - a.times).slice(0, 5);
+  let script = null;
+  if (notFavourited.length) {
+    const top2 = notFavourited.slice(0, 2), counts = top2.map(e => `${String(e.name).split(' ')[0]} ${e.shiftsRecent} times`);
+    script = `I can see ${counts.join(' and ')} with you in the last ${weeks} weeks, but ${top2.length > 1 ? "they aren't" : "they aren't"} on your favourites yet. Would you like to favourite ${top2.length > 1 ? 'them' : 'them'}? Favourites get priority for your bookings.`;
+  }
+  return { weeks, minShifts, notFavourited, rebooks, script };
+}
+
+module.exports = { buildCentreHistory, talkingPoints };

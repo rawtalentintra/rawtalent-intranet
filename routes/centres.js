@@ -704,6 +704,12 @@ router.post('/:centreKey/dormant-touchpoint', async (req, res) => {
   }
 });
 
+// Check-in call talking points (Liam, 26 Oct) — services/centreHistoryService.js talkingPoints.
+router.get('/:centreKey/talking-points', async (req, res) => {
+  try { res.json(await require('../services/centreHistoryService').talkingPoints(req.params.centreKey)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Centre History tab (Liam, 19 Oct): one timeline per centre. See
 // services/centreHistoryService.js.
 router.get('/:centreKey/history', async (req, res) => {
