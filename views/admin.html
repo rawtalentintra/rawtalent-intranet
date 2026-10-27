@@ -409,6 +409,9 @@
         <div class="admin-nav-item" onclick="showSection('users', this)">
           <span class="admin-nav-icon">👥</span> Users
         </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('security-report', this)">
+          <span class="admin-nav-icon">🔐</span> Security Report
+        </div>
         <div class="admin-nav-item" onclick="showSection('role-permissions', this)">
           <span class="admin-nav-icon">🔑</span> Role Permissions
         </div>
@@ -1045,6 +1048,19 @@
       <!-- Weekly / monthly Workforce Partner report (Joy's "Proposals for Liam" §1, 23 Oct).
            super_admin + Liam only. Data from /api/wfp-reports (services/wfpReportService.js). -->
       <!-- RTO Lookup (Sophia, 21 Oct): training.gov.au data inside HeartBeat, read-only. -->
+      <!-- Weekly security report (Joy → Liam, 22 Oct). super_admin only. -->
+      <template id="__lazy_security_report">
+      <div class="admin-section" id="section-security-report">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Security Report</div>
+            <div class="admin-page-sub">Generated every Monday 8am for the previous 7 days, with a task for you. No secret values are ever shown. Use Print to save it as a PDF to share.</div>
+          </div>
+          <div style="display:flex;gap:8px"><button class="btn-secondary" onclick="generateSecurityReport()">Refresh now</button><button class="btn-primary" onclick="window.print()">Print / Save as PDF</button></div>
+        </div>
+        <div id="secReportBody"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+      </div>
+      </template>
       <template id="__lazy_rto_lookup">
       <div class="admin-section" id="section-rto-lookup">
         <div class="admin-header">
@@ -6804,7 +6820,7 @@
     // the whole page (all partners' cards, fill rate, by state) except the
     // Intelligence Matrix, opened to partners too on 16 Oct (Joy).
     function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner'; }
-    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals', 'wfp-report'];
+    const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals', 'wfp-report', 'security-report'];
 
     function showSection(id, el) {
       // EDUCATOR_OUTREACH_ENABLED is a kill-switch, not the normal gate —
@@ -6933,6 +6949,7 @@
       if (id === 'signed-contracts') loadSignedContracts();
       if (id === 'qr-referrals') loadQrReferrals();
       if (id === 'wfp-report') initWfpReport();
+      if (id === 'security-report') loadSecurityReport();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -11174,6 +11191,43 @@
     }
 
 
+
+
+    // ── Security Report (super_admin) ─────────────────────────────────────
+    async function loadSecurityReport(r) {
+      const box = document.getElementById('secReportBody'); if (!box) return;
+      try {
+        if (!r) { const res = await fetch('/api/security-reports'); const list = await res.json(); if (!res.ok) throw new Error(list.error || 'Could not load'); r = list[0]?.data; }
+        if (!r) { box.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">No report yet. The first one is generated next Monday 8am, or click Refresh now.</div>'; return; }
+        const card = (t, inner) => `<div class="admin-table-card" style="padding:14px 20px;margin-bottom:14px"><div class="sd-card-title" style="margin-bottom:8px">${t}</div>${inner}</div>`;
+        const rows = (list, f) => list.length ? list.map(f).join('') : '<div style="font-size:12.5px;color:var(--text-muted)">None</div>';
+        const d = x => x ? new Date(x).toLocaleString('en-AU', { timeZone: 'Australia/Melbourne', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
+        box.innerHTML = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">${escHtml(r.periodStart)} to ${escHtml(r.periodEnd)} · generated ${d(r.generatedAt)}</div>`
+          + card(r.flags.length ? '⚠️ Needs a look' : '✅ Nothing unusual flagged', rows(r.flags, f => `<div style="font-size:13px">• ${escHtml(f)}</div>`))
+          + card('Users', `<div style="font-size:12px;font-weight:700">New users (${r.newUsers.length})</div>${rows(r.newUsers, u => `<div style="font-size:12.5px">${escHtml(u.email)} · ${escHtml(u.role)} · ${d(u.created_at)}</div>`)}
+              <div style="font-size:12px;font-weight:700;margin-top:8px">User changes and removals</div>${rows(r.userChanges, c => `<div style="font-size:12.5px">${escHtml(c.action)}: ${escHtml(c.entity_label || '')} by ${escHtml(c.changed_by || '')} · ${d(c.created_at)}</div>`)}
+              <div style="font-size:12px;font-weight:700;margin-top:8px">Impersonation</div>${rows(r.impersonation, c => `<div style="font-size:12.5px">${escHtml(c.action)}: ${escHtml(c.entity_label || '')} by ${escHtml(c.changed_by || '')} · ${d(c.created_at)}</div>`)}`)
+          + card('HeartBeat connector (MCP)', `<div style="font-size:12.5px">${r.mcp.newTokens.length} new token(s) · ${r.mcp.usedTokens.length} used this week · ${r.mcp.newOAuthClients.length} new app(s) connected</div>
+              <div style="font-size:12px;font-weight:700;margin-top:8px">Unused for 30+ days (consider revoking)</div>${rows(r.mcp.staleTokens, t => `<div style="font-size:12.5px">${escHtml(t.user_email)} · ${escHtml(t.label || '')} · ${escHtml(t.token_prefix || '')}… · last used ${d(t.last_used_at)}</div>`)}
+              <div style="font-size:12px;font-weight:700;margin-top:8px">Lookups this week</div>${rows(r.mcp.usageByUser, u => `<div style="font-size:12.5px">${escHtml(u.user_email)}: ${u.n}</div>`)}`)
+          + card(`Failed sign-ins (${r.signInFailures.total})`, `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Recorded since ${escHtml(r.signInFailures.loggingSince)}.</div>${rows(r.signInFailures.byAccount, f => `<div style="font-size:12.5px">${escHtml(f.email || 'unknown')} · ${escHtml(f.ip || '')} · ${f.n} time(s) · last ${d(f.last)}</div>`)}`)
+          + card('Key rotation', r.keys.map(k => `<div style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:6px;flex-wrap:wrap"><b style="min-width:220px">${escHtml(k.key)}</b>
+              <span>last rotated</span><input type="date" value="${escHtml(k.lastRotated || '')}" onchange="saveKeyRotation('${escHtml(k.key)}', this.value)" class="form-control" style="max-width:160px">
+              <span style="color:${k.daysLeft != null && k.daysLeft <= 7 ? '#b91c1c' : 'var(--text-muted)'}">${k.due ? `due ${escHtml(k.due)} (${k.daysLeft} days)` : 'no date recorded'}</span></div>`).join('') + '<div style="font-size:11.5px;color:var(--text-muted)">Dates only. Change a date after you rotate a key. Key values are never stored here.</div>')
+          + card('Check by hand this week', rows(r.manualChecks, m => `<div style="font-size:12.5px;margin-bottom:4px">☐ ${escHtml(m)}</div>`))
+          + card('Not tracked yet', rows(r.notTracked, m => `<div style="font-size:12.5px;margin-bottom:4px">• ${escHtml(m)}</div>`));
+      } catch (e) { box.innerHTML = `<div style="color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    async function generateSecurityReport() {
+      const r = await fetch('/api/security-reports/generate', { method: 'POST' }); const d = await r.json();
+      if (!r.ok) { toast(d.error || 'Could not generate', 'error'); return; }
+      loadSecurityReport(d);
+    }
+    async function saveKeyRotation(key, date) {
+      const r = await fetch(`/api/security-reports/keys/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lastRotatedOn: date }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Could not save', 'error'); return; }
+      toast('Rotation date saved', 'success'); generateSecurityReport();
+    }
 
     // ── RTO Lookup ────────────────────────────────────────────────────────
     async function rtoSearch() {

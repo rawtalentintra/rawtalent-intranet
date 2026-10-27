@@ -2874,3 +2874,36 @@ CREATE INDEX IF NOT EXISTS idx_lead_washes_lead ON lead_washes (lead_id, washed_
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_wash_leads BOOLEAN DEFAULT false;
 ALTER TABLE centre_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lead_washes ENABLE ROW LEVEL SECURITY;
+
+-- Weekly security report (Joy promised Liam, 22 Oct Weekly Growth & Product
+-- Sync). services/securityReportService.js. Never stores secret values.
+CREATE TABLE IF NOT EXISTS auth_events (
+  id SERIAL PRIMARY KEY,
+  email CITEXT,
+  outcome TEXT NOT NULL,
+  method TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_events_time ON auth_events (created_at DESC);
+CREATE TABLE IF NOT EXISTS key_rotation_schedule (
+  key_name TEXT PRIMARY KEY,
+  last_rotated_on DATE,
+  cycle_days INTEGER DEFAULT 30,
+  note TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS security_reports (
+  id SERIAL PRIMARY KEY,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  data JSONB NOT NULL,
+  task_id TEXT,
+  generated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (period_start)
+);
+ALTER TABLE auth_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE key_rotation_schedule ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security_reports ENABLE ROW LEVEL SECURITY;

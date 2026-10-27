@@ -197,6 +197,28 @@ app.use('/api/signed-contracts', require('./routes/signedContracts'));
 app.use('/api/wfp-reports', require('./routes/wfpReports'));
 app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/lead-quality', require('./routes/leadQuality'));
+// Weekly security report (services/securityReportService.js) — Joy only.
+app.get('/api/security-reports', async (req, res) => {
+  if (!req.user || req.user.role !== 'super_admin') return res.status(404).json({ error: 'Not found' });
+  try { res.json((await getDb().execute({ sql: 'SELECT id, period_start, period_end, generated_at, data FROM security_reports ORDER BY period_start DESC LIMIT 26', args: [] })).rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/security-reports/generate', async (req, res) => {
+  if (!req.user || req.user.role !== 'super_admin') return res.status(404).json({ error: 'Not found' });
+  try { res.json(await require('./services/securityReportService').generateAndSave(undefined, { createTask: false })); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.put('/api/security-reports/keys/:keyName', async (req, res) => {
+  if (!req.user || req.user.role !== 'super_admin') return res.status(404).json({ error: 'Not found' });
+  const d = String((req.body || {}).lastRotatedOn || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+  try {
+    await getDb().execute({ sql: `INSERT INTO key_rotation_schedule (key_name, last_rotated_on, cycle_days, note, updated_by) VALUES (?,?,?,?,?)
+      ON CONFLICT (key_name) DO UPDATE SET last_rotated_on = excluded.last_rotated_on, cycle_days = excluded.cycle_days, note = 'Confirmed by ' || excluded.updated_by, updated_by = excluded.updated_by, updated_at = now()`,
+      args: [req.params.keyName.slice(0, 80), d, Number(req.body.cycleDays) || 30, null, req.user.email] });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.use('/api/qr-referrals/familiar', require('./routes/qrReferrals').familiarRouter);
 app.use('/api/qr-referrals', require('./routes/qrReferrals').router);
 app.use('/api/centre-ownership', require('./routes/centreOwnership'));
@@ -547,6 +569,8 @@ async function start() {
     let lastBotSummaryDay = null;
     setInterval(async () => {
       try {
+        const sec = await require('./services/securityReportService').runScheduled();
+        if (sec) console.log(`Security report generated for ${sec.periodStart}–${sec.periodEnd}.`);
         const done = await require('./services/wfpReportService').runScheduled();
         if (done.length) console.log('WFP report generated:', done.join(', '));
         const parts = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', weekday: 'short', hour: 'numeric', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map(p => [p.type, p.value]));

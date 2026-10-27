@@ -10,7 +10,9 @@ const { canViewApprovedList } = require('../services/timesheetService');
 router.post('/login', (req, res, next) => {
   passport.authenticate('local', (err, user, info) => {
     if (err) return res.status(500).json({ error: 'Server error' });
-    if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
+    const sec = require('../services/securityReportService');
+    if (!user) { sec.logAuthEvent(req, req.body?.email, 'failed'); return res.status(401).json({ error: info?.message || 'Invalid credentials' }); }
+    sec.logAuthEvent(req, user.email, 'success');
     req.logIn(user, async (err) => {
       if (err) return res.status(500).json({ error: 'Login failed' });
       try {
