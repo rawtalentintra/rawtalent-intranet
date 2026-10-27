@@ -1308,7 +1308,7 @@
                     <th>Centre</th>
                     <th>Suburb</th>
                     <th>State</th>
-                    <th title="Growing / Declining: last 4 weeks' bookings per week vs the 8 weeks before (25%+ up or down).&#10;Steady: about the same.&#10;New: first booking in the last 8 weeks.&#10;Quiet: no booking in 12 weeks (under 6 months).&#10;Dormant: no booking for 6+ months.&#10;No bookings yet: none in the ~12 months HeartBeat holds.&#10;⚠️ = needs attention (an issue was raised, or a follow-up is overdue).">Status ⓘ</th>
+                    <th title="Growing / Declining: last 4 weeks' bookings per week vs the 8 weeks before (25%+ up or down).&#10;Steady: about the same.&#10;New: first booking in the last 8 weeks.&#10;Quiet: no booking in the last 4 weeks (under 6 months).&#10;Dormant: no booking for 6+ months.&#10;No bookings yet: none in the ~12 months HeartBeat holds.&#10;⚠️ = needs attention (an issue was raised, or a follow-up is overdue).">Status ⓘ</th>
                     <th>Last 4 weeks</th>
                     <th title="Same window the status uses: shifts in the last 4 weeks vs the 8 weeks before, shown per 4 weeks so they compare like for like">Trend (4 wks vs prior 8)</th>
                   </tr>
@@ -12426,7 +12426,7 @@
       declining: ['Declining', '#fee2e2', '#b91c1c', 'Last 4 weeks are booking at least 25% less per week than the 8 weeks before.'],
       steady: ['Steady', '#e0f2fe', '#0369a1', 'Booking at about the same rate as the 8 weeks before.'],
       new: ['New', '#ede9fe', '#6d28d9', 'First booking was within the last 8 weeks.'],
-      quiet: ['Quiet', '#fef3c7', '#b45309', 'No booking in the last 12 weeks, but not yet 6 months.'],
+      quiet: ['Quiet', '#fef3c7', '#b45309', 'No booking in the last 4 weeks, but not yet 6 months.'],
       dormant: ['Dormant', '#f3f4f6', '#374151', 'No booking for 6 months or more.']
     };
     function centreStatusBadge(t) {

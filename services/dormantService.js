@@ -30,7 +30,8 @@ const dayStr = d => (d ? new Date(d).toISOString().slice(0, 10) : null);
 //  - New:       first booking we hold is within the last 8 weeks.
 //  - Growing:   last 4 weeks' weekly rate is at least 25% above the prior 8 weeks' (and 2+ bookings in the last 4 weeks).
 //  - Declining: last 4 weeks' weekly rate is at least 25% below the prior 8 weeks' (and 2+ bookings in the prior 8).
-//  - Steady:    anything else that booked in the last 12 weeks; Quiet: no booking in 12 weeks but under 6 months.
+//  - Quiet:     no booking in the last 4 weeks, but under 6 months (Joy, 28 Oct).
+//  - Steady:    anything else.
 const LIVE_STATUSES = new Set([1, 2, 3, 5]);
 function computeTrend(centreBookings, now = Date.now()) {
   const DAY = 864e5;
@@ -43,9 +44,10 @@ function computeTrend(centreBookings, now = Date.now()) {
   let status;
   if (!last || now - last >= DORMANT_DAYS * DAY) status = last ? 'dormant' : 'none';
   else if (now - first < 56 * DAY) status = 'new';
+  // Joy, 28 Oct: no shifts in the last 4 weeks reads as Quiet, not Declining.
+  else if (last4 === 0) status = 'quiet';
   else if (last4 >= 2 && r4 >= r8 * 1.25) status = 'growing';
   else if (prior8 >= 2 && r4 <= r8 * 0.75) status = 'declining';
-  else if (now - last >= 84 * DAY) status = 'quiet';
   else status = 'steady';
   return { status, last4Weeks: last4, prior8Weeks: prior8, firstBookingDate: first ? dayStr(first) : null, firstBookingDaysAgo: first ? Math.floor((now - first) / DAY) : null };
 }
