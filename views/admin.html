@@ -340,6 +340,9 @@
         <div class="admin-nav-item" onclick="showSection('rto-lookup', this)">
           <span class="admin-nav-icon">🎓</span> RTO Lookup
         </div>
+        <div class="admin-nav-item" onclick="showSection('oshc-ready', this)">
+          <span class="admin-nav-icon">🍎</span> OSHC Ready
+        </div>
         <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('first-shift', this)">
           <span class="admin-nav-icon">📞</span> First Shift Follow-ups
         </div>
@@ -1059,6 +1062,28 @@
           <div style="display:flex;gap:8px"><button class="btn-secondary" onclick="generateSecurityReport()">Refresh now</button><button class="btn-primary" onclick="window.print()">Print / Save as PDF</button></div>
         </div>
         <div id="secReportBody"><div style="color:var(--text-muted);font-size:13px">Loading…</div></div>
+      </div>
+      </template>
+      <!-- OSHC Ready (Sophia/Gwen/Justine, 26 Oct): DoFoodSafely is mandatory for OSHC. Staff only, read-only. -->
+      <template id="__lazy_oshc_ready">
+      <div class="admin-section" id="section-oshc-ready">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">OSHC Ready</div>
+            <div class="admin-page-sub">Do Food Safely is required for OSHC shifts. OSHC-ready = Active in RT, fully compliant, and a reviewed Do Food Safely certificate on file. Staff view only.</div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="oshcState" class="form-control" style="max-width:140px" onchange="loadOshcReady()"><option value="ALL">All states</option><option>VIC</option><option>SA</option><option>QLD</option><option>ACT</option><option>NSW</option><option>NT</option><option>WA</option></select>
+          <select id="oshcShow" class="form-control" style="max-width:260px" onchange="loadOshcReady()">
+            <option value="ready">OSHC-ready</option><option value="dfs">Everyone with a Do Food Safely certificate</option>
+            <option value="gap">Has Do Food Safely but another document is missing/expired</option><option value="missing">Active, no Do Food Safely yet</option>
+          </select>
+          <button class="btn-secondary" onclick="exportOshcReady()">Export CSV</button>
+          <div id="oshcCounts" style="font-size:13px;margin-left:auto"></div>
+        </div>
+        <div class="admin-table-card"><div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>Name</th><th>Phone</th><th>Suburb</th><th>State</th><th>Qualification</th><th>Do Food Safely</th><th>Note</th></tr></thead><tbody id="oshcBody"></tbody></table></div></div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:8px">RT currently isn't sending onboarding status or visa details (since 28 Oct), so those two checks can't be applied until RT restores them.</div>
       </div>
       </template>
       <template id="__lazy_rto_lookup">
@@ -6950,6 +6975,7 @@
       if (id === 'qr-referrals') loadQrReferrals();
       if (id === 'wfp-report') initWfpReport();
       if (id === 'security-report') loadSecurityReport();
+      if (id === 'oshc-ready') loadOshcReady();
       if (id.startsWith('report-')) loadReportData(id.replace('report-', ''));
       if (id === 'workforce-queue') startWorkforceStatusPolling();
       else stopWorkforceStatusPolling();
@@ -11240,6 +11266,30 @@
       const r = await fetch(`/api/security-reports/keys/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lastRotatedOn: date }) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Could not save', 'error'); return; }
       toast('Rotation date saved', 'success'); generateSecurityReport();
+    }
+
+
+    // ── OSHC Ready (DoFoodSafely) ─────────────────────────────────────────
+    let oshcRows = [];
+    async function loadOshcReady() {
+      const body = document.getElementById('oshcBody'); if (!body) return;
+      body.innerHTML = '<tr><td colspan="7"><div class="loading-spinner"><div class="spinner"></div></div></td></tr>';
+      try {
+        const r = await fetch(`/api/oshc-ready?state=${document.getElementById('oshcState').value}&show=${document.getElementById('oshcShow').value}`); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load');
+        oshcRows = d.people;
+        document.getElementById('oshcCounts').innerHTML = `<b>${d.counts.oshcReady}</b> OSHC-ready · ${d.counts.dfsValid} with a valid Do Food Safely · ${d.counts.hasDfs} with any · ${d.counts.active} Active`;
+        body.innerHTML = oshcRows.slice(0, 500).map(p => `<tr><td style="font-weight:600">${escHtml(p.name)}</td><td>${escHtml(p.phone || '')}</td><td>${escHtml(p.suburb)}</td><td>${escHtml(p.state)}</td><td>${escHtml(p.qualification)}</td>
+          <td>${p.dfsValid ? '✅ Reviewed' : p.hasDfs ? (p.dfsReviewed ? '⚠️ Expired' : '⏳ Not reviewed') : '—'}</td><td style="font-size:12px;color:var(--text-muted)">${escHtml(p.oshcReady ? '' : (p.gap || ''))}</td></tr>`).join('')
+          || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No one in this view</td></tr>';
+        if (oshcRows.length > 500) body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" style="color:var(--text-muted)">Showing 500 of ${oshcRows.length}. Export CSV for everyone.</td></tr>`);
+      } catch (e) { body.innerHTML = `<tr><td colspan="7" style="color:#b91c1c">${escHtml(e.message)}</td></tr>`; }
+    }
+    function exportOshcReady() {
+      const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const csv = ['Name,Phone,Email,Suburb,State,Qualification,Do Food Safely,OSHC-ready,Note'].concat(oshcRows.map(p => [p.name, p.phone, p.email, p.suburb, p.state, p.qualification, p.dfsValid ? 'Reviewed' : p.hasDfs ? (p.dfsReviewed ? 'Expired' : 'Not reviewed') : 'None', p.oshcReady ? 'Yes' : 'No', p.oshcReady ? '' : p.gap].map(esc).join(','))).join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = `oshc-ready-${document.getElementById('oshcState').value}-${document.getElementById('oshcShow').value}.csv`; a.click();
     }
 
     // ── RTO Lookup ────────────────────────────────────────────────────────

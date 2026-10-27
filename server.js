@@ -197,6 +197,19 @@ app.use('/api/signed-contracts', require('./routes/signedContracts'));
 app.use('/api/wfp-reports', require('./routes/wfpReports'));
 app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/lead-quality', require('./routes/leadQuality'));
+// OSHC-ready / DoFoodSafely (services/oshcReadyService.js) — staff only, read-only.
+app.get('/api/oshc-ready', async (req, res) => {
+  if (!req.user || !['admin', 'super_admin', 'qa_view'].includes(req.user.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const all = await require('./services/oshcReadyService').list();
+    const st = String(req.query.state || '').toUpperCase();
+    const inState = all.filter(p => !st || st === 'ALL' || p.state === st);
+    const counts = { active: inState.length, hasDfs: inState.filter(p => p.hasDfs).length, dfsValid: inState.filter(p => p.dfsValid).length, oshcReady: inState.filter(p => p.oshcReady).length };
+    const show = String(req.query.show || 'ready');
+    const people = show === 'ready' ? inState.filter(p => p.oshcReady) : show === 'missing' ? inState.filter(p => !p.hasDfs) : show === 'gap' ? inState.filter(p => p.dfsValid && !p.compliant) : inState.filter(p => p.hasDfs);
+    res.json({ counts, people });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 // Weekly security report (services/securityReportService.js) — Joy only.
 app.get('/api/security-reports', async (req, res) => {
   if (!req.user || req.user.role !== 'super_admin') return res.status(404).json({ error: 'Not found' });
