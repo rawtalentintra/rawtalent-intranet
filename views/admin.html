@@ -376,7 +376,7 @@
         <div class="admin-nav-item super-admin-only wfp-perf-section" style="display:none" onclick="showSection('wfp-performance', this)">
           <span class="admin-nav-icon">🏆</span> WFP Performance
         </div>
-        <div class="admin-nav-item super-admin-only wfp-perf-viewer" style="display:none;padding-left:34px" onclick="showSection('wfp-report', this)">
+        <div class="admin-nav-item super-admin-only" style="display:none;padding-left:34px" onclick="showSection('wfp-report', this)">
           <span class="admin-nav-icon">🗓️</span> Weekly Report
         </div>
         <div class="admin-nav-item" onclick="showSection('leads', this)">
@@ -1282,15 +1282,12 @@
             <div class="leads-filter-bar" style="padding:0;border-bottom:none">
               <input type="text" id="centresFilterSearch" class="form-control" placeholder="Search centre or suburb…" oninput="filterMyCentresTable()">
               <select id="centresFilterHealth" onchange="filterMyCentresTable()">
-                <option value="">Health: any</option>
-                <option value="needs_attention">Needs attention</option>
-                <option value="declining">Declining</option>
-                <option value="opportunity">Opportunity</option>
-                <option value="new_activating">New/Activating</option>
-                <option value="growing">Growing</option>
-                <option value="healthy">Healthy</option>
-                <option value="dormant">Dormant</option>
+                <option value="">Status: any</option>
+                <option value="growing">Growing</option><option value="steady">Steady</option><option value="new">New</option>
+                <option value="declining">Declining</option><option value="quiet">Quiet</option><option value="dormant">Dormant</option>
+                <option value="none">No bookings yet</option>
               </select>
+              <label style="font-size:12.5px;display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" id="centresFilterAttention" onchange="filterMyCentresTable()"> ⚠️ Needs attention only</label>
               <select id="centresFilterState" onchange="filterMyCentresTable()">
                 <option value="">State: any</option>
               </select>
@@ -1311,9 +1308,9 @@
                     <th>Centre</th>
                     <th>Suburb</th>
                     <th>State</th>
-                    <th title="Needs attention: booking activity just stopped, or a visit follow-up is overdue.&#10;Declining: bookings materially down vs the prior 30 days.&#10;Opportunity: steady bookings but no visit in 60+ days — likely under-engaged.&#10;New/Activating: signed in the last 60 days, still ramping up.&#10;Growing: bookings materially up vs the prior 30 days.&#10;Healthy: steady bookings, nothing concerning.&#10;Dormant: no bookings in 90 days. Hover any row's badge for its specific reason.">Health ⓘ</th>
-                    <th>Bookings (30d)</th>
-                    <th>Trend vs prior 30d</th>
+                    <th title="Growing / Declining: last 4 weeks' bookings per week vs the 8 weeks before (25%+ up or down).&#10;Steady: about the same.&#10;New: first booking in the last 8 weeks.&#10;Quiet: no booking in 12 weeks (under 6 months).&#10;Dormant: no booking for 6+ months.&#10;No bookings yet: none in the ~12 months HeartBeat holds.&#10;⚠️ = needs attention (an issue was raised, or a follow-up is overdue).">Status ⓘ</th>
+                    <th>Last 4 weeks</th>
+                    <th title="Same window the status uses: shifts in the last 4 weeks vs the 8 weeks before, shown per 4 weeks so they compare like for like">Trend (4 wks vs prior 8)</th>
                   </tr>
                 </thead>
                 <tbody id="myCentresTableBody">
@@ -6881,7 +6878,7 @@
           showSection('articles', document.querySelector('[onclick*="articles"]'));
           return;
         }
-      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()) || (id === 'wfp-report' && canSeeWfpPerformance()))) {
+      } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()))) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'signed-contracts' && !currentUserCanViewContracts) {
@@ -12236,21 +12233,31 @@
     // Needs attention/Declining/Dormant centres") asked for exactly this,
     // and without it the only way to see the shape of the portfolio was
     // to scroll a 357-row table.
+    // One vocabulary for My Centres (Joy, 28 Oct): tiles, the Status filter, the
+    // row badge and Centre 360 all use the booking-trend rule (dormantService
+    // computeTrend). "Needs attention" is a separate marker/toggle, not a status.
+    const MY_CENTRE_STATUS_ORDER = ['declining', 'quiet', 'dormant', 'new', 'growing', 'steady', 'none'];
+    const myCentreStatus = c => c.bookingTrend?.status || 'none';
+    const myCentreNeedsAttention = c => !!(c.isEscalated || c.health === 'needs_attention' || c.nurture?.status === 'follow_up_overdue');
     function renderCentresHealthSummary(rows) {
       const box = document.getElementById('myCentresHealthSummary');
       const counts = {};
-      rows.forEach(c => { counts[c.health] = (counts[c.health] || 0) + 1; });
+      rows.forEach(c => { const s = myCentreStatus(c); counts[s] = (counts[s] || 0) + 1; });
       const activeFilter = document.getElementById('centresFilterHealth').value;
-      box.innerHTML = CENTRE_HEALTH_ORDER.map(key => {
-        const meta = CENTRE_HEALTH_META[key];
-        const n = counts[key] || 0;
-        const active = activeFilter === key;
+      const att = rows.filter(myCentreNeedsAttention).length, attOn = document.getElementById('centresFilterAttention')?.checked;
+      box.innerHTML = MY_CENTRE_STATUS_ORDER.map(key => {
+        const meta = CENTRE_STATUS_META[key] || ['No bookings yet', '#f8fafc', '#64748b', 'No bookings in the ~12 months HeartBeat holds.'];
+        const n = counts[key] || 0, active = activeFilter === key;
         return `
-          <div class="centre-health-box" onclick="toggleCentresHealthFilter('${key}')" style="background:${meta.bg};border:2px solid ${active ? meta.color : 'transparent'}">
-            <div class="centre-health-box-num" style="color:${meta.color}">${n}</div>
-            <div class="centre-health-box-label" style="color:${meta.color}">${meta.label.replace(/^\S+\s/, '')}</div>
+          <div class="centre-health-box" title="${escHtml(meta[3])}" onclick="toggleCentresHealthFilter('${key}')" style="background:${meta[1]};border:2px solid ${active ? meta[2] : 'transparent'}">
+            <div class="centre-health-box-num" style="color:${meta[2]}">${n}</div>
+            <div class="centre-health-box-label" style="color:${meta[2]}">${meta[0]}</div>
           </div>`;
-      }).join('');
+      }).join('') + `
+          <div class="centre-health-box" title="An issue was raised, or a follow-up is overdue. Shown as ⚠️ on the row." onclick="const t=document.getElementById('centresFilterAttention');t.checked=!t.checked;filterMyCentresTable()" style="background:#fff7ed;border:2px ${attOn ? 'solid #c2410c' : 'dashed #fdba74'}">
+            <div class="centre-health-box-num" style="color:#c2410c">${att}</div>
+            <div class="centre-health-box-label" style="color:#c2410c">⚠️ Needs attention</div>
+          </div>`;
     }
 
     // Centres-only Calls/Visits Logged — Joy, 2026-09-02: "activity done
@@ -12332,7 +12339,8 @@
       // not just the one currently selected.
       renderCentresHealthSummary(rows);
       renderMyCentresActivityKpis(rows);
-      if (health) rows = rows.filter(c => c.health === health);
+      if (health) rows = rows.filter(c => myCentreStatus(c) === health);
+      if (document.getElementById('centresFilterAttention')?.checked) rows = rows.filter(myCentreNeedsAttention);
       myCentresPage = 1;
       renderMyCentresTable(rows);
     }
@@ -12347,7 +12355,7 @@
 
     function renderMyCentresTable(rows) {
       myCentresFilteredRows = rows.slice().sort((a, b) => {
-        const orderDiff = CENTRE_HEALTH_ORDER.indexOf(a.health) - CENTRE_HEALTH_ORDER.indexOf(b.health);
+        const orderDiff = MY_CENTRE_STATUS_ORDER.indexOf(myCentreStatus(a)) - MY_CENTRE_STATUS_ORDER.indexOf(myCentreStatus(b));
         return orderDiff !== 0 ? orderDiff : (a.name || '').localeCompare(b.name || '');
       });
       document.getElementById('myCentresCount').textContent = `${rows.length} of ${myCentresData.length}`;
@@ -12368,16 +12376,18 @@
       const pageRows = myCentresFilteredRows.slice(start, start + MY_CENTRES_PAGE_SIZE);
 
       body.innerHTML = pageRows.map(c => {
-        const trend = c.bookingsPrev30dCount > 0
-          ? `${c.bookings30dCount > c.bookingsPrev30dCount ? '▲' : c.bookings30dCount < c.bookingsPrev30dCount ? '▼' : '—'} ${c.bookingsPrev30dCount} → ${c.bookings30dCount}`
-          : (c.bookings30dCount > 0 ? `${c.bookings30dCount} (new)` : '—');
+        // Same window as the status badge: last 4 weeks vs the 8 weeks before, the
+        // prior 8 shown per 4 weeks so the two numbers compare like for like.
+        const t = c.bookingTrend || {}, l4 = t.last4Weeks || 0, p4 = (t.prior8Weeks || 0) / 2;
+        const p4txt = Number.isInteger(p4) ? p4 : p4.toFixed(1);
+        const trend = (l4 || p4) ? `${l4 > p4 * 1.25 ? '▲' : l4 < p4 * 0.75 ? '▼' : '—'} ${p4txt} → ${l4} <span style="opacity:.7">per 4 wks</span>` : '—';
         return `
         <tr style="cursor:pointer" onclick="openCentre360('${c.centreKey}')">
           <td class="td-truncate" style="max-width:220px" title="${escHtml(c.name)}">${escHtml(c.name)}</td>
           <td>${escHtml(c.suburb || '—')}</td>
           <td>${escHtml(c.state || '—')}</td>
-          <td>${centreStatusBadge(c.bookingTrend) || centreHealthBadge(c.health, c.healthReasons, c.isStrategic, c.isEscalated)}${c.isEscalated ? ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:10.5px">Unhappy client</span>' : ''}</td>
-          <td>${c.bookings30dCount}</td>
+          <td>${centreStatusBadge(c.bookingTrend) || '<span class="badge" style="background:#f8fafc;color:#64748b;font-size:11.5px" title="No bookings in the ~12 months HeartBeat holds">No bookings yet</span>'}${myCentreNeedsAttention(c) ? ` <span title="${escHtml(c.isEscalated ? 'Issue raised' + (c.escalationNote ? ': ' + c.escalationNote : '') : (c.healthReasons && c.healthReasons[0]) || 'Follow-up overdue')}" style="cursor:help">⚠️</span>` : ''}</td>
+          <td>${c.bookingTrend?.last4Weeks ?? 0}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${trend}</td>
         </tr>`;
       }).join('');

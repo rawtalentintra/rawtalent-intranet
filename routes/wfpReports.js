@@ -5,9 +5,9 @@ const router = express.Router();
 const PDFDocument = require('pdfkit');
 const { getDb } = require('../db/database');
 const svc = require('../services/wfpReportService');
-const { canUseMcp } = require('../services/mcpTokenService');
 
-router.use((req, res, next) => (req.user && canUseMcp(req.user.email, req.user.role)) ? next() : res.status(404).json({ error: 'Not found' }));
+// Joy only for now (28 Oct: "doesn't look clean yet"). The scheduled saves don't go through this router.
+router.use((req, res, next) => (req.user && req.user.role === 'super_admin') ? next() : res.status(404).json({ error: 'Not found' }));
 
 async function getOrBuild(type, start, refresh) {
   const t = type === 'month' ? 'month' : 'week';
