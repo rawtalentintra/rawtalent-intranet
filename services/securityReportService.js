@@ -46,7 +46,10 @@ async function buildReport(periodEnd = melbDay()) {
   const flags = [];
   if (failureTotal >= 10) flags.push(`${failureTotal} failed sign-ins this week`);
   (failures || []).filter(r => Number(r.n) >= 5).forEach(r => flags.push(`${r.n} failed sign-ins for ${r.email || 'unknown'} from ${r.ip || 'unknown IP'}`));
-  keys.filter(k => k.daysLeft != null && k.daysLeft <= 7).forEach(k => flags.push(`${k.key} is due for rotation in ${k.daysLeft} day(s) (${k.due})`));
+  keys.filter(k => k.daysLeft != null && k.daysLeft < 0).forEach(k => flags.push(`${k.key} is OVERDUE for rotation (was due ${k.due})${k.note ? ': ' + k.note : ''}`));
+  keys.filter(k => k.daysLeft != null && k.daysLeft >= 0 && k.daysLeft <= 7).forEach(k => flags.push(`${k.key} is due for rotation in ${k.daysLeft} day(s) (${k.due})`));
+  const unknown = keys.filter(k => !k.lastRotated);
+  if (unknown.length) flags.push(`${unknown.length} secret(s) have no rotation recorded: ${unknown.map(k => k.key).join(', ')}`);
   if ((tokensStale || []).length) flags.push(`${tokensStale.length} connector token(s) unused for 30+ days, so consider revoking`);
   if ((newUsers || []).some(u => u.role === 'super_admin' || u.role === 'admin')) flags.push('A new admin-level account was created this week');
 
@@ -77,7 +80,7 @@ function reportText(r) {
   lines.push(`Impersonation sessions: ${r.impersonation.filter(i => /start/.test(i.action)).length}`);
   lines.push(`Connector (MCP): ${r.mcp.newTokens.length} new token(s), ${r.mcp.usedTokens.length} used, ${r.mcp.staleTokens.length} unused 30+ days, ${r.mcp.newOAuthClients.length} new app(s) connected`);
   lines.push(`Failed sign-ins: ${r.signInFailures.total} (recorded since ${r.signInFailures.loggingSince})`);
-  lines.push('', 'Key rotation:', ...r.keys.map(k => `• ${k.key}: last rotated ${k.lastRotated || 'not recorded'}${k.due ? `, due ${k.due} (${k.daysLeft} days)` : ''}`));
+  lines.push('', 'Key rotation:', ...r.keys.map(k => `• ${k.key}: ${k.lastRotated ? `last rotated ${k.lastRotated}, due ${k.due} (${k.daysLeft < 0 ? 'OVERDUE' : k.daysLeft + ' days'})` : 'no rotation recorded'}${k.note ? ' (' + k.note + ')' : ''}`));
   lines.push('', 'Check by hand this week:', ...r.manualChecks.map(m => '• ' + m));
   lines.push('', 'Full report: HeartBeat → Admin → Security Report.');
   return lines.join('\n');

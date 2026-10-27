@@ -19,8 +19,12 @@ const OPTIONS = {
 };
 const GROUP_RANK = { big: 0, medium: 1, small: 2, community: 3, council: 4, independent: 5, unknown: 6 };
 
+// Joy, 28 Oct: "don't let that be visible to consultants yet". Lead Wash and the
+// Call List are limited to Joy (super_admin), Sophia and Liam for now.
+// can_wash_leads stays in the schema but is ignored until Joy opens it up.
+const PREVIEW_EMAILS = ['sophia@rawtalent.com.au', 'liam@rawtalent.com.au'];
 function canWash(user) {
-  return !!user && (['admin', 'super_admin', 'qa_view'].includes(user.role) || user.can_wash_leads === true);
+  return !!user && (user.role === 'super_admin' || PREVIEW_EMAILS.includes(String(user.email || '').toLowerCase()));
 }
 
 async function latestWashes() {

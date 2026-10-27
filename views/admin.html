@@ -382,7 +382,7 @@
         <div class="admin-nav-item" onclick="showSection('leads', this)">
           <span class="admin-nav-icon">📋</span> Leads
         </div>
-        <div class="admin-nav-item" onclick="location.href='/?tab=wash'" title="Opens the Lead Wash queue the consultants use">
+        <div class="admin-nav-item" id="navLeadWash" style="display:none" onclick="location.href='/?tab=wash'" title="Opens the Lead Wash queue (preview: Joy, Sophia, Liam)">
           <span class="admin-nav-icon">🧽</span> Lead Wash ↗
         </div>
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
@@ -5259,6 +5259,7 @@
         currentUserRole = me.role;
         currentUserEmail = me.email;
         currentUserCanViewContracts = !!me.canViewContracts;
+        if (me.canWashLeads) { const nw = document.getElementById('navLeadWash'); if (nw) nw.style.display = ''; }
         if (currentUserCanViewContracts) { const n = document.getElementById('navSignedContracts'); if (n) n.style.display = ''; }
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
