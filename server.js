@@ -431,6 +431,8 @@ async function maybeRunNightlyCandidatesSync() {
     await rtCandidatesSync.refreshStaleCandidates().catch(err => console.error('RT stale candidate refresh failed:', err.message));
     // Compliance safeguards: nightly snapshot + overnight-change alert (services/complianceSafeguardService.js).
     await require('./services/complianceSafeguardService').runNightly().catch(err => console.error('Compliance snapshot failed:', err.message));
+    // Customer.io onboarding bridge while RT omits obStatus (read-only; skips itself once RT is back).
+    await require('./services/cioOnboardingBridgeService').sync().catch(err => console.error('Customer.io onboarding bridge failed:', err.message));
     // Alert Joy once if RT restores missing fields or starts sending sensitive ones.
     await require('./services/rtDataHealthService').check({ fresh: true }).catch(err => console.error('RT data health check failed:', err.message));
   } catch (err) {

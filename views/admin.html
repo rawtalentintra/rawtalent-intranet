@@ -11390,8 +11390,16 @@
           visa: rtHealth.visaMissing && 'RT hasn\'t sent visa details since 27 Oct, so every educator\'s visa status is "unknown" and no one can pass the compliance check. This returns when RT restores it.',
           history: rtHealth.bookingHistoryMissing && 'RT hasn\'t sent booking status history since 27 Oct, so cancellations can\'t be split by reason and "unfilled" shifts can\'t be told apart. The fill rate reads too high. It returns when RT restores it.'
         };
+        // While the Customer.io bridge is filling in onboarding, say so instead of "missing".
+        const info = rtHealth.onboardingFromCio ? 'Onboarding status from Customer.io (may lag RT by up to a day).' : null;
+        if (info) msg.onboarding = null;
         document.querySelectorAll('.rt-data-banner').forEach(el => {
-          const lines = el.dataset.rtBanner.split(',').map(k => msg[k]).filter(Boolean);
+          const kinds = el.dataset.rtBanner.split(',');
+          if (info && kinds.includes('onboarding') && !kinds.some(k => msg[k])) {
+            el.style.display = ''; el.innerHTML = `<div style="background:#eff6ff;border:1px solid #93c5fd;color:#1e3a8a;border-radius:8px;padding:8px 14px;font-size:12.5px;margin:0 0 12px">ℹ️ ${escHtml(info)}</div>`; return;
+          }
+          const lines = kinds.map(k => msg[k]).filter(Boolean);
+          if (info && kinds.includes('onboarding')) lines.unshift(info);
           el.style.display = lines.length ? '' : 'none';
           el.innerHTML = lines.length ? `<div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;font-size:12.5px;margin:0 0 12px">⚠️ <b>RT data incomplete.</b> ${lines.map(escHtml).join(' ')}</div>` : '';
         });

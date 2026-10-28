@@ -165,6 +165,8 @@ async function buildReadyRosterExport(state, { onProgress } = {}) {
   const { candidates, failed } = await fetchCandidatesLive(ids, { onProgress: (done, total) => onProgress && onProgress({ phase: 'checking', done, total }) });
   onProgress && onProgress({ phase: 'building', done: ids.length, total: ids.length });
 
+  const bridge = require('./cioOnboardingBridgeService');
+  const cioMap = await bridge.bridgeMap();
   const ok = [], excluded = [], reasonCount = {};
   for (const c of candidates) {
     const a = homeAddress(c);
@@ -178,7 +180,7 @@ async function buildReadyRosterExport(state, { onProgress } = {}) {
     p.area = areaFor(state, p.lat, p.lng);
     let why = null;
     if (c.isDeleted || c.status !== 1) why = 'No longer Active in RT';
-    else if (!/complete/i.test(c.obStatus || '')) why = `Onboarding not Completed (${c.obStatus || 'no status'})`;
+    else if (!bridge.onboardingCompleted(c.userId, c.obStatus, cioMap)) why = c.obStatus != null ? `Onboarding not Completed (${c.obStatus})` : 'Onboarding not Completed (Customer.io)';
     else if (shortState(a.state) !== state) why = `Home address now in ${shortState(a.state) || 'another state'}`;
     else {
       const r = complianceReasons(c, today);

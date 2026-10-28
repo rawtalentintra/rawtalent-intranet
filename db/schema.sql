@@ -2950,3 +2950,16 @@ CREATE TABLE IF NOT EXISTS rt_field_alerts (
   alerted_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE rt_field_alerts ENABLE ROW LEVEL SECURITY;
+
+-- Customer.io onboarding bridge (services/cioOnboardingBridgeService.js): read-only
+-- copy of Customer.io's onboarding attributes for Active educators while RT's
+-- feed omits obStatus. visa_tab_status is informational only, never a visa pass.
+CREATE TABLE IF NOT EXISTS cio_educator_status (
+  user_id BIGINT PRIMARY KEY,
+  onboarding_complete BOOLEAN,
+  profile_status TEXT,
+  vetting_complete BOOLEAN,
+  visa_tab_status TEXT,
+  synced_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE cio_educator_status ENABLE ROW LEVEL SECURITY;

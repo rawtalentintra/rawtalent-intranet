@@ -26,7 +26,8 @@ async function check({ fresh = false } = {}) {
   const value = {
     onboardingMissing: n > 0 && !present.obStatus, visaMissing: n > 0 && !present.visaDetails, referencesMissing: n > 0 && !present.references,
     bookingHistoryMissing: historyPresent === null ? null : !historyPresent,
-    sensitivePresent: Object.keys(SENSITIVE_FIELDS).filter(f => present[f]), since: '27 Oct'
+    sensitivePresent: Object.keys(SENSITIVE_FIELDS).filter(f => present[f]), since: '27 Oct',
+    onboardingFromCio: n > 0 && !present.obStatus && await require('./cioOnboardingBridgeService').bridgeActive().catch(() => false)
   };
   cache = { at: Date.now(), value };
   await alertChanges(present, historyPresent).catch(err => console.error('RT data health alert failed:', err.message));

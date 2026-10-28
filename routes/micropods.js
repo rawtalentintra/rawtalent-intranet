@@ -129,6 +129,9 @@ async function buildCandidatePoints() {
   // check passed anyone with NO documents on file at all (an empty list has no
   // expired document), which marked ~1,800 early-onboarding educators "fully
   // compliant". See that file's header.
+  // Onboarding: RT's obStatus when RT sends it, else the Customer.io bridge.
+  const { bridgeMap, onboardingCompleted } = require('../services/cioOnboardingBridgeService');
+  const cioMap = await bridgeMap();
   const today = new Date().toISOString().slice(0, 10);
   rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today).length === 0; });
 
@@ -155,7 +158,7 @@ async function buildCandidatePoints() {
       // Active in RT, onboarding Completed and fully compliant: the people who can be
       // rostered today. Whatever segment they sit in (a lapsed Active educator is still
       // ready); the "Ready to roster" count and the SA ready list both use this.
-      readyToRoster: r.status === 1 && r.ob_status === 'Completed' && r.fully_compliant,
+      readyToRoster: r.status === 1 && onboardingCompleted(r.user_id, r.ob_status, cioMap) && r.fully_compliant,
       hasCurrentAvailability: r.has_current_availability,
       qualification: r.qualification_name || null,
       shifts28d: shiftList.filter(t => Date.now() - t <= 28 * 864e5).length,
