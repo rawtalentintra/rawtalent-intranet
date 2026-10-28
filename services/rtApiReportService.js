@@ -20,6 +20,20 @@ const MAX_PAGES = 500;
 // types with more than a page or two of data.
 const CONCURRENCY = 8;
 
+// Sensitive candidate fields RT started sending on 28 Oct (Joy asked RT to
+// keep them out of scope). Dropped here, before any caller sees a record, so
+// they're never stored in rt_candidates_cache or sent to a browser. Which ones
+// RT sent is remembered (names only) for the RT data health banner/alert.
+const SENSITIVE_CANDIDATE_FIELDS = ['bankDetails', 'taxDeclarations', 'dateOfBirth'];
+const sensitiveSeen = new Set();
+function scrub(reportType, record) {
+  if (reportType !== 'candidates' || !record || typeof record !== 'object') return record;
+  for (const f of SENSITIVE_CANDIDATE_FIELDS) {
+    if (f in record) { sensitiveSeen.add(f); delete record[f]; }
+  }
+  return record;
+}
+
 function isConfigured() {
   return !!(process.env.RT_API_BASE_URL && process.env.RT_API_KEY);
 }
@@ -66,6 +80,7 @@ async function fetchPage(reportType, pageNumber, filters) {
     if (res.ok) {
       const json = await res.json();
       if (!json.isSuccess) throw new Error(`RT API ${reportType} error: ${json.message || 'unknown error'}`);
+      (json.data?.items || []).forEach(r => scrub(reportType, r));
       return json.data; // { items, totalCount, pageNumber, pageSize }
     }
     const body = await res.text().catch(() => '');
@@ -146,7 +161,7 @@ async function fetchById(reportType, id) {
   }
   const json = await res.json();
   if (!json.isSuccess) throw new Error(`RT API ${reportType} error: ${json.message || 'unknown error'}`);
-  return json.data;
+  return scrub(reportType, json.data);
 }
 
-module.exports = { isConfigured, fetchAllPages, fetchById };
+module.exports = { isConfigured, fetchAllPages, fetchById, sensitiveSeen: () => [...sensitiveSeen] };

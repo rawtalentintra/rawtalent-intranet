@@ -20,17 +20,18 @@ async function check({ fresh = false } = {}) {
           FROM rt_candidates_cache WHERE status = 1 AND is_deleted IS NOT TRUE`, args: []
   })).rows[0];
   const n = Number(r.n);
+  const seen = require('./rtApiReportService').sensitiveSeen();
   const present = Object.fromEntries(fields.map(f => [f, Number(r[f]) > 0]));
   let historyPresent = null;
   try { const { bookings } = await require('../routes/centres').getCentresAndBookings(); historyPresent = bookings.some(b => Array.isArray(b.history)); } catch {}
   const value = {
     onboardingMissing: n > 0 && !present.obStatus, visaMissing: n > 0 && !present.visaDetails, visaStopgap: (() => { const t = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' }); const v = require('./educatorComplianceService'); const to = Object.keys(require('../data/visa-audit-stopgap.json')).map(v.visaAuditValidTo).filter(d => d >= t).sort().pop(); return to ? v.visaAuditLabel(to) : null; })(), referencesMissing: n > 0 && !present.references,
     bookingHistoryMissing: historyPresent === null ? null : !historyPresent,
-    sensitivePresent: Object.keys(SENSITIVE_FIELDS).filter(f => present[f]), since: '27 Oct',
+    sensitivePresent: Object.keys(SENSITIVE_FIELDS).filter(f => present[f] || seen.includes(f)), sensitiveStripped: seen, since: '27 Oct',
     onboardingFromCio: n > 0 && !present.obStatus && await require('./cioOnboardingBridgeService').bridgeActive().catch(() => false)
   };
   cache = { at: Date.now(), value };
-  await alertChanges(present, historyPresent).catch(err => console.error('RT data health alert failed:', err.message));
+  await alertChanges(present, historyPresent, seen).catch(err => console.error('RT data health alert failed:', err.message));
   return value;
 }
 
@@ -48,7 +49,7 @@ async function alertOnce(key, title, body) {
   return true;
 }
 
-async function alertChanges(present, historyPresent) {
+async function alertChanges(present, historyPresent, seen = []) {
   for (const [f, label] of Object.entries(RESTORE_FIELDS)) {
     if (present[f]) await alertOnce(`restored:${f}`, `✅ RT is sending ${label} again`,
       `HeartBeat's nightly RT sync now includes ${label} (missing since 27 Oct). The "RT data incomplete" banners for it switch off by themselves.\n\nNext: run the re-test list (RawTalent/Reports/HeartBeat-Retest-When-Keys-Return.md), and check Micropods ready-to-roster, OSHC Ready and the compliance counts look right again.`);
@@ -58,6 +59,8 @@ async function alertChanges(present, historyPresent) {
   for (const [f, label] of Object.entries(SENSITIVE_FIELDS)) {
     if (present[f]) await alertOnce(`sensitive:${f}`, `⚠️ RT is now sending ${label} to HeartBeat`,
       `HeartBeat's RT sync now receives ${label}. That's sensitive data you asked Yuvraj to keep excluded. HeartBeat doesn't show it anywhere, but it is now stored in HeartBeat's copy of RT (rt_candidates_cache.raw). Please ask Yuvraj to remove it from the API scope, or tell me to strip it before it's stored.`);
+    else if (seen.includes(f)) await alertOnce(`sensitive:${f}`, `⚠️ RT is now sending ${label} to HeartBeat`,
+      `RT's API now includes ${label}. That's sensitive data you asked Yuvraj to keep excluded. HeartBeat drops it the moment it arrives, so it is never stored or shown, but it still leaves RT. Please ask Yuvraj to remove it from the API key's scope.`);
   }
 }
 
