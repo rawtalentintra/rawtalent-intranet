@@ -34,13 +34,12 @@ async function latestWashes() {
 }
 
 // "Added by" as a first name (Joy, 29 Oct): Workforce Partners are just
-// "Justine"/"Gwen", consultants their first name, the ClickUp/legacy import "Imported".
-// Legacy ClickUp imports (Joy, 29 Oct) show the lead's Workforce Partner, since
-// the original creator wasn't recorded.
-function addedByLabel(email, name, wfp) {
+// "Justine"/"Gwen", consultants their first name, the ClickUp/legacy import "From ClickUp".
+// Legacy ClickUp imports (Joy, 29 Oct): "From ClickUp", no name.
+function addedByLabel(email, name) {
   const e = String(email || '').toLowerCase();
   if (!e && !name) return '—';
-  if (e.startsWith('legacy-import') || /legacy import|clickup/i.test(name || '')) return wfp ? String(wfp).trim().split(/\s+/)[0] : 'Imported';
+  if (e.startsWith('legacy-import') || /legacy import|clickup/i.test(name || '')) return 'From ClickUp';
   if (e === 'justine@rawtalent.com.au') return 'Justine';
   if (e === 'gwen@rawtalent.com.au') return 'Gwen';
   const first = String(name || '').trim().split(/\s+/)[0];
@@ -81,7 +80,7 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
   const leads = (await db.execute({
     sql: `SELECT id, centre_name, street_address, suburb, state, centre_phone, contact_first_name, contact_last_name, contact_email, position,
                  educator_name, agency_usage, submitted_by_name, submitted_by_email, created_at, lead_called_status, centre_visited_status,
-                 service_type, group_category, assigned_workforce_partner, archived_at, archived_reason, closed_at
+                 service_type, group_category, archived_at, archived_reason, closed_at
           FROM leads WHERE created_at < CAST(? AS date) AND closed_at IS NULL`, args: [WASH_CUTOFF]
   })).rows;
   const washes = await latestWashes();
@@ -98,8 +97,7 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
     if (st === 'solid') { tally.washed++; tally.solid++; }
     else if (st === 'not_viable') { tally.washed++; tally.notViable++; }
     else { tally.remaining++; if (st === 'attempted') tally.attemptedOnly++; }
-    const imported = /^legacy-import/i.test(l.submitted_by_email || '');
-    const who = addedByLabel(l.submitted_by_email, l.submitted_by_name, l.assigned_workforce_partner);
+    const who = addedByLabel(l.submitted_by_email, l.submitted_by_name);
     const sug = l.group_category ? null : suggestGroup(l.centre_name);
     const effGroup = l.group_category || (sug && sug.group) || 'unknown';
     addedByCounts[who] = (addedByCounts[who] || 0) + 1;
@@ -115,7 +113,6 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
       phone: l.centre_phone, contact: [l.contact_first_name, l.contact_last_name].filter(x => x && !/not provided/i.test(x)).join(' ') || null,
       contactEmail: l.contact_email, position: l.position, educatorName: l.educator_name, agencyUsage: l.agency_usage,
       educator: edLinks.get(l.id) || null, addedBy: who,
-      addedByNote: imported && l.assigned_workforce_partner ? "Original creator not recorded in the ClickUp import; showing the lead's Workforce Partner" : null,
       suggestedGroup: sug, effGroup,
       submittedBy: l.submitted_by_name, createdAt: l.created_at, wfpContacted: l.lead_called_status === 'done' || l.centre_visited_status === 'done',
       serviceType: l.service_type, groupCategory: l.group_category, categoryLabel: category.label(l.service_type, l.group_category),
