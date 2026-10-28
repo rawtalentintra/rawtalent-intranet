@@ -1434,14 +1434,14 @@
     }
 
     // ── Lead Wash (Liam, 26 Oct): consultants re-call every existing lead ──
-    let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigFirst: true }, data: null, opts: null, openId: null };
+    let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigFirst: true, addedBy: '' }, data: null, opts: null, openId: null };
     async function loadWashView() {
       const box = document.getElementById('resultsList');
       box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         if (!washState.opts) washState.opts = await fetch('/api/lead-quality/options').then(r => r.json());
         const f = washState.filters;
-        const qs = new URLSearchParams({ state: f.state, service: f.service, group: f.group, status: f.status, bigFirst: f.bigFirst ? '1' : '0' });
+        const qs = new URLSearchParams({ state: f.state, service: f.service, group: f.group, status: f.status, bigFirst: f.bigFirst ? '1' : '0', addedBy: f.addedBy });
         const r = await fetch('/api/lead-quality/wash/queue?' + qs); const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Could not load the Lead Wash');
         washState.data = d; renderWash();
@@ -1473,6 +1473,7 @@
             ${sel('state', [['ALL', 'All states'], ['VIC', 'VIC'], ['SA', 'SA'], ['QLD', 'QLD'], ['NT', 'NT'], ['ACT', 'ACT'], ['NSW', 'NSW']], f.state)}
             ${sel('service', [['', 'Any service'], ...Object.entries(o.serviceTypes)], f.service)}
             ${sel('group', [['', 'Any group'], ...groupOpts], f.group)}
+            ${sel('addedBy', [['', 'Added by: anyone'], ...(d.addedByOptions || []).map(o => [o.name, `Added by ${o.name} (${o.count})`])], f.addedBy)}
             <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${f.bigFirst ? 'checked' : ''} onchange="washSetFilter('bigFirst', this.checked)"> Big groups first</label>
             <span style="font-size:12.5px;color:var(--text-muted);margin-left:auto">${d.leads.length} shown</span>
           </div>
@@ -1488,13 +1489,18 @@
         <div class="wash-head" onclick="washToggle('${l.id}')">
           <div><div style="font-weight:800;color:var(--navy);font-size:14px">${escHtml(l.centreName || 'Unnamed centre')}</div>
             <div style="font-size:12.5px;color:var(--text-muted)">${escHtml(l.address || '')}${l.phone ? ` · <a href="tel:${escHtml(l.phone)}" onclick="event.stopPropagation()">${escHtml(l.phone)}</a>` : ''}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${l.contact ? 'Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') + ' · ' : ''}${l.educatorName ? 'Referred by educator ' + escHtml(l.educatorName) + ' · ' : ''}${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
+            <div style="font-size:12.5px;margin-top:3px">${washEducatorHtml(l)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Added by <b>${escHtml(l.addedBy || '—')}</b>${l.contact ? ' · Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') : ''} · ${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
           <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
             <span class="wash-pill" style="background:${status[1]};color:${status[2]}">${status[0]}</span>
             ${l.categoryLabel ? `<span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(l.categoryLabel)}</span>` : '<span class="wash-pill" style="background:var(--gray-100);color:var(--text-muted)">No category yet</span>'}
           </div>
         </div>
         ${open ? `<div class="wash-form">
+          <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:10px 12px;font-size:13px">
+            ${l.educator ? `<div><b>Opening line:</b> "${escHtml(l.educator.name.split(' ')[0])} has registered with us and mentioned they've worked at your centre."</div>` : '<div style="color:var(--text-muted)">No educator recorded on this lead.</div>'}
+            <div style="margin-top:4px;color:var(--text-muted)">Educator: ${washEducatorHtml(l, true)} · Added by ${escHtml(l.addedBy || '—')}</div>
+          </div>
           <label>Reached them?<select id="w-reached"><option value="">Choose…</option>${opt(o.wash.reached)}</select></label>
           <label>Do they use agency?<select id="w-agency"><option value="">Choose…</option>${opt(o.wash.uses_agency)}</select></label>
           <label>Know the educator who referred them?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
@@ -1520,6 +1526,12 @@
       document.getElementById('w-group').innerHTML = st
         ? Object.entries(g).map(([k, v]) => `<option value="${k}" ${k === 'unknown' ? 'selected' : ''}>${escHtml(v)}</option>`).join('')
         : '<option value="unknown">Pick the service type first</option>';
+    }
+    function washEducatorHtml(l, plain) {
+      if (!l.educator) return plain ? '—' : '<span style="color:var(--text-muted)">No educator recorded</span>';
+      const name = escHtml(l.educator.name);
+      const link = l.educator.rtUserId ? `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(l.educator.rtUserId)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open their RT profile">${name} ↗</a>` : name;
+      return plain ? link : `👩‍🏫 Educator: <b>${link}</b>${l.educator.rtUserId ? '' : ' <span style="color:var(--text-muted);font-size:11.5px">(not matched to an RT profile)</span>'}`;
     }
     function washToggle(id) { washState.openId = washState.openId === id ? null : id; renderWash(); if (washState.openId) document.getElementById('wash-' + id)?.scrollIntoView({ block: 'nearest' }); }
     async function saveWash(id) {

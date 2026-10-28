@@ -32,15 +32,58 @@ async function latestWashes() {
   return new Map(rows.map(r => [r.lead_id, r]));
 }
 
-async function queue({ state, service, group, status = 'unwashed', bigFirst = true } = {}) {
+// "Added by" as a first name (Joy, 29 Oct): Workforce Partners are just
+// "Justine"/"Gwen", consultants their first name, the ClickUp/legacy import "Imported".
+function addedByLabel(email, name) {
+  const e = String(email || '').toLowerCase();
+  if (!e && !name) return '—';
+  if (e.startsWith('legacy-import') || /legacy import|clickup/i.test(name || '')) return 'Imported';
+  if (e === 'justine@rawtalent.com.au') return 'Justine';
+  if (e === 'gwen@rawtalent.com.au') return 'Gwen';
+  const first = String(name || '').trim().split(/\s+/)[0];
+  return first || (e ? e.split('@')[0].replace(/^./, c => c.toUpperCase()) : '—');
+}
+
+// Linked educator: a lead_educators link if there is one, otherwise the typed
+// educator_name, linked to their RT profile when exactly one RT educator has that name.
+async function educatorLinks(leads) {
+  const db = getDb();
+  const ids = leads.map(l => l.id);
+  const linked = ids.length ? (await db.execute({ sql: 'SELECT DISTINCT ON (lead_id) lead_id, candidate_user_id FROM lead_educators WHERE lead_id = ANY(?) ORDER BY lead_id, created_at', args: [ids] })).rows : [];
+  const linkBy = new Map(linked.map(r => [r.lead_id, String(r.candidate_user_id)]));
+  const names = [...new Set(leads.map(l => String(l.educator_name || '').trim().toLowerCase()).filter(n => n.split(/\s+/).length >= 2))];
+  const rows = names.length ? (await db.execute({
+    sql: `SELECT user_id::text uid, lower(trim(first_name || ' ' || last_name)) full_name, first_name, last_name FROM rt_candidates_cache
+          WHERE is_deleted IS NOT TRUE AND lower(trim(first_name || ' ' || last_name)) = ANY(?)`, args: [names]
+  })).rows : [];
+  const byName = {};
+  rows.forEach(r => { (byName[r.full_name] = byName[r.full_name] || []).push(r); });
+  const linkedIds = [...new Set([...linkBy.values()])];
+  const linkedRows = linkedIds.length ? (await db.execute({ sql: 'SELECT user_id::text uid, first_name, last_name FROM rt_candidates_cache WHERE user_id::text = ANY(?)', args: [linkedIds] })).rows : [];
+  const linkedName = new Map(linkedRows.map(r => [r.uid, `${r.first_name || ''} ${r.last_name || ''}`.trim()]));
+  const out = new Map();
+  for (const l of leads) {
+    const uid = linkBy.get(l.id);
+    if (uid) { out.set(l.id, { name: linkedName.get(uid) || l.educator_name || `Educator ${uid}`, rtUserId: uid }); continue; }
+    const n = String(l.educator_name || '').trim();
+    if (!n) continue;
+    const hits = byName[n.toLowerCase()] || [];
+    out.set(l.id, { name: n, rtUserId: hits.length === 1 ? hits[0].uid : null });
+  }
+  return out;
+}
+
+async function queue({ state, service, group, status = 'unwashed', bigFirst = true, addedBy = null } = {}) {
   const db = getDb();
   const leads = (await db.execute({
     sql: `SELECT id, centre_name, street_address, suburb, state, centre_phone, contact_first_name, contact_last_name, contact_email, position,
-                 educator_name, agency_usage, submitted_by_name, created_at, lead_called_status, centre_visited_status,
+                 educator_name, agency_usage, submitted_by_name, submitted_by_email, created_at, lead_called_status, centre_visited_status,
                  service_type, group_category, archived_at, archived_reason, closed_at
           FROM leads WHERE created_at < CAST(? AS date) AND closed_at IS NULL`, args: [WASH_CUTOFF]
   })).rows;
   const washes = await latestWashes();
+  const edLinks = await educatorLinks(leads);
+  const addedByCounts = {};
   const tally = { inScope: 0, washed: 0, solid: 0, notViable: 0, attemptedOnly: 0, remaining: 0 };
   const out = [];
   for (const l of leads) {
@@ -52,6 +95,9 @@ async function queue({ state, service, group, status = 'unwashed', bigFirst = tr
     if (st === 'solid') { tally.washed++; tally.solid++; }
     else if (st === 'not_viable') { tally.washed++; tally.notViable++; }
     else { tally.remaining++; if (st === 'attempted') tally.attemptedOnly++; }
+    const who = addedByLabel(l.submitted_by_email, l.submitted_by_name);
+    addedByCounts[who] = (addedByCounts[who] || 0) + 1;
+    if (addedBy && who !== addedBy) continue;
     if (state && state !== 'ALL' && String(l.state || '').toUpperCase() !== state) continue;
     if (service && l.service_type !== service) continue;
     if (group && (l.group_category || 'unknown') !== group) continue;
@@ -61,6 +107,7 @@ async function queue({ state, service, group, status = 'unwashed', bigFirst = tr
       id: l.id, centreName: l.centre_name, address: [l.street_address, l.suburb, l.state].filter(Boolean).join(', '), state: l.state,
       phone: l.centre_phone, contact: [l.contact_first_name, l.contact_last_name].filter(x => x && !/not provided/i.test(x)).join(' ') || null,
       contactEmail: l.contact_email, position: l.position, educatorName: l.educator_name, agencyUsage: l.agency_usage,
+      educator: edLinks.get(l.id) || null, addedBy: who,
       submittedBy: l.submitted_by_name, createdAt: l.created_at, wfpContacted: l.lead_called_status === 'done' || l.centre_visited_status === 'done',
       serviceType: l.service_type, groupCategory: l.group_category, categoryLabel: category.label(l.service_type, l.group_category),
       washStatus: st, lastWash: w ? { at: w.washed_at, by: w.washed_by_name, reached: w.reached, verdict: w.verdict, reason: w.not_viable_reason } : null
@@ -68,7 +115,7 @@ async function queue({ state, service, group, status = 'unwashed', bigFirst = tr
   }
   out.sort((a, b) => (bigFirst ? (GROUP_RANK[a.groupCategory || 'unknown'] - GROUP_RANK[b.groupCategory || 'unknown']) : 0)
     || String(a.state || '').localeCompare(String(b.state || '')) || new Date(a.createdAt) - new Date(b.createdAt));
-  return { tally, leads: out, options: OPTIONS, cutoff: WASH_CUTOFF };
+  return { tally, leads: out, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
 }
 
 async function history(leadId) {
