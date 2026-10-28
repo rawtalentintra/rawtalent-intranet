@@ -199,18 +199,9 @@ app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/lead-quality', require('./routes/leadQuality'));
 // RT data health (28 Oct): RT's new API key returns slimmed records. Screens use
 // this to show an honest banner instead of misleading zeros.
-let rtHealthCache = { at: 0, value: null };
 app.get('/api/rt-data-health', async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not signed in' });
-  try {
-    if (!rtHealthCache.value || Date.now() - rtHealthCache.at > 15 * 60 * 1000) {
-      const r = (await getDb().execute({ sql: `SELECT count(*) FILTER (WHERE jsonb_exists(raw, 'obStatus')) ob, count(*) FILTER (WHERE jsonb_exists(raw, 'visaDetails')) visa, count(*) n FROM rt_candidates_cache WHERE status = 1 AND is_deleted IS NOT TRUE`, args: [] })).rows[0];
-      let historyMissing = null;
-      try { const { bookings } = await require('./routes/centres').getCentresAndBookings(); historyMissing = bookings.length > 0 && !bookings.some(b => Array.isArray(b.history)); } catch {}
-      rtHealthCache = { at: Date.now(), value: { onboardingMissing: Number(r.n) > 0 && Number(r.ob) === 0, visaMissing: Number(r.n) > 0 && Number(r.visa) === 0, bookingHistoryMissing: historyMissing, since: '27 Oct' } };
-    }
-    res.json(rtHealthCache.value);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  try { res.json(await require('./services/rtDataHealthService').check()); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 // OSHC-ready / DoFoodSafely (services/oshcReadyService.js) — staff only, read-only.
 app.get('/api/oshc-ready', async (req, res) => {
@@ -440,6 +431,8 @@ async function maybeRunNightlyCandidatesSync() {
     await rtCandidatesSync.refreshStaleCandidates().catch(err => console.error('RT stale candidate refresh failed:', err.message));
     // Compliance safeguards: nightly snapshot + overnight-change alert (services/complianceSafeguardService.js).
     await require('./services/complianceSafeguardService').runNightly().catch(err => console.error('Compliance snapshot failed:', err.message));
+    // Alert Joy once if RT restores missing fields or starts sending sensitive ones.
+    await require('./services/rtDataHealthService').check({ fresh: true }).catch(err => console.error('RT data health check failed:', err.message));
   } catch (err) {
     console.error('Nightly RT candidates sync failed:', err.message);
   }

@@ -2941,3 +2941,12 @@ CREATE TABLE IF NOT EXISTS available_educator_sends (
 CREATE INDEX IF NOT EXISTS idx_avail_sends_target ON available_educator_sends (target_key, created_at DESC);
 ALTER TABLE consultant_calls ENABLE ROW LEVEL SECURITY;
 ALTER TABLE available_educator_sends ENABLE ROW LEVEL SECURITY;
+
+-- One-off alerts when RT restores a missing field or starts sending a sensitive
+-- one (services/rtDataHealthService.js). One row per field, so it never repeats.
+CREATE TABLE IF NOT EXISTS rt_field_alerts (
+  field_key TEXT PRIMARY KEY,
+  task_id TEXT,
+  alerted_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE rt_field_alerts ENABLE ROW LEVEL SECURITY;
