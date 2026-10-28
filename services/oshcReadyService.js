@@ -24,7 +24,7 @@ async function list() {
       .sort((a, b) => String(b.expiryDate || '').localeCompare(String(a.expiryDate || '')))[0] || null;
     const exp = dfs?.expiryDate ? String(dfs.expiryDate).slice(0, 10) : null;
     const dfsValid = !!dfs && dfs.isReviewed === true && !(exp && !['0001-01-01', '9999-12-31'].includes(exp) && exp < today);
-    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today);
+    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.uid);
     return {
       userId: r.uid, name: `${r.first_name || ''} ${r.last_name || ''}`.trim(), email: r.email, phone: r.contact_no,
       suburb: r.addr?.suburb || '', state: normalizeStateToShort(r.addr?.state) || '', qualification: r.qual || '',

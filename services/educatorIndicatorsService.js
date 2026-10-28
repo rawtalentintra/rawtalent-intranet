@@ -83,7 +83,7 @@ async function computeIndicators() {
     if (r.status === 1) {
       const in7 = list.filter(t => now - t <= 7 * DAY).length, in30 = list.filter(t => now - t <= 30 * DAY).length, in90 = list.filter(t => now - t <= 91 * DAY).length;
       tags.push(in7 >= 3 ? 'actively_working' : in30 >= 1 ? 'actively_engaged' : in90 >= 1 ? 'engaged' : list.length ? 'disengaged' : 'dormant');
-      tags.push(complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today).length ? 'not_compliant' : 'compliant');
+      tags.push(complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.uid).length ? 'not_compliant' : 'compliant');
     } else if (r.status === 4) {
       const pct = Math.round(Math.min(Math.max(r.ob_step || 0, 0), 11) / 11 * 100);
       tags.push(pct >= 100 ? 'ob_100' : pct >= 80 ? 'ob_80' : pct >= 60 ? 'ob_60' : pct >= 40 ? 'ob_40' : pct >= 20 ? 'ob_20' : 'ob_lt20');

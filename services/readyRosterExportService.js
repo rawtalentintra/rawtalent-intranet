@@ -183,7 +183,7 @@ async function buildReadyRosterExport(state, { onProgress } = {}) {
     else if (!bridge.onboardingCompleted(c.userId, c.obStatus, cioMap)) why = c.obStatus != null ? `Onboarding not Completed (${c.obStatus})` : 'Onboarding not Completed (Customer.io)';
     else if (shortState(a.state) !== state) why = `Home address now in ${shortState(a.state) || 'another state'}`;
     else {
-      const r = complianceReasons(c, today);
+      const r = complianceReasons(c, today, c.userId);
       if (r.length) why = r.join('; ');
       r.forEach(x => { const k = x.replace(/ expired \d{4}-\d{2}-\d{2}/, ' expired').replace(/^.*?(Visa) expired.*/, 'Visa expired'); reasonCount[k] = (reasonCount[k] || 0) + 1; });
     }

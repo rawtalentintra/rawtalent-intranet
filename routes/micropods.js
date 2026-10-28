@@ -133,7 +133,7 @@ async function buildCandidatePoints() {
   const { bridgeMap, onboardingCompleted } = require('../services/cioOnboardingBridgeService');
   const cioMap = await bridgeMap();
   const today = new Date().toISOString().slice(0, 10);
-  rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today).length === 0; });
+  rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id).length === 0; });
 
   const points = rows.map(r => {
     const shiftList = shiftsByUser.get(String(r.user_id)) || [];

@@ -27,7 +27,21 @@ const dateOf = v => (v ? String(v).slice(0, 10) : null);
 
 // Returns the reasons this educator is NOT fully compliant ([] = compliant).
 // `raw` needs attachedRequirements and visaDetails; today is 'YYYY-MM-DD'.
-function complianceReasons(raw, today) {
+// Visa stopgap (Joy chose C2, 29 Oct): educators on the hand-audited SA (12 Oct)
+// and VIC (19 Oct) lists count as visa-OK for 14 days after their audit, while
+// RT isn't sending visaDetails. Ends on the cut-off or when RT sends visaDetails.
+// data/visa-audit-stopgap.json = { rtUserId: auditDate } (ids only, no PII).
+const VISA_AUDIT = require('../data/visa-audit-stopgap.json');
+const VISA_AUDIT_DAYS = 14;
+function visaAuditValidTo(uid) {
+  const d = uid != null && VISA_AUDIT[String(uid)];
+  if (!d) return null;
+  const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + VISA_AUDIT_DAYS);
+  return t.toISOString().slice(0, 10);
+}
+const visaAuditLabel = to => `Visa from 12/21 Oct audit (RT not sending visa data), valid to ${to.split('-').reverse().join('/')}`;
+
+function complianceReasons(raw, today, uid) {
   const expired = d => d && !SENTINELS.includes(d) && d < today;
   const reasons = [];
   const docs = (raw.attachedRequirements || []).filter(d => !d.isDeleted && d.isActive !== false);
@@ -51,7 +65,10 @@ function complianceReasons(raw, today) {
   }
   // Fail safe (28 Oct): RT stopped sending visaDetails with the new key. Missing
   // visa data must read as "unknown", never as a pass.
-  if (raw.visaDetails === undefined || raw.visaDetails === null) reasons.push('Visa status unknown (RT isn\'t sending visa details)');
+  if (raw.visaDetails === undefined || raw.visaDetails === null) {
+    const to = visaAuditValidTo(uid);
+    if (!(to && today <= to)) reasons.push('Visa status unknown (RT isn\'t sending visa details)');
+  }
   const visa = [].concat(...(raw.visaDetails || [])).filter(Boolean)[0];
   if (visa && visa.isCitizen === false) {
     const e = dateOf(visa.expiryDate);
@@ -60,4 +77,4 @@ function complianceReasons(raw, today) {
   return reasons;
 }
 
-module.exports = { complianceReasons };
+module.exports = { visaAuditValidTo, visaAuditLabel, complianceReasons };
