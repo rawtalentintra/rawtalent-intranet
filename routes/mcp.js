@@ -146,7 +146,7 @@ function buildServerForUser(email) {
 
   server.registerTool('get_educator', {
     title: 'Get Educator Details',
-    description: 'Full profile for one educator/candidate by their RT user id (get the id from search_educators first) — contact info, addresses, qualifications, and compliance documents on file, including expiry dates.',
+    description: 'Full profile for one educator/candidate by their RT user id (get the id from search_educators first) — contact info, onboarding status, work rights (visa type and expiry), addresses, qualifications, references and their status, and compliance documents on file, including expiry dates.',
     inputSchema: { userId: z.union([z.string(), z.number()]).describe('The RT candidate user id') }
   }, async ({ userId }) => {
     const row = await educatorSearchService.getEducatorProfile(userId);
@@ -157,8 +157,21 @@ function buildServerForUser(email) {
       `${name} (id ${row.user_id})`,
       `Phone: ${row.contact_no || '—'} · Email: ${row.email || '—'}`,
       `Status: ${row.is_active ? 'Active' : 'Inactive'}${row.is_deleted ? ' (deleted)' : ''}${row.suburb ? ` · Suburb: ${row.suburb}` : ''}`,
-      row.expiring_docs_count ? `⚠️ ${row.expiring_docs_count} expiring compliance document(s)` : null
+      row.expiring_docs_count ? `⚠️ ${row.expiring_docs_count} expiring compliance document(s)` : null,
+      raw.obStatus ? `Onboarding: ${raw.obStatus}` : null
     ];
+    // visaDetails also carries passportNumber/trn/visaImage — deliberately
+    // left out; only the work-rights summary is shown.
+    if (Array.isArray(raw.visaDetails) && raw.visaDetails.length) {
+      lines.push('', 'Work rights:', ...raw.visaDetails.map(v => {
+        if (v.isCitizen) return '  • Citizen / no visa required';
+        const hasExpiry = v.expiryDate && !v.expiryDate.startsWith('0001') && !v.expiryDate.startsWith('9999');
+        return `  • ${[v.visaType, v.visaSubclass].filter(Boolean).join(' — ') || 'Visa (type not recorded)'}${hasExpiry ? ` — expires ${new Date(v.expiryDate).toLocaleDateString('en-AU')}` : ''}${v.visaHourLimit ? ` · ${v.visaHourLimit}h limit` : ''}`;
+      }));
+    }
+    if (Array.isArray(raw.references) && raw.references.length) {
+      lines.push('', 'References:', ...raw.references.map(r => `  • ${(r.name || 'Unnamed referee').trim()}${r.position ? ` (${r.position.trim()})` : ''}${r.centreName ? `, ${r.centreName.trim()}` : ''} — ${r.status || 'unknown'}`));
+    }
     if (Array.isArray(raw.addresses) && raw.addresses.length) {
       lines.push('', 'Addresses:', ...raw.addresses.map(a => `  • ${[a.addressLine1, a.addressLine2, a.suburb, a.state, a.postCode].filter(Boolean).join(', ')}`));
     }
