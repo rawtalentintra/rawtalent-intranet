@@ -11387,7 +11387,7 @@
         if (!rtHealth) return;
         const msg = {
           onboarding: rtHealth.onboardingMissing && 'RT hasn\'t sent onboarding status since 27 Oct, so "ready to roster" and onboarding numbers show 0 or are incomplete. They\'ll come back when RT restores it. Don\'t read these zeros as real.',
-          visa: rtHealth.visaMissing && 'RT hasn\'t sent visa details since 27 Oct, so every educator\'s visa status is "unknown" and no one can pass the compliance check. This returns when RT restores it.',
+          visa: rtHealth.visaMissing && (rtHealth.visaStopgap ? `${rtHealth.visaStopgap}. Only educators on the hand-audited lists count as visa-OK until then; everyone else's visa status is "unknown".` : 'RT hasn\'t sent visa details since 27 Oct, so every educator\'s visa status is "unknown" and no one can pass the compliance check. This returns when RT restores it.'),
           history: rtHealth.bookingHistoryMissing && 'RT hasn\'t sent booking status history since 27 Oct, so cancellations can\'t be split by reason and "unfilled" shifts can\'t be told apart. The fill rate reads too high. It returns when RT restores it.'
         };
         // While the Customer.io bridge is filling in onboarding, say so instead of "missing".

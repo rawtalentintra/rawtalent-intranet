@@ -24,7 +24,7 @@ async function check({ fresh = false } = {}) {
   let historyPresent = null;
   try { const { bookings } = await require('../routes/centres').getCentresAndBookings(); historyPresent = bookings.some(b => Array.isArray(b.history)); } catch {}
   const value = {
-    onboardingMissing: n > 0 && !present.obStatus, visaMissing: n > 0 && !present.visaDetails, referencesMissing: n > 0 && !present.references,
+    onboardingMissing: n > 0 && !present.obStatus, visaMissing: n > 0 && !present.visaDetails, visaStopgap: (() => { const t = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' }); const v = require('./educatorComplianceService'); const to = Object.keys(require('../data/visa-audit-stopgap.json')).map(v.visaAuditValidTo).filter(d => d >= t).sort().pop(); return to ? v.visaAuditLabel(to) : null; })(), referencesMissing: n > 0 && !present.references,
     bookingHistoryMissing: historyPresent === null ? null : !historyPresent,
     sensitivePresent: Object.keys(SENSITIVE_FIELDS).filter(f => present[f]), since: '27 Oct',
     onboardingFromCio: n > 0 && !present.obStatus && await require('./cioOnboardingBridgeService').bridgeActive().catch(() => false)
