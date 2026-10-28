@@ -54,12 +54,20 @@ async function sync({ concurrency = 4 } = {}) {
   return { read: ok, noProfile: missing, failed, total: ids.length };
 }
 
+// Chief of Staff, 29 Oct: onboarding_complete alone is NOT RT's "Completed"
+// (e.g. 27868: onboarding_complete true, profile_status in_progress, RT status 0).
+// The bridge stays OFF (empty map) until a profile_status/onboarding_complete
+// combination is validated at 95%+ against the 12/21 Oct audited SA/VIC lists
+// and RT's status. Set VALIDATED_RULE to that check only after validation.
+const VALIDATED_RULE = null; // e.g. r => r.onboarding_complete === true && r.profile_status === '<validated value>'
+
 // Map of RT user id → onboarding Completed?, from Customer.io (bridge rows only).
 let mapCache = { at: 0, value: null };
 async function bridgeMap() {
   if (mapCache.value && Date.now() - mapCache.at < 10 * 60 * 1000) return mapCache.value;
-  const rows = (await getDb().execute({ sql: 'SELECT user_id, onboarding_complete FROM cio_educator_status', args: [] }).catch(() => ({ rows: [] }))).rows;
-  mapCache = { at: Date.now(), value: new Map(rows.map(r => [String(r.user_id), r.onboarding_complete === true])) };
+  if (!VALIDATED_RULE) return new Map();
+  const rows = (await getDb().execute({ sql: 'SELECT user_id, onboarding_complete, profile_status FROM cio_educator_status', args: [] }).catch(() => ({ rows: [] }))).rows;
+  mapCache = { at: Date.now(), value: new Map(rows.filter(VALIDATED_RULE).map(r => [String(r.user_id), true])) };
   return mapCache.value;
 }
 
