@@ -1434,14 +1434,14 @@
     }
 
     // ── Lead Wash (Liam, 26 Oct): consultants re-call every existing lead ──
-    let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigFirst: true, addedBy: '' }, data: null, opts: null, openId: null };
+    let washState = { filters: { state: 'ALL', service: '', group: '', status: 'unwashed', bigOnly: false, addedBy: '' }, data: null, opts: null, openId: null };
     async function loadWashView() {
       const box = document.getElementById('resultsList');
       box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
       try {
         if (!washState.opts) washState.opts = await fetch('/api/lead-quality/options').then(r => r.json());
         const f = washState.filters;
-        const qs = new URLSearchParams({ state: f.state, service: f.service, group: f.group, status: f.status, bigFirst: f.bigFirst ? '1' : '0', addedBy: f.addedBy });
+        const qs = new URLSearchParams({ state: f.state, service: f.service, group: f.group, status: f.status, bigOnly: f.bigOnly ? '1' : '0', addedBy: f.addedBy });
         const r = await fetch('/api/lead-quality/wash/queue?' + qs); const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Could not load the Lead Wash');
         washState.data = d; renderWash();
@@ -1474,7 +1474,7 @@
             ${sel('service', [['', 'Any service'], ...Object.entries(o.serviceTypes)], f.service)}
             ${sel('group', [['', 'Any group'], ...groupOpts], f.group)}
             ${sel('addedBy', [['', 'Added by: anyone'], ...(d.addedByOptions || []).map(o => [o.name, `Added by ${o.name} (${o.count})`])], f.addedBy)}
-            <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${f.bigFirst ? 'checked' : ''} onchange="washSetFilter('bigFirst', this.checked)"> Big groups first</label>
+            <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${f.bigOnly ? 'checked' : ''} onchange="washSetFilter('bigOnly', this.checked)"> Big groups only</label>
             <span style="font-size:12.5px;color:var(--text-muted);margin-left:auto">${d.leads.length} shown</span>
           </div>
         </div>
@@ -1490,10 +1490,10 @@
           <div><div style="font-weight:800;color:var(--navy);font-size:14px">${escHtml(l.centreName || 'Unnamed centre')}</div>
             <div style="font-size:12.5px;color:var(--text-muted)">${escHtml(l.address || '')}${l.phone ? ` · <a href="tel:${escHtml(l.phone)}" onclick="event.stopPropagation()">${escHtml(l.phone)}</a>` : ''}</div>
             <div style="font-size:12.5px;margin-top:3px">${washEducatorHtml(l)}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Added by <b>${escHtml(l.addedBy || '—')}</b>${l.contact ? ' · Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') : ''} · ${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Added by <b${l.addedByNote ? ` title="${escHtml(l.addedByNote)}" style="border-bottom:1px dotted"` : ''}>${escHtml(l.addedBy || '—')}</b>${l.contact ? ' · Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') : ''} · ${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
           <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
             <span class="wash-pill" style="background:${status[1]};color:${status[2]}">${status[0]}</span>
-            ${l.categoryLabel ? `<span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(l.categoryLabel)}</span>` : '<span class="wash-pill" style="background:var(--gray-100);color:var(--text-muted)">No category yet</span>'}
+            ${l.categoryLabel ? `<span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(l.categoryLabel)}</span>` : l.suggestedGroup ? `<span class="wash-pill" style="background:#fff7ed;color:#c2410c" title="Suggested from the centre name; confirm or change it in the wash form">${l.suggestedGroup.group === 'big' ? 'Big' : 'Medium'} group (suggested) · ${escHtml(l.suggestedGroup.operator)}</span>` : '<span class="wash-pill" style="background:var(--gray-100);color:var(--text-muted)">No category yet</span>'}
           </div>
         </div>
         ${open ? `<div class="wash-form">
@@ -1508,8 +1508,8 @@
           <label>Their role<input id="w-dmrole" placeholder="e.g. Centre Director"></label>
           <label>Their phone<input id="w-dmphone"></label>
           <label>Their email<input id="w-dmemail" type="email"></label>
-          <label>Service type<select id="w-service" onchange="washServiceChanged(this.value)"><option value="">Choose…</option>${opt(o.serviceTypes, l.serviceType)}</select></label>
-          <label>Group category<select id="w-group">${l.serviceType ? opt(groupsFor(l.serviceType), l.groupCategory || 'unknown') : '<option value="unknown">Pick the service type first</option>'}</select></label>
+          <label>Service type<select id="w-service" onchange="washServiceChanged(this.value)"><option value="">Choose…</option>${opt(o.serviceTypes, l.serviceType || (l.suggestedGroup ? 'early_childhood' : ''))}</select></label>
+          <label>Group category${l.suggestedGroup ? ` <span style="font-weight:400;color:#c2410c">(suggested: ${escHtml(l.suggestedGroup.operator)}, confirm or change)</span>` : ''}<select id="w-group">${(l.serviceType || l.suggestedGroup) ? opt(groupsFor(l.serviceType || 'early_childhood'), l.groupCategory || (l.suggestedGroup && l.suggestedGroup.group) || 'unknown') : '<option value="unknown">Pick the service type first</option>'}</select></label>
           <label>Verdict<select id="w-verdict" onchange="document.getElementById('w-reasonwrap').style.display=this.value==='not_viable'?'':'none'"><option value="">Choose…</option>${opt(o.wash.verdict)}</select></label>
           <label id="w-reasonwrap" style="display:none">Why not viable?<select id="w-reason"><option value="">Choose…</option>${opt(o.wash.not_viable_reason)}</select></label>
           <label style="grid-column:1/-1">Notes<textarea id="w-notes" rows="2" placeholder="Anything useful for next time"></textarea></label>
