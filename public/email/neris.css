@@ -1,0 +1,9 @@
+/* Neris for Customer.io emails (Design Studio global font URL points here).
+   Same files as fonts.cdnfonts.com/css/neris, plus weight 500 mapped to SemiBold:
+   the emails use 500 so Gmail (which blocks web fonts) falls back to Seravek
+   Medium — the closest match to Neris SemiBold — while clients that do load
+   web fonts (Apple Mail) still get real Neris SemiBold instead of Light. */
+@font-face { font-family: 'Neris'; font-style: normal; font-weight: 300; src: url('https://fonts.cdnfonts.com/s/27435/Neris-Light.woff') format('woff'); }
+@font-face { font-family: 'Neris'; font-style: normal; font-weight: 500; src: url('https://fonts.cdnfonts.com/s/27435/Neris-SemiBold.woff') format('woff'); }
+@font-face { font-family: 'Neris'; font-style: normal; font-weight: 600; src: url('https://fonts.cdnfonts.com/s/27435/Neris-SemiBold.woff') format('woff'); }
+@font-face { font-family: 'Neris'; font-style: normal; font-weight: 900; src: url('https://fonts.cdnfonts.com/s/27435/Neris-Black.woff') format('woff'); }
