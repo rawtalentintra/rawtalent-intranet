@@ -1460,7 +1460,25 @@
           .wash-form{padding:0 16px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
           .wash-form label{font-size:12px;font-weight:700;color:var(--navy);display:flex;flex-direction:column;gap:4px}
           .wash-form input,.wash-form select,.wash-form textarea{padding:8px 10px;border:1px solid var(--gray-200);border-radius:8px;font:inherit;font-size:13px;font-weight:400}
-          .wash-pill{font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}</style>
+          .wash-pill{font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
+          .wx-ed{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:14px;overflow:hidden}
+          .wx-ed-head{padding:16px 18px;border-bottom:1px solid var(--gray-100)}
+          .wx-ed-name{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+          .wx-ed-name h3{margin:0;font-size:16px;font-weight:800;color:var(--navy)}
+          .wx-ed-name a{font-size:12.5px;font-weight:600;text-decoration:none}
+          .wx-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 16px;margin-top:12px}
+          .wx-fact span{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+          .wx-fact b{display:block;font-size:13.5px;color:#111827;margin-top:2px;font-weight:600}
+          .wx-sub{padding:10px 18px 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+          .wx-row{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--gray-100);cursor:pointer;background:#fff;width:100%;text-align:left;border-left:0;border-right:0;border-bottom:0;font:inherit}
+          .wx-row:hover{background:#f8fafc}
+          .wx-row.open{background:#f8fafc}
+          .wx-row-main{flex:1;min-width:0}
+          .wx-row-main div:first-child{font-weight:700;color:var(--navy);font-size:14px;overflow:hidden;text-overflow:ellipsis}
+          .wx-row-main div+div{font-size:12.5px;color:var(--text-muted);margin-top:2px}
+          .wx-row-tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+          .wx-open{background:#f8fafc;border-top:1px solid var(--gray-100);padding:14px 0 4px}
+          @media (max-width:640px){.wx-row{flex-direction:column;align-items:flex-start}.wx-row-tags{justify-content:flex-start}.wx-ed-head,.wx-row{padding-left:14px;padding-right:14px}}</style>
         <div class="wash-card" style="padding:16px 18px">
           <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
             <div style="font-size:15px;font-weight:800;color:var(--navy)">Washed ${t.washed} of ${t.inScope} leads</div>
@@ -1478,29 +1496,53 @@
             <span style="font-size:12.5px;color:var(--text-muted);margin-left:auto">${d.leads.length} shown</span>
           </div>
         </div>
-        ${d.leads.length ? d.leads.map(washCardHtml).join('') : '<div class="empty-wrap"><div class="empty-title">Nothing here</div><p>Try another filter.</p></div>'}`;
+        ${d.leads.length ? washGroups(d).map(washEducatorBlock).join('') : '<div class="empty-wrap"><div class="empty-title">Nothing here</div><p>Try another filter.</p></div>'}`;
+    }
+    // Educator first (Joy, 3 Nov): check the educator, then the centres they named, then open a centre to wash it.
+    function washGroups(d) {
+      const groups = new Map();
+      for (const l of d.leads) {
+        const k = l.educator ? (l.educator.rtUserId ? 'rt:' + l.educator.rtUserId : 'name:' + l.educator.name.trim().toLowerCase()) : 'none';
+        if (!groups.has(k)) groups.set(k, { key: k, educator: l.educator, info: l.educator && l.educator.rtUserId ? (d.educators || {})[l.educator.rtUserId] : null, leads: [] });
+        groups.get(k).leads.push(l);
+      }
+      const list = [...groups.values()];
+      return [...list.filter(g => g.key !== 'none'), ...list.filter(g => g.key === 'none')];
+    }
+    function washEducatorBlock(g) {
+      const fmt = iso => iso ? iso.split('-').reverse().join('/') : 'None yet';
+      const i = g.info;
+      let head;
+      if (g.key === 'none') head = `<div class="wx-ed-name"><h3>No educator recorded</h3></div><div style="font-size:13px;color:var(--text-muted);margin-top:6px">These leads didn't name an educator.</div>`;
+      else if (!i) head = `<div class="wx-ed-name"><h3>${escHtml(g.educator.name)}</h3></div><div style="font-size:13px;color:var(--text-muted);margin-top:6px">Not matched to an RT profile, so there's no status or booking history to show.</div>`;
+      else head = `<div class="wx-ed-name"><h3>${escHtml(i.name || g.educator.name)}</h3><a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(g.educator.rtUserId)}" target="_blank" rel="noopener">View in RT</a></div>
+          <div class="wx-facts">
+            <div class="wx-fact"><span>Status</span><b style="color:${i.active ? '#15803d' : '#b45309'}">${i.active ? 'Active' : 'Not active'}</b></div>
+            <div class="wx-fact"><span>Onboarding</span><b>${escHtml(i.onboarding ? i.onboarding.replace(/([a-z])([A-Z])/g, '$1 $2') : 'Unknown')}</b></div>
+            <div class="wx-fact"><span>Shifts completed</span><b>${i.shiftsDone}</b></div>
+            <div class="wx-fact"><span>Upcoming shifts</span><b>${i.upcoming}</b></div>
+            <div class="wx-fact"><span>Last shift</span><b>${fmt(i.lastShift)}</b></div>
+            ${i.suburb ? `<div class="wx-fact"><span>Suburb</span><b>${escHtml(i.suburb)}</b></div>` : ''}
+          </div>`;
+      return `<div class="wx-ed"><div class="wx-ed-head">${head}</div>
+        <div class="wx-sub">Centres they named (${g.leads.length})</div>
+        ${g.leads.map(washCardHtml).join('')}</div>`;
     }
     function washCardHtml(l) {
       const o = washState.opts, open = washState.openId === l.id;
       const status = { unwashed: ['To wash', '#eef2ff', '#3730a3'], attempted: ['Tried, no answer', '#fef3c7', '#b45309'], solid: ['SOLID', '#dcfce7', '#15803d'], not_viable: ['NOT VIABLE', '#fee2e2', '#b91c1c'] }[l.washStatus];
       const opt = (map, val) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
       const groupsFor = st => st ? o.groups[st] : {};
-      return `<div class="wash-card" id="wash-${l.id}">
-        <div class="wash-head" onclick="washToggle('${l.id}')">
-          <div><div style="font-weight:800;color:var(--navy);font-size:14px">${escHtml(l.centreName || 'Unnamed centre')}</div>
-            <div style="font-size:12.5px;color:var(--text-muted)">${escHtml(l.address || '')}${l.phone ? ` · <a href="tel:${escHtml(l.phone)}" onclick="event.stopPropagation()">${escHtml(l.phone)}</a>` : ''}</div>
-            <div style="font-size:12.5px;margin-top:3px">${washEducatorHtml(l)}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Added by <b>${escHtml(l.addedBy || '—')}</b>${l.contact ? ' · Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') : ''} · ${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
-          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
-            <span class="wash-pill" style="background:${status[1]};color:${status[2]}">${status[0]}</span>
-            ${l.categoryLabel ? `<span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(l.categoryLabel)}</span>` : l.suggestedGroup ? `<span class="wash-pill" style="background:#fff7ed;color:#c2410c" title="Suggested from the centre name; confirm or change it in the wash form">${l.suggestedGroup.group === 'big' ? 'Big' : 'Medium'} group (suggested) · ${escHtml(l.suggestedGroup.operator)}</span>` : '<span class="wash-pill" style="background:var(--gray-100);color:var(--text-muted)">No category yet</span>'}
-          </div>
-        </div>
-        ${open ? `<div class="wash-form">
-          <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:10px 12px;font-size:13px">
-            ${l.educator ? `<div><b>Opening line:</b> "${escHtml(l.educator.name.split(' ')[0])} has registered with us and mentioned they've worked at your centre."</div>` : '<div style="color:var(--text-muted)">No educator recorded on this lead.</div>'}
-            <div style="margin-top:4px;color:var(--text-muted)">Educator: ${washEducatorHtml(l, true)} · Added by ${escHtml(l.addedBy || '—')}</div>
-          </div>
+      const cat = l.categoryLabel ? l.categoryLabel : l.suggestedGroup ? `${l.suggestedGroup.group === 'big' ? 'Big' : 'Medium'} group (suggested)` : 'No category yet';
+      const sub = [l.address, l.phone].filter(Boolean).join(' · ');
+      return `<div id="wash-${l.id}">
+        <button type="button" class="wx-row${open ? ' open' : ''}" onclick="washToggle('${l.id}')">
+          <div class="wx-row-main"><div>${escHtml(l.centreName || 'Unnamed centre')}</div><div>${escHtml(sub)}</div><div>Added by ${escHtml(l.addedBy || 'unknown')}${l.contact ? ' · Contact: ' + escHtml(l.contact) + (l.position ? ' (' + escHtml(l.position) + ')' : '') : ''} · ${l.wfpContacted ? 'WFP has contacted' : 'WFP not contacted yet'}</div></div>
+          <div class="wx-row-tags"><span class="wash-pill" style="background:var(--gray-100);color:#374151">${escHtml(cat)}</span><span class="wash-pill" style="background:${status[1]};color:${status[2]}">${status[0]}</span></div>
+        </button>
+        ${open ? `<div class="wx-open"><div class="wash-form">
+          ${l.phone ? `<div style="grid-column:1/-1;font-size:13px">Centre phone: <a href="tel:${escHtml(l.phone)}">${escHtml(l.phone)}</a></div>` : ''}
+          ${l.educator ? `<div style="grid-column:1/-1;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;font-size:13px"><b>Opening line:</b> "${escHtml(l.educator.name.split(' ')[0])} has registered with us and mentioned they've worked at your centre."</div>` : ''}
           <label>Reached them?<select id="w-reached"><option value="">Choose…</option>${opt(o.wash.reached)}</select></label>
           <label>Do they use agency?<select id="w-agency"><option value="">Choose…</option>${opt(o.wash.uses_agency)}</select></label>
           <label>Educator Known?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
@@ -1518,7 +1560,7 @@
             <span style="font-size:12px;color:var(--text-muted)">No answer? Pick "No answer" and save. The lead stays in your list to try again. NOT VIABLE archives the lead with the reason (never deleted).</span>
           </div>
           ${l.lastWash ? `<div style="grid-column:1/-1;font-size:12px;color:var(--text-muted)">Last washed by ${escHtml(l.lastWash.by || '')} on ${new Date(l.lastWash.at).toLocaleDateString('en-AU')}: ${escHtml(o.wash.reached[l.lastWash.reached] || '')}${l.lastWash.verdict ? ' · ' + escHtml(o.wash.verdict[l.lastWash.verdict]) : ''}${l.lastWash.reason ? ' (' + escHtml(o.wash.not_viable_reason[l.lastWash.reason]) + ')' : ''}</div>` : ''}
-        </div>` : ''}
+        </div></div>` : ''}
       </div>`;
     }
     function washServiceChanged(st) {

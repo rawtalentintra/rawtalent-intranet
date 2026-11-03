@@ -75,6 +75,33 @@ async function educatorLinks(leads) {
   return out;
 }
 
+// Educator first (Joy, 3 Nov): a short RT summary of each linked educator so
+// consultants can check the educator before calling the centres they named.
+async function educatorSummaries(uids) {
+  if (!uids.length) return {};
+  const rows = (await getDb().execute({
+    sql: `SELECT user_id::text uid, first_name, last_name, status, suburb, raw->>'obStatus' ob FROM rt_candidates_cache WHERE user_id::text = ANY(?)`, args: [uids]
+  })).rows;
+  const shifts = {};
+  try {
+    const { bookings } = await require('../routes/centres').getCentresAndBookings();
+    const want = new Set(uids), now = Date.now();
+    for (const b of bookings) {
+      const k = String(b.assignedUserId || '');
+      if (!want.has(k) || !b.bookingDate) continue;
+      const t = new Date(b.bookingDate).getTime();
+      const e = shifts[k] = shifts[k] || { done: 0, upcoming: 0, last: null };
+      if (b.statusId === 5 && t <= now) { e.done++; if (!e.last || t > e.last) e.last = t; }
+      else if ([1, 2, 3].includes(b.statusId) && t > now) e.upcoming++;
+    }
+  } catch { /* RT bookings unavailable: show the profile without shift counts */ }
+  return Object.fromEntries(rows.map(r => {
+    const sh = shifts[r.uid] || { done: 0, upcoming: 0, last: null };
+    return [r.uid, { name: `${r.first_name || ''} ${r.last_name || ''}`.trim(), active: r.status === 1, onboarding: r.ob || null, suburb: r.suburb || null,
+      shiftsDone: sh.done, upcoming: sh.upcoming, lastShift: sh.last ? new Date(sh.last).toISOString().slice(0, 10) : null }];
+  }));
+}
+
 async function queue({ state, service, group, status = 'unwashed', bigOnly = false, addedBy = null } = {}) {
   const db = getDb();
   const leads = (await db.execute({
@@ -122,7 +149,8 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
   // Big groups (set or suggested) always sit at the top (Joy, 29 Oct).
   out.sort((a, b) => (GROUP_RANK[a.effGroup] - GROUP_RANK[b.effGroup])
     || String(a.state || '').localeCompare(String(b.state || '')) || new Date(a.createdAt) - new Date(b.createdAt));
-  return { tally, leads: out, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
+  const educators = await educatorSummaries([...new Set(out.map(l => l.educator && l.educator.rtUserId).filter(Boolean))]);
+  return { tally, leads: out, educators, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
 }
 
 async function history(leadId) {
