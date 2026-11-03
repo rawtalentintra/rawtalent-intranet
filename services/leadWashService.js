@@ -14,7 +14,7 @@ const WASH_CUTOFF = '2026-10-29';
 const OPTIONS = {
   reached: { yes: 'Yes', no_answer: 'No answer', wrong_number: 'Wrong number' },
   uses_agency: { yes: 'Yes', no: 'No', not_18_months: 'Not in 18+ months' },
-  knows_referrer: { yes: 'Yes', no: 'No' },
+  knows_referrer: { yes: 'Yes', no: 'No', favourite: 'Favourite' },
   verdict: { solid: 'SOLID (keep)', not_viable: 'NOT VIABLE' },
   not_viable_reason: { no_agency: 'No agency use', closed: 'Closed', duplicate: 'Duplicate', wrong_details: 'Wrong details', not_interested: 'Not interested' }
 };

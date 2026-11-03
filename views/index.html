@@ -1503,13 +1503,13 @@
           </div>
           <label>Reached them?<select id="w-reached"><option value="">Choose…</option>${opt(o.wash.reached)}</select></label>
           <label>Do they use agency?<select id="w-agency"><option value="">Choose…</option>${opt(o.wash.uses_agency)}</select></label>
-          <label>Know the educator who referred them?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
+          <label>Educator Known?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
           <label>Decision-maker name<input id="w-dmname"></label>
           <label>Their role<input id="w-dmrole" placeholder="e.g. Centre Director"></label>
           <label>Their phone<input id="w-dmphone"></label>
           <label>Their email<input id="w-dmemail" type="email"></label>
           <label>Service type<select id="w-service" onchange="washServiceChanged(this.value)"><option value="">Choose…</option>${opt(o.serviceTypes, l.serviceType || (l.suggestedGroup ? 'early_childhood' : ''))}</select></label>
-          <label>Group category${l.suggestedGroup ? ` <span style="font-weight:400;color:#c2410c">(suggested: ${escHtml(l.suggestedGroup.operator)}, confirm or change)</span>` : ''}<select id="w-group">${(l.serviceType || l.suggestedGroup) ? opt(groupsFor(l.serviceType || 'early_childhood'), l.groupCategory || (l.suggestedGroup && l.suggestedGroup.group) || 'unknown') : '<option value="unknown">Pick the service type first</option>'}</select></label>
+          <label><span style="display:flex;align-items:center;gap:6px">Group category${l.suggestedGroup ? `<span title="Suggested from the centre name: ${escHtml(l.suggestedGroup.operator)}. Confirm or change it." style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#f59e0b;color:#fff;font-size:10px;font-weight:800;cursor:help">i</span>` : ''}</span><select id="w-group">${(l.serviceType || l.suggestedGroup) ? opt(groupsFor(l.serviceType || 'early_childhood'), l.groupCategory || (l.suggestedGroup && l.suggestedGroup.group) || 'unknown') : '<option value="unknown">Pick the service type first</option>'}</select></label>
           <label>Verdict<select id="w-verdict" onchange="document.getElementById('w-reasonwrap').style.display=this.value==='not_viable'?'':'none'"><option value="">Choose…</option>${opt(o.wash.verdict)}</select></label>
           <label id="w-reasonwrap" style="display:none">Why not viable?<select id="w-reason"><option value="">Choose…</option>${opt(o.wash.not_viable_reason)}</select></label>
           <label style="grid-column:1/-1">Notes<textarea id="w-notes" rows="2" placeholder="Anything useful for next time"></textarea></label>
