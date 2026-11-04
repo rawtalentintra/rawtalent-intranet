@@ -128,6 +128,13 @@ app.use(passport.session());
 // it's one of the couple of places the OS's "Add to Home Screen" naming
 // could plausibly be reading from. Registered before the static mount so
 // it wins; everything else under public/wfp/ (icons, sw.js) is unaffected.
+// Build id for open tabs to notice a new deploy (public/js/autoUpdate.js).
+// Changes on every Railway deploy/restart; tells nothing else.
+const BUILD_ID = process.env.RAILWAY_DEPLOYMENT_ID || String(Date.now());
+app.get('/api/build-version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ build: BUILD_ID });
+});
 app.get('/wfp/manifest.json', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'public', 'wfp', 'manifest.json'));
