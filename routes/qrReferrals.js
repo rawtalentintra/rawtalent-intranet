@@ -44,11 +44,21 @@ async function matchCentre(entered) {
 // ── Public form endpoint ─────────────────────────────────────────────
 const publicRouter = express.Router();
 publicRouter.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true }));
+// Logs every attempt (never the key or field values) for the QR section's "Form attempts" card.
+function logAttempt(req, outcome, reason, referralId) {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  getDb().execute({
+    sql: 'INSERT INTO qr_referral_attempts (outcome, reason, key_sent, fields, origin, user_agent, ip, referral_id) VALUES (?,?,?,?,?,?,?,?)',
+    args: [outcome, reason || null, !!String(req.get('x-form-key') || '').trim(), Object.keys(b).slice(0, 30).join(', ').slice(0, 500) || null,
+      String(req.get('origin') || req.get('referer') || '').slice(0, 200) || null, String(req.get('user-agent') || '').slice(0, 200) || null, req.ip || null, referralId || null]
+  }).catch(() => {});
+}
 publicRouter.post('/', async (req, res) => {
   // Trimmed: a stray space or newline pasted into Railway's Variables tab shouldn't lock the form out.
   const key = (process.env.QR_FORM_KEY || '').trim().replace(/^["']|["']$/g, '');
   const given = String(req.get('x-form-key') || '').trim();
   if (!key || given.length !== key.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) {
+    logAttempt(req, 'refused_key', !key ? 'Form key not set on the server' : given ? 'Wrong form key' : 'No form key sent (X-Form-Key header missing)');
     return res.status(401).json({ error: 'Not authorised' });
   }
   const b = req.body || {};
@@ -57,9 +67,10 @@ publicRouter.post('/', async (req, res) => {
   const email = clean(b.email, 200);
   const phone = clean(b.phone, 40);
   if (!firstName || !centre || (!email && !phone)) {
+    logAttempt(req, 'refused_fields', 'Missing ' + [!firstName && 'firstName', !centre && 'centreName', (!email && !phone) && 'email or phone'].filter(Boolean).join(', '));
     return res.status(400).json({ error: 'First name, centre name and an email or phone number are required' });
   }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Email address looks invalid' });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return logAttempt(req, 'refused_fields', 'Email looks invalid'), res.status(400).json({ error: 'Email address looks invalid' });
   try {
     const centreKey = await matchCentre(centre).catch(() => null);
     const row = (await getDb().execute({
@@ -67,9 +78,11 @@ publicRouter.post('/', async (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       args: [firstName, clean(b.lastName, 80), email, phone, clean(b.suburb, 80), shortState(b.state) || clean(b.state, 40), clean(b.qualification, 120), centre, centreKey, clean(b.currentAgency, 120), req.ip]
     })).rows[0];
+    logAttempt(req, 'saved', null, row.id);
     res.status(201).json({ success: true, id: row.id });
   } catch (err) {
     console.error('QR referral submit failed:', err.message);
+    logAttempt(req, 'error', String(err.message).slice(0, 200));
     res.status(500).json({ error: 'Could not save your details, please try again' });
   }
 });
@@ -125,6 +138,11 @@ router.use((req, res, next) => {
 });
 
 const OB_STEPS = ['Register', 'About Us', 'Profile Image', 'Experience', 'Emergency Contact', 'Qualification Level', 'Reference', 'Visa', 'Finance', 'Tax', 'Documents', 'Completed'];
+
+router.get('/attempts', async (req, res) => {
+  try { res.json((await getDb().execute({ sql: 'SELECT id, at, outcome, reason, key_sent, fields, origin, user_agent, referral_id FROM qr_referral_attempts ORDER BY at DESC LIMIT 30', args: [] })).rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 router.get('/', async (req, res) => {
   try {

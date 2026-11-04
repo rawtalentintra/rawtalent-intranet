@@ -2632,6 +2632,24 @@ CREATE TABLE IF NOT EXISTS qr_referrals (
 CREATE INDEX IF NOT EXISTS idx_qr_referrals_created ON qr_referrals(created_at);
 CREATE INDEX IF NOT EXISTS idx_qr_referrals_email ON qr_referrals(email);
 
+-- Every attempt to the public QR form endpoint (Joy, 4 Nov), including refused
+-- ones, so a failed test shows why. Never stores the key itself: only whether
+-- one was sent, plus which field names arrived (not their values).
+CREATE TABLE IF NOT EXISTS qr_referral_attempts (
+  id SERIAL PRIMARY KEY,
+  at TIMESTAMPTZ DEFAULT now(),
+  outcome TEXT NOT NULL,          -- saved | refused_key | refused_fields | error
+  reason TEXT,
+  key_sent BOOLEAN,
+  fields TEXT,
+  origin TEXT,
+  user_agent TEXT,
+  ip TEXT,
+  referral_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_qr_attempts_at ON qr_referral_attempts(at);
+ALTER TABLE qr_referral_attempts ENABLE ROW LEVEL SECURITY;
+
 -- Call Analysis and Insights (Joy, 2026-10-14): industry intelligence pulled
 -- once per voice recording by services/voiceInsightsService.js — competitor
 -- agencies and their pricing, what centres need, objections, opportunities.

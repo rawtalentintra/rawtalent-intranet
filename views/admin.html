@@ -1141,6 +1141,11 @@
         <div id="qrBody" style="display:none">
           <div id="qrNotice"></div>
           <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
+            <div class="sd-card-title">Form attempts</div>
+            <div class="sd-card-sub">Every time the landing page (or a test) tried to send a registration, including refused ones and why. The form key itself is never stored.</div>
+            <div id="qrAttempts" style="margin-top:12px;font-size:13px;color:var(--text-muted)">Loading…</div>
+          </div>
+          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
               <div>
                 <div class="sd-card-title">Reporting</div>
@@ -11040,12 +11045,25 @@
           '<div style="padding:10px 14px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:13px;margin-bottom:14px">The landing page can\'t send registrations yet: the form key (QR_FORM_KEY) isn\'t set on the server.</div>';
         renderQrReferrals();
         loadQrReport();
+        loadQrAttempts();
         document.getElementById('qrBody').style.display = 'block';
       } catch (e) {
         const box = document.getElementById('qrError'); box.textContent = e.message; box.style.display = 'block';
       } finally {
         document.getElementById('qrLoading').style.display = 'none';
       }
+    }
+    async function loadQrAttempts() {
+      const box = document.getElementById('qrAttempts');
+      try {
+        const rows = await fetch('/api/qr-referrals/attempts').then(r => r.json());
+        if (!Array.isArray(rows) || !rows.length) { box.textContent = 'No attempts yet. Nothing has reached HeartBeat from the form.'; return; }
+        const label = { saved: ['Saved', '#15803d'], refused_key: ['Refused: form key', '#b91c1c'], refused_fields: ['Refused: missing or invalid details', '#b45309'], error: ['Error while saving', '#b91c1c'] };
+        box.innerHTML = `<div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>When</th><th>Result</th><th>Why</th><th>Key sent</th><th>Fields received</th><th>From</th></tr></thead><tbody>${rows.map(r => {
+          const l = label[r.outcome] || [r.outcome, 'inherit'];
+          return `<tr><td style="white-space:nowrap">${new Date(r.at).toLocaleString('en-AU', { timeZone: 'Australia/Melbourne', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</td><td style="color:${l[1]};font-weight:600;white-space:nowrap">${escHtml(l[0])}</td><td>${escHtml(r.reason || '')}</td><td>${r.key_sent ? 'Yes' : 'No'}</td><td>${escHtml(r.fields || '')}</td><td>${escHtml(r.origin || '')}</td></tr>`;
+        }).join('')}</tbody></table></div>`;
+      } catch { box.textContent = 'Could not load attempts.'; }
     }
     function setQrFilter(k) { qrFilter = k; renderQrReferrals(); }
     async function loadQrReport() {
