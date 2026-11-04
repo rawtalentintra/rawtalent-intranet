@@ -547,6 +547,29 @@ async function buildStageEvents() {
   }
   return events;
 }
+// Calls and visits partners recorded another way (Joy, 4 Nov): a lead note that
+// clearly describes a call or visit that already happened, or a voice note on a
+// lead (those are visit recordings). WFP Performance adds these only when no
+// call/visit was already logged for that lead, person and day.
+const NOTE_VISIT_RE = /\b(visited|visit today|dropped (in|off|by)|popped in|met with|went (in|to the centre)|in person|walked in)\b/i;
+const NOTE_CALL_RE = /\b(called|rang|phoned|spoke (to|with)|voicemail|left (a )?(message|vm)|no answer|didn'?t answer)\b/i;
+router.get('/derived-activity', leadsViewAccess, async (req, res) => {
+  try {
+    const db = getDb();
+    const notes = (await db.execute({ sql: 'SELECT lead_id, note, author_email, created_at FROM lead_notes WHERE author_email IS NOT NULL', args: [] })).rows;
+    const recs = (await db.execute({ sql: 'SELECT lead_id, uploaded_by_email, created_at FROM lead_recordings WHERE uploaded_by_email IS NOT NULL', args: [] })).rows;
+    const out = [];
+    for (const n of notes) {
+      const ch = NOTE_VISIT_RE.test(n.note || '') ? 'visit' : NOTE_CALL_RE.test(n.note || '') ? 'call' : null;
+      if (ch) out.push({ lead_id: n.lead_id, channel: ch, at: n.created_at, email: String(n.author_email).toLowerCase(), source: 'note' });
+    }
+    for (const r of recs) out.push({ lead_id: r.lead_id, channel: 'visit', at: r.created_at, email: String(r.uploaded_by_email).toLowerCase(), source: 'voice_note' });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stage-events', leadsViewAccess, async (req, res) => {
   try {
     res.json(await buildStageEvents());

@@ -1008,7 +1008,7 @@
         <div id="wfpPerfBody" style="display:none">
           <div class="admin-table-card" style="padding:24px 28px;margin-bottom:24px">
             <div class="sd-card-title">Partner Activity</div>
-            <div class="sd-card-sub">Calls and visits across leads and existing centres. Anything logged is credited to whoever logged it. Stage changes made before 5 Oct 2026 weren't recorded against a person, so those are credited to the partner who submitted the lead, or else wrote notes on it.</div>
+            <div class="sd-card-sub">Calls and visits across leads and existing centres. Anything logged is credited to whoever logged it. Stage changes made before 5 Oct 2026 weren't recorded against a person, so those are credited to the partner who submitted the lead, or else wrote notes on it. A lead note that describes a call or visit (e.g. "called", "left a message", "visited") and a voice note on a lead also count, once per lead per day, only when nothing else was logged that day.</div>
             <div id="wfpPerfPartnerRow" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-top:18px"></div>
             <div id="wfpPerfPartnerNote" style="margin-top:12px;font-size:12px;color:var(--text-muted)"></div>
           </div>
@@ -10708,15 +10708,17 @@
     // /api/centres/visits-log).
     let partnerActivityVisits = [];
     let partnerActivityLeadLog = [];
+    let partnerDerivedEvents = []; // calls/visits described in lead notes or voice notes (GET /api/leads/derived-activity)
     let partnerStageEvents = []; // call/visit stage changes with the inferred actor (GET /api/leads/stage-events)
     async function loadPartnerActivityData() {
       const safeJson = async url => {
         try { const r = await fetch(url); const d = r.ok ? await r.json() : []; return Array.isArray(d) ? d : []; } catch { return []; }
       };
-      [partnerActivityVisits, partnerActivityLeadLog, partnerStageEvents] = await Promise.all([
+      [partnerActivityVisits, partnerActivityLeadLog, partnerStageEvents, partnerDerivedEvents] = await Promise.all([
         safeJson('/api/centres/visits-log'),
         safeJson('/api/leads/activities-log'),
-        safeJson('/api/leads/stage-events')
+        safeJson('/api/leads/stage-events'),
+        safeJson('/api/leads/derived-activity')
       ]);
     }
 
@@ -10882,6 +10884,17 @@
       partnerStageEvents.forEach(e => {
         if (!inPeriod(e.at) || logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) return;
         events.push({ email: e.email, channel: e.channel });
+      });
+      // Notes that describe a call/visit and voice notes on a lead (Joy, 4 Nov):
+      // counted once per lead, person, channel and day, and only if nothing was
+      // already logged or stage-changed for that lead and day.
+      const staged = new Set(partnerStageEvents.map(e => `${e.lead_id}|${e.channel}|${dayKey(e.at)}`));
+      const seen = new Set();
+      (partnerDerivedEvents || []).forEach(e => {
+        const k = `${e.lead_id}|${e.channel}|${dayKey(e.at)}`;
+        if (!inPeriod(e.at) || !WFP_ACTIVITY_PARTNERS.some(p => p.email === e.email) || logged.has(k) || staged.has(k) || seen.has(k + '|' + e.email)) return;
+        seen.add(k + '|' + e.email);
+        events.push({ email: e.email, channel: e.channel, derived: true });
       });
       return events;
     }
