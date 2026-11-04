@@ -2963,3 +2963,23 @@ CREATE TABLE IF NOT EXISTS cio_educator_status (
   synced_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE cio_educator_status ENABLE ROW LEVEL SECURITY;
+
+-- Journey 1 Leads trigger (Liam, Management Meeting 28 Oct 2026). See
+-- services/leadJourneyService.js.
+-- 1) First booking free yes/no, asked once per lead: a call or visit can't be
+--    logged on a lead until it's picked ('yes' | 'no').
+-- 2) The Workforce Partner's first logged call/visit sends Customer.io
+--    lead_first_contact_logged (starts #42 ECEC / #43 OSHC). lead_journey_status:
+--    pending | sent | no_email | no_profile | failed | expired.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS fbf_choice TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS fbf_choice_by TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS fbf_choice_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_status TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_by TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_sent_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_identifier TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_error TEXT;
+-- Leads already tagged First Booking Free count as 'yes'.
+UPDATE leads SET fbf_choice = 'yes', fbf_choice_by = o.offered_by_name, fbf_choice_at = o.offered_at
+  FROM first_booking_free_offers o WHERE o.lead_id = leads.id AND leads.fbf_choice IS NULL;

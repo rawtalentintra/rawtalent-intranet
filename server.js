@@ -582,6 +582,7 @@ async function start() {
       .then(() => require('./services/firstBookingFreeService').processFirstBookings())
       .then(({ tasks }) => { if (tasks) console.log(`First booking free: ${tasks} task(s) created for accounts.`); })
       .then(() => require('./services/dormantService').retryPendingSignals())
+      .then(() => require('./services/leadJourneyService').retryPending())
       .catch(err => console.error('QR welcome bonus check error:', err.message));
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
     // Micropods: build the educator points once at start-up and every 50 min,

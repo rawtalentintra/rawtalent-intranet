@@ -46,12 +46,19 @@ router.post('/', async (req, res) => {
     const { centreName, email: contactEmail, firstName: contactFirst, state } = ct;
     const existing = (await db.execute({ sql: `SELECT * FROM first_booking_free_offers WHERE ${leadId ? 'lead_id' : 'centre_key'} = ?`, args: [leadId || centreKey] })).rows[0];
     if (existing) return res.json(shape(existing));
+    if (leadId) {
+      const l = (await db.execute({ sql: 'SELECT fbf_choice FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+      if (l && l.fbf_choice === 'no') return res.status(409).json({ error: 'This lead was logged as "No free first booking".' });
+    }
+    // A lead's offer is carried by Journey 1 Leads' first email (E0a has the FBF
+    // box, services/leadJourneyService.js), so no separate offer email for leads.
     const row = (await db.execute({
-      sql: `INSERT INTO first_booking_free_offers (lead_id, centre_key, centre_name, contact_email, contact_first_name, offered_by_email, offered_by_name, state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [leadId || null, leadId ? null : centreKey, centreName, contactEmail, contactFirst, req.user.email, req.user.name || req.user.email, state]
+      sql: `INSERT INTO first_booking_free_offers (lead_id, centre_key, centre_name, contact_email, contact_first_name, offered_by_email, offered_by_name, state, email_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      args: [leadId || null, leadId ? null : centreKey, centreName, contactEmail, contactFirst, req.user.email, req.user.name || req.user.email, state, leadId ? 'via_lead_journey' : 'pending']
     })).rows[0];
-    await sendOfferEmail(row.id).catch(() => {});
+    if (leadId) await db.execute({ sql: "UPDATE leads SET fbf_choice = 'yes', fbf_choice_by = ?, fbf_choice_at = now() WHERE id = ? AND fbf_choice IS NULL", args: [req.user.name || req.user.email, leadId] });
+    else await sendOfferEmail(row.id).catch(() => {});
     const fresh = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [row.id] })).rows[0];
     res.status(201).json(shape(fresh));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -64,7 +71,13 @@ router.delete('/:id', async (req, res) => {
     const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [req.params.id] })).rows[0];
     if (!o) return res.status(404).json({ error: 'Not found' });
     if (o.email_status === 'sent' || o.pay_task_id) return res.status(409).json({ error: 'The offer email or booking has already gone out, so this can no longer be removed.' });
+    if (o.lead_id) {
+      const l = (await db.execute({ sql: 'SELECT lead_journey_status FROM leads WHERE id = ?', args: [o.lead_id] })).rows[0];
+      if (l && l.lead_journey_status === 'sent') return res.status(409).json({ error: 'The welcome email with the offer has already gone out, so this can no longer be removed.' });
+    }
     await db.execute({ sql: 'DELETE FROM first_booking_free_offers WHERE id = ?', args: [o.id] });
+    // Undoing a lead's tag clears its yes so the next log asks again — unless the journey already started with it.
+    if (o.lead_id) await db.execute({ sql: "UPDATE leads SET fbf_choice = NULL, fbf_choice_by = NULL, fbf_choice_at = NULL WHERE id = ? AND fbf_choice = 'yes' AND lead_journey_status IS DISTINCT FROM 'sent'", args: [o.lead_id] });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

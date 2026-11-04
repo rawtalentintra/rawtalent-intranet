@@ -1010,11 +1010,30 @@ router.get('/:id/activities', leadsViewAccess, async (req, res) => {
 });
 
 router.post('/:id/activities', async (req, res) => {
-  const { channel, contactName, outcome, notes, opportunityNotes, nextStep, nextStepDueDate } = req.body;
+  const { channel, contactName, outcome, notes, opportunityNotes, nextStep, nextStepDueDate, firstBookingFree, contactEmail } = req.body;
   if (!channel) return res.status(400).json({ error: 'channel is required' });
   try {
-    const lead = await getDb().execute({ sql: 'SELECT id, lead_called_status, centre_visited_status FROM leads WHERE id = ?', args: [req.params.id] });
+    const lead = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     if (!lead.rows[0]) return res.status(404).json({ error: 'Lead not found' });
+    // Liam (28 Oct): no call/visit on a lead until First booking free yes/no is
+    // picked — it decides E0a vs E0b in Journey 1 Leads (services/leadJourneyService.js).
+    const fbfChoice = firstBookingFree === true ? 'yes' : firstBookingFree === false ? 'no' : null;
+    if (!lead.rows[0].fbf_choice && !fbfChoice) {
+      return res.status(400).json({ error: `Unable to log ${channel === 'visit' ? 'visit' : 'call'}, please select first booking free or not` });
+    }
+    // The journey's emails go to the lead's contact, so a partner can add the
+    // email (and first name, from "Who did you speak with?") when the lead has none.
+    const email = String(contactEmail || '').trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That contact email doesn’t look right' });
+    if (email && !lead.rows[0].contact_email) {
+      await getDb().execute({ sql: 'UPDATE leads SET contact_email = ?, updated_at = now() WHERE id = ? AND COALESCE(contact_email, \'\') = \'\'', args: [email, req.params.id] });
+      lead.rows[0].contact_email = email;
+    }
+    const first = String(contactName || '').trim().split(/\s+/)[0];
+    if (first && (!lead.rows[0].contact_first_name || /not provided/i.test(lead.rows[0].contact_first_name))) {
+      await getDb().execute({ sql: 'UPDATE leads SET contact_first_name = ? WHERE id = ?', args: [first, req.params.id] });
+      lead.rows[0].contact_first_name = first;
+    }
 
     // If this same person just moved the lead's Stage to Called/Visited, that
     // already wrote a bare activity row for this action — fill in that row
@@ -1080,6 +1099,11 @@ router.post('/:id/activities', async (req, res) => {
         args: [req.params.id]
       });
     }
+
+    // Saves the FBF choice and, on a Workforce Partner's first call/visit, starts
+    // Journey 1 Leads. Never fails the log that already saved.
+    await require('../services/leadJourneyService').onActivityLogged(lead.rows[0], req.user, fbfChoice)
+      .catch(err => console.error('Lead journey trigger failed for lead', req.params.id, err.message));
 
     const row = (await getDb().execute({ sql: 'SELECT * FROM lead_activities WHERE id = ?', args: [id] })).rows[0];
     res.json(row);

@@ -1736,10 +1736,12 @@
         : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
     }
     function fbfHtml(kind, id, boxId, o) {
+      const fbfLead = kind === 'lead' ? allLeads.find(l => l.id === id) : null;
+      if (!o && fbfLead && fbfLead.fbf_choice === 'no') return `<div style="font-size:12.5px;color:#374151">🎁 No free first booking${fbfLead.fbf_choice_by ? ` <span style="color:#6b7590">(${escHtml(fbfLead.fbf_choice_by)})</span>` : ''}</div>`;
       if (!o) return `<button type="button" class="btn btn-secondary" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', waiting_for_centre: 'Waiting for this lead to be set up as a centre in RT', via_dormant: 'Included in the Dormant journey', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
+      const email = { sent: 'Offer emails started in Customer.io', pending: 'Offer email queued (sends once emails are switched on)', no_email: 'No contact email on file, so no email was sent', no_profile: 'Not in Customer.io yet, will send once they are', waiting_for_centre: 'Waiting for this lead to be set up as a centre in RT', via_dormant: 'Included in the Dormant journey', via_lead_journey: 'Included in their first Journey 1 email', duplicate: 'Already sent to this contact for this centre', failed: 'Offer email failed, will retry' }[o.emailStatus] || '';
       const booking = o.bookingId ? `First booking received (RT ${escHtml(o.bookingId)}${o.bookingDate ? ', ' + escHtml(String(o.bookingDate).slice(0, 10)) : ''}) — accounts notified` : 'Waiting for their first booking';
       const canUndo = !o.payTaskCreated && o.emailStatus !== 'sent';
       return `<div style="border-left:4px solid #15803d;padding:6px 10px;background:#f0fdf4;border-radius:6px">
@@ -1751,11 +1753,12 @@
       </div>`;
     }
     async function setFbf(kind, id, boxId) {
-      if (!confirm('Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
+      if (!confirm(kind === 'lead' ? 'Mark this lead as offered "first booking free"? It goes in their first Journey 1 email.' : 'Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
       try {
         const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'lead' ? { leadId: id } : { centreKey: id }) });
         const o = await r.json();
         if (!r.ok) throw new Error(o.error || 'Could not save');
+        if (kind === 'lead') await ensureDataLoaded(true).catch(() => {}); // picks up the lead's new fbf_choice
         loadFbf(kind, id, boxId);
       } catch (e) { alert(e.message); }
     }
@@ -1764,6 +1767,7 @@
       const r = await fetch(`/api/first-booking-free/${offerId}`, { method: 'DELETE' });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { alert(d.error || 'Could not remove'); return; }
+      if (kind === 'lead') await ensureDataLoaded(true).catch(() => {});
       loadFbf(kind, id, boxId);
     }
 
@@ -2594,6 +2598,20 @@
       pendingRecordingId = null; // fresh sheet, fresh recording state
       const main = document.getElementById('mainContent');
       const isCentre = logTarget.type === 'centre';
+      // Lead: First booking free yes/no must be picked before the first log
+      // (Liam, 28 Oct — it decides which Journey 1 welcome email goes out).
+      const lead = !isCentre ? allLeads.find(l => l.id === logTarget.id) : null;
+      const fbfBlock = !lead ? '' : lead.fbf_choice
+        ? `<div style="font-size:12.5px;color:#374151;margin:10px 0 2px">🎁 First booking free: <strong>${lead.fbf_choice === 'yes' ? 'Yes' : 'No'}</strong>${lead.fbf_choice_by ? ` <span style="color:#6b7590">(${escHtml(lead.fbf_choice_by)})</span>` : ''}</div>`
+        : `<label>First booking free? <span style="color:#dc2626">*</span></label>
+           <div style="display:flex;gap:8px">
+             <label style="flex:1;display:flex;align-items:center;gap:6px;border:1px solid #d1d5db;border-radius:8px;padding:10px;margin:0;font-weight:500"><input type="radio" name="laFbf" value="yes" style="width:auto;margin:0"> First booking free</label>
+             <label style="flex:1;display:flex;align-items:center;gap:6px;border:1px solid #d1d5db;border-radius:8px;padding:10px;margin:0;font-weight:500"><input type="radio" name="laFbf" value="no" style="width:auto;margin:0"> No free first booking</label>
+           </div>
+           <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Only for centres that use agency regularly. Can't be changed later.</div>`;
+      const emailBlock = lead && !lead.contact_email
+        ? `<label>Contact email <span class="optional">(their welcome emails go here)</span></label>
+           <input type="email" id="laContactEmail" placeholder="name@centre.com.au" autocomplete="off">` : '';
       main.innerHTML = `
         <label>Channel</label>
         <select id="laChannel" onchange="${isCentre ? 'paintLaActivityOptions()' : ''}">
@@ -2608,9 +2626,11 @@
           <option value="planned">Planned</option>
           <option value="rescheduled">Rescheduled</option>
         </select>` : `<input type="hidden" id="laStatus" value="completed">`}
+        ${fbfBlock}
         <div id="laOutcomeWrap">
           <label>Who did you speak with?</label>
           <input type="text" id="laContactName" placeholder="Contact name">
+          ${emailBlock}
           <label>Outcome</label>
           <select id="laOutcome">
             <option value="positive" ${logTarget.prefillOutcome === 'positive' ? 'selected' : ''}>Positive</option>
@@ -2663,7 +2683,14 @@
       const el = id => document.getElementById(id);
       try {
         if (logTarget.type === 'lead') {
+          const lead = allLeads.find(l => l.id === logTarget.id);
+          const fbfPick = document.querySelector('input[name="laFbf"]:checked');
+          if (lead && !lead.fbf_choice && !fbfPick) {
+            throw new Error(`Unable to log ${el('laChannel').value === 'visit' ? 'visit' : 'call'}, please select first booking free or not`);
+          }
           const body = {
+            firstBookingFree: fbfPick ? fbfPick.value === 'yes' : undefined,
+            contactEmail: el('laContactEmail') ? el('laContactEmail').value.trim() || null : null,
             channel: el('laChannel').value,
             contactName: el('laContactName').value || null,
             outcome: el('laOutcome').value || null,

@@ -64,7 +64,7 @@ async function sendCioSignal(ident, attributes, eventName, data) {
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
-  if (!o || ['sent', 'duplicate', 'via_dormant'].includes(o.email_status)) return o && o.email_status;
+  if (!o || ['sent', 'duplicate', 'via_dormant', 'via_lead_journey'].includes(o.email_status)) return o && o.email_status;
   const cfg = cioTrackConfig();
   if (!cfg.ready) return 'pending'; // flag off or credentials missing — retried by the scheduled job
   try {
