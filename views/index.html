@@ -6080,6 +6080,10 @@
               <input type="text" id="leadCentrePhone" class="form-control" placeholder="e.g. 0884476519">
             </div>
             <div class="form-group-modal">
+              <label class="form-label-modal">Centre Email <span class="optional">(if you have it)</span></label>
+              <input type="email" id="leadContactEmail" class="form-control" placeholder="e.g. director@centre.com.au">
+            </div>
+            <div class="form-group-modal">
               <label class="form-label-modal">Educator Name <span class="optional">(optional)</span></label>
               <input type="text" id="leadEducatorName" class="form-control" placeholder="Who mentioned this centre?">
             </div>
@@ -6233,8 +6237,11 @@
         educatorName: document.getElementById('leadEducatorName').value,
         agencyName: document.getElementById('leadAgencyName').value,
         numberOfShifts: document.getElementById('leadNumberOfShifts').value,
-        agencyUsage
+        agencyUsage,
+        // Journey 1 Leads emails go to this address (services/leadJourneyService.js).
+        contactEmail: document.getElementById('leadContactEmail').value.trim() || null
       };
+      if (payload.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.contactEmail)) { toast('That email doesn\u2019t look right', 'error'); return; }
       try {
         const res = await fetch('/api/leads', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6242,9 +6249,8 @@
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || 'Failed to submit', 'error'); return; }
-        // Contact details (position/name/email) are filled in later by the
-        // Workforce Partner once they've spoken to the centre — this form
-        // no longer collects them. This note, though, goes straight into
+        // Contact name/position are filled in later by the Workforce Partner
+        // once they've spoken to the centre (the centre email is asked above). This note, though, goes straight into
         // the lead's notes thread so the Workforce Partner sees it first.
         if (notesForPartner) {
           try {

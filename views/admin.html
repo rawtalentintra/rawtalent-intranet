@@ -1774,6 +1774,10 @@
               <input type="text" id="centreLeadCentrePhone" class="form-control" placeholder="e.g. 0884476519" oninput="scheduleCentreLeadDupCheck()">
             </div>
             <div class="form-group-modal">
+              <label class="form-label-modal">Centre Email <span class="optional">(if you have it)</span></label>
+              <input type="email" id="centreLeadContactEmail" class="form-control" placeholder="e.g. director@centre.com.au">
+            </div>
+            <div class="form-group-modal">
               <label class="form-label-modal">Educator Name <span class="optional">(optional)</span></label>
               <input type="text" id="centreLeadEducatorName" class="form-control" placeholder="Who mentioned this centre?">
             </div>
@@ -9190,7 +9194,7 @@
       if (stateSelect.options.length === 1) {
         stateSelect.insertAdjacentHTML('beforeend', AU_STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
       }
-      ['centreLeadCentreName', 'centreLeadSuburb', 'centreLeadStreetAddress', 'centreLeadCentrePhone',
+      ['centreLeadCentreName', 'centreLeadSuburb', 'centreLeadStreetAddress', 'centreLeadCentrePhone', 'centreLeadContactEmail',
        'centreLeadEducatorName', 'centreLeadAgencyName', 'centreLeadNumberOfShifts', 'centreLeadNotesForPartner'
       ].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('centreLeadState').value = '';
@@ -9316,6 +9320,7 @@
         agencyName: document.getElementById('centreLeadAgencyName').value,
         numberOfShifts: document.getElementById('centreLeadNumberOfShifts').value,
         agencyUsage,
+        contactEmail: document.getElementById('centreLeadContactEmail').value.trim() || null,
         // Distinguishes this from a consultant's "Submit Lead" vetting-call
         // entry — same table, same downstream workflow, but not a lead in
         // the pipeline-performance sense. See entry_type on the leads table.

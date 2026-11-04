@@ -169,12 +169,19 @@ async function recordWash(leadId, body, user) {
   const lead = (await db.execute({ sql: 'SELECT id, archived_at FROM leads WHERE id = ? AND closed_at IS NULL', args: [leadId] })).rows[0];
   if (!lead) throw Object.assign(new Error('Lead not found'), { status: 404 });
   const s = v => (v == null ? null : String(v).trim().slice(0, 300) || null);
+  if (s(body.dmEmail) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s(body.dmEmail))) throw Object.assign(new Error('That decision maker email doesn’t look right'), { status: 400 });
   const row = (await db.execute({
     sql: `INSERT INTO lead_washes (lead_id, reached, uses_agency, dm_name, dm_role, dm_phone, dm_email, knows_referrer, verdict, not_viable_reason, notes, washed_by_email, washed_by_name)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *`,
     args: [leadId, reached, pick('uses_agency', body.usesAgency), s(body.dmName), s(body.dmRole), s(body.dmPhone), s(body.dmEmail), pick('knows_referrer', body.knowsReferrer),
       verdict, verdict === 'not_viable' ? reason : null, s(body.notes), user.email, user.name || user.email]
   })).rows[0];
+  // The decision maker's email/name become the lead's contact when it has none:
+  // Journey 1 Leads emails go to leads.contact_email (services/leadJourneyService.js).
+  const dmEmail = s(body.dmEmail);
+  if (dmEmail) await db.execute({ sql: "UPDATE leads SET contact_email = ?, updated_at = now() WHERE id = ? AND COALESCE(contact_email, '') = ''", args: [dmEmail, leadId] });
+  const dmFirst = (s(body.dmName) || '').split(/\s+/)[0];
+  if (dmFirst) await db.execute({ sql: "UPDATE leads SET contact_first_name = ? WHERE id = ? AND (COALESCE(contact_first_name, '') = '' OR contact_first_name ILIKE '%not provided%')", args: [dmFirst, leadId] });
   if (body.serviceType || body.groupCategory) await category.setLeadCategory(leadId, { serviceType: body.serviceType, groupCategory: body.groupCategory }, user);
   if (verdict === 'not_viable') {
     await db.execute({ sql: 'UPDATE leads SET archived_at = now(), archived_reason = ?, updated_at = now() WHERE id = ?', args: [`Lead wash: ${OPTIONS.not_viable_reason[reason]}`, leadId] });
