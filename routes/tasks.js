@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../db/database');
+const { getDb, transaction } = require('../db/database');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { isFinalApprover } = require('../services/leaveService');
 const { matchPersonOrCentre } = require('../services/taskPersonMatchService');
@@ -236,9 +236,11 @@ function normalizeAssignees(list) {
 // someone not already on the task — merges them in (never removes anyone)
 // and logs it in task_assignee_history same as an explicit picker change,
 // so it's visible on the task and traceable either way.
-async function addAssigneesFromMention(db, taskId, mentionedEmails, changedBy) {
+async function addAssigneesFromMention(_db, taskId, mentionedEmails, changedBy) {
   if (!mentionedEmails.length) return;
-  const existing = await db.execute({ sql: 'SELECT assigned_to_emails FROM tasks WHERE id = ?', args: [taskId] });
+  // Row lock: a task save landing at the same moment can't overwrite this (or vice versa).
+  return transaction(async db => {
+  const existing = await db.execute({ sql: 'SELECT assigned_to_emails FROM tasks WHERE id = ? FOR UPDATE', args: [taskId] });
   const previous = Array.isArray(existing.rows[0]?.assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
   const merged = normalizeAssignees([...previous, ...mentionedEmails]);
   if (merged.length === previous.length) return; // everyone mentioned was already assigned
@@ -247,6 +249,7 @@ async function addAssigneesFromMention(db, taskId, mentionedEmails, changedBy) {
     sql: `INSERT INTO task_assignee_history (id, task_id, previous_assignees, new_assignees, changed_by)
           VALUES (?, ?, ?, ?, ?)`,
     args: [uuidv4(), taskId, JSON.stringify(previous), JSON.stringify(merged), changedBy]
+  });
   });
 }
 
@@ -361,7 +364,13 @@ router.post('/', async (req, res) => {
 // database. A field that's left out of the request keeps its current value.
 function mergeList(current, original, next, keyOf) {
   if (next === undefined) return current;                  // field not sent → keep
-  if (!Array.isArray(original)) return next;               // old client → previous behaviour
+  // No "original" = a page opened before the 23 Oct fix (or another old
+  // caller). It can't say what it meant to remove, so never remove anything:
+  // only add what it sent (Sophia, 4 Nov: assignees/educators kept vanishing).
+  if (!Array.isArray(original)) {
+    const curKeys = new Set(current.map(x => String(keyOf(x))));
+    return [...current, ...next.filter(x => !curKeys.has(String(keyOf(x))))];
+  }
   const k = x => String(keyOf(x));
   const origKeys = new Set(original.map(k)), nextKeys = new Set(next.map(k));
   const removed = new Set([...origKeys].filter(x => !nextKeys.has(x)));
@@ -388,17 +397,19 @@ router.put('/:id', async (req, res) => {
   // department it can't see either).
   if (!canAccessDepartment(req.user, department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
   try {
-    const db = getDb();
-    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres FROM tasks WHERE id = ?', args: [req.params.id] });
-    if (!existing.rows[0]) return res.status(404).json({ error: 'Task not found' });
-    if (!canAccessDepartment(req.user, existing.rows[0].department_id)) return res.status(403).json({ error: 'You do not have access to this department' });
+    // One locked transaction (Sophia, 4 Nov): a note's @mention auto-assign or a
+    // second save landing at the same moment waits instead of overwriting.
+    await transaction(async db => {
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
+    if (!existing.rows[0]) throw Object.assign(new Error('Task not found'), { status: 404 });
+    if (!canAccessDepartment(req.user, existing.rows[0].department_id)) throw Object.assign(new Error('You do not have access to this department'), { status: 403 });
     const finalStatus = status || existing.rows[0].status;
     // completed_at only gets set the moment status actually transitions
     // into 'done', and clears if it's reopened — not touched on every save.
     let completedAt = existing.rows[0].completed_at;
     if (finalStatus === 'done' && existing.rows[0].status !== 'done') completedAt = new Date().toISOString();
     else if (finalStatus !== 'done') completedAt = null;
-    const mentioned = await resolveDescriptionMentions(db, description, req.user.email);
+    const mentioned = await resolveDescriptionMentions(getDb(), description, req.user.email);
     const previousAssignees = Array.isArray(existing.rows[0].assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
     const orig = original && typeof original === 'object' ? original : {};
     const newAssignees = normalizeAssignees(mergeList(previousAssignees, orig.assigned_to_emails === undefined ? undefined : normalizeAssignees(orig.assigned_to_emails),
@@ -439,10 +450,21 @@ router.put('/:id', async (req, res) => {
         args: [uuidv4(), req.params.id, JSON.stringify(previousAssignees), JSON.stringify(newAssignees), req.user.email]
       });
     }
+    // Same trail for linked educators/centres, so an unlink can always be traced and restored.
+    const ids = l => JSON.stringify(l.map(c => String(c.userId)).sort());
+    const ckeys = l => JSON.stringify(l.map(c => c.centreKey || ('name:' + c.name)).sort());
+    if (ids(currentCandidates) !== ids(finalCandidates) || ckeys(currentCentres) !== ckeys(finalCentres)) {
+      await db.execute({
+        sql: `INSERT INTO task_link_history (id, task_id, previous_candidates, new_candidates, previous_centres, new_centres, changed_by, old_client)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [uuidv4(), req.params.id, JSON.stringify(currentCandidates), JSON.stringify(finalCandidates), JSON.stringify(currentCentres), JSON.stringify(finalCentres), req.user.email, !(original && typeof original === 'object')]
+      });
+    }
+    });
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

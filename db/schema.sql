@@ -3001,3 +3001,21 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_error TEXT;
 -- Leads already tagged First Booking Free count as 'yes'.
 UPDATE leads SET fbf_choice = 'yes', fbf_choice_by = o.offered_by_name, fbf_choice_at = o.offered_at
   FROM first_booking_free_offers o WHERE o.lead_id = leads.id AND leads.fbf_choice IS NULL;
+
+-- Linked educator/centre changes on a task (Sophia, 4 Nov 2026), like
+-- task_assignee_history: written only when a save actually changes the links,
+-- so an unlink can be traced and restored. old_client = the save came from a
+-- page opened before the 23 Oct fix (such saves can only add, never remove).
+CREATE TABLE IF NOT EXISTS task_link_history (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  previous_candidates JSONB,
+  new_candidates JSONB,
+  previous_centres JSONB,
+  new_centres JSONB,
+  changed_by CITEXT,
+  old_client BOOLEAN,
+  changed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_link_history_task ON task_link_history(task_id);
+ALTER TABLE task_link_history ENABLE ROW LEVEL SECURITY;
