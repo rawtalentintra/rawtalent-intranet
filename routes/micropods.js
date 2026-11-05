@@ -569,7 +569,7 @@ function qualificationCountsFor(candidates) {
 // Filtering is done in the browser; this just returns the full list once (cached).
 const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
 // Bad geocodes (e.g. a centre plotted in Asia) would zoom the map out to the globe.
-const inAustralia = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && lat > -44.5 && lat < -9 && lng > 112 && lng < 154.5;
+const inAustralia = (lat, lng) => (lat = Number(lat), lng = Number(lng), Number.isFinite(lat) && Number.isFinite(lng)) && lat > -44.5 && lat < -9 && lng > 112 && lng < 154.5;
 let educatorMapCache = { data: null, expiresAt: 0 };
 async function buildEducatorMap() {
   if (educatorMapCache.data && Date.now() < educatorMapCache.expiresAt) return educatorMapCache.data;
@@ -625,7 +625,7 @@ async function buildEducatorMap() {
   const geocodes = await centreGeoService.getGeocodesForCentres(current);
   const centreList = current.filter(c => geocodes[c.centreKey] && inAustralia(geocodes[c.centreKey].lat, geocodes[c.centreKey].lng)).map(c => ({
     centreKey: c.centreKey, name: c.name, suburb: c.suburb || null, state: normalizeStateToShort(c.state),
-    lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng,
+    lat: Number(geocodes[c.centreKey].lat), lng: Number(geocodes[c.centreKey].lng),
     unfilled30d: bookingsForCentre(index, c).filter(b => (b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50)) && b.bookingDate && new Date(b.bookingDate).getTime() >= since30 && new Date(b.bookingDate).getTime() <= Date.now()).length
   }));
 
