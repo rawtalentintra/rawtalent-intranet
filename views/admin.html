@@ -13395,7 +13395,7 @@
       document.getElementById('emTableBody').innerHTML = rows.length ? rows.map(e => {
         const seg = SEGMENT_META[e.segment] || {};
         return `<tr>
-          <td><div style="font-weight:600">${escHtml(e.name)}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(e.phone || '')}${e.phone && e.email ? ' · ' : ''}${escHtml(e.email || '')}</div></td>
+          <td><div style="font-weight:600">${escHtml(e.name)} <a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(e.userId)}" target="_blank" rel="noopener" title="Open in RT Portal" aria-label="Open ${escHtml(e.name)} in RT Portal" style="color:#2563eb;text-decoration:none;font-size:.9em;margin-left:2px">&#8599;</a></div><div style="font-size:11px;color:var(--text-muted)">${escHtml(e.phone || '')}${e.phone && e.email ? ' · ' : ''}${escHtml(e.email || '')}</div></td>
           <td>${escHtml(e.suburb || '')}${e.state ? ', ' + e.state : ''}</td>
           <td>${escHtml(e.status || '')}</td>
           <td>${escHtml(e.onboarding || 'Not started')}</td>
