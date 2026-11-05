@@ -643,6 +643,51 @@ router.get('/locate', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Status audit (super_admin only): compares RT Portal's own candidate list
+// (userId,statusId,onboardingStepId,complianceStatusId,stateId,gender — exactly what
+// backoffice's Candidates screen shows) with HeartBeat's synced copy and its
+// own compliance calculation. Read-only; nothing is written to RT or HeartBeat.
+router.post('/status-audit', express.text({ limit: '5mb' }), async (req, res) => {
+  if (!req.user || req.user.role !== 'super_admin') return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const STEP = { Register: 0, AboutUs: 1, 'Profile Image': 2, Experience: 3, 'Emergency Contact': 4, 'Qualification Level': 5, Reference: 6, Visa: 7, Finance: 8, Tax: 9, Documents: 10, Completed: 11, Complete: 11 };
+    const rt = new Map();
+    String(req.body || '').split(/[\n;]/).forEach(line => {
+      const [id, st, step, comp, state, gender] = line.split(',').map(Number);
+      if (Number.isFinite(id)) rt.set(id, { st, step, comp, state, gender });
+    });
+    const rows = (await getDb().execute({
+      sql: `SELECT user_id, status, is_active, is_deleted, raw->>'obStatus' AS ob, raw->'attachedRequirements' AS reqs,
+              raw->'visaDetails' AS visa, (raw->'addresses'->0->>'regionId')::int AS region, raw->>'gender' AS gender
+            FROM rt_candidates_cache`, args: [] })).rows;
+    const today = new Date().toISOString().slice(0, 10);
+    const hb = new Map(rows.map(r => [Number(r.user_id), r]));
+    const out = { rtCount: rt.size, hbCount: hb.size, missingInHb: [], hbNotInRtList: { active: 0, inactive: 0, deleted: 0 },
+      status: { match: 0, diff: 0, pairs: {} }, onboarding: { match: 0, diff: 0, pairs: {} },
+      compliance: { match: 0, diff: 0, pairs: {} }, state: { match: 0, diff: 0, pairs: {} }, gender: { match: 0, diff: 0 },
+      examples: { status: [], onboarding: [], compliance: [], state: [] }, rtStatusCounts: {}, hbStatusCountsSameIds: {} };
+    const bump = (o, k) => { o[k] = (o[k] || 0) + 1; };
+    for (const [id, r] of rt) {
+      bump(out.rtStatusCounts, r.st);
+      const h = hb.get(id);
+      if (!h) { if (out.missingInHb.length < 50) out.missingInHb.push(id); out.missingCount = (out.missingCount || 0) + 1; continue; }
+      bump(out.hbStatusCountsSameIds, h.status);
+      const cmp = (key, a, b) => {
+        if (a === b) out[key].match++;
+        else { out[key].diff++; bump(out[key].pairs, `RT ${a} / HB ${b}`); if (out.examples[key] && out.examples[key].length < 15) out.examples[key].push(id); }
+      };
+      cmp('status', r.st, h.status);
+      cmp('onboarding', r.step, h.ob == null ? null : (STEP[h.ob] ?? h.ob));
+      const hbComp = complianceReasons({ attachedRequirements: h.reqs, visaDetails: h.visa }, today, h.user_id).length === 0 ? 1 : 2;
+      cmp('compliance', r.comp, hbComp);
+      if (r.state) cmp('state', r.state, h.region ?? null);
+      if (String(r.gender) === String(h.gender)) out.gender.match++; else out.gender.diff++;
+    }
+    for (const [id, h] of hb) if (!rt.has(id)) { if (h.is_deleted) out.hbNotInRtList.deleted++; else if (h.is_active) out.hbNotInRtList.active++; else out.hbNotInRtList.inactive++; }
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/unclustered', async (req, res) => {
   try {
     const result = await getPodsForParams(req);
