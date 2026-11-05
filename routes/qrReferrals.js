@@ -17,6 +17,9 @@ const { getDb } = require('../db/database');
 const { requireSuperAdmin } = require('../middleware/authMiddleware');
 const { getCentresAndBookings, getCentrePartnerAssignments } = require('./centres');
 const { partnerForSuburbState } = require('../services/melbourneTerritoryService');
+// RT Portal's labels for candidate.status. raw.statusName uses different wording and
+// even disagrees on meaning (4 is "In Progress" there but Do Not Use in RT Portal).
+const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
 
 const STATUSES = ['new', 'contacted', 'onboarding', 'active', 'not_proceeding'];
 const STATE_DEFAULT_PARTNER = { VIC: 'Justine', SA: 'Gwen', QLD: 'Gwen' };
@@ -182,7 +185,7 @@ router.get('/', async (req, res) => {
         centreKey: r.centre_key, centreName: c ? c.name : null, partner,
         status: r.status, assignedToEmail: r.assigned_to_email, currentAgencyRate: r.current_agency_rate, offeredRate: r.offered_rate,
         bonusEligible: r.bonus_eligible, bonusTaskId: r.bonus_task_id, firstShiftDate: r.first_shift_date, notes: r.notes, createdAt: r.created_at, daysWaiting,
-        rt: m ? { userId: m.uid, status: m.status_name || m.status, obStatus: m.ob_status, obStep: m.ob_step, obStepName: OB_STEPS[m.ob_step] || null } : null
+        rt: m ? { userId: m.uid, status: RT_STATUS_LABELS[m.status] || m.status_name || m.status, obStatus: m.ob_status, obStep: m.ob_step, obStepName: OB_STEPS[m.ob_step] || null } : null
       };
     });
     const assignees = (await db.execute({ sql: "SELECT email, name FROM users WHERE active = true AND role IN ('admin','super_admin') ORDER BY name", args: [] })).rows;
