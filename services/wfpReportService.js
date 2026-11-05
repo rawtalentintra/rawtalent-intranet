@@ -186,7 +186,7 @@ async function buildReport(type = 'week', start = null) {
     const r = byState[st] = byState[st] || { state: st, booked: 0, filled: 0, unfilled: 0, open: 0, cancelled: { centre: 0, educator: 0, admin: 0, unclear: 0 } };
     r.booked++;
     if (b.statusId === 2 || b.statusId === 3 || b.statusId === 5) r.filled++; // 2 = Assigned in RT Portal
-    else if (b.statusId === 1) r.open++;
+    else if (b.statusId === 1 || b.statusId === 11) r.open++; // 11 = Requested
     else if (b.statusId === 7) r.unfilled++;
     else if (b.statusId === 6) {
       const g = CANCEL_GROUP[centresMod.lastCancelReason(b)] || 'unclear';

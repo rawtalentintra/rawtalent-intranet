@@ -10,7 +10,7 @@ const jobAdderService = require('../services/jobAdderService');
 const { getCentresAndBookings, computeFillRateByPartner, lastCancelReason } = require('./centres');
 
 // RT Portal's own booking status names (RT's bookingStatus text). Filled = 2, 3 or 5.
-const STATUS_NAMES = { 1: 'Created (open, no educator yet)', 2: 'Assigned (filled)', 3: 'Accepted (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled' };
+const STATUS_NAMES = { 1: 'Created (open, no educator yet)', 2: 'Assigned (filled)', 3: 'Accepted (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled', 11: 'Requested (pending: centre asked for a named educator)' };
 const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
 const text = t => ({ content: [{ type: 'text', text: t }] });
 const day = d => (d ? new Date(d).toISOString().slice(0, 10) : '—');
@@ -218,12 +218,12 @@ function registerAdminTools(server) {
       if (state && short(stateOf.get(key) || stateOf.get(`client:${b.clientId}`) || '') !== state.toUpperCase()) return false;
       return true;
     });
-    const n = { created: 0, assigned: 0, accepted: 0, completed: 0, cancelled: 0, unfilled: 0 };
+    const n = { created: 0, requested: 0, assigned: 0, accepted: 0, completed: 0, cancelled: 0, unfilled: 0 };
     const mins = [], starts = [], ends = [];
     for (const b of rows) {
       const uf = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
       if (uf) n.unfilled++; else if (b.statusId === 6) n.cancelled++;
-      else if (b.statusId === 1) n.created++; else if (b.statusId === 2) n.assigned++; else if (b.statusId === 3) n.accepted++; else if (b.statusId === 5) n.completed++;
+      else if (b.statusId === 1) n.created++; else if (b.statusId === 11) n.requested++; else if (b.statusId === 2) n.assigned++; else if (b.statusId === 3) n.accepted++; else if (b.statusId === 5) n.completed++;
       if ([2, 3, 5].includes(b.statusId) && b.startTime && b.endTime) {
         const s = new Date(b.startTime), e = new Date(b.endTime);
         const m = (e - s) / 60000; if (m > 0 && m < 24 * 60) { mins.push(m - (Number(b.unpaidBreak) || 0)); starts.push(s.getHours() * 60 + s.getMinutes()); ends.push(e.getHours() * 60 + e.getMinutes()); }
@@ -241,6 +241,7 @@ function registerAdminTools(server) {
       `Total bookings: ${rows.length}`,
       `Filled: ${filled} (assigned ${n.assigned}, accepted ${n.accepted}, completed ${n.completed})`,
       `Open, no educator yet: ${n.created}`,
+      `Requested (centre asked for a named educator, not assigned yet): ${n.requested}`,
       `Cancelled: ${n.cancelled}`,
       `Unfilled (RT couldn't fill): ${n.unfilled}`,
       `Filled shifts: average start ${clock(avg(starts))}, average finish ${clock(avg(ends))}, average length ${dur == null ? 'n/a' : (dur / 60).toFixed(1) + ' h'} (after unpaid break)`,
@@ -296,13 +297,13 @@ function registerAdminTools(server) {
     description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns at most 50 rows, so NEVER count bookings with this tool: use get_bookings_summary for totals.',
     inputSchema: {
       centreKey: z.string().optional(),
-      status: z.enum(['filled', 'created', 'assigned', 'accepted', 'completed', 'cancelled', 'unfilled']).optional().describe('filled = assigned + accepted + completed (an educator is on it); created = no educator yet'),
+      status: z.enum(['filled', 'created', 'requested', 'assigned', 'accepted', 'completed', 'cancelled', 'unfilled']).optional().describe('filled = assigned + accepted + completed (an educator is on it); created = no educator yet'),
       from: z.string().optional(), to: z.string().optional(),
       limit: z.number().int().min(1).max(50).optional()
     }
   }, async ({ centreKey, status, from, to, limit }) => {
     const { bookings, centres } = await getCentresAndBookings();
-    const wanted = status ? { created: 1, assigned: 2, accepted: 3, completed: 5, cancelled: 6, unfilled: 7, filled: -1 }[status] : null;
+    const wanted = status ? { created: 1, requested: 11, assigned: 2, accepted: 3, completed: 5, cancelled: 6, unfilled: 7, filled: -1 }[status] : null;
     const nameByKey = new Map(centres.map(c => [c.centreKey, c.name]));
     const rows = bookings.filter(b => {
       const d = (b.bookingDate || '').slice(0, 10);

@@ -44,7 +44,7 @@ function isRealAssignment(assignedUserId) {
 // since that copy lives in a big inline <script>, not a requirable
 // module; both describe the same RT statusId values and should be kept
 // in sync if either changes.
-const BOOKING_STATUS_LABELS = { 1: 'Created', 2: 'Assigned', 3: 'Accepted', 5: 'Completed', 6: 'Cancelled', 7: 'Unfilled' }; // RT Portal's own names
+const BOOKING_STATUS_LABELS = { 1: 'Created', 2: 'Assigned', 3: 'Accepted', 5: 'Completed', 6: 'Cancelled', 7: 'Unfilled', 11: 'Requested' }; // RT Portal's own names
 function bookingStatusLabel(statusId) {
   return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
 }
@@ -631,7 +631,7 @@ const FILLED_STATUS_IDS = new Set([2, 3, 5]);
 const UNFILLED_STATUS_ID = 7;
 const CANCELLED_STATUS_ID = 6;
 const UNFILLED_CANCEL_REASON = 50;
-const PENDING_STATUS_IDS = new Set([1]);
+const PENDING_STATUS_IDS = new Set([1, 11]); // 11 = Requested (centre asked for a named educator, not assigned yet)
 function lastCancelReason(b) {
   const log = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === CANCELLED_STATUS_ID).slice(-1)[0];
   return log ? log.reason : null;

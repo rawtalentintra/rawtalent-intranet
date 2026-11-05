@@ -16966,7 +16966,7 @@
     // dates across 2,000 real bookings. Strong evidence, not confirmed.
     // Falls back to the raw code for any value outside this set, so a
     // status the sweep never saw still shows something instead of nothing.
-    const BOOKING_STATUS_LABELS = { 1: 'Created', 2: 'Assigned', 3: 'Accepted', 5: 'Completed', 6: 'Cancelled', 7: 'Unfilled' }; // RT Portal's own names (5 Nov 2026)
+    const BOOKING_STATUS_LABELS = { 1: 'Created', 2: 'Assigned', 3: 'Accepted', 5: 'Completed', 6: 'Cancelled', 7: 'Unfilled', 11: 'Requested' }; // RT Portal's own names (5 Nov 2026)
     function bookingStatusLabel(statusId) {
       if (statusId === null || statusId === undefined) return '—';
       return BOOKING_STATUS_LABELS[statusId] || `Status ${statusId}`;
