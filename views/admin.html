@@ -1344,7 +1344,14 @@
         .mp-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--gray-200)}
         .mp-tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 14px;font-size:13.5px;font-weight:600;color:var(--text-muted);cursor:pointer;margin-bottom:-1px}
         .mp-tab.active{color:var(--navy);border-bottom-color:var(--orange)}
-        .em-card{padding:16px 20px;margin-bottom:16px}
+        .em-card{padding:16px 20px;margin-bottom:16px;overflow:visible!important;position:relative;z-index:5}
+        .em-top-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-100)}
+        .em-states{display:flex;gap:8px;flex-wrap:wrap}
+        .em-state{border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;opacity:.55;transition:opacity .15s}
+        .em-state.on{opacity:1}
+        .em-type{flex:0 0 220px}
+        .em-centre-pick{flex:1 1 260px;min-width:0}
+        .em-centre-pick select{width:100%}
         .em-search-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
         .em-search{position:relative;flex:1 1 320px;min-width:0}
         .em-search label,.em-radius label,.em-filter label{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin-bottom:4px}
@@ -1399,10 +1406,18 @@
 
         <div id="emView">
           <div class="admin-table-card em-card">
+            <div class="em-top-row">
+              <div class="em-states" id="emStates"></div>
+              <div class="em-filter em-type" id="emTypeFilter"></div>
+            </div>
             <div class="em-search-row">
+              <div class="em-centre-pick">
+                <label for="emCentreSelect">Centre</label>
+                <select id="emCentreSelect" class="form-control" onchange="emOnCentreSelect(this)"><option value="">Select a centre</option></select>
+              </div>
               <div class="em-search">
-                <label for="emCentreSearch">Centre or address</label>
-                <input type="text" id="emCentreSearch" class="form-control" placeholder="Type a centre name, suburb or street address" autocomplete="off" oninput="emOnSearchInput()" onfocus="emOnSearchInput()">
+                <label for="emCentreSearch">Or type a centre name, suburb or address</label>
+                <input type="text" id="emCentreSearch" class="form-control" placeholder="e.g. YMCA Brunswick or 12 Smith St, Fitzroy" autocomplete="off" oninput="emOnSearchInput()" onfocus="emOnSearchInput()">
                 <div id="emSearchResults" class="em-search-results" style="display:none"></div>
               </div>
               <div class="em-radius">
@@ -13226,11 +13241,11 @@
     const emSel = {}; // filterKey -> Set of selected values ([] = all)
     let emListLimit = 100, emSearchTimer = null;
     const EM_FILTERS = [
-      { key: 'state', label: 'State', get: e => e.state || 'Unknown' },
+      { key: 'state', label: 'State', get: e => e.state || 'Unknown', pills: true },
       { key: 'status', label: 'Status', get: e => e.status || 'Unknown' },
       { key: 'onboarding', label: 'Onboarding step', get: e => e.onboarding || 'Not started' },
       { key: 'compliant', label: 'Compliant status', get: e => e.compliant ? 'Compliant' : 'Not compliant' },
-      { key: 'segment', label: 'Engagement', get: e => e.segment, fmt: v => (SEGMENT_META[v] || {}).label || v },
+      { key: 'segment', label: 'Educator type', get: e => e.segment, fmt: v => (SEGMENT_META[v] || {}).label || v, top: true },
       { key: 'qualification', label: 'Qualification', get: e => e.qualification || 'None listed' },
       { key: 'gender', label: 'Gender', get: e => e.gender || 'Not stated' }
     ];
@@ -13263,9 +13278,18 @@
       emRender();
     }
 
+    const EM_STATE_PILLS = [['all', 'All States', 'var(--navy)'], ['VIC', 'VIC', '#2563eb'], ['SA', 'SA', '#db2777'], ['QLD', 'QLD', '#f97316'], ['NT', 'NT', '#0d9488'], ['ACT', 'ACT', '#7c3aed'], ['WA', 'WA', '#475569']];
+    function emSetState(st) {
+      if (st === 'all') delete emSel.state; else emSel.state = new Set([st]);
+      emListLimit = 100;
+      emRenderFilters(); emRender();
+    }
     function emRenderFilters() {
-      const wrap = document.getElementById('emFilters');
-      wrap.innerHTML = EM_FILTERS.map(f => {
+      const cur = emSel.state && emSel.state.size === 1 ? [...emSel.state][0] : 'all';
+      document.getElementById('emStates').innerHTML = EM_STATE_PILLS.map(([k, label, bg]) =>
+        `<button type="button" class="em-state${k === cur ? ' on' : ''}" style="background:${bg}" onclick="emSetState('${k}')">${label}</button>`).join('');
+      emRenderCentreSelect();
+      const html = f => {
         const counts = {};
         emData.educators.forEach(e => { const v = f.get(e); counts[v] = (counts[v] || 0) + 1; });
         let values = Object.keys(counts);
@@ -13283,7 +13307,24 @@
             </div>
           </details>
         </div>`;
-      }).join('') + `<button type="button" class="btn-secondary em-reset" onclick="emResetFilters()">Reset filters</button>`;
+      };
+      document.getElementById('emTypeFilter').innerHTML = EM_FILTERS.filter(f => f.top).map(html).join('');
+      document.getElementById('emFilters').innerHTML = EM_FILTERS.filter(f => !f.top && !f.pills).map(html).join('') +
+        `<button type="button" class="btn-secondary em-reset" onclick="emResetFilters()">Reset filters</button>`;
+    }
+    function emRenderCentreSelect() {
+      const sel = document.getElementById('emCentreSelect');
+      const st = emSel.state && emSel.state.size ? emSel.state : null;
+      const byState = {};
+      emData.centres.forEach((c, i) => { if (st && !st.has(c.state || 'Unknown')) return; (byState[c.state || 'Other'] = byState[c.state || 'Other'] || []).push([c, i]); });
+      const picked = emLocation && emLocation.centreIndex != null ? emLocation.centreIndex : '';
+      sel.innerHTML = '<option value="">Select a centre</option>' + Object.keys(byState).sort().map(k =>
+        `<optgroup label="${escHtml(k)}">${byState[k].sort((a, b) => a[0].name.localeCompare(b[0].name)).map(([c, i]) =>
+          `<option value="${i}" ${String(picked) === String(i) ? 'selected' : ''}>${escHtml(c.name)}${c.suburb ? ' (' + escHtml(c.suburb) + ')' : ''}</option>`).join('')}</optgroup>`).join('');
+    }
+    function emOnCentreSelect(sel) {
+      if (sel.value === '') { emClearLocation(); return; }
+      emPickCentre(Number(sel.value));
     }
     function emToggleFilter(cb) {
       const k = cb.dataset.emKey;
@@ -13292,7 +13333,7 @@
       const open = cb.closest('details');
       emRenderFilters();
       // keep the dropdown that was being used open
-      const again = document.querySelector(`#emFilters input[data-em-key="${k}"]`);
+      const again = document.querySelector(`#emView input[data-em-key="${k}"]`);
       if (open && again) again.closest('details').open = true;
       emListLimit = 100;
       emRender();
@@ -13300,7 +13341,7 @@
     function emClearFilter(k) { delete emSel[k]; emRenderFilters(); emRender(); }
     function emResetFilters() { Object.keys(emSel).forEach(k => delete emSel[k]); emRenderFilters(); emRender(); }
     document.addEventListener('click', e => {
-      document.querySelectorAll('#emFilters details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+      document.querySelectorAll('#emView details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
       const box = document.getElementById('emSearchResults');
       if (box && !e.target.closest('.em-search')) box.style.display = 'none';
     });
@@ -13380,10 +13421,15 @@
       }
       if (!mapboxTokenCache.configured || !mapboxTokenCache.token) { mapEl.textContent = 'Map needs Mapbox configured. The list below still works.'; return; }
       try { await ensureMapboxGlLoaded(); } catch { mapEl.textContent = 'Could not load the map.'; return; }
-      const geo = { type: 'FeatureCollection', features: list.map(e => ({
-        type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      // RT stores many home addresses rounded to about 1 km, so educators stack on
+      // the same spot. Spread each one slightly (same spot every time) and draw
+      // Dormant first so the working/engaged colours sit on top.
+      const spread = id => { let h = 0; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; const a = (h % 360) * Math.PI / 180, r = 0.0015 + (h % 7) * 0.0006; return [Math.cos(a) * r, Math.sin(a) * r]; };
+      const drawOrder = [...list].sort((a, b) => EM_SEGMENT_ORDER.indexOf(b.segment) - EM_SEGMENT_ORDER.indexOf(a.segment));
+      const geo = { type: 'FeatureCollection', features: drawOrder.map(e => { const [dx, dy] = spread(e.userId); return {
+        type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng + dx, e.lat + dy] },
         properties: { id: e.userId, color: (SEGMENT_META[e.segment] || {}).dot || '#64748b' }
-      })) };
+      }; }) };
       const fit = () => {
         const pts = emLocation ? [emLocation, ...list] : (list.length ? list : centres);
         if (!pts.length) return;
@@ -13425,7 +13471,7 @@
           const s2 = document.createElement('div'); s2.style.color = 'var(--text-muted)';
           s2.textContent = `${c.suburb || ''}${c.state ? ', ' + c.state : ''}${c.unfilled30d ? ` · ${c.unfilled30d} unfilled in last 30 days` : ''}`; pop.appendChild(s2);
           const btn = document.createElement('button'); btn.className = 'btn-secondary'; btn.style.cssText = 'margin-top:6px;font-size:11.5px;padding:3px 8px';
-          btn.textContent = 'Educators near this centre'; btn.onclick = () => emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true });
+          btn.textContent = 'Educators near this centre'; btn.onclick = () => emPickCentre(emData.centres.indexOf(c));
           pop.appendChild(btn);
           return new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat]).setPopup(new mapboxgl.Popup({ offset: 14 }).setDOMContent(pop)).addTo(emMapInstance);
         });
@@ -13475,19 +13521,22 @@
       }, 350);
     }
     let emAddressResults = [];
-    function emPickCentre(i) { const c = emData.centres[i]; emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true }); }
+    function emPickCentre(i) { const c = emData.centres[i]; emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true, centreIndex: i }); }
     function emPickAddress(i) { const a = emAddressResults[i]; emPickLocation({ lat: a.lat, lng: a.lng, label: a.label.split(',')[0], centre: false }); }
     function emPickLocation(loc) {
       emLocation = loc;
       document.getElementById('emCentreSearch').value = loc.label;
       document.getElementById('emSearchResults').style.display = 'none';
       document.getElementById('emClearBtn').style.display = '';
+      if (loc.centreIndex == null) document.getElementById('emCentreSelect').value = '';
+      else { document.getElementById('emCentreSelect').value = String(loc.centreIndex); document.getElementById('emCentreSearch').value = ''; }
       emListLimit = 100;
       emRender();
     }
     function emClearLocation() {
       emLocation = null;
       document.getElementById('emCentreSearch').value = '';
+      document.getElementById('emCentreSelect').value = '';
       document.getElementById('emClearBtn').style.display = 'none';
       emRender();
     }

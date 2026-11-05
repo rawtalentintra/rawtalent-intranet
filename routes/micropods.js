@@ -567,6 +567,7 @@ function qualificationCountsFor(candidates) {
 // this deliberately includes everyone (not just ready-to-roster) so Ops can see who
 // is onboarding or not compliant near a centre. Do Not Use / Not Interested stay out.
 // Filtering is done in the browser; this just returns the full list once (cached).
+const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
 let educatorMapCache = { data: null, expiresAt: 0 };
 async function buildEducatorMap() {
   if (educatorMapCache.data && Date.now() < educatorMapCache.expiresAt) return educatorMapCache.data;
@@ -599,7 +600,9 @@ async function buildEducatorMap() {
       email: r.email || null, phone: r.contact_no || null, suburb: r.suburb || null,
       state: normalizeStateToShort(r.addr_state),
       lat: r.lat, lng: r.lng,
-      status: r.status_name || null,
+      // RT Portal's own labels for candidate.status (raw statusName uses older wording,
+      // e.g. "Registered" / "In Review", that doesn't match what staff see in RT).
+      status: RT_STATUS_LABELS[r.status] || r.status_name || null,
       onboarding: r.ob_status || null,
       compliant: complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id).length === 0,
       gender: r.gender || null,
