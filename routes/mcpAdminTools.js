@@ -121,7 +121,7 @@ function registerAdminTools(server) {
       query: z.string().optional().describe('Part of the centre name or suburb'),
       state: z.string().optional().describe('VIC, SA, QLD, etc.'),
       partner: z.string().optional().describe('Assigned partner first name, e.g. Justine or Gwen'),
-      limit: z.number().int().min(1).max(50).optional()
+      limit: z.number().int().min(1).max(500).optional()
     }
   }, async ({ query, state, partner, limit }) => {
     const where = []; const args = [];
@@ -294,18 +294,18 @@ function registerAdminTools(server) {
 
   server.registerTool('search_bookings', {
     title: 'Search Bookings',
-    description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns at most 50 rows, so NEVER count bookings with this tool: use get_bookings_summary for totals.',
+    description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns up to 1000 rows (default 500) and always states the full number matched first. For totals and money, get_bookings_summary and get_profitability are faster and exact.',
     inputSchema: {
       centreKey: z.string().optional(),
       status: z.enum(['filled', 'created', 'requested', 'assigned', 'accepted', 'completed', 'cancelled', 'unfilled']).optional().describe('filled = assigned + accepted + completed (an educator is on it); created = no educator yet'),
       from: z.string().optional(), to: z.string().optional(),
-      limit: z.number().int().min(1).max(50).optional()
+      limit: z.number().int().min(1).max(1000).optional().describe('Max rows, default 500. The reply always states the full total.')
     }
   }, async ({ centreKey, status, from, to, limit }) => {
     const { bookings, centres } = await getCentresAndBookings();
     const wanted = status ? { created: 1, requested: 11, assigned: 2, accepted: 3, completed: 5, cancelled: 6, unfilled: 7, filled: -1 }[status] : null;
     const nameByKey = new Map(centres.map(c => [c.centreKey, c.name]));
-    const rows = bookings.filter(b => {
+    const matched = bookings.filter(b => {
       const d = (b.bookingDate || '').slice(0, 10);
       if (isDay(from) && d < from) return false;
       if (isDay(to) && d >= to) return false;
@@ -316,10 +316,12 @@ function registerAdminTools(server) {
       }
       if (centreKey) { const k = `loc:${b.locationId}`; if (k !== centreKey && `client:${b.clientId}` !== centreKey) return false; }
       return true;
-    }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate))).slice(0, limit || 20);
+    }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate)));
+    const total = matched.length;
+    const rows = matched.slice(0, limit || 500);
     if (!rows.length) return text('No bookings matched.');
     const hm = t => (t ? String(t).slice(11, 16) : '?');
-    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    return text(`${total} booking(s) matched${total > rows.length ? `, showing the first ${rows.length} (use get_bookings_summary or get_profitability for totals)` : ' (complete list)'}:\n` + rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────
@@ -537,14 +539,14 @@ function registerAdminTools(server) {
 
   server.registerTool('query_heartbeat_data', {
     title: 'Query HeartBeat Data',
-    description: 'Read any HeartBeat dataset. Datasets: ' + Object.entries(DATASETS).map(([k, v]) => `${k} — ${v.about}`).join('; ') + '. Use "list_fields": true to see a dataset\'s fields first. Filters: from/to (YYYY-MM-DD, on the dataset\'s main date), search (text match across text fields), equals (exact field match, e.g. {"status":"to_do"}). Newest first, up to 100 rows.',
+    description: 'Read any HeartBeat dataset. Datasets: ' + Object.entries(DATASETS).map(([k, v]) => `${k} — ${v.about}`).join('; ') + '. Use "list_fields": true to see a dataset\'s fields first. Filters: from/to (YYYY-MM-DD, on the dataset\'s main date), search (text match across text fields), equals (exact field match, e.g. {"status":"to_do"}). Newest first, up to 500 rows (default 25).',
     inputSchema: {
       dataset: z.enum(Object.keys(DATASETS)),
       list_fields: z.boolean().optional(),
       from: z.string().optional(), to: z.string().optional(),
       search: z.string().optional(),
       equals: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-      limit: z.number().int().min(1).max(100).optional()
+      limit: z.number().int().min(1).max(500).optional()
     }
   }, async ({ dataset, list_fields, from, to, search, equals, limit }) => {
     const ds = DATASETS[dataset];
