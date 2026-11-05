@@ -33,6 +33,8 @@ const dateOf = v => (v ? String(v).slice(0, 10) : null);
 // data/visa-audit-stopgap.json = { rtUserId: auditDate } (ids only, no PII).
 const VISA_AUDIT = require('../data/visa-audit-stopgap.json');
 const VISA_AUDIT_DAYS = 14;
+const RT_PORTAL = require('../data/rt-portal-compliance.json');
+const RT_PORTAL_NOT = new Set(RT_PORTAL.notCompliant);
 function visaAuditValidTo(uid) {
   const d = uid != null && VISA_AUDIT[String(uid)];
   if (!d) return null;
@@ -73,6 +75,17 @@ function complianceReasons(raw, today, uid) {
   if (visa && visa.isCitizen === false) {
     const e = dateOf(visa.expiryDate);
     if (e && !SENTINELS.includes(e) && e < today) reasons.push(`Visa expired ${e}`);
+  }
+  // RT Portal is the source of truth (Joy, 5 Nov 2026). RT's API doesn't send the
+  // backoffice's own Compliant / Not Compliant, so where our document check disagreed
+  // with RT Portal on 5 Nov, RT Portal wins: for RT-Compliant educators only the exact
+  // reasons seen that day are waived (a new problem later still counts); RT-Not-Compliant
+  // educators get RT's verdict as a reason. Drop this once RT sends complianceStatusId.
+  // data/rt-portal-compliance.json = { asOf, waive: { rtUserId: [reason] }, notCompliant: [rtUserId] } (ids only).
+  if (uid != null) {
+    const id = String(uid), waived = RT_PORTAL.waive[id];
+    if (waived) return reasons.filter(r => !waived.includes(r));
+    if (RT_PORTAL_NOT.has(id) && !reasons.length) reasons.push(`Not Compliant in RT Portal (as of ${RT_PORTAL.asOf.split('-').reverse().join('/')})`);
   }
   return reasons;
 }
