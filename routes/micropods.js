@@ -617,7 +617,7 @@ async function buildEducatorMap() {
 
   // Centres currently working with us = a filled/meaningful booking in the last 120 days.
   // Unfilled (statusId 7) in the last 30 days shows where the shortage is.
-  const { getLastBookingDates, indexBookingsByCentre, bookingsForCentre } = require('./centres');
+  const { getLastBookingDates, indexBookingsByCentre, bookingsForCentre, lastCancelReason } = require('./centres');
   const lastByKey = await getLastBookingDates(centres, bookings);
   const index = indexBookingsByCentre(bookings);
   const cutoff = Date.now() - 120 * 864e5, since30 = Date.now() - 30 * 864e5;
@@ -626,7 +626,7 @@ async function buildEducatorMap() {
   const centreList = current.filter(c => geocodes[c.centreKey] && inAustralia(geocodes[c.centreKey].lat, geocodes[c.centreKey].lng)).map(c => ({
     centreKey: c.centreKey, name: c.name, suburb: c.suburb || null, state: normalizeStateToShort(c.state),
     lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng,
-    unfilled30d: bookingsForCentre(index, c).filter(b => b.statusId === 7 && b.bookingDate && new Date(b.bookingDate).getTime() >= since30 && new Date(b.bookingDate).getTime() <= Date.now()).length
+    unfilled30d: bookingsForCentre(index, c).filter(b => (b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50)) && b.bookingDate && new Date(b.bookingDate).getTime() >= since30 && new Date(b.bookingDate).getTime() <= Date.now()).length
   }));
 
   const data = { educators, centres: centreList, generatedAt: new Date().toISOString() };

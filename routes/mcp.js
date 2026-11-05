@@ -29,6 +29,7 @@ const rtApi = require('../services/rtApiReportService');
 // second search_centres call moments later doesn't re-hit RT's API.
 const { getCentresAndBookings } = require('./centres');
 const educatorSearchService = require('../services/educatorSearchService');
+const educatorDirectory = require('../services/educatorDirectoryService');
 const { registerAdminTools } = require('./mcpAdminTools');
 
 // sessionId -> { transport, email } — an MCP "session" spans several
@@ -41,8 +42,23 @@ const { registerAdminTools } = require('./mcpAdminTools');
 // random UUID.
 const sessions = {};
 
+// Shown to the AI client when it connects: what HeartBeat holds and which tool to use.
+const MCP_INSTRUCTIONS = `RawTalent HeartBeat: RawTalent's internal app. RawTalent is an Australian childcare staffing agency: educators (candidates) are placed into shifts (bookings) at childcare centres (clients). Read-only: no tool changes any data.
+
+Source of truth: RT Portal (RawTalent's backoffice). Educator status, onboarding step and Compliant / Not Compliant match RT Portal's Candidates screen. HeartBeat copies RT every 2 hours 8am-8pm Melbourne and overnight, so a change made in RT in the last couple of hours may not show yet.
+
+Which tool to use:
+- Educators: list_educators (counts and lists by status, state, compliance, engagement, onboarding, qualification, gender, or near a centre/address), search_educators (find a person), get_educator (one full profile), get_educator_definitions (what each status/engagement group means).
+- Centres and bookings: search_centres, get_centre, search_bookings, get_fill_rate.
+- Sales pipeline (leads, Workforce Partners Justine VIC and Gwen SA/QLD): search_leads, get_lead, get_leads_funnel, get_wfp_performance.
+- Recruitment: jobadder_* tools, get_qr_recruitment_report. Email journeys: customerio_* tools.
+- Calls: get_call_insights, search_voice_notes. Knowledge base: search_kb_articles, ask_rawtalent_ai.
+- Anything else HeartBeat stores (tasks, timesheets, payroll, team, projects, call grading, visits, training, outreach lists, compliance history, contracts...): query_heartbeat_data (use list_fields first).
+
+Dates are YYYY-MM-DD; "to" dates are exclusive. Times are Melbourne time.`;
+
 function buildServerForUser(email) {
-  const server = new McpServer({ name: 'rawtalent-heartbeat', version: '1.0.0' });
+  const server = new McpServer({ name: 'rawtalent-heartbeat', version: '1.1.0' }, { instructions: MCP_INSTRUCTIONS });
 
   server.registerTool('search_kb_articles', {
     title: 'Search HeartBeat KB Articles',
@@ -130,35 +146,41 @@ function buildServerForUser(email) {
   // search_centres reuses that route's exported getCentresAndBookings()
   // and its existing 5-minute in-memory cache.
   server.registerTool('search_educators', {
-    title: 'Search Educators / Candidates',
-    description: 'Search RawTalent\'s real educator/candidate database (RT) by name, phone, or email. Returns each match\'s contact info, active status, any expiring compliance documents, and a link to their full RT profile.',
-    inputSchema: { query: z.string().describe('A name, phone number, or email to search for'), limit: z.number().int().min(1).max(20).optional() }
+    title: 'Search Educators (by name, phone or email)',
+    description: 'Find specific educators in RawTalent\'s RT Portal candidate database by name, phone number or email. For each match returns: RT id, RT Portal status (Active, Do Not Use, Vetting Call, etc. exactly as RT Portal shows it), onboarding step, Compliant / Not Compliant (as RT Portal shows it), engagement group, last shift, state and contact details. Use get_educator with the id for the full profile. To count or list educators by status, state, compliance, engagement or location, use list_educators instead.',
+    inputSchema: { query: z.string().describe('A name, phone number or email to search for'), limit: z.number().int().min(1).max(20).optional().describe('Max results, default 10') }
   }, async ({ query, limit }) => {
     const rows = await educatorSearchService.searchEducators(query, limit || 10);
     if (!rows.length) return { content: [{ type: 'text', text: `No educators matched "${query}".` }] };
+    const { byId } = await educatorDirectory.getDirectory();
     const text = rows.map(r => {
+      const e = byId.get(String(r.user_id));
       const name = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';
-      const flags = [r.is_active ? 'active' : 'inactive', r.expiring_docs_count ? `⚠️ ${r.expiring_docs_count} expiring doc(s)` : null].filter(Boolean).join(', ');
-      return `• ${name} (id ${r.user_id}) — ${r.contact_no || 'no phone'}${r.email ? `, ${r.email}` : ''}${r.suburb ? `, ${r.suburb}` : ''} — ${flags}\n  Profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${r.user_id}`;
+      const facts = e ? `RT status: ${e.status} · Onboarding: ${e.onboarding} · ${e.compliant ? 'Compliant' : 'Not Compliant'} · Engagement: ${e.engagement} · Last shift: ${e.lastShift || 'never'}${e.state ? ' · ' + e.state : ''}` : 'Not in the current RT candidate list (deleted in RT)';
+      return `• ${name} (id ${r.user_id}) — ${r.contact_no || 'no phone'}${r.email ? `, ${r.email}` : ''}${r.suburb ? `, ${r.suburb}` : ''}\n  ${facts}\n  RT Portal profile: https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${r.user_id}`;
     }).join('\n\n');
     return { content: [{ type: 'text', text }] };
   });
 
   server.registerTool('get_educator', {
     title: 'Get Educator Details',
-    description: 'Full profile for one educator/candidate by their RT user id (get the id from search_educators first) — contact info, onboarding status, work rights (visa type and expiry), addresses, qualifications, references and their status, and compliance documents on file, including expiry dates.',
+    description: 'Full profile for one educator by their RT user id (get the id from search_educators or list_educators first): RT Portal status, onboarding step, Compliant / Not Compliant with the reasons, engagement group and shift history, state, gender, qualification, contact info, work rights (visa type and expiry), addresses, qualifications, references and their status, and compliance documents on file, including expiry dates.',
     inputSchema: { userId: z.union([z.string(), z.number()]).describe('The RT candidate user id') }
   }, async ({ userId }) => {
     const row = await educatorSearchService.getEducatorProfile(userId);
     if (!row) return { content: [{ type: 'text', text: `No educator found with id ${userId}.` }] };
     const raw = row.raw || {};
+    const e = (await educatorDirectory.getDirectory()).byId.get(String(row.user_id));
     const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unnamed candidate';
     const lines = [
       `${name} (id ${row.user_id})`,
       `Phone: ${row.contact_no || '—'} · Email: ${row.email || '—'}`,
-      `Status: ${row.is_active ? 'Active' : 'Inactive'}${row.is_deleted ? ' (deleted)' : ''}${row.suburb ? ` · Suburb: ${row.suburb}` : ''}`,
-      row.expiring_docs_count ? `⚠️ ${row.expiring_docs_count} expiring compliance document(s)` : null,
-      raw.obStatus ? `Onboarding: ${raw.obStatus}` : null
+      e ? `RT Portal status: ${e.status}` : `RT Portal status: not in the current RT list${row.is_deleted ? ' (deleted in RT)' : ''}`,
+      e ? `Onboarding step: ${e.onboarding}` : null,
+      e ? `Compliance: ${e.compliant ? 'Compliant' : 'Not Compliant'}${e.complianceIssues.length ? ' — ' + e.complianceIssues.join('; ') : ''}` : null,
+      e ? `Engagement: ${e.engagement} · Shifts in last 28 days: ${e.shiftsLast28Days} · last 12 months: ${e.shiftsLast12Months} · Last shift: ${e.lastShift || 'never'}` : null,
+      e ? `State: ${e.state || 'unknown'}${row.suburb ? ` · Suburb: ${row.suburb}` : ''} · Gender: ${e.gender} · Qualification: ${e.qualification || 'none listed'} · Joined: ${e.joined || 'unknown'}` : null,
+      e ? `Data copied from RT: ${e.lastSyncedFromRt ? new Date(e.lastSyncedFromRt).toLocaleString('en-AU', { timeZone: 'Australia/Melbourne' }) : 'unknown'}` : null
     ];
     // visaDetails also carries passportNumber/trn/visaImage — deliberately
     // left out; only the work-rights summary is shown.

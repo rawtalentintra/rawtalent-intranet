@@ -7,9 +7,9 @@
 const { z } = require('zod');
 const { getDb } = require('../db/database');
 const jobAdderService = require('../services/jobAdderService');
-const { getCentresAndBookings, computeFillRateByPartner } = require('./centres');
+const { getCentresAndBookings, computeFillRateByPartner, lastCancelReason } = require('./centres');
 
-const STATUS_NAMES = { 1: 'Open', 2: 'Requested', 3: 'Assigned', 5: 'Completed', 6: 'Cancelled', 7: 'Failed/Unfilled' };
+const STATUS_NAMES = { 1: 'Open (pending)', 2: 'Requested (pending)', 3: 'Assigned (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled' };
 const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
 const text = t => ({ content: [{ type: 'text', text: t }] });
 const day = d => (d ? new Date(d).toISOString().slice(0, 10) : '—');
@@ -32,6 +32,86 @@ async function customerIoGet(path) {
 }
 
 function registerAdminTools(server) {
+  // ── Educators (matches RT Portal's Candidates screen) ─────────────────
+  const dir = require('../services/educatorDirectoryService');
+  const csv = v => (v == null ? [] : String(v).split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+  server.registerTool('list_educators', {
+    title: 'List / Count Educators',
+    description: 'Count and list RawTalent educators with RT Portal\'s own filters, e.g. "how many Active, Compliant educators are in VIC", "Actively Engaged educators within 10 km of Goodstart Brunswick", "Do Not Use educators in SA", "educators stuck at the Documents onboarding step". Every filter is optional and accepts one value or several separated by commas. Returns the total, a breakdown by status / compliance / engagement / state, and up to `limit` educators (nearest first when near is used). Status, onboarding and compliance match RT Portal exactly. Engagement comes from completed RT shifts (see get_educator_definitions).',
+    inputSchema: {
+      status: z.string().optional().describe('RT Portal status: Active, Vetting Call, In Progress, Awaiting Activation, Pending Reference, Student, Do Not Use, Not Interested'),
+      compliant: z.boolean().optional().describe('true = Compliant, false = Not Compliant (as RT Portal shows it)'),
+      state: z.string().optional().describe('VIC, SA, QLD, NSW, NT, ACT, WA, TAS'),
+      engagement: z.string().optional().describe('Actively Working, Actively Engaged, Engaged, Disengaged, Dormant'),
+      onboarding: z.string().optional().describe('RT onboarding step: Register, AboutUs, Profile Image, Experience, Emergency Contact, Qualification Level, Reference, Visa, Finance, Tax, Documents, Complete'),
+      qualification: z.string().optional().describe('Part of the qualification name, e.g. Diploma, Cert III, ECT'),
+      gender: z.string().optional().describe('Female, Male, Other, Not stated'),
+      suburb: z.string().optional().describe('Home suburb (exact name)'),
+      near: z.string().optional().describe('A centre name (from RT) or any street address/suburb; returns educators living within radiusKm of it'),
+      radiusKm: z.number().min(1).max(100).optional().describe('Radius for near, default 10'),
+      workedSince: z.string().optional().describe('Only educators with a completed shift on/after this date (YYYY-MM-DD)'),
+      limit: z.number().int().min(0).max(500).optional().describe('How many educators to list, default 50 (0 = counts only)')
+    }
+  }, async (q) => {
+    const { list } = await dir.getDirectory();
+    let origin = null;
+    if (q.near) {
+      const { centres } = await getCentresAndBookings();
+      const needle = q.near.toLowerCase();
+      const c = centres.find(x => (x.name || '').toLowerCase() === needle) || centres.find(x => (x.name || '').toLowerCase().includes(needle));
+      if (c) {
+        const g = (await require('../services/centreGeoService').getGeocodesForCentres([c]))[c.centreKey];
+        if (g) origin = { lat: g.lat, lng: g.lng, label: `${c.name}${c.suburb ? ', ' + c.suburb : ''} (RT centre)` };
+      }
+      if (!origin) {
+        const coord = await require('../services/mapboxService').geocodeAddress(`${q.near}, Australia`).catch(() => null);
+        if (coord) origin = { lat: coord.lat, lng: coord.lng, label: `${q.near} (address)` };
+      }
+      if (!origin) return text(`Couldn't find a centre or address matching "${q.near}".`);
+    }
+    const km = (a, b) => require('../services/mapboxService').haversineKm(a, b);
+    const want = { status: csv(q.status), state: csv(q.state), engagement: csv(q.engagement), onboarding: csv(q.onboarding), gender: csv(q.gender) };
+    const radius = q.radiusKm || 10;
+    let rows = list.filter(e =>
+      (!want.status.length || want.status.includes(e.status.toLowerCase())) &&
+      (!want.state.length || want.state.includes((e.state || '').toLowerCase())) &&
+      (!want.engagement.length || want.engagement.includes(e.engagement.toLowerCase())) &&
+      (!want.onboarding.length || want.onboarding.includes(e.onboarding.toLowerCase()) || (want.onboarding.includes('completed') && e.onboarding === 'Complete')) &&
+      (!want.gender.length || want.gender.includes(e.gender.toLowerCase())) &&
+      (q.compliant == null || e.compliant === q.compliant) &&
+      (!q.qualification || (e.qualification || '').toLowerCase().includes(q.qualification.toLowerCase().replace('cert iii', 'certiii'))) &&
+      (!q.suburb || (e.suburb || '').toLowerCase() === q.suburb.toLowerCase()) &&
+      (!isDay(q.workedSince) || (e.lastShift && e.lastShift >= q.workedSince)));
+    if (origin) {
+      rows = rows.filter(e => e.lat != null).map(e => ({ ...e, distanceKm: km(origin, e) })).filter(e => e.distanceKm <= radius).sort((a, b) => a.distanceKm - b.distanceKm);
+    }
+    const tally = key => { const t = {}; rows.forEach(e => { const k = key(e) || 'unknown'; t[k] = (t[k] || 0) + 1; }); return Object.entries(t).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', '); };
+    const head = [
+      `${rows.length} educator(s)${origin ? ` within ${radius} km of ${origin.label}` : ''}.`,
+      `By RT status: ${tally(e => e.status)}`,
+      `By compliance: ${tally(e => (e.compliant ? 'Compliant' : 'Not Compliant'))}`,
+      `By engagement: ${tally(e => e.engagement)}`,
+      origin ? null : `By state: ${tally(e => e.state)}`
+    ].filter(Boolean).join('\n');
+    const n = q.limit == null ? 50 : q.limit;
+    if (!n || !rows.length) return text(head);
+    const body = rows.slice(0, n).map(e => `• ${e.name} (id ${e.id}) — ${e.status} · ${e.compliant ? 'Compliant' : 'Not Compliant'} · ${e.engagement} · onboarding ${e.onboarding} · ${[e.suburb, e.state].filter(Boolean).join(', ')}${e.distanceKm != null ? ` · ${e.distanceKm.toFixed(1)} km` : ''} · last shift ${e.lastShift || 'never'} · ${e.phone || 'no phone'}`).join('\n');
+    return text(`${head}\n\n${rows.length > n ? `First ${n}:` : 'Educators:'}\n${body}`);
+  });
+
+  server.registerTool('get_educator_definitions', {
+    title: 'Educator Status Definitions',
+    description: 'What each educator status, onboarding step, compliance result and engagement group means in RawTalent, and where the data comes from. Use this before explaining numbers from list_educators.',
+    inputSchema: {}
+  }, async () => text([
+    'RT Portal status (set by the RawTalent team in RT Portal): Vetting Call = applied, waiting for the vetting call; In Progress = onboarding underway; Pending Reference = waiting on references; Awaiting Activation = onboarded, waiting to be activated; Active = can be booked; Student = student educator; Do Not Use = banned from bookings; Not Interested = no longer wants work.',
+    'Onboarding step: the step of the RT app sign-up the educator has reached (Register, AboutUs, Profile Image, Experience, Emergency Contact, Qualification Level, Reference, Visa, Finance, Tax, Documents, Complete).',
+    'Compliance: Compliant / Not Compliant exactly as RT Portal shows it. For Not Compliant educators, get_educator lists the reasons HeartBeat can see (expired or unreviewed documents, missing core documents, visa).',
+    'Engagement (from completed RT shifts): ' + Object.entries(dir.ENGAGEMENT_DEFS).map(([k, v]) => `${k} = ${v}`).join('; ') + '.',
+    'Ready to roster (as used in Micropods): RT status Active, onboarding Complete and Compliant.',
+    'Freshness: HeartBeat copies RT every 2 hours 8am-8pm Melbourne time and overnight.'
+  ].join('\n\n')));
+
   // ── Leads / WFP pipeline ──────────────────────────────────────────────
   server.registerTool('search_leads', {
     title: 'Search Leads',
@@ -114,27 +194,31 @@ function registerAdminTools(server) {
 
   server.registerTool('search_bookings', {
     title: 'Search Bookings',
-    description: 'Look up RT bookings. Filter by centreKey (from search_centres), status (open, requested, assigned, completed, cancelled) and a shift-date range (YYYY-MM-DD, "to" exclusive). Returns up to 50, newest first.',
+    description: 'Look up individual RT bookings (shifts). Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Status meanings: open/requested = pending, assigned/completed = filled, unfilled = RT could not fill it, cancelled = cancelled by the centre or RT. Returns up to 50, newest first, with the centre, educator and booking id. For totals use get_fill_rate.',
     inputSchema: {
       centreKey: z.string().optional(),
-      status: z.enum(['open', 'requested', 'assigned', 'completed', 'cancelled']).optional(),
+      status: z.enum(['open', 'requested', 'assigned', 'completed', 'cancelled', 'unfilled']).optional(),
       from: z.string().optional(), to: z.string().optional(),
       limit: z.number().int().min(1).max(50).optional()
     }
   }, async ({ centreKey, status, from, to, limit }) => {
     const { bookings, centres } = await getCentresAndBookings();
-    const wanted = status ? { open: 1, requested: 2, assigned: 3, completed: 5, cancelled: 6 }[status] : null;
+    const wanted = status ? { open: 1, requested: 2, assigned: 3, completed: 5, cancelled: 6, unfilled: 7 }[status] : null;
     const nameByKey = new Map(centres.map(c => [c.centreKey, c.name]));
     const rows = bookings.filter(b => {
       const d = (b.bookingDate || '').slice(0, 10);
       if (isDay(from) && d < from) return false;
       if (isDay(to) && d >= to) return false;
-      if (wanted && b.statusId !== wanted) return false;
+      if (wanted) {
+        // RT records most unfilled shifts as Cancelled with cancel reason 50 ("unfilled").
+        const unfilled = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
+        if (status === 'unfilled' ? !unfilled : (b.statusId !== wanted || (status === 'cancelled' && unfilled))) return false;
+      }
       if (centreKey) { const k = `loc:${b.locationId}`; if (k !== centreKey && `client:${b.clientId}` !== centreKey) return false; }
       return true;
     }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate))).slice(0, limit || 20);
     if (!rows.length) return text('No bookings matched.');
-    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${STATUS_NAMES[b.statusId] || 'status ' + b.statusId}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────
@@ -315,7 +399,30 @@ function registerAdminTools(server) {
     training_assignments: { table: 'training_assignments', about: 'Who is assigned which training' },
     training_attempts: { table: 'training_attempts', about: 'Training attempts and scores' },
     jobadder_reviews: { table: 'jobadder_application_reviews', date: 'created_at', about: 'Reviews of JobAdder applicants' },
-    acecqa_qualifications: { table: 'acecqa_approved_qualifications', about: 'ACECQA approved qualifications list' }
+    acecqa_qualifications: { table: 'acecqa_approved_qualifications', about: 'ACECQA approved qualifications list' },
+    leads: { table: 'leads', date: 'created_at', about: 'All sales leads/centres in the Workforce Partner pipeline (every field: stage dates, partner, group category, contact details)' },
+    lead_recordings: { table: 'lead_recordings', date: 'created_at', about: 'Voice notes recorded against leads (transcript and summary)' },
+    lead_calendar_events: { table: 'lead_calendar_events', date: 'created_at', about: 'Calendar meetings linked to leads' },
+    lead_washes: { table: 'lead_washes', date: 'created_at', about: 'Lead Wash reviews (lead quality checks)' },
+    centre_recordings: { table: 'centre_recordings', date: 'created_at', about: 'Voice notes recorded against centres' },
+    centre_categories: { table: 'centre_categories', about: 'Centre group category (big group, medium, small, independent, community, council)' },
+    centre_educator_relationships: { table: 'centre_educator_relationships', about: 'Educators a centre has favourited or blocked' },
+    dormant_touchpoints: { table: 'dormant_touchpoints', date: 'created_at', about: 'Contact made with dormant centres' },
+    educator_outreach_lists: { table: 'educator_outreach_lists', date: 'created_at', about: 'Saved educator outreach lists' },
+    educator_outreach_list_members: { table: 'educator_outreach_list_members', about: 'Educators on each outreach list (filter equals {"list_id": "..."})' },
+    available_educator_sends: { table: 'available_educator_sends', date: 'created_at', about: 'Weekly available-educator emails sent to centres' },
+    compliance_snapshots: { table: 'compliance_snapshots', date: 'created_at', about: 'Nightly educator compliance snapshots' },
+    compliance_changes: { table: 'compliance_change_log', date: 'created_at', about: 'Overnight changes to educator compliance' },
+    vevo_checks: { table: 'vevo_checks', date: 'created_at', about: 'VEVO visa work-rights checks' },
+    signed_contracts: { table: 'signed_contracts', date: 'created_at', about: 'Centre contracts sent and signed' },
+    signed_contract_events: { table: 'signed_contract_events', date: 'created_at', about: 'Contract signing events (sent, viewed, signed)' },
+    consultant_calls: { table: 'consultant_calls', date: 'created_at', about: 'Consultant call logs' },
+    wfp_reports: { table: 'wfp_reports', date: 'created_at', about: 'Weekly/monthly Workforce Partner reports' },
+    meetings: { table: 'fathom_meetings', date: 'created_at', about: 'Recorded meetings (Fathom): title, date, summary' },
+    task_link_history: { table: 'task_link_history', date: 'created_at', about: 'Changes to educators/centres linked on tasks' },
+    qr_referral_attempts: { table: 'qr_referral_attempts', date: 'created_at', about: 'QR form submission attempts (saved or refused, and why)' },
+    rt_data_alerts: { table: 'rt_field_alerts', date: 'created_at', about: 'Alerts when RT stops or starts sending a data field' },
+    educator_status_customerio: { table: 'cio_educator_status', about: 'Educator status as held in Customer.io' }
   };
   const HIDDEN_COLUMN = /password|hash|token|secret|google_id|bank_account_number|swift|storage_path|^raw$|audio|photo_storage/i;
   const colCache = new Map();
