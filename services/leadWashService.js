@@ -197,6 +197,19 @@ async function recordWash(leadId, body, user) {
   if (dmEmail) await db.execute({ sql: "UPDATE leads SET contact_email = ?, updated_at = now() WHERE id = ? AND COALESCE(contact_email, '') = ''", args: [dmEmail, leadId] });
   const dmFirst = (s(body.dmName) || '').split(/\s+/)[0];
   if (dmFirst) await db.execute({ sql: "UPDATE leads SET contact_first_name = ? WHERE id = ? AND (COALESCE(contact_first_name, '') = '' OR contact_first_name ILIKE '%not provided%')", args: [dmFirst, leadId] });
+  // A direct number from the call replaces the centre phone (Liam, 5 Nov: big groups list a
+  // 1300 switchboard; the centre's own line is what we want to dial next time). The old
+  // number is kept in a lead note so nothing is lost.
+  const dmPhone = s(body.dmPhone);
+  if (dmPhone) {
+    const digits = v => String(v || '').replace(/\D/g, '').replace(/^61/, '0');
+    const cur = (await db.execute({ sql: 'SELECT centre_phone FROM leads WHERE id = ?', args: [leadId] })).rows[0]?.centre_phone || '';
+    if (digits(dmPhone) && digits(dmPhone) !== digits(cur)) {
+      await db.execute({ sql: 'UPDATE leads SET centre_phone = ?, updated_at = now() WHERE id = ?', args: [dmPhone, leadId] });
+      await db.execute({ sql: 'INSERT INTO lead_notes (id, lead_id, note, author_name, author_email) VALUES (?, ?, ?, ?, ?)',
+        args: [require('crypto').randomUUID(), leadId, `Lead Wash: centre phone updated to ${dmPhone}${cur ? ` (was ${cur})` : ''}.`, user.name || user.email, user.email] });
+    }
+  }
   if (body.serviceType || body.groupCategory) await category.setLeadCategory(leadId, { serviceType: body.serviceType, groupCategory: body.groupCategory }, user);
   if (verdict === 'not_viable') {
     await db.execute({ sql: 'UPDATE leads SET archived_at = now(), archived_reason = ?, updated_at = now() WHERE id = ?', args: [`Lead wash: ${OPTIONS.not_viable_reason[reason]}`, leadId] });
