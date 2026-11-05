@@ -3031,3 +3031,17 @@ CREATE TABLE IF NOT EXISTS lead_wash_educator_notes (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE lead_wash_educator_notes ENABLE ROW LEVEL SECURITY;
+
+-- Lead Wash reference checks: RT Portal's Reference Form questions, filled in during the
+-- wash call (Liam, 5 Nov 2026). Kept in HeartBeat only; RT Portal is updated by hand.
+CREATE TABLE IF NOT EXISTS lead_wash_references (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT NOT NULL,
+  educator_key TEXT,
+  answers JSONB NOT NULL,
+  created_by_email TEXT,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_wash_references_lead ON lead_wash_references (lead_id, created_at DESC);
+ALTER TABLE lead_wash_references ENABLE ROW LEVEL SECURITY;

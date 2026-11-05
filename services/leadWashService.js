@@ -90,6 +90,48 @@ async function saveEducatorNotes(key, notes, user) {
   return { ok: true };
 }
 
+// RT Portal's Reference Form, question for question (backoffice Reference/SubmitReference).
+const REFERENCE_FORM = [
+  { k: 'fromMonth', q: 'From month', t: 'text' }, { k: 'fromYear', q: 'From year', t: 'text' },
+  { k: 'toMonth', q: 'To month', t: 'text' }, { k: 'toYear', q: 'To year', t: 'text' },
+  { k: 'capacity', q: 'In what capacity do you know the above-mentioned applicant?', t: 'textarea' },
+  { k: 'position', q: "What was the applicant's position within your organisation?", t: 'text' },
+  { k: 'observed', q: 'Have you observed this applicant working with children?', t: 'yesno' },
+  { k: 'concernChildren', q: 'Did you have any concerns about their behaviour or conduct when working with children?', t: 'yesno' },
+  { k: 'concernTeam', q: "Did you have any concerns about the applicant's professionalism, attitude, or ability to work within a team?", t: 'yesno' },
+  { k: 'disciplinary', q: 'Has any disciplinary action been taken against the applicant in relation to inappropriate or unprofessional conduct toward a child?', t: 'yesno' },
+  { k: 'engagement', q: 'Engagement with children', t: 'rating' },
+  { k: 'initiative', q: 'Demonstration of initiative', t: 'rating' },
+  { k: 'rapport', q: 'Rapport with staff', t: 'rating' },
+  { k: 'ability', q: 'Overall ability', t: 'rating' },
+  { k: 'recommend', q: 'Would you recommend this person for temporary work?', t: 'yesno' },
+  { k: 'reemploy', q: 'Theoretically, would you re-employ this person?', t: 'yesno' },
+  { k: 'illness', q: 'To the best of your knowledge, has this candidate suffered any illness or impairment that would affect their capacity to work in early childhood?', t: 'yesno' },
+  { k: 'comments', q: 'Do you have further comments you wish to provide?', t: 'textarea' },
+  { k: 'refereeName', q: 'Referee name', t: 'text' }, { k: 'refereePosition', q: 'Position', t: 'text' }, { k: 'refereeCentre', q: 'Centre name', t: 'text' },
+  { k: 'disclose', q: 'Do you permit us to disclose information from this reference to the applicant if requested?', t: 'yesno' }
+];
+const RATINGS = ['Excellent', 'Very Good', 'Good', 'Average', 'Not Acceptable'];
+
+async function saveReference(leadId, body, user) {
+  const answers = {};
+  for (const f of REFERENCE_FORM) {
+    let v = body.answers && body.answers[f.k];
+    if (v == null || v === '') continue;
+    v = String(v).trim().slice(0, 2000);
+    if (f.t === 'yesno' && !['Yes', 'No'].includes(v)) throw Object.assign(new Error(`Invalid answer for ${f.q}`), { status: 400 });
+    if (f.t === 'rating' && !RATINGS.includes(v)) throw Object.assign(new Error(`Invalid rating for ${f.q}`), { status: 400 });
+    answers[f.k] = v;
+  }
+  if (!Object.keys(answers).length) throw Object.assign(new Error('Fill in at least one answer'), { status: 400 });
+  const key = /^(rt|name):.{1,200}$/.test(String(body.educatorKey || '')) ? body.educatorKey : null;
+  const row = (await getDb().execute({
+    sql: 'INSERT INTO lead_wash_references (id, lead_id, educator_key, answers, created_by_email, created_by_name) VALUES (?, ?, ?, ?, ?, ?) RETURNING *',
+    args: [require('crypto').randomUUID(), leadId, key, JSON.stringify(answers), user.email || null, user.name || null]
+  })).rows[0];
+  return row;
+}
+
 async function educatorSummaries(uids) {
   if (!uids.length) return {};
   const rows = (await getDb().execute({
@@ -165,7 +207,9 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
   const educators = await educatorSummaries([...new Set(out.map(l => l.educator && l.educator.rtUserId).filter(Boolean))]);
   const educatorNotes = Object.fromEntries((await db.execute({ sql: 'SELECT educator_key, notes, updated_by_name, updated_at FROM lead_wash_educator_notes', args: [] })).rows
     .map(r => [r.educator_key, { notes: r.notes, by: r.updated_by_name, at: r.updated_at }]));
-  return { tally, leads: out, educators, educatorNotes, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
+  const refRows = out.length ? (await db.execute({ sql: 'SELECT DISTINCT ON (lead_id) lead_id, answers, created_by_name, created_at FROM lead_wash_references WHERE lead_id = ANY(?) ORDER BY lead_id, created_at DESC', args: [out.map(l => l.id)] })).rows : [];
+  const references = Object.fromEntries(refRows.map(r => [r.lead_id, { answers: r.answers, by: r.created_by_name, at: r.created_at }]));
+  return { tally, leads: out, educators, educatorNotes, references, referenceForm: REFERENCE_FORM, ratings: RATINGS, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
 }
 
 async function history(leadId) {
@@ -221,4 +265,4 @@ async function recordWash(leadId, body, user) {
   return row;
 }
 
-module.exports = { saveEducatorNotes, WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };
+module.exports = { saveReference, saveEducatorNotes, WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };

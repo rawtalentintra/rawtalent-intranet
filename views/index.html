@@ -1463,6 +1463,18 @@
           .wash-pill{font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
           .wx-ed{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:14px;overflow:hidden}
           .wx-ed-head{padding:16px 18px;border-bottom:1px solid #bfdbfe;background:#e0f2fe}
+          .rf{background:#fff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font-size:13px}
+          .rf summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:center}
+          .rf summary::-webkit-details-marker{display:none}
+          .rf-begin{color:#2563eb;font-weight:600}
+          .rf-body{margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px}
+          .rf-intro{color:var(--text-muted);margin-bottom:10px;line-height:1.45}
+          .rf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 16px}
+          .rf-q{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:#374151}
+          .rf-q input,.rf-q textarea{font:inherit;font-weight:400;border:1px solid var(--gray-200);border-radius:6px;padding:6px 8px}
+          .rf-wide{grid-column:1/-1}
+          .rf-opts{display:flex;flex-wrap:wrap;gap:4px 14px;font-weight:400}
+          .rf-opt{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:400;margin:0}
           .wx-ed-toggle{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-align:left}
           .wx-caret{font-size:.75em;color:#2563eb;width:12px}
           .wx-note-flag{font-size:11px;font-weight:600;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 8px}
@@ -1570,6 +1582,48 @@
         } catch { if (meta) meta.textContent = 'Couldn\u2019t save. Check your connection and keep typing to retry.'; }
       }, 700);
     }
+    // Reference check (Liam, 5 Nov): RT Portal's Reference Form, opened inline so the
+    // consultant can fill it in while still seeing the wash questions below.
+    function washReferenceHtml(l) {
+      const d = washState.data || {}, form = d.referenceForm || [], ratings = d.ratings || [];
+      const prev = (d.references || {})[l.id];
+      const a = (prev && prev.answers) || {};
+      const ed = l.educator.name;
+      const field = f => {
+        const id = `rf-${f.k}`, val = a[f.k] || '';
+        if (f.t === 'yesno' || f.t === 'rating') {
+          const opts = f.t === 'yesno' ? ['Yes', 'No'] : ratings;
+          return `<div class="rf-q"><div>${escHtml(f.q)}</div><div class="rf-opts">${opts.map(o => `<label class="rf-opt"><input type="radio" name="${id}" value="${escHtml(o)}" ${val === o ? 'checked' : ''}> ${escHtml(o)}</label>`).join('')}</div></div>`;
+        }
+        return `<label class="rf-q${f.t === 'textarea' ? ' rf-wide' : ''}">${escHtml(f.q)}${f.t === 'textarea' ? `<textarea id="${id}" rows="2">${escHtml(val)}</textarea>` : `<input id="${id}" value="${escHtml(val)}">`}</label>`;
+      };
+      return `<details class="rf" style="grid-column:1/-1" ${prev ? '' : ''}>
+        <summary><b>Reference check</b> <span class="rf-begin">${prev ? `Saved by ${escHtml(prev.by || 'someone')} · click to view or update` : 'Click here to begin'}</span></summary>
+        <div class="rf-body">
+          <div class="rf-intro">${escHtml(ed)} has applied for work within the education sector through Raw Talent and has provided your name as a referee. We have obtained consent from ${escHtml(ed)} to speak with you and would be grateful if you could answer the following questions.</div>
+          <div class="rf-grid">${form.map(field).join('')}</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><button type="button" class="btn-primary" onclick="washSaveReference('${l.id}')">Save reference</button><span id="rf-msg" style="font-size:12px;color:var(--text-muted)">Saved in HeartBeat. Copy it into RT Portal's References tab as well.</span></div>
+        </div>
+      </details>`;
+    }
+    async function washSaveReference(leadId) {
+      const d = washState.data, l = d.leads.find(x => x.id === leadId), msg = document.getElementById('rf-msg');
+      const answers = {};
+      for (const f of d.referenceForm) {
+        if (f.t === 'yesno' || f.t === 'rating') { const c = document.querySelector(`input[name="rf-${f.k}"]:checked`); if (c) answers[f.k] = c.value; }
+        else { const el = document.getElementById('rf-' + f.k); if (el && el.value.trim()) answers[f.k] = el.value.trim(); }
+      }
+      const educatorKey = l.educator ? (l.educator.rtUserId ? 'rt:' + l.educator.rtUserId : 'name:' + l.educator.name.trim().toLowerCase()) : null;
+      msg.textContent = 'Saving…';
+      try {
+        const r = await fetch(`/api/lead-quality/wash/${leadId}/reference`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers, educatorKey }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Could not save');
+        d.references = d.references || {};
+        d.references[leadId] = { answers, by: 'you', at: new Date().toISOString() };
+        msg.textContent = 'Reference saved. Copy it into RT Portal\u2019s References tab as well.';
+      } catch (e) { msg.textContent = e.message; }
+    }
     function washCardHtml(l) {
       const o = washState.opts, open = washState.openId === l.id;
       const status = { unwashed: ['To wash', '#eef2ff', '#3730a3'], attempted: ['Tried, no answer', '#fef3c7', '#b45309'], solid: ['SOLID', '#dcfce7', '#15803d'], not_viable: ['NOT VIABLE', '#fee2e2', '#b91c1c'] }[l.washStatus];
@@ -1584,7 +1638,7 @@
         </button>
         ${open ? `<div class="wx-open"><div class="wash-form">
           ${l.phone ? `<div style="grid-column:1/-1;font-size:13px">Centre phone: <a href="tel:${escHtml(l.phone)}">${escHtml(l.phone)}</a></div>` : ''}
-          ${l.educator ? `<div style="grid-column:1/-1;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;font-size:13px"><b>Opening line:</b> "${escHtml(l.educator.name.split(' ')[0])} has registered with us and mentioned they've worked at your centre."</div>` : ''}
+          ${l.educator ? washReferenceHtml(l) : ''}
           <label>Reached them?<select id="w-reached"><option value="">Choose…</option>${opt(o.wash.reached)}</select></label>
           <label>Do they use agency?<select id="w-agency"><option value="">Choose…</option>${opt(o.wash.uses_agency)}</select></label>
           <label>Educator Known?<select id="w-ref"><option value="">Choose…</option>${opt(o.wash.knows_referrer)}</select></label>
