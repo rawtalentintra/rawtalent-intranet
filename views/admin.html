@@ -1429,6 +1429,7 @@
               <button type="button" class="btn-secondary em-clear" id="emClearBtn" style="display:none" onclick="emClearLocation()">Clear centre</button>
             </div>
             <div class="em-filters" id="emFilters"></div>
+            <div id="emLabelsLegend" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--gray-100)"></div>
           </div>
 
           <div class="admin-table-card" style="padding:0;overflow:hidden;margin-bottom:16px">
@@ -11548,10 +11549,10 @@
     }
 
     // ── Micropods legend + Find educators (Joy, 22 Oct: simpler page, Sophia's labels) ──
-    function renderMicropodsLegend() {
-      const el = document.getElementById('micropodsLegend');
+    function renderMicropodsLegend(id = 'micropodsLegend', note = 'every educator on this page is Active, onboarded and fully compliant') {
+      const el = document.getElementById(id);
       if (!el) return;
-      el.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">What the labels mean <span style="font-weight:400;color:var(--text-muted)">(every educator on this page is Active, onboarded and fully compliant)</span></div>
+      el.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">What the labels mean <span style="font-weight:400;color:var(--text-muted)">(${escHtml(note)})</span></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
           ${SEGMENT_ORDER.map(k => { const m = SEGMENT_META[k]; return `<div style="display:flex;gap:10px;align-items:flex-start;background:${m.bg};border-radius:8px;padding:10px 12px">
             <span style="flex:none;width:14px;height:14px;border-radius:50%;background:${m.dot};margin-top:2px"></span>
@@ -13275,6 +13276,7 @@
         }
       }
       emRenderFilters();
+      renderMicropodsLegend('emLabelsLegend', 'dot colours on the map; this map shows every educator, use the filters for Active and compliant');
       emRender();
     }
 
