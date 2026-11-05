@@ -13,7 +13,8 @@
 // (Completed) — Open/Requested/Cancelled/Failed bookings don't represent
 // real activity at a centre (see BOOKING_STATUS_LABELS in admin.html's RT
 // API Data Reference for the full inferred status map).
-const MEANINGFUL_BOOKING_STATUSES = new Set([3, 5]);
+// 2 is "Booking Assigned" in RT Portal (an educator is placed), so it counts too (5 Nov 2026).
+const MEANINGFUL_BOOKING_STATUSES = new Set([2, 3, 5]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -9,7 +9,8 @@ const { getDb } = require('../db/database');
 const jobAdderService = require('../services/jobAdderService');
 const { getCentresAndBookings, computeFillRateByPartner, lastCancelReason } = require('./centres');
 
-const STATUS_NAMES = { 1: 'Open (pending)', 2: 'Requested (pending)', 3: 'Assigned (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled' };
+// RT Portal's own booking status names (RT's bookingStatus text). Filled = 2, 3 or 5.
+const STATUS_NAMES = { 1: 'Created (open, no educator yet)', 2: 'Assigned (filled)', 3: 'Accepted (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled' };
 const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
 const text = t => ({ content: [{ type: 'text', text: t }] });
 const day = d => (d ? new Date(d).toISOString().slice(0, 10) : '—');
@@ -192,18 +193,73 @@ function registerAdminTools(server) {
     return text(`Fill rate ${r.from} to ${r.to} (exclusive)\n${r.partners.map(line).join('\n')}\n${line(r.total)}`);
   });
 
+  server.registerTool('get_bookings_summary', {
+    title: 'Bookings Summary (matches RT Portal dashboard)',
+    description: 'Exact booking totals for one day or a date range (shift date, Melbourne time), counted the same way as RT Portal\'s dashboard ("Filled Booking 69/69" = filled out of all bookings that aren\'t cancelled). Returns total, filled (assigned + accepted + completed), still open (created, no educator yet), cancelled and unfilled, plus shift start/finish times and average shift length. Optional state (VIC, SA, QLD...) or centreKey. Use this for any "how many bookings" question; defaults to today.',
+    inputSchema: {
+      date: z.string().optional().describe('One day, YYYY-MM-DD (default today, Melbourne)'),
+      from: z.string().optional().describe('Range start YYYY-MM-DD (use with to instead of date)'),
+      to: z.string().optional().describe('Range end YYYY-MM-DD, exclusive'),
+      state: z.string().optional(), centreKey: z.string().optional()
+    }
+  }, async ({ date, from, to, state, centreKey }) => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(new Date());
+    let f, t;
+    if (isDay(from) || isDay(to)) { f = isDay(from) ? from : today; t = isDay(to) ? to : null; }
+    else { f = isDay(date) ? date : today; t = null; }
+    const { bookings, centres } = await getCentresAndBookings();
+    const stateOf = new Map(centres.map(c => [c.centreKey, String(c.state || '')]));
+    const short = st => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'northern territory': 'NT', 'australian capital territory': 'ACT', 'western australia': 'WA', tasmania: 'TAS' })[st.toLowerCase()] || st.toUpperCase();
+    const rows = bookings.filter(b => {
+      const d = (b.bookingDate || '').slice(0, 10);
+      if (!d || (t ? (d < f || d >= t) : d !== f)) return false;
+      const key = b.locationId != null ? `loc:${b.locationId}` : `client:${b.clientId}`;
+      if (centreKey && key !== centreKey && `client:${b.clientId}` !== centreKey) return false;
+      if (state && short(stateOf.get(key) || stateOf.get(`client:${b.clientId}`) || '') !== state.toUpperCase()) return false;
+      return true;
+    });
+    const n = { created: 0, assigned: 0, accepted: 0, completed: 0, cancelled: 0, unfilled: 0 };
+    const mins = [], starts = [], ends = [];
+    for (const b of rows) {
+      const uf = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
+      if (uf) n.unfilled++; else if (b.statusId === 6) n.cancelled++;
+      else if (b.statusId === 1) n.created++; else if (b.statusId === 2) n.assigned++; else if (b.statusId === 3) n.accepted++; else if (b.statusId === 5) n.completed++;
+      if ([2, 3, 5].includes(b.statusId) && b.startTime && b.endTime) {
+        const s = new Date(b.startTime), e = new Date(b.endTime);
+        const m = (e - s) / 60000; if (m > 0 && m < 24 * 60) { mins.push(m - (Number(b.unpaidBreak) || 0)); starts.push(s.getHours() * 60 + s.getMinutes()); ends.push(e.getHours() * 60 + e.getMinutes()); }
+      }
+    }
+    const filled = n.assigned + n.accepted + n.completed;
+    const live = rows.length - n.cancelled - n.unfilled;
+    const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    const clock = m => (m == null ? 'n/a' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`);
+    const dur = avg(mins);
+    const label = t ? `${f} to ${t} (exclusive)` : f;
+    return text([
+      `Bookings ${label}${state ? ' · ' + state.toUpperCase() : ''}${centreKey ? ' · ' + centreKey : ''}`,
+      `Filled ${filled}/${live} (RT Portal dashboard style: filled out of all non-cancelled bookings)`,
+      `Total bookings: ${rows.length}`,
+      `Filled: ${filled} (assigned ${n.assigned}, accepted ${n.accepted}, completed ${n.completed})`,
+      `Open, no educator yet: ${n.created}`,
+      `Cancelled: ${n.cancelled}`,
+      `Unfilled (RT couldn't fill): ${n.unfilled}`,
+      `Filled shifts: average start ${clock(avg(starts))}, average finish ${clock(avg(ends))}, average length ${dur == null ? 'n/a' : (dur / 60).toFixed(1) + ' h'} (after unpaid break)`,
+      'Source: RT bookings, refreshed every few minutes.'
+    ].join('\n'));
+  });
+
   server.registerTool('search_bookings', {
     title: 'Search Bookings',
-    description: 'Look up individual RT bookings (shifts). Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Status meanings: open/requested = pending, assigned/completed = filled, unfilled = RT could not fill it, cancelled = cancelled by the centre or RT. Returns up to 50, newest first, with the centre, educator and booking id. For totals use get_fill_rate.',
+    description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns at most 50 rows, so NEVER count bookings with this tool: use get_bookings_summary for totals.',
     inputSchema: {
       centreKey: z.string().optional(),
-      status: z.enum(['open', 'requested', 'assigned', 'completed', 'cancelled', 'unfilled']).optional(),
+      status: z.enum(['filled', 'created', 'assigned', 'accepted', 'completed', 'cancelled', 'unfilled']).optional().describe('filled = assigned + accepted + completed (an educator is on it); created = no educator yet'),
       from: z.string().optional(), to: z.string().optional(),
       limit: z.number().int().min(1).max(50).optional()
     }
   }, async ({ centreKey, status, from, to, limit }) => {
     const { bookings, centres } = await getCentresAndBookings();
-    const wanted = status ? { open: 1, requested: 2, assigned: 3, completed: 5, cancelled: 6, unfilled: 7 }[status] : null;
+    const wanted = status ? { created: 1, assigned: 2, accepted: 3, completed: 5, cancelled: 6, unfilled: 7, filled: -1 }[status] : null;
     const nameByKey = new Map(centres.map(c => [c.centreKey, c.name]));
     const rows = bookings.filter(b => {
       const d = (b.bookingDate || '').slice(0, 10);
@@ -212,13 +268,14 @@ function registerAdminTools(server) {
       if (wanted) {
         // RT records most unfilled shifts as Cancelled with cancel reason 50 ("unfilled").
         const unfilled = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
-        if (status === 'unfilled' ? !unfilled : (b.statusId !== wanted || (status === 'cancelled' && unfilled))) return false;
+        if (status === 'filled' ? ![2, 3, 5].includes(b.statusId) : status === 'unfilled' ? !unfilled : (b.statusId !== wanted || (status === 'cancelled' && unfilled))) return false;
       }
       if (centreKey) { const k = `loc:${b.locationId}`; if (k !== centreKey && `client:${b.clientId}` !== centreKey) return false; }
       return true;
     }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate))).slice(0, limit || 20);
     if (!rows.length) return text('No bookings matched.');
-    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    const hm = t => (t ? String(t).slice(11, 16) : '?');
+    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────

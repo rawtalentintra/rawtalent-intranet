@@ -11,7 +11,7 @@
 const { getDb } = require('../db/database');
 
 const LIVE = new Set([1, 2, 3, 5]);
-const FILLED = new Set([3, 5]);
+const FILLED = new Set([2, 3, 5]); // 2 = Assigned in RT Portal (an educator is on it)
 const day = d => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const monthKey = d => String(d).slice(0, 7);
 

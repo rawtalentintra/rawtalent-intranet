@@ -49,7 +49,7 @@ Source of truth: RT Portal (RawTalent's backoffice). Educator status, onboarding
 
 Which tool to use:
 - Educators: list_educators (counts and lists by status, state, compliance, engagement, onboarding, qualification, gender, or near a centre/address), search_educators (find a person), get_educator (one full profile), get_educator_definitions (what each status/engagement group means).
-- Centres and bookings: search_centres, get_centre, search_bookings, get_fill_rate.
+- Centres and bookings: get_bookings_summary (ALL booking totals, matches the RT Portal dashboard; never count with search_bookings), search_bookings (individual shifts with start/finish times), get_fill_rate, search_centres, get_centre.
 - Sales pipeline (leads, Workforce Partners Justine VIC and Gwen SA/QLD): search_leads, get_lead, get_leads_funnel, get_wfp_performance.
 - Recruitment: jobadder_* tools, get_qr_recruitment_report. Email journeys: customerio_* tools.
 - Calls: get_call_insights, search_voice_notes. Knowledge base: search_kb_articles, ask_rawtalent_ai.
