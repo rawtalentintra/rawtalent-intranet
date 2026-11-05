@@ -561,6 +561,85 @@ function qualificationCountsFor(candidates) {
 // (same shape/fields as a pod's own candidate list) instead. Registered
 // as a literal path ahead of '/:podId', same reason as /territory-strategy
 // and /advertising-opportunities above.
+// Educator Map (Sophia + Joy, 4 Nov 2026 call): one dot per educator instead of
+// grouped pods, filterable by RT's own candidate fields (status, state, onboarding
+// step, compliance, gender, qualification) plus the engagement groups. Unlike pods,
+// this deliberately includes everyone (not just ready-to-roster) so Ops can see who
+// is onboarding or not compliant near a centre. Do Not Use / Not Interested stay out.
+// Filtering is done in the browser; this just returns the full list once (cached).
+let educatorMapCache = { data: null, expiresAt: 0 };
+async function buildEducatorMap() {
+  if (educatorMapCache.data && Date.now() < educatorMapCache.expiresAt) return educatorMapCache.data;
+  const rows = (await getDb().execute({
+    sql: `SELECT user_id, first_name, last_name, email, contact_no, suburb, status,
+            raw->>'statusName' AS status_name, raw->>'genderName' AS gender,
+            raw->>'obStatus' AS ob_status,
+            raw->'addresses'->0->>'state' AS addr_state,
+            (raw->'addresses'->0->>'latitude')::float8 AS lat,
+            (raw->'addresses'->0->>'longitude')::float8 AS lng,
+            raw->'qualifications'->0->>'qualificationName' AS qualification_name,
+            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa
+          FROM rt_candidates_cache
+          WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)
+            AND raw->'addresses'->0->>'latitude' IS NOT NULL`,
+    args: []
+  })).rows;
+  const { completedShiftsByUser, engagementTag } = require('../services/educatorIndicatorsService');
+  const { centres, bookings } = await getCentresAndBookings();
+  const shiftsByUser = completedShiftsByUser(bookings);
+  const today = new Date().toISOString().slice(0, 10);
+  const educators = [];
+  for (const r of rows) {
+    if (!Number.isFinite(r.lat) || !Number.isFinite(r.lng) || (r.lat === 0 && r.lng === 0)) continue;
+    const shiftList = shiftsByUser.get(String(r.user_id)) || [];
+    const lastShift = shiftList.length ? Math.max(...shiftList) : null;
+    educators.push({
+      userId: String(r.user_id),
+      name: [r.first_name, r.last_name].filter(Boolean).join(' ') || `Candidate #${r.user_id}`,
+      email: r.email || null, phone: r.contact_no || null, suburb: r.suburb || null,
+      state: normalizeStateToShort(r.addr_state),
+      lat: r.lat, lng: r.lng,
+      status: r.status_name || null,
+      onboarding: r.ob_status || null,
+      compliant: complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id).length === 0,
+      gender: r.gender || null,
+      qualification: r.qualification_name || null,
+      segment: engagementTag(shiftList),
+      shifts28d: shiftList.filter(t => Date.now() - t <= 28 * 864e5).length,
+      lastShift: lastShift ? new Date(lastShift).toISOString().slice(0, 10) : null
+    });
+  }
+
+  // Centres currently working with us = a filled/meaningful booking in the last 120 days.
+  // Unfilled (statusId 7) in the last 30 days shows where the shortage is.
+  const { getLastBookingDates, indexBookingsByCentre, bookingsForCentre } = require('./centres');
+  const lastByKey = await getLastBookingDates(centres, bookings);
+  const index = indexBookingsByCentre(bookings);
+  const cutoff = Date.now() - 120 * 864e5, since30 = Date.now() - 30 * 864e5;
+  const current = centres.filter(c => lastByKey[c.centreKey] && new Date(lastByKey[c.centreKey]).getTime() >= cutoff);
+  const geocodes = await centreGeoService.getGeocodesForCentres(current);
+  const centreList = current.filter(c => geocodes[c.centreKey]).map(c => ({
+    centreKey: c.centreKey, name: c.name, suburb: c.suburb || null, state: normalizeStateToShort(c.state),
+    lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng,
+    unfilled30d: bookingsForCentre(index, c).filter(b => b.statusId === 7 && b.bookingDate && new Date(b.bookingDate).getTime() >= since30 && new Date(b.bookingDate).getTime() <= Date.now()).length
+  }));
+
+  const data = { educators, centres: centreList, generatedAt: new Date().toISOString() };
+  educatorMapCache = { data, expiresAt: Date.now() + CANDIDATES_CACHE_TTL_MS };
+  return data;
+}
+
+router.get('/educator-map', async (req, res) => {
+  try { res.json(await buildEducatorMap()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Address lookup for a centre not in RT yet (e.g. a new YMCA site being onboarded).
+router.get('/locate', async (req, res) => {
+  try { res.json({ suggestions: await require('../services/mapboxService').suggestAddresses(req.query.q || '') }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/unclustered', async (req, res) => {
   try {
     const result = await getPodsForParams(req);

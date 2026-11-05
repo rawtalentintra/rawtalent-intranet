@@ -1340,6 +1340,50 @@
       <template id="__lazy_micropods">
       <!-- Micropods -->
       <div class="admin-section" id="section-micropods">
+      <style>
+        .mp-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--gray-200)}
+        .mp-tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 14px;font-size:13.5px;font-weight:600;color:var(--text-muted);cursor:pointer;margin-bottom:-1px}
+        .mp-tab.active{color:var(--navy);border-bottom-color:var(--orange)}
+        .em-card{padding:16px 20px;margin-bottom:16px}
+        .em-search-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+        .em-search{position:relative;flex:1 1 320px;min-width:0}
+        .em-search label,.em-radius label,.em-filter label{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin-bottom:4px}
+        .em-search input{width:100%}
+        .em-radius select{width:110px}
+        .em-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);z-index:50;max-height:320px;overflow:auto}
+        .em-sr{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--gray-100);padding:8px 12px;font-size:13px;cursor:pointer;color:var(--text)}
+        .em-sr:hover{background:var(--gray-100)}
+        .em-sr-k{display:inline-block;min-width:58px;font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.03em}
+        .em-sr-sub{display:block;margin-left:58px;font-size:11.5px;color:var(--text-muted)}
+        .em-sr-empty{padding:10px 12px;font-size:12.5px;color:var(--text-muted)}
+        .em-filters{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--gray-100);align-items:flex-end}
+        .em-filter{flex:0 1 170px;min-width:140px}
+        .em-dd{position:relative}
+        .em-dd summary{list-style:none;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#fff}
+        .em-dd summary::-webkit-details-marker{display:none}
+        .em-dd-panel{position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);z-index:40;min-width:220px;max-height:300px;overflow:auto;padding:6px 0}
+        .em-dd-opt{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:12.5px;font-weight:400;color:var(--text);margin:0;cursor:pointer}
+        .em-dd-opt span:nth-child(2){flex:1}
+        .em-dd-count{color:var(--text-muted);font-size:11.5px}
+        .em-dd-clear{background:none;border:0;color:var(--navy);font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer}
+        .em-reset{font-size:12px;padding:6px 10px}
+        .em-map{height:520px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12.5px}
+        .em-legend{display:flex;flex-wrap:wrap;gap:14px;padding:10px 16px;font-size:12px;color:var(--text);border-top:1px solid var(--gray-100)}
+        .em-leg{display:inline-flex;align-items:center;gap:6px}
+        .em-dot{width:10px;height:10px;border-radius:50%;border:1px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+        .em-home{display:inline-flex;color:var(--navy)}
+        .em-centre-pin{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);cursor:pointer}
+        .em-centre-pin.short{background:#c0392b}
+        .em-centre-pin.new{background:var(--orange)}
+        .em-list-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        .em-summary{font-size:13px}
+        .em-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+        .em-pill.ok{background:#dcfce7;color:#15803d}
+        .em-pill.no{background:#fee2e2;color:#b91c1c}
+        .em-more{font-size:12px;color:var(--text-muted);margin-top:10px}
+        @media (max-width:640px){.em-map{height:380px}.em-filter{flex:1 1 140px}.em-radius select{width:100%}}
+      </style>
+
         <div class="admin-header">
           <div>
             <div class="admin-page-title">Micropods</div>
@@ -1348,6 +1392,51 @@
         </div>
 
         <div class="rt-data-banner" data-rt-banner="onboarding,visa" style="display:none"></div>
+        <div class="mp-tabs">
+          <button type="button" class="mp-tab active" data-mp-tab="map" onclick="setMicropodsTab('map')">Educator map</button>
+          <button type="button" class="mp-tab" data-mp-tab="pods" onclick="setMicropodsTab('pods')">Pods</button>
+        </div>
+
+        <div id="emView">
+          <div class="admin-table-card em-card">
+            <div class="em-search-row">
+              <div class="em-search">
+                <label for="emCentreSearch">Centre or address</label>
+                <input type="text" id="emCentreSearch" class="form-control" placeholder="Type a centre name, suburb or street address" autocomplete="off" oninput="emOnSearchInput()" onfocus="emOnSearchInput()">
+                <div id="emSearchResults" class="em-search-results" style="display:none"></div>
+              </div>
+              <div class="em-radius">
+                <label for="emRadius">Within</label>
+                <select id="emRadius" class="form-control" onchange="emRender()">
+                  <option value="5">5 km</option><option value="10" selected>10 km</option><option value="15">15 km</option><option value="25">25 km</option><option value="50">50 km</option>
+                </select>
+              </div>
+              <button type="button" class="btn-secondary em-clear" id="emClearBtn" style="display:none" onclick="emClearLocation()">Clear centre</button>
+            </div>
+            <div class="em-filters" id="emFilters"></div>
+          </div>
+
+          <div class="admin-table-card" style="padding:0;overflow:hidden;margin-bottom:16px">
+            <div id="emMap" class="em-map">Loading map…</div>
+            <div id="emLegend" class="em-legend"></div>
+          </div>
+
+          <div class="admin-table-card">
+            <div class="em-list-head">
+              <div id="emSummary" class="em-summary"></div>
+              <button type="button" class="btn-secondary" onclick="emExportCsv()">Export CSV</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table data-table-compact">
+                <thead><tr><th>Educator</th><th>Suburb</th><th>Status</th><th>Onboarding</th><th>Compliance</th><th>Engagement</th><th>Qualification</th><th>Last shift</th><th id="emDistHead" style="display:none">Distance</th></tr></thead>
+                <tbody id="emTableBody"><tr><td colspan="9"><div class="loading-spinner"><div class="spinner"></div></div></td></tr></tbody>
+              </table>
+            </div>
+            <div id="emMore" class="em-more"></div>
+          </div>
+        </div>
+
+        <div id="mpPodsView" style="display:none">
         <div id="micropodsListScreen">
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1448,6 +1537,7 @@
         <div id="micropodDetailScreen" style="display:none">
           <button class="btn-secondary" style="font-size:11.5px;padding:4px 10px;margin-bottom:14px" onclick="backToMicropodsList()">← Back to Micropods</button>
           <div id="micropodDetailBody"></div>
+        </div>
         </div>
       </div>
       </template>
@@ -6976,7 +7066,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
-      if (id === 'micropods') { backToMicropodsList(); initMicropodsSection(); initFindEducators(); initReadyExport(); }
+      if (id === 'micropods') { backToMicropodsList(); setMicropodsTab(micropodsTab); initFindEducators(); initReadyExport(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
       if (id === 'route-planner') loadRoutePlannerSection();
@@ -13126,6 +13216,297 @@
     // Checked segment keys — empty Set means "all candidates", same
     // sentinel every other multi-select in this app uses.
     let micropodsSegmentSelection = new Set();
+
+    // ── Educator map (Sophia + Joy call, 4 Nov 2026) ──────────────────────
+    // One dot per educator, coloured by the same engagement groups as pods,
+    // filtered by RT's own candidate fields. Search a current centre (or any
+    // address, for centres not in RT yet) to see who lives within a radius.
+    let micropodsTab = 'map';
+    let emData = null, emMapInstance = null, emLocation = null, emCentreMarkers = [], emLocationMarker = null;
+    const emSel = {}; // filterKey -> Set of selected values ([] = all)
+    let emListLimit = 100, emSearchTimer = null;
+    const EM_FILTERS = [
+      { key: 'state', label: 'State', get: e => e.state || 'Unknown' },
+      { key: 'status', label: 'Status', get: e => e.status || 'Unknown' },
+      { key: 'onboarding', label: 'Onboarding step', get: e => e.onboarding || 'Not started' },
+      { key: 'compliant', label: 'Compliant status', get: e => e.compliant ? 'Compliant' : 'Not compliant' },
+      { key: 'segment', label: 'Engagement', get: e => e.segment, fmt: v => (SEGMENT_META[v] || {}).label || v },
+      { key: 'qualification', label: 'Qualification', get: e => e.qualification || 'None listed' },
+      { key: 'gender', label: 'Gender', get: e => e.gender || 'Not stated' }
+    ];
+    const EM_SEGMENT_ORDER = ['actively_working', 'actively_engaged', 'engaged', 'disengaged', 'dormant'];
+
+    function setMicropodsTab(tab) {
+      micropodsTab = tab;
+      document.querySelectorAll('.mp-tab').forEach(b => b.classList.toggle('active', b.dataset.mpTab === tab));
+      const mapView = document.getElementById('emView'), podsView = document.getElementById('mpPodsView');
+      if (!mapView) return;
+      mapView.style.display = tab === 'map' ? '' : 'none';
+      podsView.style.display = tab === 'pods' ? '' : 'none';
+      if (tab === 'map') emInit(); else initMicropodsSection();
+    }
+
+    async function emInit() {
+      if (!emData) {
+        try {
+          const d = await fetch('/api/micropods/educator-map').then(r => r.json());
+          if (d.error) throw new Error(d.error);
+          emData = d;
+          const st = defaultStateForCurrentUser();
+          if (st && st !== 'all') emSel.state = new Set([st]);
+        } catch {
+          document.getElementById('emTableBody').innerHTML = '<tr><td colspan="9" style="color:#c0392b;padding:20px">Could not load educators.</td></tr>';
+          return;
+        }
+      }
+      emRenderFilters();
+      emRender();
+    }
+
+    function emRenderFilters() {
+      const wrap = document.getElementById('emFilters');
+      wrap.innerHTML = EM_FILTERS.map(f => {
+        const counts = {};
+        emData.educators.forEach(e => { const v = f.get(e); counts[v] = (counts[v] || 0) + 1; });
+        let values = Object.keys(counts);
+        if (f.key === 'segment') values = EM_SEGMENT_ORDER.filter(v => counts[v]);
+        else values.sort((a, b) => counts[b] - counts[a]);
+        const sel = emSel[f.key] || new Set();
+        const btnText = sel.size === 0 ? 'All' : sel.size === 1 ? (f.fmt ? f.fmt([...sel][0]) : [...sel][0]) : `${sel.size} selected`;
+        return `<div class="em-filter">
+          <label>${f.label}</label>
+          <details class="em-dd">
+            <summary class="form-control">${escHtml(btnText)}</summary>
+            <div class="em-dd-panel">
+              ${values.map(v => `<label class="em-dd-opt"><input type="checkbox" data-em-key="${f.key}" value="${escHtml(v)}" ${sel.has(v) ? 'checked' : ''} onchange="emToggleFilter(this)"> <span>${escHtml(f.fmt ? f.fmt(v) : v)}</span> <span class="em-dd-count">${counts[v]}</span></label>`).join('')}
+              ${sel.size ? `<button type="button" class="em-dd-clear" onclick="emClearFilter('${f.key}')">Clear</button>` : ''}
+            </div>
+          </details>
+        </div>`;
+      }).join('') + `<button type="button" class="btn-secondary em-reset" onclick="emResetFilters()">Reset filters</button>`;
+    }
+    function emToggleFilter(cb) {
+      const k = cb.dataset.emKey;
+      if (!emSel[k]) emSel[k] = new Set();
+      cb.checked ? emSel[k].add(cb.value) : emSel[k].delete(cb.value);
+      const open = cb.closest('details');
+      emRenderFilters();
+      // keep the dropdown that was being used open
+      const again = document.querySelector(`#emFilters input[data-em-key="${k}"]`);
+      if (open && again) again.closest('details').open = true;
+      emListLimit = 100;
+      emRender();
+    }
+    function emClearFilter(k) { delete emSel[k]; emRenderFilters(); emRender(); }
+    function emResetFilters() { Object.keys(emSel).forEach(k => delete emSel[k]); emRenderFilters(); emRender(); }
+    document.addEventListener('click', e => {
+      document.querySelectorAll('#emFilters details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+      const box = document.getElementById('emSearchResults');
+      if (box && !e.target.closest('.em-search')) box.style.display = 'none';
+    });
+
+    function emKm(a, b) {
+      const R = 6371, toR = x => x * Math.PI / 180;
+      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function emFiltered() {
+      const radius = Number(document.getElementById('emRadius').value) || 10;
+      let list = emData.educators.filter(e => EM_FILTERS.every(f => {
+        const sel = emSel[f.key];
+        if (!sel || !sel.size) return true;
+        // a picked centre already decides the area, so the state filter steps aside
+        if (f.key === 'state' && emLocation) return true;
+        return sel.has(f.get(e));
+      }));
+      if (emLocation) {
+        list = list.map(e => ({ ...e, distanceKm: emKm(emLocation, e) })).filter(e => e.distanceKm <= radius);
+        list.sort((a, b) => a.distanceKm - b.distanceKm);
+      } else {
+        list.sort((a, b) => EM_SEGMENT_ORDER.indexOf(a.segment) - EM_SEGMENT_ORDER.indexOf(b.segment) || a.name.localeCompare(b.name));
+      }
+      return list;
+    }
+    function emVisibleCentres() {
+      const radius = Number(document.getElementById('emRadius').value) || 10;
+      const st = emSel.state;
+      return emData.centres.filter(c => emLocation ? emKm(emLocation, c) <= radius : (!st || !st.size || st.has(c.state || 'Unknown')));
+    }
+
+    function emRender() {
+      if (!emData) return;
+      const list = emFiltered();
+      const centres = emVisibleCentres();
+      const counts = {};
+      list.forEach(e => { counts[e.segment] = (counts[e.segment] || 0) + 1; });
+      document.getElementById('emLegend').innerHTML = EM_SEGMENT_ORDER.map(k =>
+        `<span class="em-leg"><span class="em-dot" style="background:${SEGMENT_META[k].dot}"></span>${SEGMENT_META[k].label} <b>${counts[k] || 0}</b></span>`).join('') +
+        `<span class="em-leg"><span class="em-home">${EM_HOME_SVG}</span>Centre <b>${centres.length}</b></span>`;
+      const where = emLocation ? ` within ${document.getElementById('emRadius').value} km of ${escHtml(emLocation.label)}` : '';
+      const unfilled = centres.reduce((n, c) => n + (c.unfilled30d || 0), 0);
+      document.getElementById('emSummary').innerHTML = `<b>${list.length.toLocaleString()}</b> educator${list.length === 1 ? '' : 's'}${where}` +
+        (emLocation && unfilled ? ` · ${unfilled} unfilled booking${unfilled === 1 ? '' : 's'} at centres in this area in the last 30 days` : '');
+      document.getElementById('emDistHead').style.display = emLocation ? '' : 'none';
+      const rows = list.slice(0, emListLimit);
+      document.getElementById('emTableBody').innerHTML = rows.length ? rows.map(e => {
+        const seg = SEGMENT_META[e.segment] || {};
+        return `<tr>
+          <td><div style="font-weight:600">${escHtml(e.name)}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(e.phone || '')}${e.phone && e.email ? ' · ' : ''}${escHtml(e.email || '')}</div></td>
+          <td>${escHtml(e.suburb || '')}${e.state ? ', ' + e.state : ''}</td>
+          <td>${escHtml(e.status || '')}</td>
+          <td>${escHtml(e.onboarding || 'Not started')}</td>
+          <td><span class="em-pill ${e.compliant ? 'ok' : 'no'}">${e.compliant ? 'Compliant' : 'Not compliant'}</span></td>
+          <td><span class="em-pill" style="background:${seg.bg};color:${seg.color}">${escHtml(seg.label || '')}</span></td>
+          <td>${escHtml(e.qualification || '')}</td>
+          <td>${e.lastShift ? fmtDateAU(e.lastShift) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+          ${emLocation ? `<td>${e.distanceKm.toFixed(1)} km</td>` : ''}
+        </tr>`;
+      }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px">No educators match these filters.</td></tr>';
+      document.getElementById('emMore').innerHTML = list.length > emListLimit
+        ? `Showing ${emListLimit} of ${list.length.toLocaleString()}. <button type="button" class="btn-secondary" onclick="emListLimit+=200;emRender()">Show more</button> Export CSV includes everyone.` : '';
+      emDrawMap(list, centres);
+    }
+
+    function fmtDateAU(iso) { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; }
+
+    const EM_HOME_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 3 2 11.5h3V21h5.5v-6h3v6H19v-9.5h3z"/></svg>';
+
+    async function emDrawMap(list, centres) {
+      const mapEl = document.getElementById('emMap');
+      if (!mapboxTokenCache) {
+        try { mapboxTokenCache = await fetch('/api/route-planner/map-token').then(r => r.json()); } catch { mapboxTokenCache = { configured: false }; }
+      }
+      if (!mapboxTokenCache.configured || !mapboxTokenCache.token) { mapEl.textContent = 'Map needs Mapbox configured. The list below still works.'; return; }
+      try { await ensureMapboxGlLoaded(); } catch { mapEl.textContent = 'Could not load the map.'; return; }
+      const geo = { type: 'FeatureCollection', features: list.map(e => ({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+        properties: { id: e.userId, color: (SEGMENT_META[e.segment] || {}).dot || '#64748b' }
+      })) };
+      const fit = () => {
+        const pts = emLocation ? [emLocation, ...list] : (list.length ? list : centres);
+        if (!pts.length) return;
+        if (emLocation && !list.length) { emMapInstance.flyTo({ center: [emLocation.lng, emLocation.lat], zoom: 11 }); return; }
+        const b = new mapboxgl.LngLatBounds();
+        pts.forEach(p => b.extend([p.lng, p.lat]));
+        emMapInstance.fitBounds(b, { padding: 40, maxZoom: 13, duration: 600 });
+      };
+      const paint = () => {
+        const src = emMapInstance.getSource('em-educators');
+        if (src) src.setData(geo);
+        else {
+          emMapInstance.addSource('em-educators', { type: 'geojson', data: geo });
+          emMapInstance.addLayer({ id: 'em-educators', type: 'circle', source: 'em-educators', paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 2.5, 10, 4.5, 14, 7],
+            'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1, 'circle-opacity': .9 } });
+          emMapInstance.on('click', 'em-educators', ev => {
+            const e = emData.educators.find(x => x.userId === ev.features[0].properties.id);
+            if (!e) return;
+            const div = document.createElement('div');
+            div.style.cssText = 'font-size:12.5px;line-height:1.45';
+            const t = document.createElement('div'); t.style.fontWeight = '700'; t.textContent = e.name; div.appendChild(t);
+            [`${e.suburb || ''}${e.state ? ', ' + e.state : ''}`, `${e.status || ''} · ${e.compliant ? 'Compliant' : 'Not compliant'}`,
+             `${(SEGMENT_META[e.segment] || {}).label || ''}${e.lastShift ? ' · last shift ' + fmtDateAU(e.lastShift) : ''}`, e.phone || '']
+              .filter(Boolean).forEach(line => { const l = document.createElement('div'); l.style.color = 'var(--text-muted)'; l.textContent = line; div.appendChild(l); });
+            new mapboxgl.Popup({ offset: 8 }).setLngLat(ev.lngLat).setDOMContent(div).addTo(emMapInstance);
+          });
+          emMapInstance.on('mouseenter', 'em-educators', () => { emMapInstance.getCanvas().style.cursor = 'pointer'; });
+          emMapInstance.on('mouseleave', 'em-educators', () => { emMapInstance.getCanvas().style.cursor = ''; });
+        }
+        emCentreMarkers.forEach(m => m.remove());
+        emCentreMarkers = centres.map(c => {
+          const el = document.createElement('div');
+          el.className = 'em-centre-pin' + (c.unfilled30d ? ' short' : '');
+          el.innerHTML = EM_HOME_SVG;
+          const pop = document.createElement('div');
+          pop.style.cssText = 'font-size:12.5px;line-height:1.45';
+          const t = document.createElement('div'); t.style.fontWeight = '700'; t.textContent = c.name; pop.appendChild(t);
+          const s2 = document.createElement('div'); s2.style.color = 'var(--text-muted)';
+          s2.textContent = `${c.suburb || ''}${c.state ? ', ' + c.state : ''}${c.unfilled30d ? ` · ${c.unfilled30d} unfilled in last 30 days` : ''}`; pop.appendChild(s2);
+          const btn = document.createElement('button'); btn.className = 'btn-secondary'; btn.style.cssText = 'margin-top:6px;font-size:11.5px;padding:3px 8px';
+          btn.textContent = 'Educators near this centre'; btn.onclick = () => emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true });
+          pop.appendChild(btn);
+          return new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat]).setPopup(new mapboxgl.Popup({ offset: 14 }).setDOMContent(pop)).addTo(emMapInstance);
+        });
+        if (emLocationMarker) { emLocationMarker.remove(); emLocationMarker = null; }
+        if (emLocation && !emLocation.centre) {
+          const el = document.createElement('div'); el.className = 'em-centre-pin new'; el.innerHTML = EM_HOME_SVG;
+          emLocationMarker = new mapboxgl.Marker({ element: el }).setLngLat([emLocation.lng, emLocation.lat]).addTo(emMapInstance);
+        }
+        fit();
+      };
+      if (emMapInstance && emMapInstance.getContainer() === mapEl) {
+        if (emMapInstance.loaded()) paint(); else emMapInstance.once('load', paint);
+        return;
+      }
+      mapEl.innerHTML = '';
+      mapboxgl.accessToken = mapboxTokenCache.token;
+      await new Promise(requestAnimationFrame);
+      if (mapEl !== document.getElementById('emMap')) return;
+      emMapInstance = new mapboxgl.Map({ container: 'emMap', style: 'mapbox://styles/mapbox/streets-v12', center: [144.96, -37.81], zoom: 8 });
+      emMapInstance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+      emMapInstance.resize();
+      emMapInstance.once('load', paint);
+    }
+
+    // Centre search: current centres by name/suburb first, then street addresses
+    // (for centres not in RT yet, e.g. a new YMCA site).
+    function emOnSearchInput() {
+      const q = document.getElementById('emCentreSearch').value.trim().toLowerCase();
+      const box = document.getElementById('emSearchResults');
+      if (!emData || q.length < 2) { box.style.display = 'none'; return; }
+      const matches = emData.centres.filter(c => (c.name || '').toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q)).slice(0, 8);
+      const draw = (addresses) => {
+        const items = [
+          ...matches.map((c, i) => `<button type="button" class="em-sr" onclick="emPickCentre(${emData.centres.indexOf(c)})"><span class="em-sr-k">Centre</span>${escHtml(c.name)}<span class="em-sr-sub">${escHtml(c.suburb || '')}${c.state ? ', ' + c.state : ''}</span></button>`),
+          ...(addresses || []).map((a, i) => `<button type="button" class="em-sr" onclick="emPickAddress(${i})"><span class="em-sr-k">Address</span>${escHtml(a.label)}</button>`)
+        ];
+        box.innerHTML = items.length ? items.join('') : `<div class="em-sr-empty">${addresses ? 'No centre or address found.' : 'Searching addresses…'}</div>`;
+        box.style.display = 'block';
+      };
+      draw(null);
+      clearTimeout(emSearchTimer);
+      if (q.length < 4) { draw([]); return; }
+      emSearchTimer = setTimeout(async () => {
+        try { const d = await fetch('/api/micropods/locate?q=' + encodeURIComponent(q)).then(r => r.json()); emAddressResults = d.suggestions || []; }
+        catch { emAddressResults = []; }
+        if (document.getElementById('emCentreSearch').value.trim().toLowerCase() === q) draw(emAddressResults);
+      }, 350);
+    }
+    let emAddressResults = [];
+    function emPickCentre(i) { const c = emData.centres[i]; emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true }); }
+    function emPickAddress(i) { const a = emAddressResults[i]; emPickLocation({ lat: a.lat, lng: a.lng, label: a.label.split(',')[0], centre: false }); }
+    function emPickLocation(loc) {
+      emLocation = loc;
+      document.getElementById('emCentreSearch').value = loc.label;
+      document.getElementById('emSearchResults').style.display = 'none';
+      document.getElementById('emClearBtn').style.display = '';
+      emListLimit = 100;
+      emRender();
+    }
+    function emClearLocation() {
+      emLocation = null;
+      document.getElementById('emCentreSearch').value = '';
+      document.getElementById('emClearBtn').style.display = 'none';
+      emRender();
+    }
+
+    function emExportCsv() {
+      const list = emFiltered();
+      const cols = ['Name', 'Phone', 'Email', 'Suburb', 'State', 'Latitude', 'Longitude', 'Status', 'Onboarding step', 'Compliance', 'Engagement', 'Qualification', 'Gender', 'Shifts last 28 days', 'Last shift'];
+      if (emLocation) cols.push('Distance (km)');
+      const q = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const lines = [cols.join(',')].concat(list.map(e => [e.name, e.phone, e.email, e.suburb, e.state, e.lat, e.lng, e.status, e.onboarding || 'Not started',
+        e.compliant ? 'Compliant' : 'Not compliant', (SEGMENT_META[e.segment] || {}).label, e.qualification, e.gender, e.shifts28d, e.lastShift ? fmtDateAU(e.lastShift) : '',
+        ...(emLocation ? [e.distanceKm.toFixed(1)] : [])].map(q).join(',')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `educators${emLocation ? '-near-' + emLocation.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : ''}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
 
     function initMicropodsSection() {
       if (!micropodsState) micropodsState = defaultStateForCurrentUser() || 'all';
