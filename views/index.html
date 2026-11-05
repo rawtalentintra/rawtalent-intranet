@@ -1474,7 +1474,9 @@
           .rf-q input,.rf-q textarea{font:inherit;font-weight:400;border:1px solid var(--gray-200);border-radius:6px;padding:6px 8px}
           .rf-wide{grid-column:1/-1}
           .rf-opts{display:flex;flex-wrap:wrap;gap:4px 14px;font-weight:400}
-          .rf-opt{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:400;margin:0}
+          .rf .rf-opt{display:inline-flex!important;flex-direction:row!important;align-items:center;gap:5px;font-size:12.5px;font-weight:400;margin:0;white-space:nowrap}
+          .rf .rf-opt input{width:auto!important;margin:0;padding:0;height:auto}
+          .rf .btn-primary{width:auto!important;flex:none;padding:8px 18px}
           .wx-ed-toggle{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-align:left}
           .wx-caret{font-size:.75em;color:#2563eb;width:12px}
           .wx-note-flag{font-size:11px;font-weight:600;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 8px}
