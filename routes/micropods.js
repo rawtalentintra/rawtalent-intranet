@@ -568,6 +568,8 @@ function qualificationCountsFor(candidates) {
 // is onboarding or not compliant near a centre. Do Not Use / Not Interested stay out.
 // Filtering is done in the browser; this just returns the full list once (cached).
 const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
+// Bad geocodes (e.g. a centre plotted in Asia) would zoom the map out to the globe.
+const inAustralia = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && lat > -44.5 && lat < -9 && lng > 112 && lng < 154.5;
 let educatorMapCache = { data: null, expiresAt: 0 };
 async function buildEducatorMap() {
   if (educatorMapCache.data && Date.now() < educatorMapCache.expiresAt) return educatorMapCache.data;
@@ -591,7 +593,7 @@ async function buildEducatorMap() {
   const today = new Date().toISOString().slice(0, 10);
   const educators = [];
   for (const r of rows) {
-    if (!Number.isFinite(r.lat) || !Number.isFinite(r.lng) || (r.lat === 0 && r.lng === 0)) continue;
+    if (!inAustralia(r.lat, r.lng)) continue;
     const shiftList = shiftsByUser.get(String(r.user_id)) || [];
     const lastShift = shiftList.length ? Math.max(...shiftList) : null;
     educators.push({
@@ -621,7 +623,7 @@ async function buildEducatorMap() {
   const cutoff = Date.now() - 120 * 864e5, since30 = Date.now() - 30 * 864e5;
   const current = centres.filter(c => lastByKey[c.centreKey] && new Date(lastByKey[c.centreKey]).getTime() >= cutoff);
   const geocodes = await centreGeoService.getGeocodesForCentres(current);
-  const centreList = current.filter(c => geocodes[c.centreKey]).map(c => ({
+  const centreList = current.filter(c => geocodes[c.centreKey] && inAustralia(geocodes[c.centreKey].lat, geocodes[c.centreKey].lng)).map(c => ({
     centreKey: c.centreKey, name: c.name, suburb: c.suburb || null, state: normalizeStateToShort(c.state),
     lat: geocodes[c.centreKey].lat, lng: geocodes[c.centreKey].lng,
     unfilled30d: bookingsForCentre(index, c).filter(b => b.statusId === 7 && b.bookingDate && new Date(b.bookingDate).getTime() >= since30 && new Date(b.bookingDate).getTime() <= Date.now()).length
