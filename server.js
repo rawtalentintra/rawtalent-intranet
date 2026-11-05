@@ -423,6 +423,19 @@ async function maybeRunNightlyCandidatesSync() {
   if (rtCandidatesSync.isSyncRunning(state)) return;
 
   const nowMelbourne = new Date(new Date().toLocaleString('en-US', { timeZone: RT_CANDIDATES_SYNC_TZ }));
+  // Daytime refresh (Joy, 5 Nov 2026: a once-a-night copy left statuses up to a day
+  // behind RT Portal). Every 2 hours 8am-8pm Melbourne, a plain re-sync only; the
+  // slower one-by-one gap fill and the nightly reports stay in the 2am run below.
+  const hour = nowMelbourne.getHours();
+  if (hour >= 8 && hour <= 20 && hour % 2 === 0) {
+    if (state?.started_at && Date.now() - new Date(state.started_at).getTime() < 90 * 60 * 1000) return;
+    console.log('Starting daytime RT candidates sync…');
+    try {
+      const { count, durationMs } = await rtCandidatesSync.syncAllCandidates('daytime');
+      console.log(`Daytime RT candidates sync complete — ${count} candidates in ${Math.round(durationMs / 1000)}s.`);
+    } catch (err) { console.error('Daytime RT candidates sync failed:', err.message); }
+    return;
+  }
   if (nowMelbourne.getHours() !== 2) return; // only inside the 2-3am Melbourne window
 
   const lastRunDay = state?.started_at
