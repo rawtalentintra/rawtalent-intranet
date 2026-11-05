@@ -1463,6 +1463,13 @@
           .wash-pill{font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
           .wx-ed{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:14px;overflow:hidden}
           .wx-ed-head{padding:16px 18px;border-bottom:1px solid #bfdbfe;background:#e0f2fe}
+          .wx-ed-toggle{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-align:left}
+          .wx-caret{font-size:.75em;color:#2563eb;width:12px}
+          .wx-note-flag{font-size:11px;font-weight:600;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 8px}
+          .wx-notes{margin-top:12px}
+          .wx-notes label{display:block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px}
+          .wx-notes textarea{width:100%;box-sizing:border-box;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font:inherit;font-size:14px;resize:vertical;min-height:72px;background:#fff}
+          .wx-note-meta{font-size:11.5px;color:var(--text-muted);margin-top:4px}
           .wx-ed-link{font-size:.8em;font-weight:600;color:#2563eb;text-decoration:none;margin-left:4px}.wx-ed-link:hover{color:#1d4ed8}
           .wx-ed-name{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
           .wx-ed-name h3{margin:0;font-size:16px;font-weight:800;color:var(--navy)}
@@ -1510,24 +1517,58 @@
       const list = [...groups.values()];
       return [...list.filter(g => g.key !== 'none'), ...list.filter(g => g.key === 'none')];
     }
+    // Educator details and notes stay folded away until the name is clicked (Joy, 5 Nov).
+    const washEdOpen = new Set();
+    let washNoteTimers = {};
     function washEducatorBlock(g) {
       const fmt = iso => iso ? iso.split('-').reverse().join('/') : 'None yet';
       const i = g.info;
-      let head;
-      if (g.key === 'none') head = `<div class="wx-ed-name"><h3>No educator recorded</h3></div><div style="font-size:13px;color:var(--text-muted);margin-top:6px">These leads didn't name an educator.</div>`;
-      else if (!i) head = `<div class="wx-ed-name"><h3>${escHtml(g.educator.name)}</h3></div><div style="font-size:13px;color:var(--text-muted);margin-top:6px">Not matched to an RT profile, so there's no status or booking history to show.</div>`;
-      else head = `<div class="wx-ed-name"><h3>${escHtml(i.name || g.educator.name)} <a class="wx-ed-link" href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(g.educator.rtUserId)}" target="_blank" rel="noopener" title="Open in RT Portal" aria-label="Open ${escHtml(i.name || g.educator.name)} in RT Portal">&#8599;</a></h3></div>
-          <div class="wx-facts">
-            <div class="wx-fact"><span>Status</span><b style="color:${i.active ? '#15803d' : '#b45309'}">${i.active ? 'Active' : 'Not active'}</b></div>
+      if (g.key === 'none') return `<div class="wx-ed"><div class="wx-ed-head"><div class="wx-ed-name"><h3>No educator recorded</h3></div><div style="font-size:13px;color:var(--text-muted);margin-top:6px">These leads didn't name an educator.</div></div>
+        <div class="wx-sub">Centres (${g.leads.length})</div>${g.leads.map(washCardHtml).join('')}</div>`;
+      const open = washEdOpen.has(g.key);
+      const name = (i && i.name) || g.educator.name;
+      const note = ((washState.data && washState.data.educatorNotes) || {})[g.key];
+      const statusColor = i && i.active ? '#15803d' : '#b45309';
+      const facts = !i ? `<div style="font-size:13px;color:var(--text-muted);margin-top:10px">Not matched to an RT profile, so there's no status or booking history to show.</div>` : `<div class="wx-facts">
+            <div class="wx-fact"><span>Status</span><b style="color:${statusColor}">${escHtml(i.statusLabel || (i.active ? 'Active' : 'Not active'))}</b></div>
             <div class="wx-fact"><span>Onboarding</span><b>${escHtml(i.onboarding ? i.onboarding.replace(/([a-z])([A-Z])/g, '$1 $2') : 'Unknown')}</b></div>
             <div class="wx-fact"><span>Shifts completed</span><b>${i.shiftsDone}</b></div>
             <div class="wx-fact"><span>Upcoming shifts</span><b>${i.upcoming}</b></div>
             <div class="wx-fact"><span>Last shift</span><b>${fmt(i.lastShift)}</b></div>
             ${i.suburb ? `<div class="wx-fact"><span>Suburb</span><b>${escHtml(i.suburb)}</b></div>` : ''}
           </div>`;
-      return `<div class="wx-ed"><div class="wx-ed-head">${head}</div>
+      const link = i ? ` <a class="wx-ed-link" href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(g.educator.rtUserId)}" target="_blank" rel="noopener" title="Open in RT Portal" aria-label="Open ${escHtml(name)} in RT Portal" onclick="event.stopPropagation()">&#8599;</a>` : '';
+      const keyAttr = escHtml(g.key);
+      return `<div class="wx-ed"><div class="wx-ed-head">
+          <div class="wx-ed-name"><h3><button type="button" class="wx-ed-toggle" aria-expanded="${open}" onclick="washToggleEducator(this.dataset.key)" data-key="${keyAttr}"><span class="wx-caret">${open ? '&#9662;' : '&#9656;'}</span>${escHtml(name)}</button>${link}</h3>
+            ${note && note.notes ? `<span class="wx-note-flag">Has notes</span>` : ''}</div>
+          ${open ? `${facts}
+          <div class="wx-notes">
+            <label for="wxn-${keyAttr}">Notes</label>
+            <textarea id="wxn-${keyAttr}" data-key="${keyAttr}" rows="3" placeholder="What the educator said on the call, who to ask for at each centre..." oninput="washNoteInput(this)">${escHtml(note ? note.notes : '')}</textarea>
+            <div class="wx-note-meta" id="wxm-${keyAttr}">${note && note.by ? `Last saved by ${escHtml(note.by)} ${new Date(note.at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Saves automatically'}</div>
+          </div>` : ''}
+        </div>
         <div class="wx-sub">Centres they named (${g.leads.length})</div>
         ${g.leads.map(washCardHtml).join('')}</div>`;
+    }
+    function washToggleEducator(key) {
+      washEdOpen.has(key) ? washEdOpen.delete(key) : washEdOpen.add(key);
+      renderWash();
+    }
+    function washNoteInput(el) {
+      const key = el.dataset.key, meta = document.getElementById('wxm-' + key);
+      if (meta) meta.textContent = 'Saving…';
+      clearTimeout(washNoteTimers[key]);
+      washNoteTimers[key] = setTimeout(async () => {
+        try {
+          const r = await fetch('/api/lead-quality/wash/educator-notes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, notes: el.value }) });
+          if (!r.ok) throw new Error();
+          washState.data.educatorNotes = washState.data.educatorNotes || {};
+          washState.data.educatorNotes[key] = { notes: el.value, by: 'you', at: new Date().toISOString() };
+          if (meta) meta.textContent = 'Saved';
+        } catch { if (meta) meta.textContent = 'Couldn\u2019t save. Check your connection and keep typing to retry.'; }
+      }, 700);
     }
     function washCardHtml(l) {
       const o = washState.opts, open = washState.openId === l.id;

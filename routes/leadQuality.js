@@ -26,6 +26,7 @@ router.get('/wash/queue', canWash, async (req, res) => {
     }));
   } catch (err) { fail(res, err); }
 });
+router.put('/wash/educator-notes', canWash, async (req, res) => { try { res.json(await wash.saveEducatorNotes(req.body?.key, req.body?.notes, req.user)); } catch (err) { fail(res, err); } });
 router.get('/wash/:leadId/history', canWash, async (req, res) => { try { res.json(await wash.history(req.params.leadId)); } catch (err) { fail(res, err); } });
 router.post('/wash/:leadId', canWash, async (req, res) => { try { res.status(201).json(await wash.recordWash(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
 

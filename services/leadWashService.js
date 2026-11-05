@@ -77,6 +77,19 @@ async function educatorLinks(leads) {
 
 // Educator first (Joy, 3 Nov): a short RT summary of each linked educator so
 // consultants can check the educator before calling the centres they named.
+const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
+
+async function saveEducatorNotes(key, notes, user) {
+  if (!/^(rt|name):.{1,200}$/.test(String(key || ''))) throw Object.assign(new Error('Invalid educator'), { status: 400 });
+  const text = String(notes == null ? '' : notes).slice(0, 10000);
+  await getDb().execute({
+    sql: `INSERT INTO lead_wash_educator_notes (educator_key, notes, updated_by_email, updated_by_name, updated_at) VALUES (?, ?, ?, ?, now())
+          ON CONFLICT (educator_key) DO UPDATE SET notes = EXCLUDED.notes, updated_by_email = EXCLUDED.updated_by_email, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`,
+    args: [key, text, user.email || null, user.name || null]
+  });
+  return { ok: true };
+}
+
 async function educatorSummaries(uids) {
   if (!uids.length) return {};
   const rows = (await getDb().execute({
@@ -97,7 +110,7 @@ async function educatorSummaries(uids) {
   } catch { /* RT bookings unavailable: show the profile without shift counts */ }
   return Object.fromEntries(rows.map(r => {
     const sh = shifts[r.uid] || { done: 0, upcoming: 0, last: null };
-    return [r.uid, { name: `${r.first_name || ''} ${r.last_name || ''}`.trim(), active: r.status === 1, onboarding: r.ob || null, suburb: r.suburb || null,
+    return [r.uid, { name: `${r.first_name || ''} ${r.last_name || ''}`.trim(), active: r.status === 1, statusLabel: RT_STATUS_LABELS[r.status] || null, onboarding: r.ob || null, suburb: r.suburb || null,
       shiftsDone: sh.done, upcoming: sh.upcoming, lastShift: sh.last ? new Date(sh.last).toISOString().slice(0, 10) : null }];
   }));
 }
@@ -150,7 +163,9 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
   out.sort((a, b) => (GROUP_RANK[a.effGroup] - GROUP_RANK[b.effGroup])
     || String(a.state || '').localeCompare(String(b.state || '')) || new Date(a.createdAt) - new Date(b.createdAt));
   const educators = await educatorSummaries([...new Set(out.map(l => l.educator && l.educator.rtUserId).filter(Boolean))]);
-  return { tally, leads: out, educators, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
+  const educatorNotes = Object.fromEntries((await db.execute({ sql: 'SELECT educator_key, notes, updated_by_name, updated_at FROM lead_wash_educator_notes', args: [] })).rows
+    .map(r => [r.educator_key, { notes: r.notes, by: r.updated_by_name, at: r.updated_at }]));
+  return { tally, leads: out, educators, educatorNotes, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
 }
 
 async function history(leadId) {
@@ -193,4 +208,4 @@ async function recordWash(leadId, body, user) {
   return row;
 }
 
-module.exports = { WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };
+module.exports = { saveEducatorNotes, WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };

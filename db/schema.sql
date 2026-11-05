@@ -3019,3 +3019,15 @@ CREATE TABLE IF NOT EXISTS task_link_history (
 );
 CREATE INDEX IF NOT EXISTS idx_task_link_history_task ON task_link_history(task_id);
 ALTER TABLE task_link_history ENABLE ROW LEVEL SECURITY;
+
+-- Lead Wash: free-text notes per educator (shared by everyone washing), so a
+-- consultant can note the educator call and refer back when calling the centres.
+-- educator_key = 'rt:<RT user id>' or 'name:<lowercased name>' for unmatched names.
+CREATE TABLE IF NOT EXISTS lead_wash_educator_notes (
+  educator_key TEXT PRIMARY KEY,
+  notes TEXT NOT NULL DEFAULT '',
+  updated_by_email TEXT,
+  updated_by_name TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE lead_wash_educator_notes ENABLE ROW LEVEL SECURITY;
