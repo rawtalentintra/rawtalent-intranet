@@ -248,6 +248,49 @@ function registerAdminTools(server) {
     ].join('\n'));
   });
 
+  server.registerTool('get_profitability', {
+    title: 'Booking Profitability (pay rate, charge rate, margin)',
+    description: 'Revenue, educator pay cost, gross profit and margin for filled RT bookings (assigned, accepted, completed) over a day or date range, straight from RT\'s own booking financials: charge rate per hour, pay rate per hour, paid hours, booking revenue, educator pay cost and gross profit. Breaks down by client (centre) or by state, sorted by gross profit, with average pay rate, average charge rate and margin %. Gross profit is charge minus educator pay as RT calculates it; it does NOT include on-costs (super, workers comp, payroll tax). Defaults to today (Melbourne).',
+    inputSchema: {
+      date: z.string().optional().describe('One day, YYYY-MM-DD (default today)'),
+      from: z.string().optional(), to: z.string().optional().describe('Range end YYYY-MM-DD, exclusive'),
+      groupBy: z.enum(['client', 'state', 'none']).optional().describe('Breakdown, default client'),
+      state: z.string().optional(), limit: z.number().int().min(1).max(200).optional().describe('Rows in the breakdown, default 50')
+    }
+  }, async ({ date, from, to, groupBy, state, limit }) => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(new Date());
+    let f, t;
+    if (isDay(from) || isDay(to)) { f = isDay(from) ? from : today; t = isDay(to) ? to : null; } else { f = isDay(date) ? date : today; t = null; }
+    const { bookings, centres } = await getCentresAndBookings();
+    const cByKey = new Map(centres.map(c => [c.centreKey, c]));
+    const shortSt = v => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'northern territory': 'NT', 'australian capital territory': 'ACT', 'western australia': 'WA', tasmania: 'TAS' })[String(v || '').toLowerCase()] || String(v || 'Unknown').toUpperCase();
+    const rows = bookings.filter(b => {
+      const d = (b.bookingDate || '').slice(0, 10);
+      if (!d || (t ? (d < f || d >= t) : d !== f) || ![2, 3, 5].includes(b.statusId)) return false;
+      if (state) { const c = cByKey.get(`loc:${b.locationId}`) || cByKey.get(`client:${b.clientId}`); if (shortSt(c && c.state) !== state.toUpperCase()) return false; }
+      return true;
+    });
+    const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const add = (acc, b) => { acc.n++; acc.hours += num(b.paidHours); acc.rev += num(b.bookingRevenue); acc.cost += num(b.educatorPayCost); acc.gp += num(b.grossProfit); acc.pay += num(b.payRate); acc.charge += num(b.chargeRate); return acc; };
+    const blank = () => ({ n: 0, hours: 0, rev: 0, cost: 0, gp: 0, pay: 0, charge: 0 });
+    const total = rows.reduce(add, blank());
+    const money = v => '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const line = (name, a) => `${name}: ${a.n} shifts · ${a.hours.toFixed(1)} h · revenue ${money(a.rev)} · educator pay ${money(a.cost)} · gross profit ${money(a.gp)} · margin ${a.rev ? (a.gp / a.rev * 100).toFixed(1) : '0.0'}% · avg charge ${money(a.n ? a.charge / a.n : 0)}/h · avg pay ${money(a.n ? a.pay / a.n : 0)}/h`;
+    const out = [`Profitability ${t ? `${f} to ${t} (exclusive)` : f}${state ? ' · ' + state.toUpperCase() : ''} (filled bookings only; RT's figures, before on-costs)`, line('TOTAL', total)];
+    const g = groupBy || 'client';
+    if (g !== 'none' && rows.length) {
+      const by = new Map();
+      for (const b of rows) {
+        const c = cByKey.get(`loc:${b.locationId}`) || cByKey.get(`client:${b.clientId}`);
+        const k = g === 'state' ? shortSt(c && c.state) : (b.locationName || b.clientName || (c && c.name) || `centre ${b.locationId || b.clientId}`);
+        if (!by.has(k)) by.set(k, blank());
+        add(by.get(k), b);
+      }
+      out.push('', `By ${g} (highest gross profit first):`, ...[...by.entries()].sort((a, b) => b[1].gp - a[1].gp).slice(0, limit || 50).map(([k, a]) => line('• ' + k, a)));
+    }
+    return text(out.join('\n'));
+  });
+
   server.registerTool('search_bookings', {
     title: 'Search Bookings',
     description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns at most 50 rows, so NEVER count bookings with this tool: use get_bookings_summary for totals.',
@@ -275,7 +318,7 @@ function registerAdminTools(server) {
     }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate))).slice(0, limit || 20);
     if (!rows.length) return text('No bookings matched.');
     const hm = t => (t ? String(t).slice(11, 16) : '?');
-    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    return text(rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────
