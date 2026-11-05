@@ -607,6 +607,10 @@ async function start() {
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
     // Micropods: build the educator points once at start-up and every 50 min,
     // so nobody waits on a cold 10–30s build (routes/micropods.js).
+    // Fetch RT centres + bookings straight away after a restart (about 30s from RT),
+    // so the first person to open Lead Wash, My Centres or the map after a deploy
+    // isn't the one who waits for it. After this, stale-while-refresh keeps it warm.
+    require('./routes/centres').getCentresAndBookings().catch(err => console.error('Boot bookings warm-up failed:', err.message));
     setTimeout(() => require('./routes/micropods').warmMicropods(), 60 * 1000);
     // Weekly/monthly WFP report (Mondays 8am → last week; the 1st 8am → last month) and the
     // Monday Bot activity summary for Joy. Checked every 20 min; each only runs once per period.
