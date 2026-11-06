@@ -6955,7 +6955,7 @@
     // 'wfp-performance' is a super_admin-only preview (Joy, 2026-10-05) — not for Workforce Partners or anyone else until the numbers are signed off.
     // WFP Performance released to Liam (Joy, 2026-10-14) once its numbers
     // reconciled. Still hidden from the Workforce Partners themselves.
-    const WFP_PERFORMANCE_VIEWERS = ['liam@rawtalent.com.au'];
+    const WFP_PERFORMANCE_VIEWERS = ['liam@rawtalent.com.au', 'sophia@rawtalent.com.au']; // Sophia: same access as Liam (Joy, 2026-11-06)
     function canSeeWfpPerformance() {
       return currentUserRole === 'super_admin' || WFP_PERFORMANCE_VIEWERS.includes(String(currentUserEmail || '').toLowerCase());
     }

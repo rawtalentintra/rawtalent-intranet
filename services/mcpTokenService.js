@@ -65,14 +65,15 @@ async function verifyToken(rawToken) {
 // Who may connect to the MCP server: the super_admin, plus named people Joy
 // has allowed (Liam, 2026-10-09, for his ChatGPT). Same tools and data as the
 // super_admin sees — no separate view.
-const MCP_ALLOWED_EMAILS = ['liam@rawtalent.com.au'];
+// Sophia added 2026-11-06 with the same access as Liam (MCP + the pages gated on this).
+const MCP_ALLOWED_EMAILS = ['liam@rawtalent.com.au', 'sophia@rawtalent.com.au'];
 function canUseMcp(email, role) {
   return role === 'super_admin' || MCP_ALLOWED_EMAILS.includes(String(email || '').toLowerCase());
 }
 
 // MCP connection only (no extra HeartBeat pages): Sophia, 2026-11-06, for her ChatGPT.
 // canUseMcp above also unlocks a couple of pages, so this list is kept separate.
-const MCP_CONNECT_ONLY_EMAILS = ['sophia@rawtalent.com.au'];
+const MCP_CONNECT_ONLY_EMAILS = [];
 function canConnectMcp(email, role) {
   return canUseMcp(email, role) || MCP_CONNECT_ONLY_EMAILS.includes(String(email || '').toLowerCase());
 }
