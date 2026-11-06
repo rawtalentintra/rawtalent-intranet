@@ -2182,7 +2182,6 @@ INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
   ('onboarding', 'Onboarding', '#15803d', '🧑‍🎓', 2),
   ('app_dev', 'App Development', '#7c3aed', '💻', 3),
   ('management', 'Management', '#b45309', '📊', 4),
-  ('marketing', 'Marketing', '#db2777', '📣', 5),
   ('quality', 'Quality', '#0d9488', '🔍', 6),
   -- Anything logged under this department is an escalation, not a regular
   -- task (2026-08-24) — the 🚨 icon/red colour and the note in the
@@ -2196,6 +2195,16 @@ INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
   -- to match. Sorted last.
   ('payroll', 'Payroll', '#4338ca', '💵', 8)
 ON CONFLICT (id) DO NOTHING;
+-- Marketing replaced by HeartBeat and Email - Customer.io (Joy, 2026-11-06). No task
+-- or user used Marketing. Inserted/removed here so every boot ends in the same state.
+DELETE FROM task_departments WHERE id = 'marketing' AND NOT EXISTS (SELECT 1 FROM tasks WHERE department_id = 'marketing');
+INSERT INTO task_departments (id, name, color, icon, sort_order) VALUES
+  ('heartbeat', 'HeartBeat', '#0284c7', '💙', 5),
+  ('email_cio', 'Email - Customer.io', '#db2777', '✉️', 6)
+ON CONFLICT (id) DO NOTHING;
+UPDATE task_departments SET sort_order = 7 WHERE id = 'quality' AND sort_order = 6;
+UPDATE task_departments SET sort_order = 8 WHERE id = 'workforce_partners' AND sort_order = 7;
+UPDATE task_departments SET sort_order = 9 WHERE id = 'payroll' AND sort_order = 8;
 -- Dropping "Team" from the original 5 names (2026-08-24) — CREATE ... IF
 -- NOT EXISTS/ON CONFLICT DO NOTHING above won't rename a department that
 -- already exists in a database from before this change, so these UPDATEs

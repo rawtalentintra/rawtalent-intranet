@@ -53,7 +53,7 @@ function validateStatusForDepartment(status, departmentId) {
 //      department-specific work streams don't clutter/confuse people
 //      who aren't part of them.
 const FULL_VISIBILITY_ROLES = new Set(['admin', 'super_admin', 'qa_view']);
-const HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS = new Set(['app_dev', 'marketing', 'workforce_partners']);
+const HIDDEN_DEPARTMENTS_FOR_GENERAL_USERS = new Set(['app_dev', 'heartbeat', 'email_cio', 'workforce_partners']);
 
 function canAccessDepartment(user, departmentId) {
   if (user.restricted_task_department_id) return user.restricted_task_department_id === departmentId;
