@@ -50,7 +50,7 @@ Source of truth: RT Portal (RawTalent's backoffice). Educator status, onboarding
 Which tool to use:
 - Educators: list_educators (counts and lists by status, state, compliance, engagement, onboarding, qualification, gender, or near a centre/address), search_educators (find a person), get_educator (one full profile), get_educator_definitions (what each status/engagement group means).
 - Centres and bookings: get_bookings_summary (ALL booking totals, matches the RT Portal dashboard; never count with search_bookings), search_bookings (individual shifts with start/finish times and rates), get_profitability (revenue, pay, gross profit and margin by client or state), get_fill_rate, search_centres, get_centre.
-- Sales pipeline (leads, Workforce Partners Justine VIC and Gwen SA/QLD): search_leads, get_lead, get_leads_funnel, get_wfp_performance.
+- Sales pipeline (leads, Workforce Partners Justine VIC and Gwen SA/QLD): search_leads, get_lead, get_leads_funnel, get_wfp_performance, get_wfp_portfolio (each partner's centres: health, trend, dormant, days since last call/visit, overdue for the 3-monthly visit).
 - Recruitment: jobadder_* tools, get_qr_recruitment_report. Email journeys: customerio_* tools.
 - Calls: get_call_insights, search_voice_notes. Knowledge base: search_kb_articles, ask_rawtalent_ai.
 - Anything else HeartBeat stores (tasks, timesheets, payroll, team, projects, call grading, visits, training, outreach lists, compliance history, contracts...): query_heartbeat_data (use list_fields first).

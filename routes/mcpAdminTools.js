@@ -194,6 +194,47 @@ function registerAdminTools(server) {
     return text(`Fill rate ${r.from} to ${r.to} (exclusive)\n${r.partners.map(line).join('\n')}\n${line(r.total)}`);
   });
 
+  server.registerTool('get_wfp_portfolio', {
+    title: 'Workforce Partner Portfolio',
+    description: 'The centres each Workforce Partner is responsible for (Justine, Gwen, Liam, or Unassigned) and how that portfolio is doing: number of centres, health (healthy / needs attention / at risk etc.), booking trend (growing / steady / declining), dormant centres, average days since the partner last called or visited, and every centre NOT contacted in the last 90 days (the 3-monthly visit target). Leave partner empty for all partners side by side. Same centres and rules as My Centres in HeartBeat.',
+    inputSchema: { partner: z.string().optional().describe('Justine, Gwen, Liam or Unassigned'), overdueDays: z.number().int().min(7).max(365).optional().describe('Contact gap that counts as overdue, default 90') }
+  }, async ({ partner, overdueDays }) => {
+    const centresMod = require('./centres');
+    const layer = centresMod.stack.find(l => l.route && l.route.path === '/' && l.route.methods.get);
+    const rows = await new Promise((resolve, reject) => layer.route.stack[layer.route.stack.length - 1].handle(
+      { query: {}, user: { role: 'super_admin' } },
+      { json: resolve, status() { return { json: d => reject(new Error(d && d.error || 'centres unavailable')) }; } }));
+    const assignments = await centresMod.getCentrePartnerAssignments();
+    const gap = overdueDays || 90, now = Date.now();
+    const byP = new Map();
+    for (const c of rows) {
+      const p = centresMod.partnerLabelForCentre(c, assignments) || 'Unassigned';
+      if (partner && p.toLowerCase() !== partner.toLowerCase()) continue;
+      if (!byP.has(p)) byP.set(p, []);
+      byP.get(p).push(c);
+    }
+    if (!byP.size) return text(`No centres found${partner ? ' for ' + partner : ''}.`);
+    const pct = (n, d) => (d ? Math.round(n / d * 100) : 0);
+    const tally = (list, f) => { const t = {}; list.forEach(c => { const k = f(c) || 'unknown'; t[k] = (t[k] || 0) + 1; }); return Object.entries(t).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k.replace(/_/g, ' ')} ${n} (${pct(n, list.length)}%)`).join(', '); };
+    const out = [];
+    for (const [p, list] of [...byP.entries()].sort((a, b) => b[1].length - a[1].length)) {
+      const days = c => (c.lastContactAt ? Math.floor((now - new Date(c.lastContactAt).getTime()) / 864e5) : null);
+      const contacted = list.filter(c => days(c) != null);
+      const avg = contacted.length ? Math.round(contacted.reduce((a, c) => a + days(c), 0) / contacted.length) : null;
+      const overdue = list.filter(c => days(c) == null || days(c) > gap).sort((a, b) => (days(b) ?? 1e9) - (days(a) ?? 1e9));
+      out.push(`${p}: ${list.length} centres`,
+        `  Health (as on My Centres): ${tally(list, c => c.health)}`,
+        `  Booking trend: ${tally(list, c => c.bookingTrend && c.bookingTrend.status)}`,
+        `  On the dormant call list (6+ months since last booking): ${list.filter(c => c.isDormant).length} (${pct(list.filter(c => c.isDormant).length, list.length)}%)`,
+        `  Last call/visit: average ${avg == null ? 'n/a' : avg + ' days ago'} across ${contacted.length} contacted; never contacted ${list.length - contacted.length}`,
+        `  Not contacted in ${gap}+ days: ${overdue.length} (${pct(overdue.length, list.length)}%)`,
+        ...(partner ? overdue.slice(0, 100).map(c => `    • ${c.name}${c.suburb ? ', ' + c.suburb : ''} — ${days(c) == null ? 'never contacted' : days(c) + ' days since last contact'}${c.lastBookingDate ? ` · last booking ${String(c.lastBookingDate).slice(0, 10)}` : ''}`) : []),
+        '');
+    }
+    out.push('Ownership: explicit assignment in HeartBeat, else the suburb/state default (VIC Justine or Liam by suburb, SA/QLD/NT Gwen).');
+    return text(out.join('\n'));
+  });
+
   server.registerTool('get_bookings_summary', {
     title: 'Bookings Summary (matches RT Portal dashboard)',
     description: 'Exact booking totals for one day or a date range (shift date, Melbourne time), counted the same way as RT Portal\'s dashboard ("Filled Booking 69/69" = filled out of all bookings that aren\'t cancelled). Returns total, filled (assigned + accepted + completed), still open (created, no educator yet), unfilled, fill rate, and cancellations broken down by who cancelled and why using RT Portal\'s own cancellation reasons (centre, educator, admin such as reassignments/tests/duplicates, or no reason recorded). Cancellations are not counted against the fill rate. Also shift start/finish times and average shift length. Optional state (VIC, SA, QLD...) or centreKey. Use this for any "how many bookings" question; defaults to today.',
