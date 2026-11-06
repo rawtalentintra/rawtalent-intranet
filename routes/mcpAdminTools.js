@@ -8,6 +8,7 @@ const { z } = require('zod');
 const { getDb } = require('../db/database');
 const jobAdderService = require('../services/jobAdderService');
 const { getCentresAndBookings, computeFillRateByPartner, lastCancelReason } = require('./centres');
+const cancelReasons = require('../services/cancelReasons');
 
 // RT Portal's own booking status names (RT's bookingStatus text). Filled = 2, 3 or 5.
 const STATUS_NAMES = { 1: 'Created (open, no educator yet)', 2: 'Assigned (filled)', 3: 'Accepted (filled)', 5: 'Completed (filled)', 6: 'Cancelled', 7: 'Unfilled', 11: 'Requested (pending: centre asked for a named educator)' };
@@ -185,7 +186,7 @@ function registerAdminTools(server) {
   // ── Bookings / fill rate ──────────────────────────────────────────────
   server.registerTool('get_fill_rate', {
     title: 'Fill Rate by Partner',
-    description: 'Booking fill rate by Workforce Partner (Justine, Gwen, Unassigned) for a date range of shift dates. Fill rate = filled / (filled + unfilled). "Unfilled" is inferred from RT cancel reason 50, so it reads lower than the weekly ops figure. Dates are YYYY-MM-DD, "to" exclusive; defaults to the last 30 days.',
+    description: 'Booking fill rate by Workforce Partner (Justine, Gwen, Unassigned) for a date range of shift dates. Fill rate = filled / (filled + unfilled). "Unfilled" = bookings RT cancelled with reason 50 (Unfilled). Cancellations by the centre or educator, and admin cancellations, are not counted against the fill rate. Dates are YYYY-MM-DD, "to" exclusive; defaults to the last 30 days.',
     inputSchema: { from: z.string().optional(), to: z.string().optional() }
   }, async ({ from, to }) => {
     const r = await computeFillRateByPartner(from, to);
@@ -195,7 +196,7 @@ function registerAdminTools(server) {
 
   server.registerTool('get_bookings_summary', {
     title: 'Bookings Summary (matches RT Portal dashboard)',
-    description: 'Exact booking totals for one day or a date range (shift date, Melbourne time), counted the same way as RT Portal\'s dashboard ("Filled Booking 69/69" = filled out of all bookings that aren\'t cancelled). Returns total, filled (assigned + accepted + completed), still open (created, no educator yet), cancelled and unfilled, plus shift start/finish times and average shift length. Optional state (VIC, SA, QLD...) or centreKey. Use this for any "how many bookings" question; defaults to today.',
+    description: 'Exact booking totals for one day or a date range (shift date, Melbourne time), counted the same way as RT Portal\'s dashboard ("Filled Booking 69/69" = filled out of all bookings that aren\'t cancelled). Returns total, filled (assigned + accepted + completed), still open (created, no educator yet), unfilled, fill rate, and cancellations broken down by who cancelled and why using RT Portal\'s own cancellation reasons (centre, educator, admin such as reassignments/tests/duplicates, or no reason recorded). Cancellations are not counted against the fill rate. Also shift start/finish times and average shift length. Optional state (VIC, SA, QLD...) or centreKey. Use this for any "how many bookings" question; defaults to today.',
     inputSchema: {
       date: z.string().optional().describe('One day, YYYY-MM-DD (default today, Melbourne)'),
       from: z.string().optional().describe('Range start YYYY-MM-DD (use with to instead of date)'),
@@ -219,10 +220,11 @@ function registerAdminTools(server) {
       return true;
     });
     const n = { created: 0, requested: 0, assigned: 0, accepted: 0, completed: 0, cancelled: 0, unfilled: 0 };
+    const cx = { centre: {}, educator: {}, admin: {}, none: {} }, cxN = { centre: 0, educator: 0, admin: 0, none: 0 };
     const mins = [], starts = [], ends = [];
     for (const b of rows) {
       const uf = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
-      if (uf) n.unfilled++; else if (b.statusId === 6) n.cancelled++;
+      if (uf) n.unfilled++; else if (b.statusId === 6) { n.cancelled++; const c = cancelReasons.classify(b); const g = c.group === 'unfilled' ? 'admin' : c.group; cxN[g]++; cx[g][c.reason] = (cx[g][c.reason] || 0) + 1; }
       else if (b.statusId === 1) n.created++; else if (b.statusId === 11) n.requested++; else if (b.statusId === 2) n.assigned++; else if (b.statusId === 3) n.accepted++; else if (b.statusId === 5) n.completed++;
       if ([2, 3, 5].includes(b.statusId) && b.startTime && b.endTime) {
         const s = new Date(b.startTime), e = new Date(b.endTime);
@@ -242,8 +244,10 @@ function registerAdminTools(server) {
       `Filled: ${filled} (assigned ${n.assigned}, accepted ${n.accepted}, completed ${n.completed})`,
       `Open, no educator yet: ${n.created}`,
       `Requested (centre asked for a named educator, not assigned yet): ${n.requested}`,
-      `Cancelled: ${n.cancelled}`,
-      `Unfilled (RT couldn't fill): ${n.unfilled}`,
+      `Cancelled: ${n.cancelled} (cancellations are NOT counted against the fill rate; fill rate = filled / (filled + unfilled))`,
+      ...['centre', 'educator', 'admin', 'none'].filter(g => cxN[g]).map(g => `  • ${cancelReasons.GROUP_LABELS[g]}: ${cxN[g]} (${Object.entries(cx[g]).sort((a, b) => b[1] - a[1]).map(([r, k]) => `${r} ${k}`).join(', ')})`),
+      `Unfilled (RT couldn't fill, cancel reason 50): ${n.unfilled}`,
+      `Fill rate: ${(filled + n.unfilled) ? (filled / (filled + n.unfilled) * 100).toFixed(1) + '%' : 'n/a'}`,
       `Filled shifts: average start ${clock(avg(starts))}, average finish ${clock(avg(ends))}, average length ${dur == null ? 'n/a' : (dur / 60).toFixed(1) + ' h'} (after unpaid break)`,
       'Source: RT bookings, refreshed every few minutes.'
     ].join('\n'));
@@ -321,7 +325,7 @@ function registerAdminTools(server) {
     const rows = matched.slice(0, limit || 500);
     if (!rows.length) return text('No bookings matched.');
     const hm = t => (t ? String(t).slice(11, 16) : '?');
-    return text(`${total} booking(s) matched${total > rows.length ? `, showing the first ${rows.length} (use get_bookings_summary or get_profitability for totals)` : ' (complete list)'}:\n` + rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${(b.statusId === 6 && lastCancelReason(b) === 50) ? 'Unfilled' : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    return text(`${total} booking(s) matched${total > rows.length ? `, showing the first ${rows.length} (use get_bookings_summary or get_profitability for totals)` : ' (complete list)'}:\n` + rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${b.statusId === 6 ? (c => (c.group === 'unfilled' ? 'Unfilled' : `Cancelled: ${cancelReasons.GROUP_LABELS[c.group]} · ${c.reason}`))(cancelReasons.classify(b)) : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────

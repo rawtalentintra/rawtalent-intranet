@@ -47,13 +47,8 @@ function lastCompletedPeriod(type, now = new Date()) {
 }
 const inP = (t, p) => { const d = melbDay(t); return d >= p.start && d < p.end; };
 
-// Cancellation codes → who cancelled. PROVISIONAL (from RT notes, 16 Oct) until Sophia confirms.
-const CANCEL_GROUP = {
-  50: 'unfilled', 3: 'unfilled',
-  7: 'centre', 9: 'centre', 10: 'centre', 11: 'centre', 12: 'centre', 13: 'centre', 14: 'centre', 15: 'centre', 16: 'centre', 17: 'centre', 22: 'centre', 47: 'centre', 48: 'centre',
-  1: 'educator', 4: 'educator', 5: 'educator', 23: 'educator', 24: 'educator', 25: 'educator', 26: 'educator', 27: 'educator', 29: 'educator', 30: 'educator', 31: 'educator', 33: 'educator', 35: 'educator', 36: 'educator', 39: 'educator', 44: 'educator', 45: 'educator',
-  2: 'admin', 6: 'admin', 28: 'admin', 49: 'admin', 51: 'admin'
-};
+// Who cancelled: RT Portal's own cancellation reasons (services/cancelReasons.js, 6 Nov 2026).
+const cancelReasons = require('./cancelReasons');
 
 async function buildReport(type = 'week', start = null) {
   const db = getDb();
@@ -189,7 +184,7 @@ async function buildReport(type = 'week', start = null) {
     else if (b.statusId === 1 || b.statusId === 11) r.open++; // 11 = Requested
     else if (b.statusId === 7) r.unfilled++;
     else if (b.statusId === 6) {
-      const g = CANCEL_GROUP[centresMod.lastCancelReason(b)] || 'unclear';
+      const c = cancelReasons.classify(b).group; const g = c === 'none' ? 'unclear' : c;
       if (g === 'unfilled') r.unfilled++; else r.cancelled[g]++;
     }
   }
@@ -241,4 +236,4 @@ async function runScheduled(now = new Date()) {
   return done;
 }
 
-module.exports = { buildReport, generateAndSave, runScheduled, lastCompletedPeriod, periodBounds, CANCEL_GROUP };
+module.exports = { buildReport, generateAndSave, runScheduled, lastCompletedPeriod, periodBounds };
