@@ -70,4 +70,11 @@ function canUseMcp(email, role) {
   return role === 'super_admin' || MCP_ALLOWED_EMAILS.includes(String(email || '').toLowerCase());
 }
 
-module.exports = { generateToken, listTokens, revokeToken, verifyToken, canUseMcp };
+// MCP connection only (no extra HeartBeat pages): Sophia, 2026-11-06, for her ChatGPT.
+// canUseMcp above also unlocks a couple of pages, so this list is kept separate.
+const MCP_CONNECT_ONLY_EMAILS = ['sophia@rawtalent.com.au'];
+function canConnectMcp(email, role) {
+  return canUseMcp(email, role) || MCP_CONNECT_ONLY_EMAILS.includes(String(email || '').toLowerCase());
+}
+
+module.exports = { generateToken, listTokens, revokeToken, verifyToken, canUseMcp, canConnectMcp };

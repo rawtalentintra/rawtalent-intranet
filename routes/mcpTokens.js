@@ -17,7 +17,7 @@ const mcpTokens = require('../services/mcpTokenService');
 // OAuth sign-in (e.g. the Codex app). Tokens are only ever for the signed-in user.
 router.use((req, res, next) => {
   if (!req.isAuthenticated || !req.isAuthenticated()) return res.status(401).json({ error: 'Login required' });
-  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Super admin access required' });
+  if (!require('../services/mcpTokenService').canConnectMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Super admin access required' });
   next();
 });
 
