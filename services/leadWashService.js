@@ -90,6 +90,64 @@ async function saveEducatorNotes(key, notes, user) {
   return { ok: true };
 }
 
+// Lead Wash pipeline (Liam, 6 Nov 2026): consultants confirm with the educator first,
+// then the Workforce Partner does the reference call, books a visit, and decides.
+const STAGES = [
+  { key: 'new', label: 'New', color: '#fee2e2', text: '#b91c1c' },
+  { key: 'educator_confirmed', label: 'Educator confirmed', color: '#fef3c7', text: '#b45309' },
+  { key: 'centre_called', label: 'Reference / centre called', color: '#dbeafe', text: '#1d4ed8' },
+  { key: 'visit_booked', label: 'Visit booked', color: '#ccfbf1', text: '#0f766e' },
+  { key: 'solid', label: 'Solid', color: '#dcfce7', text: '#15803d' },
+  { key: 'not_viable', label: 'Not viable', color: '#f1f5f9', text: '#475569' }
+];
+const CHECK_FIELDS = { workedHere: 'worked_here', lastShift: 'last_shift', howOften: 'how_often', agencyUsed: 'agency_used', otherAgencyEducators: 'other_agency_educators', favourite: 'favourite', managerName: 'manager_name', notes: 'notes' };
+
+async function saveEducatorCheck(leadId, body, user) {
+  const db = getDb();
+  const lead = (await db.execute({ sql: 'SELECT id FROM leads WHERE id = ? AND closed_at IS NULL', args: [leadId] })).rows[0];
+  if (!lead) throw Object.assign(new Error('Lead not found'), { status: 404 });
+  const v = k => { const x = body[k]; return x == null || x === '' ? null : String(x).trim().slice(0, 500); };
+  if (v('workedHere') && !['yes', 'no'].includes(v('workedHere'))) throw Object.assign(new Error('Did they work here: yes or no'), { status: 400 });
+  const cols = Object.values(CHECK_FIELDS), vals = Object.keys(CHECK_FIELDS).map(v);
+  await db.execute({
+    sql: `INSERT INTO lead_wash_educator_checks (lead_id, ${cols.join(', ')}, updated_by_email, updated_by_name, updated_at)
+          VALUES (?, ${cols.map(() => '?').join(', ')}, ?, ?, now())
+          ON CONFLICT (lead_id) DO UPDATE SET ${cols.map(c => `${c} = EXCLUDED.${c}`).join(', ')}, updated_by_email = EXCLUDED.updated_by_email, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`,
+    args: [leadId, ...vals, user.email || null, user.name || null]
+  });
+  if (body.agencyUsage && ['target_temp', 'high_agency_user'].includes(body.agencyUsage)) {
+    await db.execute({ sql: 'UPDATE leads SET agency_usage = ?, updated_at = now() WHERE id = ?', args: [body.agencyUsage, leadId] });
+  }
+  // The educator never worked there: the lead isn't real, so it leaves the wash (archived, not deleted).
+  if (v('workedHere') === 'no') {
+    await db.execute({ sql: "UPDATE leads SET archived_at = now(), archived_reason = 'Lead wash: educator says they never worked here', updated_at = now() WHERE id = ? AND archived_at IS NULL", args: [leadId] });
+  }
+  return { ok: true };
+}
+
+// A centre the educator mentioned on the call: created through the normal New Lead form,
+// then flagged so it shows in Lead Wash and linked to the educator.
+async function adoptLead(leadId, body, user) {
+  const db = getDb();
+  await db.execute({ sql: 'UPDATE leads SET wash_added = true WHERE id = ?', args: [leadId] });
+  if (body.rtUserId && /^\d+$/.test(String(body.rtUserId))) {
+    await db.execute({ sql: 'INSERT INTO lead_educators (id, lead_id, candidate_user_id, note, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (lead_id, candidate_user_id) DO NOTHING',
+      args: [require('crypto').randomUUID(), leadId, String(body.rtUserId), 'Named on the Lead Wash call', user.email || null, user.name || null] });
+  }
+  return { ok: true };
+}
+
+// Book the Workforce Partner's visit straight from the wash (shows as Visit scheduled in Leads / Today).
+async function bookVisit(leadId, body, user) {
+  const when = String(body.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(when)) throw Object.assign(new Error('Pick a date for the visit'), { status: 400 });
+  const db = getDb();
+  await db.execute({ sql: "UPDATE leads SET centre_visited_status = 'scheduled', centre_visited_at = ?, updated_at = now() WHERE id = ?", args: [when.length === 10 ? when + 'T09:00:00' : when + ':00', leadId] });
+  await db.execute({ sql: 'INSERT INTO lead_notes (id, lead_id, note, author_name, author_email) VALUES (?, ?, ?, ?, ?)',
+    args: [require('crypto').randomUUID(), leadId, `Lead Wash: visit booked for ${when.slice(0, 10).split('-').reverse().join('/')}.`, user.name || user.email, user.email] });
+  return { ok: true };
+}
+
 // RT Portal's Reference Form, question for question (backoffice Reference/SubmitReference).
 const REFERENCE_FORM = [
   { k: 'fromMonth', q: 'From month', t: 'text' }, { k: 'fromYear', q: 'From year', t: 'text' },
@@ -157,16 +215,19 @@ async function educatorSummaries(uids) {
   }));
 }
 
-async function queue({ state, service, group, status = 'unwashed', bigOnly = false, addedBy = null } = {}) {
+async function queue({ state, service, group, status = 'unwashed', bigOnly = false, addedBy = null, stage = null } = {}) {
   const db = getDb();
   const leads = (await db.execute({
     sql: `SELECT id, centre_name, street_address, suburb, state, centre_phone, contact_first_name, contact_last_name, contact_email, position,
-                 educator_name, agency_usage, submitted_by_name, submitted_by_email, created_at, lead_called_status, centre_visited_status,
+                 educator_name, agency_usage, submitted_by_name, submitted_by_email, created_at, lead_called_status, centre_visited_status, centre_visited_at, wash_added,
                  service_type, group_category, archived_at, archived_reason, closed_at
-          FROM leads WHERE created_at < CAST(? AS date) AND closed_at IS NULL`, args: [WASH_CUTOFF]
+          FROM leads WHERE (created_at < CAST(? AS date) OR wash_added) AND closed_at IS NULL`, args: [WASH_CUTOFF]
   })).rows;
   const washes = await latestWashes();
   const edLinks = await educatorLinks(leads);
+  const checks = new Map((await db.execute({ sql: 'SELECT * FROM lead_wash_educator_checks', args: [] })).rows.map(r => [r.lead_id, r]));
+  const refLeadIds = new Set((await db.execute({ sql: 'SELECT DISTINCT lead_id FROM lead_wash_references', args: [] })).rows.map(r => r.lead_id));
+  const stageCounts = Object.fromEntries(STAGES.map(s => [s.key, 0]));
   const addedByCounts = {};
   const tally = { inScope: 0, washed: 0, solid: 0, notViable: 0, attemptedOnly: 0, remaining: 0 };
   const out = [];
@@ -188,8 +249,15 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
     if (service && l.service_type !== service) continue;
     if (group && effGroup !== group) continue;
     if (bigOnly && effGroup !== 'big') continue;
-    if (status === 'unwashed' && !(st === 'unwashed' || st === 'attempted')) continue;
-    if (status && !['unwashed', 'all'].includes(status) && st !== status) continue;
+    const chk = checks.get(l.id) || null;
+    const stg = st === 'not_viable' ? 'not_viable' : st === 'solid' ? 'solid'
+      : ['scheduled', 'done'].includes(l.centre_visited_status) && chk ? 'visit_booked'
+      : (refLeadIds.has(l.id) || (w && w.reached === 'yes')) ? 'centre_called'
+      : chk && chk.worked_here === 'yes' ? 'educator_confirmed' : 'new';
+    stageCounts[stg]++;
+    if (stage && stg !== stage) continue;
+    if (!stage && status === 'unwashed' && !(st === 'unwashed' || st === 'attempted')) continue;
+    if (!stage && status && !['unwashed', 'all'].includes(status) && st !== status) continue;
     out.push({
       id: l.id, centreName: l.centre_name, address: [l.street_address, l.suburb, l.state].filter(Boolean).join(', '), state: l.state,
       phone: l.centre_phone, contact: [l.contact_first_name, l.contact_last_name].filter(x => x && !/not provided/i.test(x)).join(' ') || null,
@@ -198,6 +266,7 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
       suggestedGroup: sug, effGroup,
       submittedBy: l.submitted_by_name, createdAt: l.created_at, wfpContacted: l.lead_called_status === 'done' || l.centre_visited_status === 'done',
       serviceType: l.service_type, groupCategory: l.group_category, categoryLabel: category.label(l.service_type, l.group_category),
+      stage: stg, educatorCheck: chk, visitStatus: l.centre_visited_status, visitAt: l.centre_visited_at, washAdded: !!l.wash_added,
       washStatus: st, lastWash: w ? { at: w.washed_at, by: w.washed_by_name, reached: w.reached, verdict: w.verdict, reason: w.not_viable_reason } : null
     });
   }
@@ -209,7 +278,7 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
     .map(r => [r.educator_key, { notes: r.notes, by: r.updated_by_name, at: r.updated_at }]));
   const refRows = out.length ? (await db.execute({ sql: 'SELECT DISTINCT ON (lead_id) lead_id, answers, created_by_name, created_at FROM lead_wash_references WHERE lead_id = ANY(?) ORDER BY lead_id, created_at DESC', args: [out.map(l => l.id)] })).rows : [];
   const references = Object.fromEntries(refRows.map(r => [r.lead_id, { answers: r.answers, by: r.created_by_name, at: r.created_at }]));
-  return { tally, leads: out, educators, educatorNotes, references, referenceForm: REFERENCE_FORM, ratings: RATINGS, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
+  return { tally, stageCounts, stages: STAGES, leads: out, educators, educatorNotes, references, referenceForm: REFERENCE_FORM, ratings: RATINGS, options: OPTIONS, cutoff: WASH_CUTOFF, addedByOptions: Object.entries(addedByCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ name: k, count: n })) };
 }
 
 async function history(leadId) {
@@ -265,4 +334,4 @@ async function recordWash(leadId, body, user) {
   return row;
 }
 
-module.exports = { saveReference, saveEducatorNotes, WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };
+module.exports = { saveEducatorCheck, adoptLead, bookVisit, STAGES, saveReference, saveEducatorNotes, WASH_CUTOFF, OPTIONS, canWash, queue, history, recordWash };

@@ -3054,3 +3054,24 @@ CREATE TABLE IF NOT EXISTS lead_wash_references (
 );
 CREATE INDEX IF NOT EXISTS idx_lead_wash_references_lead ON lead_wash_references (lead_id, created_at DESC);
 ALTER TABLE lead_wash_references ENABLE ROW LEVEL SECURITY;
+
+-- Lead Wash stage 1 (Liam, 6 Nov 2026): the consultant's call with the educator about
+-- each centre they named. One row per lead, updated in place.
+CREATE TABLE IF NOT EXISTS lead_wash_educator_checks (
+  lead_id TEXT PRIMARY KEY,
+  worked_here TEXT,            -- 'yes' | 'no'
+  last_shift TEXT,
+  how_often TEXT,
+  agency_used TEXT,
+  other_agency_educators TEXT, -- 'yes' | 'no' | 'unsure'
+  favourite TEXT,              -- 'yes' | 'no'
+  manager_name TEXT,
+  notes TEXT,
+  updated_by_email TEXT,
+  updated_by_name TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE lead_wash_educator_checks ENABLE ROW LEVEL SECURITY;
+-- A centre the educator mentioned during the wash call; shown in Lead Wash even though
+-- it was added after the wash cut-off.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS wash_added BOOLEAN DEFAULT false;

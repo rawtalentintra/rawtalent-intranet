@@ -22,11 +22,14 @@ router.get('/wash/queue', canWash, async (req, res) => {
   try {
     res.json(await wash.queue({
       state: String(req.query.state || '').toUpperCase() || null, service: req.query.service || null, group: req.query.group || null,
-      status: req.query.status || 'unwashed', bigOnly: req.query.bigOnly === '1', addedBy: req.query.addedBy || null
+      status: req.query.status || 'unwashed', bigOnly: req.query.bigOnly === '1', addedBy: req.query.addedBy || null, stage: req.query.stage || null
     }));
   } catch (err) { fail(res, err); }
 });
 router.post('/wash/:leadId/reference', canWash, async (req, res) => { try { res.status(201).json(await wash.saveReference(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
+router.post('/wash/:leadId/educator-check', canWash, async (req, res) => { try { res.json(await wash.saveEducatorCheck(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
+router.post('/wash/:leadId/adopt', canWash, async (req, res) => { try { res.json(await wash.adoptLead(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
+router.post('/wash/:leadId/book-visit', canWash, async (req, res) => { try { res.json(await wash.bookVisit(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
 router.put('/wash/educator-notes', canWash, async (req, res) => { try { res.json(await wash.saveEducatorNotes(req.body?.key, req.body?.notes, req.user)); } catch (err) { fail(res, err); } });
 router.get('/wash/:leadId/history', canWash, async (req, res) => { try { res.json(await wash.history(req.params.leadId)); } catch (err) { fail(res, err); } });
 router.post('/wash/:leadId', canWash, async (req, res) => { try { res.status(201).json(await wash.recordWash(req.params.leadId, req.body || {}, req.user)); } catch (err) { fail(res, err); } });
