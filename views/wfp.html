@@ -359,7 +359,7 @@
     function setView(view, push = true) {
       const from = viewStack[viewStack.length - 1];
       if (push && from) viewScroll[from] = window.scrollY;
-      if (push) viewStack.push(view);
+      if (push) { viewStack.push(view); window.scrollTo(0, 0); }
       const back = document.getElementById('hdrBack');
       if (back) back.style.display = viewStack.length > 1 && !TOP_LEVEL_TABS.includes(view) ? '' : 'none';
       document.getElementById('navToday').classList.toggle('active', view === 'today');
