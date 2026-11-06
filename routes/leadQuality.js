@@ -22,7 +22,7 @@ router.get('/wash/queue', canWash, async (req, res) => {
   try {
     res.json(await wash.queue({
       state: String(req.query.state || '').toUpperCase() || null, service: req.query.service || null, group: req.query.group || null,
-      status: req.query.status || 'unwashed', bigOnly: req.query.bigOnly === '1', addedBy: req.query.addedBy || null, stage: req.query.stage || null
+      status: req.query.status || 'unwashed', excludeBig: req.query.excludeBig === '1', addedBy: req.query.addedBy || null, stage: req.query.stage || null
     }));
   } catch (err) { fail(res, err); }
 });

@@ -409,6 +409,9 @@ async function getCentreStopsByKeys(centreKeys) {
 // zero centres for Gwen — leads never showed this bug since a lead's
 // assigned_workforce_partner is set explicitly at creation time
 // (autoAssignWorkforcePartner), so this fallback rarely even runs there.
+// Joy, 6 Nov 2026: every active RT centre nobody has claimed belongs to Liam;
+// Justine and Gwen keep the centres they own or have called/visited.
+const DEFAULT_CENTRE_OWNER = 'Liam';
 const STATE_WORKFORCE_PARTNER = { SA: 'Gwen', QLD: 'Gwen' }; // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
 
 // `?partnerLabel=` was previously accepted from any authenticated caller
@@ -475,7 +478,7 @@ router.get('/', async (req, res) => {
       // shortState() (already used elsewhere in this file) normalizes it
       // before the STATE_WORKFORCE_PARTNER lookup; partnerForSuburbState
       // does its own normalizing internally already.
-      visible = visible.filter(c => (assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)]) === targetLabel);
+      visible = visible.filter(c => (assignments[c.centreKey] || DEFAULT_CENTRE_OWNER) === targetLabel);
     } else if (req.query.state) {
       // `?state=<VIC|SA|QLD|NT>` (2026-09-21) — /wfp's own filter bar, now
       // a plain state pick with no per-person division (Joy: "remove Liam
@@ -647,9 +650,9 @@ async function computeFillRateByPartner(fromQ, toQ) {
   const partnerByKey = new Map();
   for (const c of centres) {
     if (hidden.has(c.centreKey)) continue;
-    const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned';
+    const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || 'Unassigned';
     // The old Liam (north/west) / Justine (east) VIC split is over — all of VIC is Justine's (Joy, 2026-10-08).
-    partnerByKey.set(c.centreKey, label === 'Liam' ? 'Justine' : label);
+    partnerByKey.set(c.centreKey, label);
   }
   const rows = new Map();
   const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0 }); return rows.get(name); };
@@ -699,7 +702,7 @@ router.post('/:centreKey/dormant-touchpoint', async (req, res) => {
     const days = last ? (Date.now() - new Date(last).getTime()) / 864e5 : null;
     const dormant = require('../services/dormantService');
     if (days == null || days < dormant.DORMANT_DAYS) return res.status(409).json({ error: 'This centre isn\'t dormant (it has booked in the last 6 months).' });
-    const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || null;
+    const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || null;
     const row = await dormant.completeTouchpoint({ ...c, stateShort: shortState(c.state), partnerLabel: label, lastBookingDate: new Date(last).toISOString().slice(0, 10) }, req.user, req.body || {});
     res.status(201).json({ id: row.id, completedAt: row.completed_at, firstBookingFree: row.first_booking_free, discountNeedsApproval: !!row.approval_task_id, emailStatus: row.cio_status });
   } catch (err) {
@@ -1168,12 +1171,25 @@ router.post('/:centreKey/quick-log', async (req, res) => {
             ) VALUES (?, ?, now(), 'completed', ?, ?, ?, 'Quick log', ?)`,
       args: [id, req.params.centreKey, req.user.email, req.user.name || req.user.email, channel, req.user.email]
     });
+    await claimCentreOnFirstAction(req.params.centreKey, req.user);
     const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [id] })).rows[0];
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// First-action ownership (Liam, 6 Nov 2026; confirmed by Joy): a centre with
+// no owner yet belongs to the Workforce Partner who first logs a call or visit
+// on it. Never overrides an existing owner.
+async function claimCentreOnFirstAction(centreKey, user) {
+  if (!user || !user.wfp_label) return;
+  await getDb().execute({
+    sql: `INSERT INTO centre_partner_assignments (centre_key, workforce_partner, assigned_by_email, assigned_by_name)
+          VALUES (?, ?, ?, ?) ON CONFLICT (centre_key) DO NOTHING`,
+    args: [centreKey, user.wfp_label, user.email, (user.name || user.email) + ' (first call/visit)']
+  }).catch(err => console.error('First-action claim failed:', err.message));
+}
 
 router.post('/:centreKey/visits', async (req, res) => {
   const {
@@ -1200,6 +1216,7 @@ router.post('/:centreKey/visits', async (req, res) => {
       ]
     });
     await linkRecordingsToVisit(req.params.centreKey, id, recordingIds);
+    await claimCentreOnFirstAction(req.params.centreKey, req.user);
     const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [id] })).rows[0];
     res.json(row);
   } catch (err) {
@@ -1439,8 +1456,8 @@ module.exports.getCentrePartnerAssignments = getCentrePartnerAssignments;
 // Shared with services/wfpReportService.js (weekly/monthly partner report).
 module.exports.centresWithNurture = centresWithNurture;
 module.exports.partnerLabelForCentre = (c, assignments) => {
-  const label = assignments[c.centreKey] || partnerForSuburbState(c.suburb, c.state) || STATE_WORKFORCE_PARTNER[shortState(c.state)] || 'Unassigned';
-  return label === 'Liam' ? 'Justine' : label;
+  const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || 'Unassigned';
+  return label;
 };
 module.exports.shortState = shortState;
 module.exports.getLastBookingDates = getLastBookingDates;

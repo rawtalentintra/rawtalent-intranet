@@ -215,7 +215,7 @@ async function educatorSummaries(uids) {
   }));
 }
 
-async function queue({ state, service, group, status = 'unwashed', bigOnly = false, addedBy = null, stage = null } = {}) {
+async function queue({ state, service, group, status = 'unwashed', excludeBig = false, addedBy = null, stage = null } = {}) {
   const db = getDb();
   const leads = (await db.execute({
     sql: `SELECT id, centre_name, street_address, suburb, state, centre_phone, contact_first_name, contact_last_name, contact_email, position,
@@ -248,7 +248,7 @@ async function queue({ state, service, group, status = 'unwashed', bigOnly = fal
     if (state && state !== 'ALL' && String(l.state || '').toUpperCase() !== state) continue;
     if (service && l.service_type !== service) continue;
     if (group && effGroup !== group) continue;
-    if (bigOnly && effGroup !== 'big') continue;
+    if (excludeBig && effGroup === 'big') continue;
     const chk = checks.get(l.id) || null;
     const stg = st === 'not_viable' ? 'not_viable' : st === 'solid' ? 'solid'
       : ['scheduled', 'done'].includes(l.centre_visited_status) && chk ? 'visit_booked'
