@@ -6962,7 +6962,9 @@
     // WFP Performance opened to the Workforce Partners (Joy, 2026-10-16): they see
     // the whole page (all partners' cards, fill rate, by state) except the
     // Intelligence Matrix, opened to partners too on 16 Oct (Joy).
-    function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner'; }
+    // Call Analysis and Insights (bottom of WFP Performance) opened to Sophia (Joy, 2026-11-06).
+    const CALL_INSIGHTS_VIEWERS = ['sophia@rawtalent.com.au'];
+    function canSeeWfpPerformanceSection() { return canSeeWfpPerformance() || currentUserRole === 'workforce_partner' || CALL_INSIGHTS_VIEWERS.includes(String(currentUserEmail || '').toLowerCase()); }
     const superAdminSections = ['users', 'logs', 'sources', 'role-permissions', 'meetings', 'rt-api-reference', 'task-reports', 'wfp-performance', 'first-shift', 'qr-referrals', 'wfp-report', 'security-report'];
 
     function showSection(id, el) {

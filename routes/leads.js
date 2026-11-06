@@ -497,8 +497,11 @@ const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au
 // page: super_admin and Liam (mcpTokenService.canUseMcp covers exactly those).
 // Intelligence Matrix — also opened to the Workforce Partners (Justine, Gwen) on
 // 16 Oct (Joy) so they can review it. The raw insights list below stays restricted.
+// Call Analysis and Insights also opened to Sophia (Joy, 2026-11-06).
+const CALL_INSIGHTS_VIEWERS = ['sophia@rawtalent.com.au'];
+const canSeeCallInsights = u => require('../services/mcpTokenService').canUseMcp(u.email, u.role) || CALL_INSIGHTS_VIEWERS.includes(String(u.email || '').toLowerCase());
 router.get('/voice-insights/matrix', async (req, res) => {
-  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role) && req.user.role !== 'workforce_partner') return res.status(403).json({ error: 'Not available for your account' });
+  if (!canSeeCallInsights(req.user) && req.user.role !== 'workforce_partner') return res.status(403).json({ error: 'Not available for your account' });
   try {
     const svc = require('../services/voiceInsightsService');
     const states = await svc.matrixStates();
@@ -510,7 +513,7 @@ router.get('/voice-insights/matrix', async (req, res) => {
 });
 
 router.get('/voice-insights', async (req, res) => {
-  if (!require('../services/mcpTokenService').canUseMcp(req.user.email, req.user.role)) return res.status(403).json({ error: 'Not available for your account' });
+  if (!canSeeCallInsights(req.user)) return res.status(403).json({ error: 'Not available for your account' });
   try {
     res.json(await require('../services/voiceInsightsService').listInsights());
   } catch (err) {
