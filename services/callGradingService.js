@@ -59,7 +59,7 @@ const RUBRICS = {
         'Captures the exact shift need — room, ratio, dates, urgency — without repeat questions',
         'Notices frustration (e.g. repeat unfilled shifts) and acknowledges it before problem-solving'
       ]},
-      { key: 'compliance', label: 'Compliance Accuracy', weight: 20, critical: false, criteria: [
+      { key: 'compliance', label: 'Accurate Matching & Honest Representation', weight: 20, critical: false, criteria: [
         'Only offers educators who are genuinely qualified and cleared for the room/ratio requested',
         "Represents educator experience and availability truthfully — no overselling to win the booking"
       ]},
