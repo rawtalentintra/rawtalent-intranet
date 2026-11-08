@@ -5359,7 +5359,7 @@
     // without the "Add to Home Screen" prompt); everyone else keeps going
     // to the full /admin sidebar exactly as before.
     function goToAdminPanel() {
-      location.href = currentUserRole === 'workforce_partner' ? '/wfp' : '/admin';
+      location.href = currentUserRole === 'workforce_partner' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? '/wfp' : '/admin';
     }
     function escHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

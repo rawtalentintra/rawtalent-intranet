@@ -318,7 +318,10 @@ process.on('unhandledRejection', (err) => {
 // here via role anyway (they land on "/" as a normal 'user' account,
 // same as before — this redirect is keyed off role, not the grant).
 app.get('/', (req, res) => {
-  if (req.isAuthenticated() && req.user.role === 'workforce_partner') return res.redirect('/wfp');
+  // Phones go to the /wfp app; a laptop/desktop gets the full Desktop view (Gwen, 9 Nov).
+  if (req.isAuthenticated() && req.user.role === 'workforce_partner') {
+    return res.redirect(/Mobi|Android|iPhone|iPad|iPod/i.test(req.get('user-agent') || '') ? '/wfp' : '/admin');
+  }
   guardRoute(req, res, 'index.html');
 });
 app.get('/article', (req, res) => guardRoute(req, res, 'article.html'));
