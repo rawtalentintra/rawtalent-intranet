@@ -61,6 +61,15 @@ async function sendCioSignal(ident, attributes, eventName, data) {
   if (!r2.ok) throw new Error(`Customer.io event ${r2.status}: ${(await r2.text()).slice(0, 200)}`);
 }
 
+// Service type on Customer.io events, in both forms the journeys accept: the text
+// HeartBeat stores and RT's serviceTypeId (Yuv, 4 Nov: 0 = ECEC/long day care,
+// 1 = OSHC, 2 = Both). Only 1 routes to the OSHC journeys; 0, 2 and blank go ECEC.
+const SERVICE_TYPE_IDS = { early_childhood: 0, oshc: 1, both: 2 };
+function serviceTypeFields(st) {
+  const key = String(st || '').trim().toLowerCase();
+  return key in SERVICE_TYPE_IDS ? { service_type: key, service_type_id: SERVICE_TYPE_IDS[key] } : { service_type: '' };
+}
+
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
@@ -172,4 +181,4 @@ async function processFirstBookings() {
   return { tasks };
 }
 
-module.exports = { cioTrackConfig, sendCioSignal, cioIdentifierFor, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey };
+module.exports = { cioTrackConfig, sendCioSignal, cioIdentifierFor, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey, serviceTypeFields };

@@ -44,7 +44,7 @@ async function sendFirstContactSignal(leadId) {
     const firstName = (ct && ct.firstName) || (l.contact_first_name && !/not provided/i.test(l.contact_first_name) ? l.contact_first_name : '');
     const data = {
       first_booking_free: l.fbf_choice === 'yes',
-      service_type: l.service_type || '',
+      ...fbf.serviceTypeFields(l.service_type),
       first_name: firstName || '',
       centre_name: (ct && ct.centreName) || l.centre_name || '',
       state: (ct && ct.state) || String(l.state || '').toUpperCase(),

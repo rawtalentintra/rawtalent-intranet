@@ -154,8 +154,12 @@ async function sendTouchpointSignal(id) {
     // first_booking_free_tagged here, even with FBF ticked: the dormant FBF
     // journey (#38) sends those emails. sendCioSignal does the profile update
     // before the event.
+    // ECEC vs OSHC Dormant journey: the centre's service type as set in HeartBeat
+    // (centre_categories); blank goes to the ECEC journeys.
+    const cat = (await db.execute({ sql: 'SELECT service_type FROM centre_categories WHERE centre_key = ?', args: [t.centre_key] })).rows[0];
     await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!t.first_booking_free }, 'dormant_touchpoint_complete', {
-      first_booking_free: !!t.first_booking_free, centre_key: t.centre_key, centre_name: t.centre_name, state: t.state || '', partner_name: t.completed_by_name || ''
+      first_booking_free: !!t.first_booking_free, centre_key: t.centre_key, centre_name: t.centre_name, state: t.state || '', partner_name: t.completed_by_name || '',
+      ...fbf.serviceTypeFields(cat && cat.service_type)
     });
     await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'sent', cio_sent_at = now(), cio_identifier = ?, cio_error = NULL WHERE id = ?", args: [ident, id] });
     if (t.first_booking_free) await db.execute({ sql: "UPDATE first_booking_free_offers SET email_sent_at = COALESCE(email_sent_at, now()), cio_identifier = ?, cio_centre_key = ? WHERE centre_key = ? AND email_status = 'via_dormant'", args: [ident, t.centre_key, t.centre_key] });
