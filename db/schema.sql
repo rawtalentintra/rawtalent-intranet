@@ -3112,3 +3112,17 @@ CREATE TABLE IF NOT EXISTS task_note_reactions (
   PRIMARY KEY (note_id, user_email, emoji)
 );
 ALTER TABLE task_note_reactions ENABLE ROW LEVEL SECURITY;
+
+-- Centre service type sent to the Customer.io Centre object (services/centreServiceTypeSync.js,
+-- 9 Nov 2026). One row per RT location: the computed type (0 ECEC, 1 OSHC, 2 Both), what it was
+-- worked out from, and the last value Customer.io accepted (only changes are re-sent).
+CREATE TABLE IF NOT EXISTS centre_service_type_sync (
+  rt_location_id BIGINT PRIMARY KEY,
+  service_type_id SMALLINT NOT NULL,
+  sources TEXT,
+  sent_service_type_id SMALLINT,
+  sent_at TIMESTAMPTZ,
+  error TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE centre_service_type_sync ENABLE ROW LEVEL SECURITY;

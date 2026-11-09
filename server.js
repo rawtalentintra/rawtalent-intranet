@@ -611,6 +611,9 @@ async function start() {
       .then(({ tasks }) => { if (tasks) console.log(`First booking free: ${tasks} task(s) created for accounts.`); })
       .then(() => require('./services/dormantService').retryPendingSignals())
       .then(() => require('./services/leadJourneyService').retryPending())
+      // Centre service type (0 ECEC / 1 OSHC / 2 Both) onto the Customer.io Centre object; only changes are sent.
+      .then(() => require('./services/centreServiceTypeSync').syncCentreServiceTypes())
+      .then(r => { if (r && r.sent) console.log(`Centre service type: ${r.sent} centre(s) updated in Customer.io.`); })
       .catch(err => console.error('QR welcome bonus check error:', err.message));
     setTimeout(runQrBonusCheck, 3 * 60 * 1000);
     // Micropods: build the educator points once at start-up and every 50 min,
