@@ -214,11 +214,9 @@ async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
     const who = [];
     for (const email of list) {
       try { who.push(`<@${(await slackCall('users.lookupByEmail', { email })).user.id}>`); }
-      catch (err) {
-        const r = await getDb().execute({ sql: 'SELECT name FROM users WHERE lower(email) = ?', args: [email] });
-        who.push(r.rows[0] && r.rows[0].name || email);
-      }
+      catch (err) { console.log('Task tag: no Slack account for', email, '- skipped'); }
     }
+    if (!who.length) return; // nobody tagged/assigned is on Slack
     const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
     const names = who.length > 1 ? who.slice(0, -1).join(', ') + ' and ' + who[who.length - 1] : who[0];
     await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false,
