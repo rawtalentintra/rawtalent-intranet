@@ -39,6 +39,18 @@
       line-height: 1.2;
     }
     .hero-title span { color: var(--orange); }
+    .hero-tabs { display: flex; justify-content: center; gap: 8px; margin: -12px 0 20px; }
+    .hero-tab { background: transparent; border: 1.5px solid rgba(255,255,255,.35); color: rgba(255,255,255,.75); font-size: 13.5px; font-weight: 600; padding: 8px 20px; border-radius: 10px; cursor: pointer; font-family: inherit; }
+    .hero-tab:hover { border-color: rgba(255,255,255,.7); color: white; background: rgba(255,255,255,.06); }
+    .hero-tab.active { background: white; border-color: white; color: var(--navy); }
+    .perf-seg { display: inline-flex; border: 1px solid var(--gray-100); border-radius: 9px; overflow: hidden; background: white; }
+    .perf-seg button { border: none; background: white; padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; font-family: inherit; }
+    .perf-seg button.active { background: var(--navy); color: white; }
+    .perf-card { background: white; border: 1px solid var(--gray-100); border-radius: 10px; padding: 12px 14px; }
+    .perf-table { width: 100%; border-collapse: collapse; font-size: 13px; background: white; border: 1px solid var(--gray-100); border-radius: 10px; overflow: hidden; }
+    .perf-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); padding: 10px 12px; background: #f8fafc; }
+    .perf-table td { padding: 10px 12px; border-top: 1px solid var(--gray-100); }
+    .perf-row { cursor: pointer; } .perf-row:hover td { background: #f8fafc; }
     .hero-sub {
       font-size: 15px;
       color: rgba(255,255,255,.5);
@@ -901,6 +913,7 @@
         <div class="hero-content">
           <h1 class="hero-title" id="heroTitle">How can we help you<span>?</span></h1>
           <p class="hero-sub" id="heroSub">Search RawTalent HeartBeat for answers, guides, and resources</p>
+          <div id="heroTabs" class="hero-tabs" style="display:none"></div>
 
           <div id="searchArea" class="hero-search-wrap">
             <input type="text" id="searchInput" class="hero-input"
@@ -2708,6 +2721,7 @@
         : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
+      renderHeroTabs(isTasks);
       if (isHome) {
         loadHomeView();
       } else if (isLeads) {
@@ -2717,7 +2731,7 @@
       } else if (isCalls) {
         loadCallsView();
       } else if (isTasks) {
-        loadTasksView();
+        if (tasksSubView === 'performance' && canSeeTaskPerformance()) loadTaskPerformanceView(); else loadTasksView();
       } else if (isHours) {
         loadHoursView();
       } else if (isAI) {
@@ -2875,6 +2889,125 @@
     let taskNotesRequestId = 0;
     let currentTaskNotes = [];
     let taskMentionCandidates = [];
+
+    // ── Tasks → User View / Performance tabs (Joy, 9 Nov 2026) ─────────
+    // Tabs sit in the dark hero. Performance: Sophia, Liam and Joy only
+    // (server-enforced too, GET /api/tasks/performance).
+    let tasksSubView = 'user';
+    const TASK_PERF_VIEWERS = ['sophia@rawtalent.com.au', 'liam@rawtalent.com.au', 'joy@rawtalent.com.au'];
+    function canSeeTaskPerformance() { return TASK_PERF_VIEWERS.includes((currentUserEmail || '').toLowerCase()); }
+    function renderHeroTabs(isTasks) {
+      const el = document.getElementById('heroTabs');
+      if (!el) return;
+      if (!isTasks || !canSeeTaskPerformance()) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      el.style.display = 'flex';
+      el.innerHTML = `<button class="hero-tab ${tasksSubView === 'user' ? 'active' : ''}" onclick="setTasksSubView('user')">User View</button>
+        <button class="hero-tab ${tasksSubView === 'performance' ? 'active' : ''}" onclick="setTasksSubView('performance')">📊 Performance</button>`;
+    }
+    function setTasksSubView(v) {
+      tasksSubView = v;
+      renderHeroTabs(true);
+      if (v === 'performance') loadTaskPerformanceView(); else loadTasksView();
+    }
+
+    let perfPeriod = 'weekly', perfAnchor = null, perfData = null, perfOpen = null;
+    const perfDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    function perfMelbourneToday() {
+      const s = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      return new Date(s + 'T00:00:00');
+    }
+    function perfRange() {
+      const a = new Date(perfAnchor);
+      if (perfPeriod === 'daily') return { from: perfDay(a), to: perfDay(a), label: a.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) };
+      if (perfPeriod === 'weekly') {
+        const mon = new Date(a); mon.setDate(a.getDate() - ((a.getDay() + 6) % 7));
+        const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+        const f = d => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+        return { from: perfDay(mon), to: perfDay(sun), label: `Week of ${f(mon)} – ${f(sun)} ${sun.getFullYear()}` };
+      }
+      const first = new Date(a.getFullYear(), a.getMonth(), 1), last = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+      return { from: perfDay(first), to: perfDay(last), label: first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) };
+    }
+    function setPerfPeriod(p) { perfPeriod = p; perfAnchor = perfMelbourneToday(); perfOpen = null; loadTaskPerformanceView(); }
+    function shiftPerf(n) {
+      const a = new Date(perfAnchor);
+      if (perfPeriod === 'daily') a.setDate(a.getDate() + n);
+      else if (perfPeriod === 'weekly') a.setDate(a.getDate() + 7 * n);
+      else a.setMonth(a.getMonth() + n, 1);
+      perfAnchor = a; perfOpen = null; loadTaskPerformanceView();
+    }
+    function fmtPerfHours(h) {
+      if (h == null) return '—';
+      if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+      if (h < 24) return `${Math.round(h * 10) / 10} hrs`;
+      return `${Math.round(h / 24 * 10) / 10} days`;
+    }
+    async function loadTaskPerformanceView() {
+      if (!perfAnchor) perfAnchor = perfMelbourneToday();
+      const list = document.getElementById('resultsList');
+      list.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      const r = perfRange();
+      try {
+        const res = await fetch(`/api/tasks/performance?from=${r.from}&to=${r.to}`);
+        perfData = await res.json();
+        if (!res.ok) throw new Error(perfData.error || 'Could not load');
+        renderTaskPerformance();
+      } catch (err) {
+        list.innerHTML = `<div class="empty-wrap"><div class="empty-title">${escHtml(err.message || 'Could not load performance')}</div></div>`;
+      }
+    }
+    function togglePerfPerson(email) { perfOpen = perfOpen === email ? null : email; renderTaskPerformance(); }
+    function renderTaskPerformance() {
+      const d = perfData, r = perfRange();
+      const isFuture = r.from > perfDay(perfMelbourneToday());
+      const card = (label, val, color) => `<div class="perf-card"><div style="font-size:11.5px;color:var(--text-muted);font-weight:600">${label}</div><div style="font-size:22px;font-weight:800;color:${color || 'var(--navy)'};margin-top:2px">${val}</div></div>`;
+      const pct = v => v == null ? '<span style="color:var(--text-muted);font-weight:500">too few</span>' : `${v}%`;
+      const rows = d.people.map(p => {
+        const open = perfOpen === p.email;
+        const taskLine = (t, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px dashed var(--gray-100);font-size:12.5px">
+            <a href="javascript:void(0)" onclick="event.stopPropagation();openTaskDetail('${t.id}')" style="color:var(--navy);text-decoration:none;font-weight:600">${escHtml(t.title)}</a>
+            <span style="color:var(--text-muted);white-space:nowrap">${extra}</span></div>`;
+        const detail = open ? `<tr><td colspan="6" style="background:#fbfcfe">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+              <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Completed in this period (${p.tasks.done.length})</div>
+                ${p.tasks.done.map(t => taskLine(t, `${t.completedDay.split('-').reverse().join('/')} · ${fmtPerfHours(t.hours)}${t.onTime === false ? ' · <b style="color:#b91c1c">late</b>' : t.onTime ? ' · on time' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
+              <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Open now (${p.tasks.open.length})</div>
+                ${p.tasks.open.map(t => taskLine(t, `${t.due ? 'due ' + t.due.split('-').reverse().join('/') : 'no due date'}${t.overdue ? ' · <b style="color:#b91c1c">overdue</b>' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
+            </div></td></tr>` : '';
+        return `<tr class="perf-row" onclick="togglePerfPerson('${p.email}')">
+            <td style="font-weight:700;color:var(--navy)">${open ? '▾' : '▸'} ${escHtml(p.name)} <span style="font-size:10.5px;font-weight:700;color:var(--text-muted);margin-left:4px">${escHtml((p.team || '').toUpperCase())}</span></td>
+            <td style="font-weight:700">${p.done}</td><td>${pct(p.onTimePct)}</td>
+            <td>${p.typicalHours == null ? '<span style="color:var(--text-muted)">too few</span>' : fmtPerfHours(p.typicalHours)}</td>
+            <td>${p.open}</td><td style="${p.overdue ? 'color:#b91c1c;font-weight:700' : ''}">${p.overdue}</td></tr>${detail}`;
+      }).join('');
+      document.getElementById('resultsList').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0 14px">
+          <div class="perf-seg">
+            ${['daily', 'weekly', 'monthly'].map(p => `<button class="${perfPeriod === p ? 'active' : ''}" onclick="setPerfPeriod('${p}')">${p[0].toUpperCase() + p.slice(1)}</button>`).join('')}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button onclick="shiftPerf(-1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">‹</button>
+            <div style="font-weight:700;color:var(--navy);font-size:14px;min-width:220px;text-align:center">${escHtml(r.label)}</div>
+            <button onclick="shiftPerf(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+          ${card('Tasks completed', d.totals.done)}
+          ${card('On time', d.totals.onTimePct == null ? '—' : d.totals.onTimePct + '%')}
+          ${card('Typical time to complete', fmtPerfHours(d.totals.typicalHours))}
+          ${card('Overdue right now', d.totals.overdue, d.totals.overdue ? '#b91c1c' : null)}
+        </div>
+        ${isFuture ? '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px">This period hasn\'t started yet.</div>' : ''}
+        <div style="overflow-x:auto"><table class="perf-table">
+          <tr><th>Person</th><th>Done</th><th>On time</th><th>Typical time</th><th>Open now</th><th>Overdue now</th></tr>
+          ${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No one found under Sophia on the org chart.</td></tr>'}
+        </table></div>
+        <div style="font-size:11.5px;color:var(--text-muted);line-height:1.6;margin-top:10px">
+          <b>How this is worked out:</b> Done = tasks the person was assigned to and marked Done in this period (shared tasks count for each person).
+          On time = of those with a due date, finished on or before it. Typical time = the middle value of assigned-to-done time, counted from when <i>that person</i> was assigned, so one stuck task or an old hand-over doesn't skew it.
+          Open and Overdue are right now, whatever period is picked. Under ${d.minSample} completed tasks shows "too few". Click a name to see the tasks behind the numbers.
+        </div>`;
+    }
 
     async function loadTasksView() {
       const list = document.getElementById('resultsList');

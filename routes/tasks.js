@@ -126,6 +126,16 @@ async function resolveDescriptionMentions(db, description, excludeEmail) {
 // else (status/priority/search/etc.); department visibility is the one
 // thing gated server-side, since that's an access boundary, not just a
 // UI filter.
+// Tasks → Performance: Sophia, Liam and Joy only (Joy, 9 Nov 2026).
+router.get('/performance', async (req, res) => {
+  const perf = require('../services/taskPerformanceService');
+  if (!perf.canView(req.user)) return res.status(403).json({ error: 'Not available' });
+  const ok = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+  if (!ok(req.query.from) || !ok(req.query.to) || req.query.from > req.query.to) return res.status(400).json({ error: 'from and to dates required' });
+  try { res.json(await perf.report({ from: req.query.from, to: req.query.to })); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/', async (req, res) => {
   try {
     const db = getDb();
