@@ -6373,7 +6373,7 @@
     function teamShiftColor(team) {
       const t = String(team || '').toLowerCase();
       if (t.startsWith('am')) return { bg: '#dbeafe', text: '#1e3a8a', sub: '#1d4ed8' };
-      if (t.startsWith('pm')) return { bg: '#2563eb', text: '#ffffff', sub: '#dbeafe' };
+      if (t.startsWith('pm')) return { bg: '#2563eb', text: '#ffffff', sub: '#dbeafe', dot: '#2563eb' };
       return null;
     }
     function ensureLeaveColorMap() {
@@ -6394,6 +6394,14 @@
           [map.Prince, map.Sophia] = [map.Sophia, map.Prince];
           // Joy, 9 Nov 2026: AM Team light blue, PM Team darker blue (also used on the Ops Calendar).
           members.forEach(m => { const c = teamShiftColor(m.team); if (c && m.name) map[m.name] = c; });
+          // Joy, 9 Nov 2026: Sophia a fourth blue, Joy teal, Gwen + Justine pink, Yuv + Prince yellow.
+          const NAMED = {
+            Sophia: { bg: '#bae6fd', text: '#075985', sub: '#0369a1' },
+            Joy: { bg: '#ccfbf1', text: '#0f766e', sub: '#115e59' },
+            Gwen: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d' }, Justine: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d' },
+            Yuv: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e' }, Prince: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e' }
+          };
+          Object.entries(NAMED).forEach(([n, c]) => { map[n] = c; });
         } catch { /* falls back to hashPersonColor below for everyone */ }
         leaveColorMap = map;
         return map;
@@ -6692,7 +6700,7 @@
         const col = leavePersonColor(m.name);
         return `
         <tr>
-          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.dot || col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
