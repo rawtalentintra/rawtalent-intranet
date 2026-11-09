@@ -413,9 +413,9 @@ router.put('/:id', async (req, res) => {
   try {
     // One locked transaction (Sophia, 4 Nov): a note's @mention auto-assign or a
     // second save landing at the same moment waits instead of overwriting.
-    let justDone = false, newlyTagged = [], newlyAssigned = [];
+    let justDone = false, newlyTagged = [], newlyAssigned = [], creatorChanges = [], creatorEmail = null;
     await transaction(async db => {
-    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres, mentioned_emails FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres, mentioned_emails, title, description, priority, due_date, created_by FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
     if (!existing.rows[0]) throw Object.assign(new Error('Task not found'), { status: 404 });
     if (!canAccessDepartment(req.user, existing.rows[0].department_id)) throw Object.assign(new Error('You do not have access to this department'), { status: 403 });
     const finalStatus = status || existing.rows[0].status;
@@ -432,8 +432,22 @@ router.put('/:id', async (req, res) => {
     const orig = original && typeof original === 'object' ? original : {};
     const newAssignees = normalizeAssignees(mergeList(previousAssignees, orig.assigned_to_emails === undefined ? undefined : normalizeAssignees(orig.assigned_to_emails),
       assigned_to_emails === undefined ? undefined : normalizeAssignees(assigned_to_emails), e => e));
+    // What changed, for the creator's Slack DM.
+    {
+      const ex = existing.rows[0];
+      creatorEmail = ex.created_by;
+      const lbl = s => ({ requested_bookings: 'Requested bookings', to_do: 'To do', in_progress: 'In progress', in_review: 'In review', done: 'Done' }[s] || s);
+      const day = d => d ? String(d instanceof Date ? d.toISOString() : d).slice(0, 10).split('-').reverse().join('/') : 'none';
+      if (finalStatus !== ex.status) creatorChanges.push(`Status: ${lbl(ex.status)} → ${lbl(finalStatus)}`);
+      if (title.trim() !== ex.title) creatorChanges.push(`Title changed to "${title.trim()}"`);
+      if ((description || '') !== (ex.description || '')) creatorChanges.push('Description edited');
+      if ((priority || 'normal') !== (ex.priority || 'normal')) creatorChanges.push(`Priority: ${ex.priority || 'normal'} → ${priority || 'normal'}`);
+      if (day(due_date) !== day(ex.due_date)) creatorChanges.push(`Due date: ${day(ex.due_date)} → ${day(due_date)}`);
+      if (department_id !== ex.department_id) creatorChanges.push('Moved to another department');
+    }
     const prevAsg = new Set(previousAssignees.map(e => String(e).toLowerCase()));
     newlyAssigned = newAssignees.filter(e => !prevAsg.has(String(e).toLowerCase()));
+    if (JSON.stringify([...previousAssignees].map(String).sort()) !== JSON.stringify([...newAssignees].map(String).sort())) creatorChanges.push('Assignees changed');
     const currentCandidates = Array.isArray(existing.rows[0].linked_candidates) ? existing.rows[0].linked_candidates : [];
     const currentCentres = Array.isArray(existing.rows[0].linked_centres) ? existing.rows[0].linked_centres : [];
     const finalCandidates = mergeList(currentCandidates, orig.linked_candidates === undefined ? undefined : normalizeLinkedCandidates(orig.linked_candidates),
@@ -485,6 +499,7 @@ router.put('/:id', async (req, res) => {
     if (justDone) require('../services/slackService').notifyTaskDone(req.params.id, req.user.name || req.user.email);
     const me = String(req.user.email).toLowerCase();
     notifyTaggedAndAssigned(req.params.id, newlyTagged, newlyAssigned, me);
+    if (creatorEmail && String(creatorEmail).toLowerCase() !== me) require('../services/slackService').notifyTaskCreator(req.params.id, creatorEmail, req.user.name || req.user.email, creatorChanges);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -608,6 +623,13 @@ router.post('/:id/notes', requireTaskAccess, async (req, res) => {
     });
     await addAssigneesFromMention(db, req.params.id, mentioned, req.user.email);
     require('../services/slackService').notifyTaskTagged(req.params.id, mentioned);
+    {
+      const c = (await db.execute({ sql: 'SELECT created_by FROM tasks WHERE id = ?', args: [req.params.id] })).rows[0];
+      if (c && c.created_by && String(c.created_by).toLowerCase() !== req.user.email.toLowerCase()) {
+        const txt = body.trim().replace(/\s+/g, ' ');
+        require('../services/slackService').notifyTaskCreator(req.params.id, c.created_by, req.user.name || req.user.email, [`New note: "${txt.length > 200 ? txt.slice(0, 200) + '…' : txt}"`]);
+      }
+    }
     const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [id] });
     res.json({ success: true, note: row.rows[0] });
   } catch (err) {

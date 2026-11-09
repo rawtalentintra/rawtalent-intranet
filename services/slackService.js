@@ -180,6 +180,23 @@ async function notifyTaskDone(taskId, doneBy) {
   } catch (err) { console.error('Task-done Slack notify failed:', err.message); }
 }
 
+// Joy, 9 Nov 2026: the task's creator gets a Slack DM whenever someone else
+// updates their task (edits or a new note). `changes` = short readable lines.
+async function notifyTaskCreator(taskId, creatorEmail, updatedBy, changes) {
+  try {
+    if (!creatorEmail || !changes || !changes.length) return;
+    const t = (await getDb().execute({ sql: 'SELECT title FROM tasks WHERE id = ?', args: [taskId] })).rows[0];
+    if (!t) return;
+    const esc = x => String(x || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
+    await sendDmByEmail(creatorEmail, `Update on your HeartBeat Task: ${t.title}`, [
+      { type: 'section', text: { type: 'mrkdwn', text: `🔔 *Update on your HeartBeat Task:* <${url}|${esc(t.title)}>` } },
+      { type: 'section', text: { type: 'mrkdwn', text: changes.map(c => '• ' + esc(c)).join('\n') } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `Updated by ${esc(updatedBy)}` }] }
+    ]);
+  } catch (err) { console.error('Task-creator Slack notify failed:', err.message); }
+}
+
 // Joy, 9 Nov 2026: anyone @tagged on a task gets a shout-out in #daily-check-in.
 const TAG_CHANNEL_NAME = 'daily-check-in';
 let tagChannelId = null;
@@ -209,4 +226,4 @@ async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
   } catch (err) { console.error('Task-tag Slack notify failed:', err.message); }
 }
 
-module.exports = { notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+module.exports = { notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
