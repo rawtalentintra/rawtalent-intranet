@@ -56,6 +56,9 @@ async function sendFirstContactSignal(leadId) {
     // client's profile is left as RT set it.
     const attrs = ident === (email || '').trim().toLowerCase() && !(ct && ct.rtPersonId)
       ? { email: data.email, ...(data.first_name ? { first_name: data.first_name } : {}) } : {};
+    // RT Footer's "first booking is on us" reminder (Liam, 4 Nov) shows on
+    // customer.first_booking_free, so a FBF lead carries it on the profile too.
+    if (data.first_booking_free) attrs.first_booking_free = true;
     await fbf.sendCioSignal(ident, attrs, 'lead_first_contact_logged', data);
     await db.execute({ sql: "UPDATE leads SET lead_journey_status = 'sent', lead_journey_sent_at = now(), lead_journey_identifier = ?, lead_journey_error = NULL WHERE id = ?", args: [ident, leadId] });
     return 'sent';
