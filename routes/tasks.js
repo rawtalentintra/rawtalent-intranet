@@ -324,6 +324,13 @@ function notifyTaggedAndAssigned(taskId, tagged, assigned, selfEmail) {
   if (a.length) slack.notifyTaskTagged(taskId, a, 'assigned to');
 }
 
+// No due date given → due by end of the next Melbourne day (Joy, 9 Nov 2026).
+function defaultDueDate() {
+  const t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const d = new Date(t + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 async function createTask({ departmentId, classificationId, title, description, status, priority, assignedToEmails, dueDate, linkedCandidates, linkedCentres, createdByEmail, createdByName }) {
   const db = getDb();
   const id = uuidv4();
@@ -336,7 +343,7 @@ async function createTask({ departmentId, classificationId, title, description, 
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     args: [
       id, departmentId, classificationId || null, title.trim(), description || null,
-      finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assignedToEmails)), dueDate || null,
+      finalStatus, priority || 'normal', JSON.stringify(normalizeAssignees(assignedToEmails)), dueDate || defaultDueDate(),
       createdByEmail, createdByName || createdByEmail,
       finalStatus === 'done' ? new Date().toISOString() : null,
       JSON.stringify(mentioned),
@@ -474,7 +481,7 @@ router.put('/:id', async (req, res) => {
             WHERE id=?`,
       args: [
         department_id, classification_id || null, title.trim(), description || null, finalStatus,
-        priority || 'normal', JSON.stringify(newAssignees), due_date || null, completedAt, JSON.stringify(mentioned),
+        priority || 'normal', JSON.stringify(newAssignees), due_date || (finalStatus === 'done' ? (existing.rows[0].due_date || null) : defaultDueDate()), completedAt, JSON.stringify(mentioned),
         JSON.stringify(finalCandidates),
         JSON.stringify(finalCentres),
         req.params.id
