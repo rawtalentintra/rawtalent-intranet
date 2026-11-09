@@ -4900,8 +4900,8 @@
         return `
           <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px;${colStyle}">
             <div class="org-node-name" style="${col ? `color:${col.text}` : ''}">${escHtml(m.name)}</div>
-            ${m.position ? `<div class="org-node-position">${escHtml(m.position)}</div>` : ''}
-            ${m.team ? `<div class="org-node-team">${escHtml(m.team.toUpperCase())}</div>` : ''}
+            ${m.position ? `<div class="org-node-position" style="${col && col.sub ? `color:${col.sub}` : ''}">${escHtml(m.position)}</div>` : ''}
+            ${m.team ? `<div class="org-node-team" style="${col && col.sub ? `color:${col.sub}` : ''}">${escHtml(m.team.toUpperCase())}</div>` : ''}
           </div>`;
       }).join('');
       const canvasW = Math.max(maxX + ORG_NODE_W + 30, 700);
@@ -4962,7 +4962,7 @@
         const col = leavePersonColor(m.name);
         return `
         <tr>
-          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
+          <td style="font-weight:700;color:var(--navy)"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col.dot || col.text};margin-right:7px;vertical-align:middle"></span>${escHtml(m.name)}</td>
           <td style="color:var(--text-muted)">${escHtml(m.position || '—')}</td>
           <td>${[m.phone, m.whatsapp].filter(Boolean).map(escHtml).join(' / ') || '—'}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${escHtml(m.employment_date || '—')}</td>
@@ -5605,6 +5605,12 @@
     // while another caller is still awaiting /api/team) must await the same
     // build rather than one of them grabbing the map mid-population and
     // silently falling back to per-call hash colors for everyone.
+    function teamShiftColor(team) {
+      const t = String(team || '').toLowerCase();
+      if (t.startsWith('am')) return { bg: '#dbeafe', text: '#1e3a8a', sub: '#1d4ed8', dot: '#93c5fd' };
+      if (t.startsWith('pm')) return { bg: '#2563eb', text: '#ffffff', sub: '#dbeafe', dot: '#2563eb' };
+      return null;
+    }
     function ensureLeaveColorMap() {
       if (leaveColorMap) return Promise.resolve(leaveColorMap);
       if (leaveColorMapPromise) return leaveColorMapPromise;
@@ -5621,6 +5627,16 @@
           // backwards to them, so they trade slots here rather than
           // reshuffling everyone else's colors to fix it.
           [map.Prince, map.Sophia] = [map.Sophia, map.Prince];
+          members.forEach(m => { const c = teamShiftColor(m.team); if (c && m.name) map[m.name] = c; });
+          // Joy, 9 Nov 2026: Sophia a fourth blue, Joy teal, Gwen + Justine pink, Yuv + Prince yellow.
+          const NAMED = {
+            Sophia: { bg: '#bae6fd', text: '#075985', sub: '#0369a1', dot: '#38bdf8' },
+            Joy: { bg: '#ccfbf1', text: '#0f766e', sub: '#115e59', dot: '#14b8a6' },
+            Gwen: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d', dot: '#f472b6' }, Justine: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d', dot: '#f472b6' },
+            Yuv: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e', dot: '#facc15' }, Prince: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e', dot: '#facc15' },
+            Liam: { bg: '#0f172a', text: '#ffffff', dot: '#0f172a' }
+          };
+          Object.entries(NAMED).forEach(([n, c]) => { map[n] = c; });
         } catch { /* falls back to hashPersonColor below for everyone */ }
         leaveColorMap = map;
         return map;
