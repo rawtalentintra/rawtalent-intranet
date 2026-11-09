@@ -323,6 +323,7 @@ async function createTask({ departmentId, classificationId, title, description, 
       JSON.stringify(normalizeLinkedCentres(linkedCentres))
     ]
   });
+  require('../services/slackService').notifyTaskTagged(id, mentioned);
   return id;
 }
 
@@ -399,9 +400,9 @@ router.put('/:id', async (req, res) => {
   try {
     // One locked transaction (Sophia, 4 Nov): a note's @mention auto-assign or a
     // second save landing at the same moment waits instead of overwriting.
-    let justDone = false;
+    let justDone = false, newlyTagged = [];
     await transaction(async db => {
-    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
+    const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres, mentioned_emails FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
     if (!existing.rows[0]) throw Object.assign(new Error('Task not found'), { status: 404 });
     if (!canAccessDepartment(req.user, existing.rows[0].department_id)) throw Object.assign(new Error('You do not have access to this department'), { status: 403 });
     const finalStatus = status || existing.rows[0].status;
@@ -412,6 +413,8 @@ router.put('/:id', async (req, res) => {
     if (finalStatus === 'done' && existing.rows[0].status !== 'done') completedAt = new Date().toISOString();
     else if (finalStatus !== 'done') completedAt = null;
     const mentioned = await resolveDescriptionMentions(getDb(), description, req.user.email);
+    const prevMentioned = new Set((Array.isArray(existing.rows[0].mentioned_emails) ? existing.rows[0].mentioned_emails : []).map(e => String(e).toLowerCase()));
+    newlyTagged = mentioned.filter(e => !prevMentioned.has(String(e).toLowerCase()));
     const previousAssignees = Array.isArray(existing.rows[0].assigned_to_emails) ? existing.rows[0].assigned_to_emails : [];
     const orig = original && typeof original === 'object' ? original : {};
     const newAssignees = normalizeAssignees(mergeList(previousAssignees, orig.assigned_to_emails === undefined ? undefined : normalizeAssignees(orig.assigned_to_emails),
@@ -465,6 +468,7 @@ router.put('/:id', async (req, res) => {
     });
 
     if (justDone) require('../services/slackService').notifyTaskDone(req.params.id, req.user.name || req.user.email);
+    if (newlyTagged.length) require('../services/slackService').notifyTaskTagged(req.params.id, newlyTagged);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -587,6 +591,7 @@ router.post('/:id/notes', requireTaskAccess, async (req, res) => {
       args: [id, req.params.id, body.trim(), req.user.email, req.user.name || req.user.email, JSON.stringify(mentioned)]
     });
     await addAssigneesFromMention(db, req.params.id, mentioned, req.user.email);
+    require('../services/slackService').notifyTaskTagged(req.params.id, mentioned);
     const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [id] });
     res.json({ success: true, note: row.rows[0] });
   } catch (err) {
@@ -619,6 +624,8 @@ router.put('/:id/notes/:noteId', requireTaskAccess, async (req, res) => {
       args: [body.trim(), JSON.stringify(mentioned), req.user.email, req.user.name || req.user.email, req.params.noteId]
     });
     await addAssigneesFromMention(db, req.params.id, mentioned, req.user.email);
+    const before = new Set((Array.isArray(note.mentioned_emails) ? note.mentioned_emails : []).map(e => String(e).toLowerCase()));
+    require('../services/slackService').notifyTaskTagged(req.params.id, mentioned.filter(e => !before.has(String(e).toLowerCase())));
     const row = await db.execute({ sql: 'SELECT * FROM task_notes WHERE id = ?', args: [req.params.noteId] });
     res.json({ success: true, note: row.rows[0] });
   } catch (err) {

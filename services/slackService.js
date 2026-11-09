@@ -19,7 +19,7 @@ function slackTsToIso(ts) {
 async function slackCall(method, params = {}) {
   const token = getToken();
   if (!token) throw new Error('Slack is not configured. Set SLACK_BOT_TOKEN.');
-  const isRead = method.startsWith('conversations.list') || method.startsWith('conversations.history') || method.startsWith('conversations.replies') || method === 'users.lookupByEmail';
+  const isRead = method.startsWith('conversations.list') || method.startsWith('conversations.history') || method.startsWith('conversations.replies') || method === 'users.lookupByEmail' || method === 'users.info';
   let url = `${SLACK_API}/${method}`;
   let opts = { headers: { 'Authorization': `Bearer ${token}` } };
   if (isRead) {
@@ -180,4 +180,33 @@ async function notifyTaskDone(taskId, doneBy) {
   } catch (err) { console.error('Task-done Slack notify failed:', err.message); }
 }
 
-module.exports = { runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+// Joy, 9 Nov 2026: anyone @tagged on a task gets a shout-out in #daily-check-in.
+const TAG_CHANNEL_NAME = 'daily-check-in';
+let tagChannelId = null;
+async function tagChannel() {
+  if (tagChannelId) return tagChannelId;
+  const ch = (await listPublicChannels()).find(c => c.name === TAG_CHANNEL_NAME);
+  if (!ch) throw new Error('#' + TAG_CHANNEL_NAME + ' not found');
+  if (!ch.is_member) await slackCall('conversations.join', { channel: ch.id });
+  return (tagChannelId = ch.id);
+}
+async function notifyTaskTagged(taskId, emails) {
+  try {
+    const list = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
+    if (!list.length || !getToken()) return;
+    const who = [];
+    for (const email of list) {
+      try { who.push(`<@${(await slackCall('users.lookupByEmail', { email })).user.id}>`); }
+      catch (err) {
+        const r = await getDb().execute({ sql: 'SELECT name FROM users WHERE lower(email) = ?', args: [email] });
+        who.push(r.rows[0] && r.rows[0].name || email);
+      }
+    }
+    const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
+    const names = who.length > 1 ? who.slice(0, -1).join(', ') + ' and ' + who[who.length - 1] : who[0];
+    await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false,
+      text: `:label: Hi ${names}, you were tagged on a <${url}|HeartBeat Task>. Please check :writing_hand:` });
+  } catch (err) { console.error('Task-tag Slack notify failed:', err.message); }
+}
+
+module.exports = { notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
