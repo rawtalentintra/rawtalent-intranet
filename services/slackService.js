@@ -218,6 +218,30 @@ async function tagChannel() {
   if (!ch.is_member) await slackCall('conversations.join', { channel: ch.id });
   return (tagChannelId = ch.id);
 }
+// One "HeartBeat Tasks for today" thread per Melbourne day (from 10 Nov 2026).
+const THREADS_START_DAY = '2026-11-10';
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function melbourneDay(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+let threadPending = null;
+async function dailyThreadTs() {
+  const day = melbourneDay();
+  if (day < THREADS_START_DAY) return null;
+  const db = getDb();
+  const found = (await db.execute({ sql: 'SELECT thread_ts FROM slack_daily_threads WHERE day = ?', args: [day] })).rows[0];
+  if (found) return found.thread_ts;
+  if (threadPending) return threadPending;
+  threadPending = (async () => {
+    const [y, m, dd] = day.split('-');
+    const channel = await tagChannel();
+    const r = await slackCall('chat.postMessage', { channel, text: `:clipboard: *HeartBeat Tasks for today, ${dd}-${MONTHS[+m - 1]}-${y}*` });
+    await db.execute({ sql: 'INSERT INTO slack_daily_threads (day, channel_id, thread_ts) VALUES (?, ?, ?) ON CONFLICT (day) DO NOTHING', args: [day, channel, r.ts] });
+    return (await db.execute({ sql: 'SELECT thread_ts FROM slack_daily_threads WHERE day = ?', args: [day] })).rows[0].thread_ts;
+  })().finally(() => { threadPending = null; });
+  return threadPending;
+}
+
 async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
   try {
     const list = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
@@ -231,9 +255,10 @@ async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
     if (!who.length) return; // nobody tagged/assigned is on Slack
     const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
     const names = who.length > 1 ? who.slice(0, -1).join(', ') + ' and ' + who[who.length - 1] : who[0];
-    await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false,
+    const thread_ts = await dailyThreadTs();
+    await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false, ...(thread_ts ? { thread_ts } : {}),
       text: `:label: Hi ${names}, you were ${verb} a <${url}|HeartBeat Task>. Please check :writing_hand:` });
   } catch (err) { console.error('Task-tag Slack notify failed:', err.message); }
 }
 
-module.exports = { notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+module.exports = { dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };

@@ -3075,3 +3075,13 @@ ALTER TABLE lead_wash_educator_checks ENABLE ROW LEVEL SECURITY;
 -- A centre the educator mentioned during the wash call; shown in Lead Wash even though
 -- it was added after the wash cut-off.
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS wash_added BOOLEAN DEFAULT false;
+
+-- #daily-check-in daily thread (Joy, 9 Nov 2026): one parent message per Melbourne
+-- day, posted at 5am; task tag/assign notifications reply inside it.
+CREATE TABLE IF NOT EXISTS slack_daily_threads (
+  day TEXT PRIMARY KEY,          -- YYYY-MM-DD, Melbourne
+  channel_id TEXT NOT NULL,
+  thread_ts TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE slack_daily_threads ENABLE ROW LEVEL SECURITY;

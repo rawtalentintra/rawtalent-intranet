@@ -496,6 +496,11 @@ async function start() {
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
     syncFromDrive().catch(err => console.error('Drive sync error:', err.message));
   }
+  // 5am Melbourne: open today's "HeartBeat Tasks for today" thread in #daily-check-in.
+  setInterval(() => {
+    const h = +new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', hour: 'numeric', hourCycle: 'h23' }).format(new Date());
+    if (h === 5) require('./services/slackService').dailyThreadTs().catch(err => console.error('Daily Slack thread error:', err.message));
+  }, 5 * 60 * 1000);
   // initDatabase() only clears expired sessions on boot — keep sweeping
   // periodically too, since a process can run for weeks between deploys.
   setInterval(() => {
