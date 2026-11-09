@@ -6372,7 +6372,7 @@
     // silently falling back to per-call hash colors for everyone.
     function teamShiftColor(team) {
       const t = String(team || '').toLowerCase();
-      if (t.startsWith('am')) return { bg: '#dbeafe', text: '#1e3a8a', sub: '#1d4ed8' };
+      if (t.startsWith('am')) return { bg: '#dbeafe', text: '#1e3a8a', sub: '#1d4ed8', dot: '#93c5fd' };
       if (t.startsWith('pm')) return { bg: '#2563eb', text: '#ffffff', sub: '#dbeafe', dot: '#2563eb' };
       return null;
     }
@@ -6396,10 +6396,11 @@
           members.forEach(m => { const c = teamShiftColor(m.team); if (c && m.name) map[m.name] = c; });
           // Joy, 9 Nov 2026: Sophia a fourth blue, Joy teal, Gwen + Justine pink, Yuv + Prince yellow.
           const NAMED = {
-            Sophia: { bg: '#bae6fd', text: '#075985', sub: '#0369a1' },
-            Joy: { bg: '#ccfbf1', text: '#0f766e', sub: '#115e59' },
-            Gwen: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d' }, Justine: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d' },
-            Yuv: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e' }, Prince: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e' }
+            Sophia: { bg: '#bae6fd', text: '#075985', sub: '#0369a1', dot: '#38bdf8' },
+            Joy: { bg: '#ccfbf1', text: '#0f766e', sub: '#115e59', dot: '#14b8a6' },
+            Gwen: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d', dot: '#f472b6' }, Justine: { bg: '#fce7f3', text: '#be185d', sub: '#9d174d', dot: '#f472b6' },
+            Yuv: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e', dot: '#facc15' }, Prince: { bg: '#fef9c3', text: '#a16207', sub: '#854d0e', dot: '#facc15' },
+            Liam: { bg: '#0f172a', text: '#ffffff', dot: '#0f172a' }
           };
           Object.entries(NAMED).forEach(([n, c]) => { map[n] = c; });
         } catch { /* falls back to hashPersonColor below for everyone */ }
