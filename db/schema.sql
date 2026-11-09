@@ -819,9 +819,11 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS priority_override TEXT;
 -- the real multi-owner projects separately; new projects going forward
 -- only ever populate owner_emails via the picker.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_emails JSONB DEFAULT '[]';
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_emails_migrated BOOLEAN DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_emails_migrated BOOLEAN DEFAULT true;
+ALTER TABLE projects ALTER COLUMN owner_emails_migrated SET DEFAULT true;
 UPDATE projects SET
-  owner_emails = CASE WHEN owner_email IS NOT NULL AND owner_email != '' THEN jsonb_build_array(LOWER(owner_email::text)) ELSE '[]'::jsonb END,
+  owner_emails = CASE WHEN owner_email IS NOT NULL AND owner_email != '' AND COALESCE(owner_emails, '[]'::jsonb) = '[]'::jsonb
+    THEN jsonb_build_array(LOWER(owner_email::text)) ELSE COALESCE(owner_emails, '[]'::jsonb) END,
   owner_emails_migrated = true
 WHERE owner_emails_migrated = false;
 CREATE INDEX IF NOT EXISTS idx_projects_owner_emails ON projects USING gin(owner_emails);
@@ -2279,9 +2281,17 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_client_phone TEXT;
 -- from a task that still had a stale legacy assigned_to value, silently
 -- re-assigning them.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to_emails JSONB DEFAULT '[]';
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to_migrated BOOLEAN DEFAULT false;
+-- FIX 10 Nov 2026: these backfills ran on EVERY boot for any row still flagged
+-- migrated=false — and new rows defaulted to false — so every deploy/restart wiped the
+-- assignees / linked educators / linked centres / owners of everything created since the
+-- previous boot (no history row, since it bypassed the app). Now: new rows default to
+-- migrated=true, and the backfill only ever FILLS an empty value from a legacy one —
+-- it can never overwrite or clear a live value.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to_migrated BOOLEAN DEFAULT true;
+ALTER TABLE tasks ALTER COLUMN assigned_to_migrated SET DEFAULT true;
 UPDATE tasks SET
-  assigned_to_emails = CASE WHEN assigned_to IS NOT NULL THEN jsonb_build_array(LOWER(assigned_to::text)) ELSE '[]'::jsonb END,
+  assigned_to_emails = CASE WHEN assigned_to IS NOT NULL AND COALESCE(assigned_to_emails, '[]'::jsonb) = '[]'::jsonb
+    THEN jsonb_build_array(LOWER(assigned_to::text)) ELSE COALESCE(assigned_to_emails, '[]'::jsonb) END,
   assigned_to_migrated = true
 WHERE assigned_to_migrated = false;
 -- Multiple linked educators (2026-08-26) — a centre often requests
@@ -2294,11 +2304,12 @@ WHERE assigned_to_migrated = false;
 -- stays singular on purpose — a task is about one centre requesting
 -- possibly-several educators, not several centres.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidates JSONB DEFAULT '[]';
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidates_migrated BOOLEAN DEFAULT false;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_candidates_migrated BOOLEAN DEFAULT true;
+ALTER TABLE tasks ALTER COLUMN linked_candidates_migrated SET DEFAULT true;
 UPDATE tasks SET
-  linked_candidates = CASE WHEN linked_candidate_id IS NOT NULL
+  linked_candidates = CASE WHEN linked_candidate_id IS NOT NULL AND COALESCE(linked_candidates, '[]'::jsonb) = '[]'::jsonb
     THEN jsonb_build_array(jsonb_build_object('userId', linked_candidate_id, 'name', linked_candidate_name, 'phone', linked_candidate_phone))
-    ELSE '[]'::jsonb END,
+    ELSE COALESCE(linked_candidates, '[]'::jsonb) END,
   linked_candidates_migrated = true
 WHERE linked_candidates_migrated = false;
 -- Multiple linked centres (2026-09-17) — reverses the "stays singular on
@@ -2316,11 +2327,12 @@ WHERE linked_candidates_migrated = false;
 -- added going forward carries a real centreKey via taskPersonMatchService's
 -- clientResult().
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_centres JSONB DEFAULT '[]';
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_centres_migrated BOOLEAN DEFAULT false;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS linked_centres_migrated BOOLEAN DEFAULT true;
+ALTER TABLE tasks ALTER COLUMN linked_centres_migrated SET DEFAULT true;
 UPDATE tasks SET
-  linked_centres = CASE WHEN linked_client_name IS NOT NULL
+  linked_centres = CASE WHEN linked_client_name IS NOT NULL AND COALESCE(linked_centres, '[]'::jsonb) = '[]'::jsonb
     THEN jsonb_build_array(jsonb_build_object('centreKey', NULL, 'name', linked_client_name, 'phone', linked_client_phone))
-    ELSE '[]'::jsonb END,
+    ELSE COALESCE(linked_centres, '[]'::jsonb) END,
   linked_centres_migrated = true
 WHERE linked_centres_migrated = false;
 CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department_id);
