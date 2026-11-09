@@ -5653,6 +5653,13 @@
       } catch { opsRoster = { head: null, ops: [] }; }
       return opsRoster;
     }
+    // Minutes after midnight of a shift's start ("6:00am - 2:00pm" -> 360), so the earliest start lists first.
+    function shiftStartMins(t) {
+      const m = String(t || '').match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+      if (!m) return 9999;
+      let h = +m[1] % 12; if ((m[3] || '').toLowerCase() === 'pm') h += 12; else if (!m[3] && +m[1] === 12) h = 12;
+      return h * 60 + (+m[2] || 0);
+    }
     function renderLeaveTeamCalendar() {
       const wrap = document.getElementById('leaveTeamCalendarWrap');
       if (!wrap) return;
@@ -5682,7 +5689,7 @@
         const dayKey = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][c.date.getDay()];
         const away = onLeave[c.dateStr] || new Set();
         const onShift = roster.ops.filter(m => (m.shift_times || {})[dayKey] && !away.has((m.name || '').split(' ')[0].toLowerCase()))
-          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          .sort((a, b) => shiftStartMins(a.shift_times[dayKey]) - shiftStartMins(b.shift_times[dayKey]) || (a.name || '').localeCompare(b.name || ''));
         return `<div style="min-height:58px;border:1px solid var(--gray-100);border-radius:6px;padding:4px;opacity:${c.inMonth ? 1 : 0.35}">
           <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:3px">${c.date.getDate()}</div>
           ${people.map(p => {
