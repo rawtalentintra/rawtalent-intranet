@@ -6370,6 +6370,12 @@
     // while another caller is still awaiting /api/team) must await the same
     // build rather than one of them grabbing the map mid-population and
     // silently falling back to per-call hash colors for everyone.
+    function teamShiftColor(team) {
+      const t = String(team || '').toLowerCase();
+      if (t.startsWith('am')) return { bg: '#dbeafe', text: '#1e3a8a', sub: '#1d4ed8' };
+      if (t.startsWith('pm')) return { bg: '#2563eb', text: '#ffffff', sub: '#dbeafe' };
+      return null;
+    }
     function ensureLeaveColorMap() {
       if (leaveColorMap) return Promise.resolve(leaveColorMap);
       if (leaveColorMapPromise) return leaveColorMapPromise;
@@ -6386,6 +6392,8 @@
           // backwards to them, so they trade slots here rather than
           // reshuffling everyone else's colors to fix it.
           [map.Prince, map.Sophia] = [map.Sophia, map.Prince];
+          // Joy, 9 Nov 2026: AM Team light blue, PM Team darker blue (also used on the Ops Calendar).
+          members.forEach(m => { const c = teamShiftColor(m.team); if (c && m.name) map[m.name] = c; });
         } catch { /* falls back to hashPersonColor below for everyone */ }
         leaveColorMap = map;
         return map;
@@ -6506,8 +6514,8 @@
         return `
           <div class="org-node ${tierClass}" data-id="${m.id}" style="left:${x}px;top:${y}px;${colStyle}">
             <div class="org-node-name" style="${col ? `color:${col.text}` : ''}">${escHtml(m.name)}</div>
-            ${m.position ? `<div class="org-node-position">${escHtml(m.position)}</div>` : ''}
-            ${m.team ? `<div class="org-node-team">${escHtml(m.team.toUpperCase())}</div>` : ''}
+            ${m.position ? `<div class="org-node-position" style="${col && col.sub ? `color:${col.sub}` : ''}">${escHtml(m.position)}</div>` : ''}
+            ${m.team ? `<div class="org-node-team" style="${col && col.sub ? `color:${col.sub}` : ''}">${escHtml(m.team.toUpperCase())}</div>` : ''}
           </div>`;
       }).join('');
       const canvasW = Math.max(maxX + ORG_NODE_W + 30, 700);

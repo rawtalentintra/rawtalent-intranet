@@ -5531,7 +5531,8 @@
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:24px 0 10px">
           <div style="font-weight:700;color:var(--navy);font-size:14px">Ops Calendar</div>
           <div style="display:flex;gap:12px;font-size:11.5px;color:var(--text-muted)">
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#dcfce7;border:1px solid #86efac;vertical-align:middle"></span> On shift</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#dbeafe;border:1px solid #93c5fd;vertical-align:middle"></span> AM Team on shift</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#2563eb;vertical-align:middle"></span> PM Team on shift</span>
             <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#fee2e2;border:1px solid #fca5a5;vertical-align:middle"></span> On leave</span>
           </div>
         </div>
@@ -5696,7 +5697,7 @@
             const col = leavePersonColor(p.key);
             return `<div style="font-size:10px;font-weight:600;background:#fee2e2;color:#b91c1c;border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(p.name)} on Leave</div>`;
           }).join('')}
-          ${onShift.map(m => `<div title="${escHtml(m.name)} on shift ${escHtml(m.shift_times[dayKey])}" style="font-size:10px;font-weight:600;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml((m.name || '').split(' ')[0])} <span style="font-weight:500">${escHtml(m.shift_times[dayKey])}</span></div>`).join('')}
+          ${onShift.map(m => { const pm = /^pm/i.test(m.team || ''); return `<div title="${escHtml(m.name)} on shift ${escHtml(m.shift_times[dayKey])} (${escHtml(m.team || '')})" style="font-size:10px;font-weight:600;background:${pm ? '#2563eb' : '#dbeafe'};color:${pm ? '#ffffff' : '#1e3a8a'};border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml((m.name || '').split(' ')[0])} <span style="font-weight:500">${escHtml(m.shift_times[dayKey])}</span></div>`; }).join('')}
         </div>`;
       }).join('');
       wrap.innerHTML = `
