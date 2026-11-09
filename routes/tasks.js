@@ -399,6 +399,7 @@ router.put('/:id', async (req, res) => {
   try {
     // One locked transaction (Sophia, 4 Nov): a note's @mention auto-assign or a
     // second save landing at the same moment waits instead of overwriting.
+    let justDone = false;
     await transaction(async db => {
     const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
     if (!existing.rows[0]) throw Object.assign(new Error('Task not found'), { status: 404 });
@@ -407,6 +408,7 @@ router.put('/:id', async (req, res) => {
     // completed_at only gets set the moment status actually transitions
     // into 'done', and clears if it's reopened — not touched on every save.
     let completedAt = existing.rows[0].completed_at;
+    justDone = finalStatus === 'done' && existing.rows[0].status !== 'done';
     if (finalStatus === 'done' && existing.rows[0].status !== 'done') completedAt = new Date().toISOString();
     else if (finalStatus !== 'done') completedAt = null;
     const mentioned = await resolveDescriptionMentions(getDb(), description, req.user.email);
@@ -462,6 +464,7 @@ router.put('/:id', async (req, res) => {
     }
     });
 
+    if (justDone) require('../services/slackService').notifyTaskDone(req.params.id, req.user.name || req.user.email);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

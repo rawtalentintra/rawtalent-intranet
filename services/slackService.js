@@ -143,4 +143,41 @@ async function runSlackScan(triggeredBy) {
   return { channelsScanned: channels.length, threadsProcessed, candidatesFound, truncated, errors };
 }
 
-module.exports = { runSlackScan, isConfigured: () => !!getToken() };
+// Direct message to a HeartBeat user by their work email (needs the bot's
+// chat:write + users:read.email scopes). Never throws: a Slack hiccup must
+// not break whatever triggered it.
+async function sendDmByEmail(email, text, blocks) {
+  try {
+    if (!getToken()) return false;
+    const u = await slackCall('users.lookupByEmail', { email });
+    await slackCall('chat.postMessage', { channel: u.user.id, text, ...(blocks ? { blocks } : {}), unfurl_links: false });
+    return true;
+  } catch (err) { console.error('Slack DM failed:', email, err.message); return false; }
+}
+
+// Sophia, 9 Nov 2026: a Slack DM whenever ANY task is marked Done.
+const TASK_DONE_RECIPIENTS = ['sophia@rawtalent.com.au'];
+async function notifyTaskDone(taskId, doneBy) {
+  try {
+    const t = (await getDb().execute({ sql: `SELECT t.title, t.assigned_to_emails, d.name AS dept, d.icon
+      FROM tasks t LEFT JOIN task_departments d ON d.id = t.department_id WHERE t.id = ?`, args: [taskId] })).rows[0];
+    if (!t) return;
+    const names = async emails => {
+      if (!emails.length) return 'Unassigned';
+      const r = await getDb().execute({ sql: `SELECT email, name FROM users WHERE lower(email) = ANY(?)`, args: [emails.map(e => String(e).toLowerCase())] });
+      const m = new Map(r.rows.map(x => [String(x.email).toLowerCase(), x.name]));
+      return emails.map(e => m.get(String(e).toLowerCase()) || e).join(', ');
+    };
+    const assignees = await names(Array.isArray(t.assigned_to_emails) ? t.assigned_to_emails : []);
+    const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
+    const esc = x => String(x || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const text = `✅ Task done: ${t.title}`;
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: `✅ *Task done:* <${url}|${esc(t.title)}>` } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `${esc((t.icon ? t.icon + ' ' : '') + (t.dept || 'No department'))} · Marked done by ${esc(doneBy)} · Assigned to ${esc(assignees)}` }] }
+    ];
+    await Promise.all(TASK_DONE_RECIPIENTS.map(e => sendDmByEmail(e, text, blocks)));
+  } catch (err) { console.error('Task-done Slack notify failed:', err.message); }
+}
+
+module.exports = { runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
