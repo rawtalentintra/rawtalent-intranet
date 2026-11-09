@@ -692,6 +692,46 @@ router.get('/fill-rate-by-partner', async (req, res) => {
 // per-client booking filter to fetch just this one centre's bookings.
 // "Dormant touch point complete" (Liam, 19 Oct). Body: { touchpointType:
 // 'call'|'visit', firstBookingFree, pricingNote, discountPerHour }.
+// Dormant Centre Call List (Liam, 22 Oct + 3 Nov 2026; built 10 Nov). Desktop only.
+// Every centre with no booking in 6+ months, ranked so the heaviest past agency
+// users come first (Liam: classify barely / moderately / a lot, concentrate on
+// the heavy users with First Booking Free). Same centres, owners and dormancy
+// rules as My Centres; the touch point itself is still logged on the centre.
+const DORMANT_LIST_VIEWERS = ['gwen@rawtalent.com.au', 'justine@rawtalent.com.au', 'liam@rawtalent.com.au', 'sophia@rawtalent.com.au', 'joy@rawtalent.com.au'];
+router.get('/dormant-call-list', async (req, res) => {
+  if (!DORMANT_LIST_VIEWERS.includes(String(req.user && req.user.email || '').toLowerCase())) return res.status(403).json({ error: 'Not available' });
+  try {
+    const layer = router.stack.find(l => l.route && l.route.path === '/' && l.route.methods.get);
+    const rows = await new Promise((resolve, reject) => layer.route.stack[layer.route.stack.length - 1].handle(
+      { query: {}, user: req.user },
+      { json: resolve, status() { return { json: d => reject(new Error(d && d.error || 'centres unavailable')) }; } }));
+    const { bookings } = await getCentresAndBookings();
+    const index = indexBookingsByCentre(bookings);
+    const assignments = await getCentrePartnerAssignments();
+    const LIVE = new Set([2, 3, 5]);
+    // Liam, 3 Nov: dormant = no booking in 6+ months OR never booked. RT history here is ~12 months,
+    // so 'no booking at all' = nothing in the last 12+ months (or never booked).
+    const out = rows.filter(c => c.isDormant || !c.lastBookingDate).map(c => {
+      const bs = bookingsForCentre(index, c).filter(b => LIVE.has(b.statusId) && b.bookingDate);
+      const n = bs.length;
+      const usage = !c.lastBookingDate ? 'none' : n >= 20 ? 'high' : n >= 5 ? 'moderate' : 'light';
+      return {
+        centreKey: c.centreKey, name: c.name, suburb: c.suburb || '', state: shortState(c.state) || '',
+        owner: assignments[c.centreKey] || DEFAULT_CENTRE_OWNER,
+        lastBookingDate: c.lastBookingDate, daysSinceLastBooking: c.daysSinceLastBooking,
+        pastBookings: n, usage,
+        lastContactAt: c.lastContactAt || null,
+        needsContact: c.lastBookingDate ? !!c.dormantNeedsContact : !c.lastContactAt,
+        noRecentBookings: !c.lastBookingDate,
+        lastTouchpoint: c.lastDormantTouchpoint || null
+      };
+    }).sort((a, b) => (b.needsContact - a.needsContact) || (b.pastBookings - a.pastBookings) || a.name.localeCompare(b.name));
+    res.json({ centres: out, historyNote: 'RT booking history in HeartBeat goes back about 12 months.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:centreKey/dormant-touchpoint', async (req, res) => {
   try {
     const { centres, bookings } = await getCentresAndBookings();

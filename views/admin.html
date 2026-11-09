@@ -388,6 +388,9 @@
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
+        <div class="admin-nav-item" id="navDormantCalls" style="display:none" onclick="showSection('dormant-calls', this)">
+          <span class="admin-nav-icon">📞</span> Dormant Call List
+        </div>
         <div class="admin-nav-item" onclick="showSection('micropods', this)">
           <span class="admin-nav-icon">🗺️</span> Micropods
         </div>
@@ -1336,6 +1339,17 @@
         </div>
       </div>
       </template>
+
+      <!-- Dormant Centre Call List (Liam 22 Oct / 3 Nov; built 10 Nov 2026) -->
+      <div class="admin-section" id="section-dormant-calls">
+        <div class="admin-page-header">
+          <div>
+            <div class="admin-page-title">Dormant Call List</div>
+            <div class="admin-page-sub">Centres that haven't booked in 6+ months, heaviest past users first. Call or visit, then open the centre and press <b>Dormant touch point complete</b> to pick the offer and start the emails.</div>
+          </div>
+        </div>
+        <div id="dclWrap"><div class="spinner-wrap"><div class="spinner"></div></div></div>
+      </div>
 
       <template id="__lazy_micropods">
       <!-- Micropods -->
@@ -5381,6 +5395,7 @@
         currentUserEmail = me.email;
         currentUserCanViewContracts = !!me.canViewContracts;
         if (me.canWashLeads) { const nw = document.getElementById('navLeadWash'); if (nw) nw.style.display = ''; }
+        if (DORMANT_LIST_VIEWERS.includes(String(me.email || '').toLowerCase())) { const nd = document.getElementById('navDormantCalls'); if (nd) nd.style.display = ''; }
         if (currentUserCanViewContracts) { const n = document.getElementById('navSignedContracts'); if (n) n.style.display = ''; }
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
@@ -5538,7 +5553,7 @@
       // admin/super_admin-only before this section existed and this move
       // doesn't change that; qa_view/workforce_partner access can be added
       // later if Ops needs it.
-      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'my-centres', 'route-planner', 'micropods']
+      workforce_partner: ['articles', 'new-article', 'glossary', 'faq', 'calls-dashboard', 'call-rubrics', 'calls', 'leads', 'sales-dashboard', 'wfp-performance', 'my-centres', 'route-planner', 'micropods', 'dormant-calls']
     };
 
     // Educator Outreach is a per-user grant for qa_view (e.g. Adzi/Laurie/
@@ -7109,6 +7124,7 @@
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
       if (id === 'my-centres') { backToMyCentres(); loadMyCentres(); }
+      if (id === 'dormant-calls') { if (!canSeeDormantCallList()) { showSection('articles', document.querySelector('[onclick*="articles"]')); return; } loadDormantCallList(); }
       if (id === 'micropods') { backToMicropodsList(); setMicropodsTab(micropodsTab); initFindEducators(); initReadyExport(); }
       if (id === 'advertising-opportunities') initAdvertisingOpportunitiesSection();
       if (id === 'educator-outreach') { backToOutreachLists(); loadOutreachLists(); }
@@ -12588,6 +12604,69 @@
     // attention queue) — navigates to the section first, then opens the
     // centre, done as real JS rather than a nested-quote CSS selector
     // string inside an inline onclick attribute.
+    // ── Dormant Call List ─────────────────────────────────────────────
+    var DORMANT_LIST_VIEWERS = ['gwen@rawtalent.com.au', 'justine@rawtalent.com.au', 'liam@rawtalent.com.au', 'sophia@rawtalent.com.au', 'joy@rawtalent.com.au'];
+    function canSeeDormantCallList() { return DORMANT_LIST_VIEWERS.includes((currentUserEmail || '').toLowerCase()); }
+    let dclData = null;
+    const dclF = { group: 'high', owner: '', state: '', q: '', hideDone: true };
+    const DCL_GROUPS = [
+      ['high', 'Used us a lot', '20+ bookings before going quiet', 'Offer First Booking Free or the $700 credit'],
+      ['moderate', 'Used us moderately', '5–19 bookings', 'Offer First Booking Free or the $700 credit'],
+      ['light', 'Used us lightly', '1–4 bookings', 'Normal Dormant emails ("did you know you have an account?")'],
+      ['none', 'No bookings in 12+ months', 'Nothing in the RT history we hold (12 months), or never booked', 'Find out how they use agency first, then pick the offer']
+    ];
+    async function loadDormantCallList() {
+      const wrap = document.getElementById('dclWrap');
+      if (!dclData) wrap.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      try {
+        const r = await fetch('/api/centres/dormant-call-list');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load');
+        dclData = d.centres;
+        if (!dclF.owner && currentUserRole === 'workforce_partner' && currentUserWfpLabel) dclF.owner = currentUserWfpLabel;
+        renderDormantCallList();
+      } catch (err) { wrap.innerHTML = `<div class="empty-state">${escHtml(err.message)}</div>`; }
+    }
+    function setDcl(k, v) { dclF[k] = v; renderDormantCallList(); }
+    function renderDormantCallList() {
+      const all = dclData || [];
+      const base = all.filter(c => (!dclF.owner || c.owner === dclF.owner) && (!dclF.state || c.state === dclF.state)
+        && (!dclF.q || (c.name + ' ' + c.suburb).toLowerCase().includes(dclF.q.toLowerCase())) && (!dclF.hideDone || c.needsContact));
+      const count = g => base.filter(c => c.usage === g).length;
+      const rows = base.filter(c => c.usage === dclF.group);
+      const grp = DCL_GROUPS.find(g => g[0] === dclF.group);
+      const owners = [...new Set(all.map(c => c.owner))].sort(), states = [...new Set(all.map(c => c.state).filter(Boolean))].sort();
+      const fmt = d => d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+      const ago = days => days == null ? '' : days >= 60 ? `${Math.round(days / 30.4)} months ago` : `${days} days ago`;
+      const sel = (k, opts, label) => `<select class="form-control" style="width:auto;min-width:130px;padding:7px 10px" onchange="setDcl('${k}', this.value)"><option value="">${label}</option>${opts.map(o => `<option value="${escHtml(o)}" ${dclF[k] === o ? 'selected' : ''}>${escHtml(o)}</option>`).join('')}</select>`;
+      document.getElementById('dclWrap').innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:14px">
+          ${DCL_GROUPS.map(([k, label, sub]) => `<div onclick="setDcl('group','${k}')" style="cursor:pointer;background:white;border:${dclF.group === k ? '2px solid var(--navy)' : '1px solid var(--gray-100)'};border-radius:12px;padding:12px 14px">
+            <div style="font-size:24px;font-weight:800;color:var(--navy)">${count(k)}</div>
+            <div style="font-weight:700;color:var(--navy);font-size:13.5px">${label}</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">${sub}</div></div>`).join('')}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+          ${sel('owner', owners, 'All partners')}
+          ${sel('state', states, 'All states')}
+          <input class="form-control" style="width:220px;padding:7px 10px" placeholder="Search centre or suburb" value="${escHtml(dclF.q)}" oninput="dclF.q=this.value;clearTimeout(window.__dclT);window.__dclT=setTimeout(renderDormantCallList,250)">
+          <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${dclF.hideDone ? 'checked' : ''} onchange="setDcl('hideDone', this.checked)"> Only centres still to contact</label>
+        </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;font-size:13px;color:#1e3a8a;margin-bottom:12px"><b>${escHtml(grp[1])}:</b> ${escHtml(grp[3])}.</div>
+        ${rows.length ? `<div style="overflow-x:auto"><table class="data-table" style="width:100%">
+          <thead><tr><th>Centre</th><th>Partner</th><th>Last booking</th><th>Past bookings</th><th>Last call / visit</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rows.map(c => `<tr style="cursor:pointer" onclick="goToCentre360('${escHtml(c.centreKey)}')">
+            <td><div style="font-weight:700;color:var(--navy)">${escHtml(c.name)}</div><div style="font-size:12px;color:var(--text-muted)">${escHtml(c.suburb)}${c.state ? ', ' + escHtml(c.state) : ''}</div></td>
+            <td>${escHtml(c.owner)}</td>
+            <td>${c.lastBookingDate ? `${fmt(c.lastBookingDate)}<div style="font-size:12px;color:var(--text-muted)">${ago(c.daysSinceLastBooking)}</div>` : '<span style="color:var(--text-muted)">None in 12+ months</span>'}</td>
+            <td style="font-weight:700">${c.pastBookings}</td>
+            <td>${c.lastContactAt ? fmt(c.lastContactAt) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+            <td>${c.needsContact ? '<span style="background:#fef3c7;color:#b45309;font-weight:700;font-size:12px;padding:2px 8px;border-radius:999px">To call</span>' : `<span style="background:#dcfce7;color:#15803d;font-weight:700;font-size:12px;padding:2px 8px;border-radius:999px">Done${c.lastTouchpoint ? ' ' + fmt(c.lastTouchpoint.at) : ''}</span>`}</td>
+            <td style="color:var(--orange);font-weight:700;white-space:nowrap">Open ›</td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty-state">No centres here with these filters.</div>'}
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Past bookings = filled bookings in the RT history HeartBeat holds (about 12 months). Click a centre for its full history, favourite educators and the touch point button. Reactivating a dormant centre makes it yours (Liam, 14 Sep).</div>`;
+    }
+
     async function goToCentre360(centreKey, tab) {
       showSection('my-centres', document.querySelector('[onclick*="my-centres"]'));
       await openCentre360(centreKey);
