@@ -323,7 +323,9 @@ async function createTask({ departmentId, classificationId, title, description, 
       JSON.stringify(normalizeLinkedCentres(linkedCentres))
     ]
   });
-  require('../services/slackService').notifyTaskTagged(id, mentioned);
+  // Tagged or assigned (Joy, 9 Nov): one #daily-check-in message, never for yourself.
+  const me = String(createdByEmail || '').toLowerCase();
+  require('../services/slackService').notifyTaskTagged(id, [...mentioned, ...normalizeAssignees(assignedToEmails)].filter(e => String(e).toLowerCase() !== me));
   return id;
 }
 
@@ -400,7 +402,7 @@ router.put('/:id', async (req, res) => {
   try {
     // One locked transaction (Sophia, 4 Nov): a note's @mention auto-assign or a
     // second save landing at the same moment waits instead of overwriting.
-    let justDone = false, newlyTagged = [];
+    let justDone = false, newlyTagged = [], newlyAssigned = [];
     await transaction(async db => {
     const existing = await db.execute({ sql: 'SELECT status, completed_at, department_id, assigned_to_emails, linked_candidates, linked_centres, mentioned_emails FROM tasks WHERE id = ? FOR UPDATE', args: [req.params.id] });
     if (!existing.rows[0]) throw Object.assign(new Error('Task not found'), { status: 404 });
@@ -419,6 +421,8 @@ router.put('/:id', async (req, res) => {
     const orig = original && typeof original === 'object' ? original : {};
     const newAssignees = normalizeAssignees(mergeList(previousAssignees, orig.assigned_to_emails === undefined ? undefined : normalizeAssignees(orig.assigned_to_emails),
       assigned_to_emails === undefined ? undefined : normalizeAssignees(assigned_to_emails), e => e));
+    const prevAsg = new Set(previousAssignees.map(e => String(e).toLowerCase()));
+    newlyAssigned = newAssignees.filter(e => !prevAsg.has(String(e).toLowerCase()));
     const currentCandidates = Array.isArray(existing.rows[0].linked_candidates) ? existing.rows[0].linked_candidates : [];
     const currentCentres = Array.isArray(existing.rows[0].linked_centres) ? existing.rows[0].linked_centres : [];
     const finalCandidates = mergeList(currentCandidates, orig.linked_candidates === undefined ? undefined : normalizeLinkedCandidates(orig.linked_candidates),
@@ -468,7 +472,9 @@ router.put('/:id', async (req, res) => {
     });
 
     if (justDone) require('../services/slackService').notifyTaskDone(req.params.id, req.user.name || req.user.email);
-    if (newlyTagged.length) require('../services/slackService').notifyTaskTagged(req.params.id, newlyTagged);
+    const me = String(req.user.email).toLowerCase();
+    const notify = [...newlyTagged, ...newlyAssigned].filter(e => String(e).toLowerCase() !== me);
+    if (notify.length) require('../services/slackService').notifyTaskTagged(req.params.id, notify);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
