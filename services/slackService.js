@@ -180,11 +180,22 @@ async function notifyTaskDone(taskId, doneBy) {
   } catch (err) { console.error('Task-done Slack notify failed:', err.message); }
 }
 
+// Joy, 9 Nov 2026: no task Slack notifications for these people yet (Desiree,
+// Jacqueline, and new hires Queen, Ryle, Morien). Matched on their HeartBeat
+// name or email, so it also covers them once their accounts are added.
+const MUTED_NAME_RE = /\b(desiree|des|serrano|soriano|jacqueline|jackie|jackiw|dalwatan|queen|ryle|morien)\b/i;
+async function isMuted(email) {
+  const e = String(email || '').toLowerCase();
+  if (MUTED_NAME_RE.test(e.split('@')[0].replace(/[._-]/g, ' '))) return true;
+  const r = await getDb().execute({ sql: 'SELECT name FROM users WHERE lower(email) = ?', args: [e] });
+  return !!(r.rows[0] && MUTED_NAME_RE.test(r.rows[0].name || ''));
+}
+
 // Joy, 9 Nov 2026: the task's creator gets a Slack DM whenever someone else
 // updates their task (edits or a new note). `changes` = short readable lines.
 async function notifyTaskCreator(taskId, creatorEmail, updatedBy, changes) {
   try {
-    if (!creatorEmail || !changes || !changes.length) return;
+    if (!creatorEmail || !changes || !changes.length || await isMuted(creatorEmail)) return;
     const t = (await getDb().execute({ sql: 'SELECT title FROM tasks WHERE id = ?', args: [taskId] })).rows[0];
     if (!t) return;
     const esc = x => String(x || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -213,6 +224,7 @@ async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
     if (!list.length || !getToken()) return;
     const who = [];
     for (const email of list) {
+      if (await isMuted(email)) continue;
       try { who.push(`<@${(await slackCall('users.lookupByEmail', { email })).user.id}>`); }
       catch (err) { console.log('Task tag: no Slack account for', email, '- skipped'); }
     }
