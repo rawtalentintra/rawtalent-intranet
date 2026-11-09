@@ -303,6 +303,17 @@ function normalizeLinkedCentres(list) {
 // API for those to call yet, so they raise a real Task here instead of
 // faking a write RT can't accept). Kept as one insert path rather than
 // two, so a future change to the tasks schema doesn't have to be made twice.
+// #daily-check-in: "you were tagged on" for @tags, "you were assigned to" for
+// assignments; someone both tagged and assigned in one save gets the tag message only.
+function notifyTaggedAndAssigned(taskId, tagged, assigned, selfEmail) {
+  const slack = require('../services/slackService');
+  const lc = e => String(e).toLowerCase();
+  const t = [...new Set(tagged.map(lc))].filter(e => e !== selfEmail);
+  const a = [...new Set(assigned.map(lc))].filter(e => e !== selfEmail && !t.includes(e));
+  if (t.length) slack.notifyTaskTagged(taskId, t, 'tagged on');
+  if (a.length) slack.notifyTaskTagged(taskId, a, 'assigned to');
+}
+
 async function createTask({ departmentId, classificationId, title, description, status, priority, assignedToEmails, dueDate, linkedCandidates, linkedCentres, createdByEmail, createdByName }) {
   const db = getDb();
   const id = uuidv4();
@@ -325,7 +336,7 @@ async function createTask({ departmentId, classificationId, title, description, 
   });
   // Tagged or assigned (Joy, 9 Nov): one #daily-check-in message, never for yourself.
   const me = String(createdByEmail || '').toLowerCase();
-  require('../services/slackService').notifyTaskTagged(id, [...mentioned, ...normalizeAssignees(assignedToEmails)].filter(e => String(e).toLowerCase() !== me));
+  notifyTaggedAndAssigned(id, mentioned, normalizeAssignees(assignedToEmails), me);
   return id;
 }
 
@@ -473,8 +484,7 @@ router.put('/:id', async (req, res) => {
 
     if (justDone) require('../services/slackService').notifyTaskDone(req.params.id, req.user.name || req.user.email);
     const me = String(req.user.email).toLowerCase();
-    const notify = [...newlyTagged, ...newlyAssigned].filter(e => String(e).toLowerCase() !== me);
-    if (notify.length) require('../services/slackService').notifyTaskTagged(req.params.id, notify);
+    notifyTaggedAndAssigned(req.params.id, newlyTagged, newlyAssigned, me);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

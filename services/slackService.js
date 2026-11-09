@@ -190,7 +190,7 @@ async function tagChannel() {
   if (!ch.is_member) await slackCall('conversations.join', { channel: ch.id });
   return (tagChannelId = ch.id);
 }
-async function notifyTaskTagged(taskId, emails) {
+async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
   try {
     const list = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
     if (!list.length || !getToken()) return;
@@ -205,7 +205,7 @@ async function notifyTaskTagged(taskId, emails) {
     const url = `https://rawtalent-internal.app/?tab=tasks&task=${taskId}`;
     const names = who.length > 1 ? who.slice(0, -1).join(', ') + ' and ' + who[who.length - 1] : who[0];
     await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false,
-      text: `:label: Hi ${names}, you were tagged on a <${url}|HeartBeat Task>. Please check :writing_hand:` });
+      text: `:label: Hi ${names}, you were ${verb} a <${url}|HeartBeat Task>. Please check :writing_hand:` });
   } catch (err) { console.error('Task-tag Slack notify failed:', err.message); }
 }
 
