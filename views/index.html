@@ -2960,26 +2960,42 @@
     function renderTaskPerformance() {
       const d = perfData, r = perfRange();
       const isFuture = r.from > perfDay(perfMelbourneToday());
-      const card = (label, val, color) => `<div class="perf-card"><div style="font-size:11.5px;color:var(--text-muted);font-weight:600">${label}</div><div style="font-size:22px;font-weight:800;color:${color || 'var(--navy)'};margin-top:2px">${val}</div></div>`;
-      const pct = v => v == null ? '<span style="color:var(--text-muted);font-weight:500">too few</span>' : `${v}%`;
-      const rows = d.people.map(p => {
-        const open = perfOpen === p.email;
-        const taskLine = (t, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px dashed var(--gray-100);font-size:12.5px">
-            <a href="javascript:void(0)" onclick="event.stopPropagation();openTaskDetail('${t.id}')" style="color:var(--navy);text-decoration:none;font-weight:600">${escHtml(t.title)}</a>
-            <span style="color:var(--text-muted);white-space:nowrap">${extra}</span></div>`;
-        const detail = open ? `<tr><td colspan="6" style="background:#fbfcfe">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
-              <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Completed in this period (${p.tasks.done.length})</div>
-                ${p.tasks.done.map(t => taskLine(t, `${t.completedDay.split('-').reverse().join('/')} · ${fmtPerfHours(t.hours)}${t.onTime === false ? ' · <b style="color:#b91c1c">late</b>' : t.onTime ? ' · on time' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
-              <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Open now (${p.tasks.open.length})</div>
-                ${p.tasks.open.map(t => taskLine(t, `${t.due ? 'due ' + t.due.split('-').reverse().join('/') : 'no due date'}${t.overdue ? ' · <b style="color:#b91c1c">overdue</b>' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
-            </div></td></tr>` : '';
-        return `<tr class="perf-row" onclick="togglePerfPerson('${p.email}')">
-            <td style="font-weight:700;color:var(--navy)">${open ? '▾' : '▸'} ${escHtml(p.name)} <span style="font-size:10.5px;font-weight:700;color:var(--text-muted);margin-left:4px">${escHtml((p.team || '').toUpperCase())}</span></td>
-            <td style="font-weight:700">${p.done}</td><td>${pct(p.onTimePct)}</td>
-            <td>${p.typicalHours == null ? '<span style="color:var(--text-muted)">too few</span>' : fmtPerfHours(p.typicalHours)}</td>
-            <td>${p.open}</td><td style="${p.overdue ? 'color:#b91c1c;font-weight:700' : ''}">${p.overdue}</td></tr>${detail}`;
+      const periodWord = { daily: 'This day', weekly: 'This week', monthly: 'This month' }[perfPeriod];
+      const split = list => ({ on: list.filter(t => t.onTime === true).length, late: list.filter(t => t.onTime === false).length, none: list.filter(t => t.onTime === null).length });
+      const uniq = new Map();
+      d.people.forEach(p => p.tasks.done.forEach(t => uniq.set(t.id, t)));
+      const T = split([...uniq.values()]);
+      const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+      const bar = c => {
+        const tot = c.on + c.late + c.none;
+        if (!tot) return '<div style="height:8px;border-radius:4px;background:var(--gray-100);margin:8px 0 6px"></div>';
+        const seg = (n, col) => n ? `<div style="width:${n / tot * 100}%;background:${col}"></div>` : '';
+        return `<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 6px">${seg(c.on, '#22c55e')}${seg(c.late, '#ef4444')}${seg(c.none, '#cbd5e1')}</div>`;
+      };
+      const splitText = c => [c.on && `<span style="color:#15803d">${c.on} on time</span>`, c.late && `<span style="color:#b91c1c">${c.late} late</span>`, c.none && `${c.none} no due date`].filter(Boolean).join(' · ') || 'Nothing completed';
+      const cards = d.people.map(p => {
+        const c = split(p.tasks.done), open = perfOpen === p.email;
+        return `<div onclick="togglePerfPerson('${p.email}')" style="cursor:pointer;background:white;border:${open ? '2px solid var(--navy)' : '1px solid var(--gray-100)'};border-radius:12px;padding:12px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:800;color:var(--navy)">${escHtml(p.name)}</span><span style="font-size:10.5px;font-weight:700;color:var(--text-muted)">${escHtml((p.team || '').toUpperCase())}</span></div>
+          <div style="font-size:28px;font-weight:800;color:var(--navy);margin-top:4px;line-height:1.1">${p.done} <span style="font-size:13px;font-weight:600;color:var(--text-muted)">done</span></div>
+          ${bar(c)}
+          <div style="font-size:12px;color:var(--text-muted)">${splitText(c)}</div>
+          <div style="font-size:12px;margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);color:var(--text)">${p.open} open · <span style="${p.overdue ? 'color:#b91c1c;font-weight:700' : 'color:var(--text-muted)'}">${p.overdue} overdue</span></div>
+        </div>`;
       }).join('');
+      const sel = d.people.find(p => p.email === perfOpen);
+      const taskLine = (t, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px dashed var(--gray-100);font-size:12.5px">
+          <a href="javascript:void(0)" onclick="openTaskDetail('${t.id}')" style="color:var(--navy);text-decoration:none;font-weight:600">${escHtml(t.title)}</a>
+          <span style="color:var(--text-muted);white-space:nowrap">${extra}</span></div>`;
+      const ddmm = x => x.split('-').reverse().join('/');
+      const detail = sel ? `<div style="background:white;border:1px solid var(--gray-100);border-radius:12px;padding:14px 16px;margin-top:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-weight:800;color:var(--navy)">${escHtml(sel.name)}'s tasks</div><span onclick="togglePerfPerson('${sel.email}')" style="cursor:pointer;font-size:12px;color:var(--text-muted)">Close ✕</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px">
+            <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Completed (${sel.tasks.done.length})</div>
+              ${sel.tasks.done.map(t => taskLine(t, `${ddmm(t.completedDay)} · took ${fmtPerfHours(t.hours)}${t.onTime === false ? ' · <b style="color:#b91c1c">late</b>' : t.onTime ? ' · <span style="color:#15803d">on time</span>' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
+            <div><div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">Open now (${sel.tasks.open.length})</div>
+              ${sel.tasks.open.map(t => taskLine(t, `${t.due ? 'due ' + ddmm(t.due) : 'no due date'}${t.overdue ? ' · <b style="color:#b91c1c">overdue</b>' : ''}`)).join('') || '<div style="font-size:12px;color:var(--text-muted)">None</div>'}</div>
+          </div></div>` : '';
       document.getElementById('resultsList').innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0 14px">
           <div class="perf-seg">
@@ -2991,21 +3007,17 @@
             <button onclick="shiftPerf(1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">›</button>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
-          ${card('Tasks completed', d.totals.done)}
-          ${card('On time', d.totals.onTimePct == null ? '—' : d.totals.onTimePct + '%')}
-          ${card('Typical time to complete', fmtPerfHours(d.totals.typicalHours))}
-          ${card('Overdue right now', d.totals.overdue, d.totals.overdue ? '#b91c1c' : null)}
+        <div style="background:white;border:1px solid var(--gray-100);border-radius:12px;padding:14px 16px;font-size:15px;color:var(--navy);margin-bottom:14px;line-height:1.6">
+          ${isFuture ? 'This period hasn\'t started yet.' : `${periodWord} the Ops team finished <b>${plural(d.totals.done, 'task')}</b>${d.totals.done ? `: <span style="color:#15803d;font-weight:700">${T.on} on time</span>, <span style="color:#b91c1c;font-weight:700">${T.late} late</span>${T.none ? `, ${T.none} with no due date` : ''}` : ''}.`}
+          <span style="${d.totals.overdue ? 'color:#b91c1c;font-weight:700' : 'color:var(--text-muted)'}"> ${d.totals.overdue ? `${plural(d.totals.overdue, 'task')} ${d.totals.overdue === 1 ? 'is' : 'are'} overdue right now.` : 'Nothing is overdue right now.'}</span>
         </div>
-        ${isFuture ? '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px">This period hasn\'t started yet.</div>' : ''}
-        <div style="overflow-x:auto"><table class="perf-table">
-          <tr><th>Person</th><th>Done</th><th>On time</th><th>Typical time</th><th>Open now</th><th>Overdue now</th></tr>
-          ${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No one found under Sophia on the org chart.</td></tr>'}
-        </table></div>
-        <div style="font-size:11.5px;color:var(--text-muted);line-height:1.6;margin-top:10px">
-          <b>How this is worked out:</b> Done = tasks the person was assigned to and marked Done in this period (shared tasks count for each person).
-          On time = of those with a due date, finished on or before it. Typical time = the middle value of assigned-to-done time, counted from when <i>that person</i> was assigned, so one stuck task or an old hand-over doesn't skew it.
-          Open and Overdue are right now, whatever period is picked. Under ${d.minSample} completed tasks shows "too few". Click a name to see the tasks behind the numbers.
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${cards || '<div style="color:var(--text-muted)">No one found under Sophia on the org chart.</div>'}</div>
+        ${detail}
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--text-muted);margin-top:12px;align-items:center">
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#22c55e;vertical-align:middle"></span> On time (done by the due date)</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#ef4444;vertical-align:middle"></span> Late</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#cbd5e1;vertical-align:middle"></span> No due date</span>
+          <span>· Shared tasks count for each person · Open and overdue are as of right now · Click a card to see the tasks</span>
         </div>`;
     }
 
