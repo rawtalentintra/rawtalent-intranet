@@ -2910,6 +2910,8 @@
       if (v === 'performance') loadTaskPerformanceView(); else loadTasksView();
     }
 
+    let perfTeam = 'all';
+    function setPerfTeam(t) { perfTeam = t; perfOpen = null; renderTaskPerformance(); }
     let perfPeriod = 'weekly', perfAnchor = null, perfData = null, perfOpen = null;
     const perfDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     function perfMelbourneToday() {
@@ -2962,31 +2964,36 @@
       const isFuture = r.from > perfDay(perfMelbourneToday());
       const periodWord = { daily: 'This day', weekly: 'This week', monthly: 'This month' }[perfPeriod];
       const split = list => ({ on: list.filter(t => t.onTime === true).length, late: list.filter(t => t.onTime === false).length, none: list.filter(t => t.onTime === null).length });
+      const teamOf = p => /^am/i.test(p.team || '') ? 'am' : /^pm/i.test(p.team || '') ? 'pm' : 'other';
+      const people = perfTeam === 'all' ? d.people : d.people.filter(p => teamOf(p) === perfTeam);
       const uniq = new Map();
-      d.people.forEach(p => p.tasks.done.forEach(t => uniq.set(t.id, t)));
+      people.forEach(p => p.tasks.done.forEach(t => uniq.set(t.id, t)));
+      const doneTotal = uniq.size;
+      const overdueTotal = new Set(people.flatMap(p => p.tasks.open.filter(o => o.overdue).map(o => o.id))).size;
+      const teamWord = { all: 'the Ops team', am: 'the AM Team', pm: 'the PM Team' }[perfTeam];
       const T = split([...uniq.values()]);
       const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-      const bar = c => {
+      const bar = (c, dark) => {
         const tot = c.on + c.late + c.none;
-        if (!tot) return '<div style="height:8px;border-radius:4px;background:var(--gray-100);margin:8px 0 6px"></div>';
+        if (!tot) return `<div style="height:8px;border-radius:4px;background:${dark ? 'rgba(255,255,255,.25)' : 'rgba(30,58,138,.12)'};margin:8px 0 6px"></div>`;
         const seg = (n, col) => n ? `<div style="width:${n / tot * 100}%;background:${col}"></div>` : '';
         return `<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 6px">${seg(c.on, '#22c55e')}${seg(c.late, '#ef4444')}${seg(c.none, '#cbd5e1')}</div>`;
       };
-      const splitText = c => [c.on && `<span style="color:#15803d">${c.on} on time</span>`, c.late && `<span style="color:#b91c1c">${c.late} late</span>`, c.none && `${c.none} no due date`].filter(Boolean).join(' · ') || 'Nothing completed';
+      const splitText = (c, dark) => [c.on && `<span style="color:${dark ? '#bbf7d0' : '#15803d'};font-weight:700">${c.on} on time</span>`, c.late && `<span style="color:${dark ? '#fecaca' : '#b91c1c'};font-weight:700">${c.late} late</span>`, c.none && `${c.none} no due date`].filter(Boolean).join(' · ') || 'Nothing completed';
       // AM Team first, then PM, then anyone else; busiest first within a team.
       const teamRank = p => /^am/i.test(p.team || '') ? 0 : /^pm/i.test(p.team || '') ? 1 : 2;
-      const cards = [...d.people].sort((a, b) => teamRank(a) - teamRank(b) || b.done - a.done || a.name.localeCompare(b.name)).map(p => {
+      const cards = [...people].sort((a, b) => teamRank(a) - teamRank(b) || b.done - a.done || a.name.localeCompare(b.name)).map(p => {
         const pm = teamRank(p) === 1, am = teamRank(p) === 0;
-        const head = pm ? 'background:#2563eb;color:#ffffff' : am ? 'background:#dbeafe;color:#1e3a8a' : 'background:#f1f5f9;color:var(--navy)';
+        // Same colours as the org chart: AM light blue, PM strong blue with white text.
+        const bg = pm ? '#2563eb' : am ? '#dbeafe' : 'white', fg = pm ? '#ffffff' : am ? '#1e3a8a' : 'var(--navy)';
+        const sub = pm ? '#dbeafe' : am ? '#1d4ed8' : 'var(--text-muted)', line = pm ? 'rgba(255,255,255,.25)' : am ? '#bfdbfe' : 'var(--gray-100)';
         const c = split(p.tasks.done), open = perfOpen === p.email;
-        return `<div onclick="togglePerfPerson('${p.email}')" style="cursor:pointer;background:white;border:${open ? '2px solid var(--navy)' : `1px solid ${pm ? '#2563eb' : am ? '#93c5fd' : 'var(--gray-100)'}`};border-radius:12px;overflow:hidden">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 14px;${head}"><span style="font-weight:800">${escHtml(p.name)}</span><span style="font-size:10.5px;font-weight:700;opacity:.85">${escHtml((p.team || '').toUpperCase())}</span></div>
-          <div style="padding:8px 14px 12px">
-          <div style="font-size:28px;font-weight:800;color:var(--navy);margin-top:4px;line-height:1.1">${p.done} <span style="font-size:13px;font-weight:600;color:var(--text-muted)">done</span></div>
-          ${bar(c)}
-          <div style="font-size:12px;color:var(--text-muted)">${splitText(c)}</div>
-          <div style="font-size:12px;margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);color:var(--text)">${p.open} open · <span style="${p.overdue ? 'color:#b91c1c;font-weight:700' : 'color:var(--text-muted)'}">${p.overdue} overdue</span></div>
-          </div>
+        return `<div onclick="togglePerfPerson('${p.email}')" style="cursor:pointer;background:${bg};color:${fg};border:${open ? '3px solid var(--navy)' : `1px solid ${pm ? '#2563eb' : am ? '#93c5fd' : 'var(--gray-100)'}`};border-radius:12px;padding:12px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:800">${escHtml(p.name)}</span><span style="font-size:10.5px;font-weight:700;color:${sub}">${escHtml((p.team || '').toUpperCase())}</span></div>
+          <div style="font-size:28px;font-weight:800;margin-top:4px;line-height:1.1">${p.done} <span style="font-size:13px;font-weight:600;color:${sub}">done</span></div>
+          ${bar(c, pm)}
+          <div style="font-size:12px;color:${sub}">${splitText(c, pm)}</div>
+          <div style="font-size:12px;margin-top:8px;padding-top:8px;border-top:1px solid ${line}">${p.open} open · <span style="${p.overdue ? `color:${pm ? '#fecaca' : '#b91c1c'};font-weight:800` : `color:${sub}`}">${p.overdue} overdue</span></div>
         </div>`;
       }).join('');
       const sel = d.people.find(p => p.email === perfOpen);
@@ -3007,6 +3014,9 @@
           <div class="perf-seg">
             ${['daily', 'weekly', 'monthly'].map(p => `<button class="${perfPeriod === p ? 'active' : ''}" onclick="setPerfPeriod('${p}')">${p[0].toUpperCase() + p.slice(1)}</button>`).join('')}
           </div>
+          <div class="perf-seg">
+            ${[['all', 'All'], ['am', 'AM Team'], ['pm', 'PM Team']].map(([k, l]) => `<button class="${perfTeam === k ? 'active' : ''}" onclick="setPerfTeam('${k}')">${l}</button>`).join('')}
+          </div>
           <div style="display:flex;align-items:center;gap:8px">
             <button onclick="shiftPerf(-1)" style="background:var(--gray-100);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">‹</button>
             <div style="font-weight:700;color:var(--navy);font-size:14px;min-width:220px;text-align:center">${escHtml(r.label)}</div>
@@ -3014,8 +3024,8 @@
           </div>
         </div>
         <div style="background:white;border:1px solid var(--gray-100);border-radius:12px;padding:14px 16px;font-size:15px;color:var(--navy);margin-bottom:14px;line-height:1.6">
-          ${isFuture ? 'This period hasn\'t started yet.' : `${periodWord} the Ops team finished <b>${plural(d.totals.done, 'task')}</b>${d.totals.done ? `: <span style="color:#15803d;font-weight:700">${T.on} on time</span>, <span style="color:#b91c1c;font-weight:700">${T.late} late</span>${T.none ? `, ${T.none} with no due date` : ''}` : ''}.`}
-          <span style="${d.totals.overdue ? 'color:#b91c1c;font-weight:700' : 'color:var(--text-muted)'}"> ${d.totals.overdue ? `${plural(d.totals.overdue, 'task')} ${d.totals.overdue === 1 ? 'is' : 'are'} overdue right now.` : 'Nothing is overdue right now.'}</span>
+          ${isFuture ? 'This period hasn\'t started yet.' : `${periodWord} ${teamWord} finished <b>${plural(doneTotal, 'task')}</b>${doneTotal ? `: <span style="color:#15803d;font-weight:700">${T.on} on time</span>, <span style="color:#b91c1c;font-weight:700">${T.late} late</span>${T.none ? `, ${T.none} with no due date` : ''}` : ''}.`}
+          <span style="${overdueTotal ? 'color:#b91c1c;font-weight:700' : 'color:var(--text-muted)'}"> ${overdueTotal ? `${plural(overdueTotal, 'task')} ${overdueTotal === 1 ? 'is' : 'are'} overdue right now.` : 'Nothing is overdue right now.'}</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${cards || '<div style="color:var(--text-muted)">No one found under Sophia on the org chart.</div>'}</div>
         ${detail}
