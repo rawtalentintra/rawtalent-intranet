@@ -3089,3 +3089,14 @@ ALTER TABLE slack_daily_threads ENABLE ROW LEVEL SECURITY;
 -- Shift times per weekday (Joy, 9 Nov 2026), e.g. {"mon":"8:00am - 4:30pm"}; a blank
 -- day = not rostered. Drives the green "on shift" chips on the Ops Calendar.
 ALTER TABLE team_members ADD COLUMN IF NOT EXISTS shift_times JSONB DEFAULT '{}'::jsonb;
+
+-- Emoji reactions on task notes (Joy, 9 Nov 2026). No notifications.
+CREATE TABLE IF NOT EXISTS task_note_reactions (
+  note_id TEXT NOT NULL,
+  user_email TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  user_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (note_id, user_email, emoji)
+);
+ALTER TABLE task_note_reactions ENABLE ROW LEVEL SECURITY;

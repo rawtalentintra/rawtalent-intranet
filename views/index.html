@@ -4216,6 +4216,7 @@
             <div class="task-note-head"><b>${escHtml(n.author_name || n.author_email)}</b> <span>· ${fmtMelbourne(n.created_at)}</span>${editedTag}</div>
             <div class="task-note-body">${renderNoteBody(n.body)}</div>
             ${viewAttHtml ? `<div style="margin-top:6px">${viewAttHtml}</div>` : ''}
+            ${noteReactionsHtml(n)}
             ${canModify ? `<div style="display:flex;gap:12px;margin-top:4px">
               <span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted)" onclick="startTaskNoteEdit('${n.id}')">Edit</span>
               <span style="cursor:pointer;font-size:11px;font-weight:700;color:#dc2626" onclick="deleteTaskNoteConfirm('${n.id}')">Delete</span>
@@ -4223,6 +4224,45 @@
           </div>`;
       }).join('');
       el.scrollTop = el.scrollHeight;
+    }
+
+    // Emoji reactions on notes (Joy, 9 Nov 2026) — click to add/remove yours; no notifications.
+    const NOTE_REACTIONS = ['👍', '❤️', '😊', '😂', '👀', '✅', '🙏', '🎉'];
+    let reactPickerNoteId = null;
+    function noteReactionsHtml(n) {
+      const groups = {};
+      (n.reactions || []).forEach(r => { (groups[r.emoji] = groups[r.emoji] || []).push(r); });
+      const me = (currentUserEmail || '').toLowerCase();
+      const chips = Object.entries(groups).map(([e, rs]) => {
+        const mine = rs.some(r => (r.user_email || '').toLowerCase() === me);
+        const who = rs.map(r => r.user_name || r.user_email).join(', ');
+        return `<span title="${escHtml(who)}" onclick="toggleNoteReaction('${n.id}','${e}')" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:1px 7px;border-radius:999px;border:1px solid ${mine ? '#93c5fd' : 'var(--gray-100)'};background:${mine ? '#eff6ff' : 'white'}">${e} <b style="font-size:11px;color:var(--navy)">${rs.length}</b></span>`;
+      }).join('');
+      const picker = reactPickerNoteId === n.id ? `<span style="display:inline-flex;gap:2px;padding:2px 4px;border:1px solid var(--gray-100);border-radius:999px;background:white;box-shadow:0 2px 8px rgba(0,0,0,.08)">${NOTE_REACTIONS.map(e => `<span onclick="toggleNoteReaction('${n.id}','${e}')" style="cursor:pointer;font-size:15px;padding:0 2px">${e}</span>`).join('')}</span>` : '';
+      return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:6px">${chips}
+        <span title="Add a reaction" onclick="toggleReactPicker('${n.id}')" style="cursor:pointer;font-size:12px;padding:1px 7px;border-radius:999px;border:1px dashed var(--gray-200,#e5e7eb);color:var(--text-muted)">☺+</span>${picker}</div>`;
+    }
+    function rerenderNotesKeepScroll() {
+      const el = document.getElementById('taskNotesList');
+      const top = el ? el.scrollTop : 0;
+      renderTaskNotes();
+      if (el) el.scrollTop = top;
+    }
+    function toggleReactPicker(noteId) {
+      reactPickerNoteId = reactPickerNoteId === noteId ? null : noteId;
+      rerenderNotesKeepScroll();
+    }
+    async function toggleNoteReaction(noteId, emoji) {
+      const note = currentTaskNotes.find(n => n.id === noteId);
+      if (!note) return;
+      reactPickerNoteId = null;
+      try {
+        const r = await fetch(`/api/tasks/${note.task_id}/notes/${noteId}/react`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emoji }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not react');
+        note.reactions = d.reactions;
+      } catch (err) { alert(err.message); }
+      rerenderNotesKeepScroll();
     }
 
     function startTaskNoteEdit(id) {

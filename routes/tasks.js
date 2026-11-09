@@ -592,13 +592,32 @@ router.post('/:id/short-link', requireTaskAccess, async (req, res) => {
   }
 });
 
+// Toggle an emoji reaction on a note (Joy, 9 Nov 2026) — no notifications.
+const NOTE_REACTIONS = ['👍', '❤️', '😊', '😂', '👀', '✅', '🙏', '🎉'];
+router.post('/:id/notes/:noteId/react', requireTaskAccess, async (req, res) => {
+  const emoji = String((req.body || {}).emoji || '');
+  if (!NOTE_REACTIONS.includes(emoji)) return res.status(400).json({ error: 'Unsupported reaction' });
+  try {
+    const db = getDb();
+    const note = (await db.execute({ sql: 'SELECT id FROM task_notes WHERE id = ? AND task_id = ?', args: [req.params.noteId, req.params.id] })).rows[0];
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    const del = await db.execute({ sql: 'DELETE FROM task_note_reactions WHERE note_id = ? AND lower(user_email) = lower(?) AND emoji = ?', args: [note.id, req.user.email, emoji] });
+    if (!del.rowsAffected) await db.execute({ sql: 'INSERT INTO task_note_reactions (note_id, user_email, emoji, user_name) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING', args: [note.id, req.user.email, emoji, req.user.name || req.user.email] });
+    const reactions = (await db.execute({ sql: 'SELECT emoji, user_email, user_name FROM task_note_reactions WHERE note_id = ? ORDER BY created_at', args: [note.id] })).rows;
+    res.json({ reactions });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/:id/notes', requireTaskAccess, async (req, res) => {
   try {
     const result = await getDb().execute({
       sql: 'SELECT * FROM task_notes WHERE task_id = ? ORDER BY created_at ASC',
       args: [req.params.id]
     });
-    res.json(result.rows);
+    const reacts = (await getDb().execute({
+      sql: `SELECT r.note_id, r.emoji, r.user_email, r.user_name FROM task_note_reactions r JOIN task_notes n ON n.id = r.note_id
+            WHERE n.task_id = ? ORDER BY r.created_at`, args: [req.params.id] })).rows;
+    res.json(result.rows.map(n => ({ ...n, reactions: reacts.filter(r => r.note_id === n.id).map(({ emoji, user_email, user_name }) => ({ emoji, user_email, user_name })) })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
