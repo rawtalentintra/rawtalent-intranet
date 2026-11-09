@@ -19,7 +19,7 @@ function slackTsToIso(ts) {
 async function slackCall(method, params = {}) {
   const token = getToken();
   if (!token) throw new Error('Slack is not configured. Set SLACK_BOT_TOKEN.');
-  const isRead = method.startsWith('conversations.list') || method.startsWith('conversations.history') || method.startsWith('conversations.replies');
+  const isRead = method.startsWith('conversations.list') || method.startsWith('conversations.history') || method.startsWith('conversations.replies') || method === 'users.lookupByEmail';
   let url = `${SLACK_API}/${method}`;
   let opts = { headers: { 'Authorization': `Bearer ${token}` } };
   if (isRead) {
