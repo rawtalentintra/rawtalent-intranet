@@ -3085,3 +3085,7 @@ CREATE TABLE IF NOT EXISTS slack_daily_threads (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE slack_daily_threads ENABLE ROW LEVEL SECURITY;
+
+-- Shift times per weekday (Joy, 9 Nov 2026), e.g. {"mon":"8:00am - 4:30pm"}; a blank
+-- day = not rostered. Drives the green "on shift" chips on the Ops Calendar.
+ALTER TABLE team_members ADD COLUMN IF NOT EXISTS shift_times JSONB DEFAULT '{}'::jsonb;

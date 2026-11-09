@@ -4894,6 +4894,10 @@
           </div>
         </div>
         <div class="form-group-modal">
+          <label class="form-label-modal">Shift Times <span class="optional">(Melbourne time, e.g. 8:00am - 4:30pm; leave blank on days off)</span></label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px"><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Mon</div><input type="text" id="teamMemberShift_mon" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Tue</div><input type="text" id="teamMemberShift_tue" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Wed</div><input type="text" id="teamMemberShift_wed" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Thu</div><input type="text" id="teamMemberShift_thu" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Fri</div><input type="text" id="teamMemberShift_fri" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Sat</div><input type="text" id="teamMemberShift_sat" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div><div><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px">Sun</div><input type="text" id="teamMemberShift_sun" class="form-control" placeholder="Off" style="padding:6px 8px;font-size:12.5px"></div></div>
+        </div>
+        <div class="form-group-modal">
           <label class="form-label-modal">Backup Types <span class="optional">(one per line)</span></label>
           <textarea id="teamMemberBackupTypes" class="form-control textarea" placeholder="Power Station&#10;Smart Mobile Data" style="min-height:70px"></textarea>
         </div>
@@ -6725,6 +6729,8 @@
         <strong>Internet Connection:</strong> ${escHtml(m.internet_connection || '—')}<br>
         <strong>Backup Available:</strong> ${escHtml(m.backup_available || '—')}
         ${backups ? `<ul style="margin:6px 0 0;padding-left:18px">${backups}</ul>` : ''}
+        <div style="margin-top:10px"><strong>Shift Times:</strong></div>
+        ${[['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat'],['sun','Sun']].map(([k, l]) => `<div style="display:flex;gap:10px"><span style="width:38px;color:var(--text-muted)">${l}</span><span>${escHtml((m.shift_times || {})[k] || 'Off')}</span></div>`).join('')}
       `;
       document.getElementById('teamProfileModal').classList.add('open');
     }
@@ -6785,6 +6791,7 @@
       document.getElementById('teamMemberEmergencyNumber').value = m?.emergency_contact_number || '';
       document.getElementById('teamMemberDevice').value = m?.device_name || '';
       document.getElementById('teamMemberHeadset').value = m?.headset || '';
+      ['mon','tue','wed','thu','fri','sat','sun'].forEach(d => { document.getElementById('teamMemberShift_' + d).value = (m?.shift_times || {})[d] || ''; });
       document.getElementById('teamMemberInternet').value = m?.internet_connection || '';
       document.getElementById('teamMemberBackupAvailable').value = m?.backup_available || '';
       document.getElementById('teamMemberBackupTypes').value = (m?.backup_types || []).join('\n');
@@ -6830,7 +6837,8 @@
         headset: document.getElementById('teamMemberHeadset').value.trim(),
         internet_connection: document.getElementById('teamMemberInternet').value.trim(),
         backup_available: document.getElementById('teamMemberBackupAvailable').value.trim(),
-        backup_types: document.getElementById('teamMemberBackupTypes').value.split('\n').map(s => s.trim()).filter(Boolean)
+        backup_types: document.getElementById('teamMemberBackupTypes').value.split('\n').map(s => s.trim()).filter(Boolean),
+        shift_times: Object.fromEntries(['mon','tue','wed','thu','fri','sat','sun'].map(d => [d, document.getElementById('teamMemberShift_' + d).value.trim()]))
       };
       if (teamMemberPhotoDataUri) payload.photo = teamMemberPhotoDataUri;
       else if (id) { const existing = allTeamMembers.find(m => m.id === id); if (existing?.photo) payload.photo = existing.photo; }

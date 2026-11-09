@@ -884,7 +884,7 @@
       <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
-      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">🏖️ Leave Request</button>
+      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">📅 Calendar</button>
       <button class="mode-tab" id="tabHours" onclick="setMode('hours')">🕒 Log My Hours</button>
       <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
       </div>
@@ -2698,7 +2698,7 @@
         : isFaq ? 'Frequently asked questions'
         : isTeam ? 'Our Team'
         : isTraining ? 'Training'
-        : isLeave ? 'Leave Request'
+        : isLeave ? 'Calendar'
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
         : isWash ? 'Lead Wash'
@@ -5528,7 +5528,13 @@
       `;
 
       const calendarHtml = `
-        <div style="font-weight:700;color:var(--navy);font-size:14px;margin:24px 0 10px">Team Leave Calendar</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:24px 0 10px">
+          <div style="font-weight:700;color:var(--navy);font-size:14px">Ops Calendar</div>
+          <div style="display:flex;gap:12px;font-size:11.5px;color:var(--text-muted)">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#dcfce7;border:1px solid #86efac;vertical-align:middle"></span> On shift</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#fee2e2;border:1px solid #fca5a5;vertical-align:middle"></span> On leave</span>
+          </div>
+        </div>
         <div id="leaveTeamCalendarWrap"><div class="spinner-wrap"><div class="spinner"></div></div></div>
       `;
 
@@ -5543,6 +5549,7 @@
         leaveTeamData = await fetch(`/api/leave-requests/calendar?from=${from}&to=${to}`).then(r => r.json());
       } catch { leaveTeamData = []; }
       await ensureLeaveColorMap();
+      await ensureOpsRoster();
       renderLeaveTeamCalendar();
     }
     function changeLeaveTeamMonth(delta) {
@@ -5629,6 +5636,23 @@
       return (leaveColorMap && leaveColorMap[firstName]) || hashPersonColor(key);
     }
 
+    // Ops Calendar (Joy, 9 Nov 2026): everyone who reports under Sophia (any
+    // depth, from Our Team's org chart). Rostered (shift time set for that
+    // weekday) and not on leave = on shift, shown in green with their hours.
+    // Sophia herself only appears when she's on leave.
+    let opsRoster = null;
+    async function ensureOpsRoster() {
+      if (opsRoster) return opsRoster;
+      try {
+        const members = await fetch('/api/team').then(r => r.json());
+        const head = members.find(m => /^sophia\b/i.test(m.name || ''));
+        const kids = id => members.filter(m => m.manager_id === id && m.status !== 'to_hire' && m.status !== 'inactive');
+        const ops = [], walk = id => kids(id).forEach(m => { ops.push(m); walk(m.id); });
+        if (head) walk(head.id);
+        opsRoster = { head, ops };
+      } catch { opsRoster = { head: null, ops: [] }; }
+      return opsRoster;
+    }
     function renderLeaveTeamCalendar() {
       const wrap = document.getElementById('leaveTeamCalendarWrap');
       if (!wrap) return;
@@ -5637,24 +5661,35 @@
       const monthLabel = leaveTeamMonth.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const byDate = {};
-      leaveTeamData.forEach(l => {
+      const roster = opsRoster || { head: null, ops: [] };
+      const inOps = l => [roster.head, ...roster.ops].filter(Boolean).some(m =>
+        (m.email && l.user_email && m.email.toLowerCase() === l.user_email.toLowerCase()) ||
+        ((l.user_name || '').split(' ')[0].toLowerCase() === (m.name || '').split(' ')[0].toLowerCase()));
+      const onLeave = {};
+      leaveTeamData.filter(inOps).forEach(l => {
         const fullName = l.user_name || l.user_email;
         const d = new Date(l.start_date + 'T00:00:00');
         const end = new Date(l.end_date + 'T00:00:00');
         while (d <= end) {
           const ds = toDateStr(d);
           (byDate[ds] = byDate[ds] || []).push({ name: fullName.split(' ')[0], key: fullName });
+          (onLeave[ds] = onLeave[ds] || new Set()).add(fullName.split(' ')[0].toLowerCase());
           d.setDate(d.getDate() + 1);
         }
       });
       const cellsHtml = cells.map(c => {
         const people = byDate[c.dateStr] || [];
+        const dayKey = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][c.date.getDay()];
+        const away = onLeave[c.dateStr] || new Set();
+        const onShift = roster.ops.filter(m => (m.shift_times || {})[dayKey] && !away.has((m.name || '').split(' ')[0].toLowerCase()))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         return `<div style="min-height:58px;border:1px solid var(--gray-100);border-radius:6px;padding:4px;opacity:${c.inMonth ? 1 : 0.35}">
           <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:3px">${c.date.getDate()}</div>
           ${people.map(p => {
             const col = leavePersonColor(p.key);
-            return `<div style="font-size:10px;font-weight:600;background:${col.bg};color:${col.text};border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(p.name)} on Leave</div>`;
+            return `<div style="font-size:10px;font-weight:600;background:#fee2e2;color:#b91c1c;border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml(p.name)} on Leave</div>`;
           }).join('')}
+          ${onShift.map(m => `<div title="${escHtml(m.name)} on shift ${escHtml(m.shift_times[dayKey])}" style="font-size:10px;font-weight:600;background:#dcfce7;color:#15803d;border-radius:4px;padding:1px 4px;margin-bottom:2px">${escHtml((m.name || '').split(' ')[0])} <span style="font-weight:500">${escHtml(m.shift_times[dayKey])}</span></div>`).join('')}
         </div>`;
       }).join('');
       wrap.innerHTML = `
@@ -6203,7 +6238,7 @@
       { icon: '✅', label: 'Tasks', desc: 'Everything the team is working on', mode: 'tasks' },
       { icon: '🎓', label: 'Training', desc: 'Courses assigned to you', mode: 'training' },
       { icon: '💡', label: 'Submit Ideas', desc: "Suggest an improvement", mode: 'ideas' },
-      { icon: '🏖️', label: 'Leave Request', desc: 'Request time off', mode: 'leave' },
+      { icon: '📅', label: 'Calendar', desc: 'Who is on shift and who is on leave', mode: 'leave' },
       { icon: '🕒', label: 'Log My Hours', desc: 'Log your time, submit weekly', mode: 'hours' },
       { icon: '🧑‍🤝‍🧑', label: 'Our Team', desc: 'Team hierarchy & profiles', mode: 'team' }
     ];

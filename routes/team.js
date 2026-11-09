@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
       if (photo_storage_path) {
         try { photo = await getSignedUrl(BUCKETS.teamPhotos, photo_storage_path); } catch { photo = null; }
       }
-      return { ...r, photo, backup_types: r.backup_types || [] };
+      return { ...r, photo, backup_types: r.backup_types || [], shift_times: r.shift_times || {} };
     }));
     res.json(rows);
   } catch (err) {
@@ -92,6 +92,12 @@ router.post('/', requireSuperAdmin, async (req, res) => {
         JSON.stringify(backup_types || []), status || 'active'
       ]
     });
+
+    if (req.body.shift_times && typeof req.body.shift_times === 'object') {
+      const clean = {};
+      for (const d of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']) { const v = String(req.body.shift_times[d] || '').trim().slice(0, 60); if (v) clean[d] = v; }
+      await getDb().execute({ sql: 'UPDATE team_members SET shift_times = ? WHERE id = ?', args: [JSON.stringify(clean), id] });
+    }
     await logActivity('team_member', name.trim(), 'created', `Team member "${name.trim()}" added`, req.user.email);
     res.json({ success: true, id });
   } catch (err) {
@@ -123,6 +129,12 @@ router.put('/:id', requireSuperAdmin, async (req, res) => {
         JSON.stringify(backup_types || []), status || 'active', req.params.id
       ]
     });
+
+    if (req.body.shift_times && typeof req.body.shift_times === 'object') {
+      const clean = {};
+      for (const d of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']) { const v = String(req.body.shift_times[d] || '').trim().slice(0, 60); if (v) clean[d] = v; }
+      await getDb().execute({ sql: 'UPDATE team_members SET shift_times = ? WHERE id = ?', args: [JSON.stringify(clean), req.params.id] });
+    }
     await logActivity('team_member', name.trim(), 'updated', `Team member "${name.trim()}" edited`, req.user.email);
     res.json({ success: true });
   } catch (err) {
