@@ -259,6 +259,7 @@ app.use('/api/data-accuracy-check', require('./routes/dataAccuracyCheck'));
 app.use('/api/outreach-lists', require('./routes/outreachLists'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/jobadder', require('./routes/jobadderCandidates'));
+app.use('/api/onboarding-beta', require('./routes/onboardingBeta'));
 // MCP Custom Connector — /mcp uses its own bearer-token auth (see
 // routes/mcp.js), not the session cookie every other route above relies
 // on; /api/mcp-tokens is the ordinary session-authenticated Settings UI

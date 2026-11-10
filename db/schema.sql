@@ -3144,3 +3144,15 @@ CREATE TABLE IF NOT EXISTS centre_service_type_sync (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE centre_service_type_sync ENABLE ROW LEVEL SECURITY;
+
+-- Onboarding beta candidate notes (10 Nov 2026). HeartBeat's own notes on RT candidates; never written back to RT.
+CREATE TABLE IF NOT EXISTS onboarding_candidate_notes (
+  id SERIAL PRIMARY KEY,
+  candidate_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  author_email CITEXT,
+  author_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_candidate_notes_cand ON onboarding_candidate_notes (candidate_id, created_at DESC);
+ALTER TABLE onboarding_candidate_notes ENABLE ROW LEVEL SECURITY;

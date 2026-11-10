@@ -367,6 +367,9 @@
         <div class="admin-nav-item" onclick="showSection('jobadder-open-ads', this)">
           <span class="admin-nav-icon">📣</span> Open Job Ads
         </div>
+        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('onboarding-beta', this)">
+          <span class="admin-nav-icon">🚀</span> Onboarding (Beta)
+        </div>
       </div>
       <div class="admin-nav-section">
         <div class="admin-nav-label" onclick="toggleNavSection(this)">Workforce Partners</div>
@@ -847,6 +850,22 @@
            has to be read off the title/reference like Joy did from her own
            JobAdder screenshot — not guessed or parsed here. -->
       <template id="__lazy_jobadder_open_ads">
+      <div class="admin-section" id="section-onboarding-beta">
+        <div class="admin-page-header"><div>
+          <div class="admin-page-title">Onboarding call list <span style="font-size:12px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:999px;vertical-align:middle">Beta</span></div>
+          <div class="admin-page-sub">Candidates still onboarding near a centre or suburb (VIC, SA, NT), best to call first. Click a name for everything we hold. Read-only from RT; notes stay in HeartBeat.</div>
+        </div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;position:relative">
+          <input id="obLoc" class="form-control" style="width:280px" placeholder="Centre name or suburb (e.g. Reservoir)" oninput="obSuggest(this.value)" onkeydown="if(event.key==='Enter'){obPicked=null;loadObCallList()}">
+          <div id="obSuggest" style="position:absolute;top:40px;left:0;width:280px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;z-index:50;display:none;max-height:260px;overflow:auto"></div>
+          <select id="obRadius" class="form-control" style="width:auto"><option value="10">10 km</option><option value="25" selected>25 km</option><option value="50">50 km</option></select>
+          <select id="obQual" class="form-control" style="width:auto"><option value="">Any qualification</option><option>Diploma+</option><option>Cert III</option><option>Studying</option></select>
+          <select id="obDisc" class="form-control" style="width:auto"><option value="">ECEC + OSHC</option><option value="oshc">OSHC only</option></select>
+          <button class="btn-primary" onclick="loadObCallList()">Find</button>
+        </div>
+        <div id="obWrap"><div class="empty-state">Type a centre or suburb to start.</div></div>
+      </div>
+
       <div class="admin-section" id="section-jobadder-open-ads">
         <div class="admin-header">
           <div>
@@ -7120,6 +7139,7 @@
       if (id === 'payroll') initPayrollSection();
       if (id === 'approved-timesheets') loadApprovedTimesheetsInto('approvedTimesheetsWrap');
       if (id === 'jobadder-candidates') initJobAdderCandidatesSection();
+      if (id === 'onboarding-beta') { /* waits for a location */ }
       if (id === 'jobadder-open-ads') { loadJobadderOpenAds(); loadJobadderOpenAdsDashboard(); }
       if (id === 'leads') loadLeadsTable();
       if (id === 'document-checker') { loadDocumentCheckHistory(); loadFlaggedProfiles(); loadAcecqaSyncStatus(); }
@@ -12666,6 +12686,79 @@
             <td style="white-space:nowrap"><span style="color:var(--orange);font-weight:700">Open ›</span> <button class="btn-secondary" style="padding:2px 8px;font-size:11.5px;margin-left:6px" title="Remove from this list (not deleted from RT)" onclick="event.stopPropagation();hideFromDormantList('${escHtml(c.centreKey)}')">Remove</button></td></tr>`).join('')}</tbody></table></div>`
           : '<div class="empty-state">No centres here with these filters.</div>'}
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Past bookings = filled bookings in the RT history HeartBeat holds (about 12 months). Click a centre for its full history, favourite educators and the touch point button. Reactivating a dormant centre makes it yours (Liam, 14 Sep).</div>`;
+    }
+
+    // ---- Onboarding beta (super_admin only, 10 Nov 2026) ----
+    let obPicked = null, obData = null;
+    async function obSuggest(q) {
+      obPicked = null;
+      const box = document.getElementById('obSuggest');
+      if (q.trim().length < 2) { box.style.display = 'none'; return; }
+      clearTimeout(window.__obT);
+      window.__obT = setTimeout(async () => {
+        try {
+          const list = await fetch('/api/jobadder/centres/search?q=' + encodeURIComponent(q)).then(r => r.json());
+          box.innerHTML = (list || []).slice(0, 10).map(c => `<div style="padding:7px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--gray-100)" onmousedown="obPick('${escHtml(c.centreKey)}', this.dataset.n)" data-n="${escHtml(c.name)}"><b>${escHtml(c.name)}</b> <span style="color:var(--text-muted)">${escHtml([c.suburb, c.state].filter(Boolean).join(', '))}</span></div>`).join('')
+            + `<div style="padding:7px 10px;cursor:pointer;font-size:12.5px;color:var(--orange)" onmousedown="obPicked=null;document.getElementById('obSuggest').style.display='none';loadObCallList()">Use "${escHtml(q)}" as a suburb</div>`;
+          box.style.display = '';
+        } catch (_) { box.style.display = 'none'; }
+      }, 250);
+    }
+    function obPick(centreKey, name) { obPicked = centreKey; document.getElementById('obLoc').value = name; document.getElementById('obSuggest').style.display = 'none'; loadObCallList(); }
+    async function loadObCallList() {
+      const wrap = document.getElementById('obWrap'); const loc = document.getElementById('obLoc').value.trim();
+      if (!loc) return;
+      document.getElementById('obSuggest').style.display = 'none';
+      wrap.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+      const p = new URLSearchParams({ radiusKm: document.getElementById('obRadius').value, qual: document.getElementById('obQual').value, discipline: document.getElementById('obDisc').value });
+      if (obPicked) p.set('centreKey', obPicked); else p.set('suburb', loc);
+      try {
+        const r = await fetch('/api/onboarding-beta/call-list?' + p); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Could not load');
+        obData = d;
+        const ago = n => n == null ? '—' : n === 0 ? 'today' : n === 1 ? 'yesterday' : n < 60 ? `${n} days ago` : `${Math.round(n / 30)} months ago`;
+        wrap.innerHTML = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">${d.total} candidate${d.total === 1 ? '' : 's'} within ${d.radiusKm} km of <b>${escHtml(d.location.label)}</b>${d.total > d.candidates.length ? ` (top ${d.candidates.length} shown)` : ''}. Ranked by distance, how far through onboarding, recent activity, qualification and past shifts with us.</div>
+          ${d.candidates.length ? `<div style="overflow-x:auto"><table class="data-table" style="width:100%"><thead><tr><th>#</th><th>Candidate</th><th>Distance</th><th>Qualification</th><th>Onboarding step</th><th>RT status</th><th>Last activity</th><th>Past shifts</th><th>Phone</th></tr></thead>
+          <tbody>${d.candidates.map((c, i) => `<tr style="cursor:pointer" onclick="openObCandidate('${escHtml(c.id)}')">
+            <td style="color:var(--text-muted)">${i + 1}</td>
+            <td><div style="font-weight:700;color:var(--navy)">${escHtml(c.name)}</div><div style="font-size:12px;color:var(--text-muted)">${escHtml(c.suburb)}, ${escHtml(c.state)}</div></td>
+            <td>${c.distanceKm} km</td><td>${escHtml(c.qualification)}${c.oshc ? ' · OSHC' : ''}</td><td>${escHtml(c.onboardingStep || '—')}</td><td>${escHtml(c.status)}</td>
+            <td>${ago(c.daysSinceActivity)}</td><td style="font-weight:700">${c.pastShifts || ''}</td><td style="white-space:nowrap">${c.phone ? `<a href="tel:${escHtml(c.phone)}" onclick="event.stopPropagation()">${escHtml(c.phone)}</a>` : '—'}</td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty-state">Nobody onboarding within that distance. Try a wider radius.</div>'}`;
+      } catch (e) { wrap.innerHTML = `<div style="color:#b91c1c">${escHtml(e.message)}</div>`; }
+    }
+    async function openObCandidate(id) {
+      let m = document.getElementById('obCandModal');
+      if (!m) { m = document.createElement('div'); m.id = 'obCandModal'; document.body.appendChild(m); }
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;z-index:3000;overflow:auto;padding:40px 12px';
+      m.onclick = e => { if (e.target === m) m.remove(); };
+      m.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;width:min(760px,96vw)"><div class="spinner-wrap"><div class="spinner"></div></div></div>';
+      try {
+        const r = await fetch('/api/onboarding-beta/candidates/' + encodeURIComponent(id)); const c = await r.json();
+        if (!r.ok) throw new Error(c.error || 'Could not load');
+        const sec = (t, body) => `<div style="margin-top:16px"><div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:6px">${t}</div>${body}</div>`;
+        const ja = c.jobadder;
+        m.firstElementChild.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px"><div>
+            <div style="font-size:19px;font-weight:800;color:var(--navy)">${escHtml(c.name)}</div>
+            <div style="font-size:13px;color:var(--text-muted)">${escHtml(c.address || '')} · ${escHtml(c.status)} · onboarding step: ${escHtml(c.onboardingStep || '—')} · ${c.pastShifts} past shift${c.pastShifts === 1 ? '' : 's'}</div>
+            <div style="font-size:13px;margin-top:4px">${c.phone ? `<a href="tel:${escHtml(c.phone)}">${escHtml(c.phone)}</a> · ` : ''}${escHtml(c.email || '')}</div></div>
+            <button class="btn-secondary" onclick="document.getElementById('obCandModal').remove()">Close</button></div>
+          ${sec('JobAdder', !ja ? '<div style="font-size:13px;color:var(--text-muted)">No JobAdder candidate with this email.</div>' : ja.notConnected ? '<div style="font-size:13px;color:var(--text-muted)">JobAdder is not connected.</div>' : ja.error ? `<div style="font-size:13px;color:#b91c1c">${escHtml(ja.error)}</div>`
+            : `<div style="font-size:13px">${escHtml(ja.name)}${ja.status ? ' · ' + escHtml(ja.status) : ''} · ${ja.resume ? `<a href="/api/jobadder/candidates/${ja.candidateId}/attachments/${ja.resume.attachmentId}" target="_blank">📄 Resume (${escHtml(ja.resume.fileName || 'file')})</a>` : 'no resume attached'}</div>`)}
+          ${sec('Qualifications', c.qualifications.length ? c.qualifications.map(q => `<div style="font-size:13px">${escHtml(q.name || '')}${q.college ? ' · ' + escHtml(q.college) : ''}</div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">None listed in RT.</div>')}
+          ${c.experience.length ? sec('Experience', c.experience.map(e => `<div style="font-size:13px">${escHtml(e.role)}${e.place ? ' · ' + escHtml(e.place) : ''}</div>`).join('')) : ''}
+          ${c.documents.length ? sec('Documents in RT', `<div style="font-size:12.5px;color:#374151">${c.documents.map(d => escHtml(d.name) + (d.expiry ? ` (exp ${fmtShortDate(d.expiry)})` : '')).join(' · ')}</div>`) : ''}
+          ${sec('Notes (HeartBeat)', `<textarea id="obNoteText" class="form-control" rows="2" placeholder="Add a note or comment"></textarea>
+            <button class="btn-primary" style="margin-top:6px" onclick="addObNote('${escHtml(c.id)}')">Add note</button>
+            <div style="margin-top:8px">${c.notes.length ? c.notes.map(n => `<div style="padding:7px 0;border-bottom:1px solid var(--gray-100);font-size:13px"><div style="white-space:pre-wrap">${escHtml(n.body)}</div><div style="font-size:11.5px;color:var(--text-muted)">${escHtml(n.author_name || '')} · ${new Date(n.created_at).toLocaleString('en-AU')}</div></div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No notes yet.</div>'}</div>`)}
+          ${sec('RT activity history', c.rtActivity.length ? c.rtActivity.map(a => `<div style="padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12.5px"><b>${escHtml(a.subject || 'Activity')}</b> <span style="color:var(--text-muted)">${fmtShortDate(a.at)}${a.by ? ' · ' + escHtml(a.by) : ''}</span><div>${escHtml(a.text)}</div></div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">None.</div>')}`;
+      } catch (e) { m.firstElementChild.innerHTML = `<div style="color:#b91c1c">${escHtml(e.message)}</div>`; }
+    }
+    async function addObNote(id) {
+      const body = document.getElementById('obNoteText').value.trim(); if (!body) return;
+      const r = await fetch('/api/onboarding-beta/candidates/' + encodeURIComponent(id) + '/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+      if (!r.ok) return alert((await r.json()).error || 'Could not save');
+      openObCandidate(id);
     }
 
     async function hideFromDormantList(centreKey) {
