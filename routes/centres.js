@@ -858,6 +858,7 @@ router.put('/:centreKey/assign-partner', requireRole('admin', 'super_admin', 'wo
     } else {
       await getDb().execute({ sql: 'DELETE FROM centre_partner_assignments WHERE centre_key = ?', args: [req.params.centreKey] });
     }
+    require('../services/firstBookingFreeService').syncOwnerAttributes(req.params.centreKey).catch(() => {});
     res.json({ success: true, assignedWorkforcePartner: partner });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1246,7 +1247,8 @@ async function claimCentreOnFirstAction(centreKey, user) {
     sql: `INSERT INTO centre_partner_assignments (centre_key, workforce_partner, assigned_by_email, assigned_by_name)
           VALUES (?, ?, ?, ?) ON CONFLICT (centre_key) DO NOTHING`,
     args: [centreKey, user.wfp_label, user.email, (user.name || user.email) + ' (first call/visit)']
-  }).catch(err => console.error('First-action claim failed:', err.message));
+  }).then(r => { if (r && r.rowsAffected) require('../services/firstBookingFreeService').syncOwnerAttributes(centreKey).catch(() => {}); })
+    .catch(err => console.error('First-action claim failed:', err.message));
 }
 
 router.post('/:centreKey/visits', async (req, res) => {

@@ -501,6 +501,17 @@ async function start() {
     const h = +new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', hour: 'numeric', hourCycle: 'h23' }).format(new Date());
     if (h === 5) require('./services/slackService').dailyThreadTs().catch(err => console.error('Daily Slack thread error:', err.message));
   }, 5 * 60 * 1000);
+  // Centre owner attributes on Customer.io profiles (10 Nov 2026): once per Melbourne day, first run 3 min after boot.
+  let ownerSyncDay = null;
+  const ownerSync = () => {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(new Date());
+    if (ownerSyncDay === day) return;
+    ownerSyncDay = day;
+    require('./services/firstBookingFreeService').syncAllOwnerAttributes()
+      .then(r => console.log('Customer.io owner sync:', JSON.stringify(r))).catch(err => console.error('Owner sync error:', err.message));
+  };
+  setTimeout(ownerSync, 3 * 60 * 1000);
+  setInterval(ownerSync, 60 * 60 * 1000);
   // initDatabase() only clears expired sessions on boot — keep sweeping
   // periodically too, since a process can run for weeks between deploys.
   setInterval(() => {

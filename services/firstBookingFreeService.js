@@ -70,6 +70,41 @@ function serviceTypeFields(st) {
   return key in SERVICE_TYPE_IDS ? { service_type: key, service_type_id: SERVICE_TYPE_IDS[key] } : { service_type: '' };
 }
 
+// Centre owner by relationship, not state (Liam, 10 Nov 2026). Owner = HeartBeat's
+// centre_partner_assignments row, else Liam (same default as My Centres).
+const WFP_EMAIL = { Liam: 'liam@rawtalent.com.au', Justine: 'justine@rawtalent.com.au', Gwen: 'gwen@rawtalent.com.au' };
+async function ownerFields(centreKey) {
+  let name = 'Liam';
+  if (centreKey && !String(centreKey).startsWith('lead:')) {
+    const r = (await getDb().execute({ sql: 'SELECT workforce_partner FROM centre_partner_assignments WHERE centre_key = ?', args: [centreKey] })).rows[0];
+    if (r && r.workforce_partner) name = r.workforce_partner;
+  }
+  return { wfp_owner_name: name, wfp_owner_email: WFP_EMAIL[name] || '' };
+}
+// Attributes only (no event): keeps each centre's Customer.io profile's owner current.
+async function syncOwnerAttributes(centreKey) {
+  const cfg = cioTrackConfig();
+  if (!cfg.ready) return 'off';
+  const ct = await resolveContact({ centreKey });
+  const ident = ct && ct.rtPersonId ? String(ct.rtPersonId) : null; // RT profiles only; no new profiles created
+  if (!ident) return 'no_profile';
+  const auth = 'Basic ' + Buffer.from(`${cfg.siteId}:${cfg.key}`).toString('base64');
+  const r = await fetch(`${cfg.host}/api/v1/customers/${encodeURIComponent(ident)}`, { method: 'PUT', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(await ownerFields(centreKey)) });
+  if (!r.ok) throw new Error(`Customer.io profile ${r.status}`);
+  return 'sent';
+}
+
+// Every RT centre's Customer.io profile gets its owner (attributes only). Daily + after a deploy.
+async function syncAllOwnerAttributes() {
+  if (!cioTrackConfig().ready) return { skipped: 'off' };
+  const { centres } = await getCentresAndBookings();
+  const out = { sent: 0, no_profile: 0, failed: 0 };
+  for (const c of centres) {
+    try { const st = await syncOwnerAttributes(c.centreKey); out[st] = (out[st] || 0) + 1; } catch (_) { out.failed++; }
+  }
+  return out;
+}
+
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
@@ -98,10 +133,11 @@ async function sendOfferEmail(offerId) {
     const auth = 'Basic ' + Buffer.from(`${cfg.siteId}:${cfg.key}`).toString('base64');
     const base = `${cfg.host}/api/v1/customers/${encodeURIComponent(ident)}`;
     const headers = { Authorization: auth, 'Content-Type': 'application/json' };
-    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '' };
+    const owner = await ownerFields(centreKey);
+    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '', ...owner };
     const r1 = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({
       first_booking_free: true, first_booking_free_tagged_at: Math.floor(new Date(o.offered_at).getTime() / 1000),
-      fbf_centre_name: data.centre_name, fbf_centre_key: centreKey, fbf_state: data.state, fbf_partner_name: data.partner_name
+      fbf_centre_name: data.centre_name, fbf_centre_key: centreKey, fbf_state: data.state, fbf_partner_name: data.partner_name, ...owner
     }) });
     if (!r1.ok) throw new Error(`Customer.io profile ${r1.status}: ${(await r1.text()).slice(0, 200)}`);
     const r2 = await fetch(`${base}/events`, { method: 'POST', headers, body: JSON.stringify({ name: 'first_booking_free_tagged', data }) });
@@ -181,4 +217,4 @@ async function processFirstBookings() {
   return { tasks };
 }
 
-module.exports = { cioTrackConfig, sendCioSignal, cioIdentifierFor, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey, serviceTypeFields };
+module.exports = { ownerFields, syncOwnerAttributes, syncAllOwnerAttributes, WFP_EMAIL, cioTrackConfig, sendCioSignal, cioIdentifierFor, resolveContact, sendOfferEmail, processFirstBookings, resolveCentreKey, serviceTypeFields };
