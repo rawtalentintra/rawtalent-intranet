@@ -467,7 +467,14 @@ async function buildActivitiesLog() {
      ORDER BY a.created_at DESC`,
     args: [AUTO_STAGE_NOTE, AUTO_STAGE_NOTE]
   });
-  return result.rows;
+  // Once per lead + person + channel + Melbourne day (11 Nov 2026): a voice
+  // recording and a stage change for the same visit used to count twice.
+  const day = d => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
+  const seen = new Set();
+  return result.rows.filter(a => {
+    const k = [a.lead_id, String(a.created_by_email || '').toLowerCase(), a.channel, day(a.occurred_at || a.created_at)].join('|');
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
 }
 router.get('/activities-log', leadsViewAccess, async (req, res) => {
   try {
