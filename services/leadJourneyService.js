@@ -52,6 +52,11 @@ async function sendFirstContactSignal(leadId) {
       wfp_name: l.lead_journey_by || '',
       lead_id: l.id
     };
+    // Owner by relationship (10 Nov 2026): the lead's assigned WFP, else its RT centre's owner, else Liam.
+    const owner = l.assigned_workforce_partner && fbf.WFP_EMAIL[l.assigned_workforce_partner]
+      ? { wfp_owner_name: l.assigned_workforce_partner, wfp_owner_email: fbf.WFP_EMAIL[l.assigned_workforce_partner] }
+      : await fbf.ownerFields(ct && ct.centreKey);
+    Object.assign(data, owner);
     // A brand-new email-only profile gets its email and first name; an existing
     // client's profile is left as RT set it.
     const attrs = ident === (email || '').trim().toLowerCase() && !(ct && ct.rtPersonId)
@@ -59,6 +64,7 @@ async function sendFirstContactSignal(leadId) {
     // RT Footer's "first booking is on us" reminder (Liam, 4 Nov) shows on
     // customer.first_booking_free, so a FBF lead carries it on the profile too.
     if (data.first_booking_free) attrs.first_booking_free = true;
+    Object.assign(attrs, owner);
     await fbf.sendCioSignal(ident, attrs, 'lead_first_contact_logged', data);
     await db.execute({ sql: "UPDATE leads SET lead_journey_status = 'sent', lead_journey_sent_at = now(), lead_journey_identifier = ?, lead_journey_error = NULL WHERE id = ?", args: [ident, leadId] });
     return 'sent';
