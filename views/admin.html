@@ -11055,31 +11055,12 @@
     // wrote notes on it — NOT the assigned partner, which is just a suburb
     // default. A stage change that already has a logged entry for the same lead
     // + channel on the same day is the same action, counted once.
+    // Rules live in /js/wfpLeadEvents.js, shared with the MCP report.
     function wfpPerfLeadActivity(from, to) {
-      const inPeriod = d => inDateRange(d, from, to);
-      const dayKey = d => { const x = new Date(d); return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`; };
-      // occurred_at: when it happened (a back-filled stage date), not when it was entered.
-      const when = a => a.occurred_at || a.created_at;
-      const logged = new Set(partnerActivityLeadLog.map(a => `${a.lead_id}|${a.channel}|${dayKey(when(a))}`));
-      const events = [];
-      partnerActivityLeadLog.filter(a => inPeriod(when(a)))
-        .forEach(a => events.push({ email: (a.created_by_email || '').toLowerCase(), channel: a.channel }));
-      partnerStageEvents.forEach(e => {
-        if (!inPeriod(e.at) || logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) return;
-        events.push({ email: e.email, channel: e.channel });
+      return window.wfpLeadEvents({
+        log: partnerActivityLeadLog, stage: partnerStageEvents, derived: partnerDerivedEvents || [],
+        inPeriod: d => inDateRange(d, from, to), partnerEmails: WFP_ACTIVITY_PARTNERS.map(p => p.email)
       });
-      // Notes that describe a call/visit and voice notes on a lead (Joy, 4 Nov):
-      // counted once per lead, person, channel and day, and only if nothing was
-      // already logged or stage-changed for that lead and day.
-      const staged = new Set(partnerStageEvents.map(e => `${e.lead_id}|${e.channel}|${dayKey(e.at)}`));
-      const seen = new Set();
-      (partnerDerivedEvents || []).forEach(e => {
-        const k = `${e.lead_id}|${e.channel}|${dayKey(e.at)}`;
-        if (!inPeriod(e.at) || !WFP_ACTIVITY_PARTNERS.some(p => p.email === e.email) || logged.has(k) || staged.has(k) || seen.has(k + '|' + e.email)) return;
-        seen.add(k + '|' + e.email);
-        events.push({ email: e.email, channel: e.channel, derived: true });
-      });
-      return events;
     }
 
     function renderWfpPerfPartners(from, to) {
@@ -24976,6 +24957,7 @@
 
     init();
   </script>
+<script src="/js/wfpLeadEvents.js"></script>
 <script src="/js/autoUpdate.js"></script>
 </body>
 </html>

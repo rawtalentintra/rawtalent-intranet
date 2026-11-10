@@ -468,18 +468,18 @@ function registerAdminTools(server) {
     const dayMs = 86400000;
     const F = new Date((isDay(from) ? from : new Date(Date.now() - 30 * dayMs).toISOString().slice(0, 10)) + 'T00:00:00+10:00');
     const T = new Date((isDay(to) ? to : new Date(Date.now() + dayMs).toISOString().slice(0, 10)) + 'T00:00:00+10:00');
-    const inP = d => { if (!d) return false; const x = new Date(d); return x >= F && x < T; };
-    const { buildStageEvents, buildActivitiesLog } = require('./leads');
-    const [ev, log] = await Promise.all([buildStageEvents(), buildActivitiesLog()]);
-    const dayKey = d => new Date(d).toLocaleDateString('en-AU', { timeZone: 'Australia/Melbourne' });
-    const when = a => a.occurred_at || a.created_at;
-    const logged = new Set(log.map(a => `${a.lead_id}|${a.channel}|${dayKey(when(a))}`));
-    const events = log.filter(a => inP(when(a))).map(a => ({ email: String(a.created_by_email || '').toLowerCase(), channel: a.channel }));
-    ev.forEach(e => { if (inP(e.at) && !logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) events.push({ email: e.email, channel: e.channel }); });
+    // Melbourne calendar days (DST-aware), same as the page.
+    const mel = d => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
+    const fromDay = isDay(from) ? from : mel(new Date(Date.now() - 30 * dayMs)), toDay = isDay(to) ? to : mel(new Date(Date.now() + dayMs));
+    const inP = d => { if (!d) return false; const k = mel(d); return k >= fromDay && k < toDay; };
+    const { buildStageEvents, buildActivitiesLog, buildDerivedActivity } = require('./leads');
+    const [ev, log, derived] = await Promise.all([buildStageEvents(), buildActivitiesLog(), buildDerivedActivity()]);
+    const partners = [['Liam', 'liam@rawtalent.com.au'], ['Justine', 'justine@rawtalent.com.au'], ['Gwen', 'gwen@rawtalent.com.au']];
+    // Same rules as the page: public/js/wfpLeadEvents.js.
+    const events = require('../public/js/wfpLeadEvents').wfpLeadEvents({ log, stage: ev, derived, inPeriod: inP, partnerEmails: partners.map(p => p[1]) });
     const db = getDb();
     const centreActs = (await db.execute({ sql: `SELECT lower(created_by_email) email, channel, visit_date FROM ${require('../services/centreVisitDedup').COMPLETED_VISITS_DEDUPED}`, args: [] })).rows.filter(v => inP(v.visit_date));
     const leadsCreated = (await db.execute({ sql: "SELECT lower(submitted_by_email) email, created_at FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%'", args: [] })).rows.filter(l => inP(l.created_at));
-    const partners = [['Justine', 'justine@rawtalent.com.au'], ['Gwen', 'gwen@rawtalent.com.au']];
     const known = new Set(partners.map(p => p[1]));
     const lines = partners.map(([n, e]) => {
       const lc = events.filter(x => x.email === e && x.channel === 'call').length, lv = events.filter(x => x.email === e && x.channel === 'visit').length;
