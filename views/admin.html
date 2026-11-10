@@ -12662,11 +12662,21 @@
             <td style="font-weight:700">${c.pastBookings}</td>
             <td>${c.lastContactAt ? fmt(c.lastContactAt) : '<span style="color:var(--text-muted)">Never</span>'}</td>
             <td>${c.needsContact ? '<span style="background:#fef3c7;color:#b45309;font-weight:700;font-size:12px;padding:2px 8px;border-radius:999px">To call</span>' : `<span style="background:#dcfce7;color:#15803d;font-weight:700;font-size:12px;padding:2px 8px;border-radius:999px">Done${c.lastTouchpoint ? ' ' + fmt(c.lastTouchpoint.at) : ''}</span>`}</td>
-            <td style="color:var(--orange);font-weight:700;white-space:nowrap">Open ›</td></tr>`).join('')}</tbody></table></div>`
+            <td style="white-space:nowrap"><span style="color:var(--orange);font-weight:700">Open ›</span> <button class="btn-secondary" style="padding:2px 8px;font-size:11.5px;margin-left:6px" title="Remove from this list (not deleted from RT)" onclick="event.stopPropagation();hideFromDormantList('${escHtml(c.centreKey)}')">Remove</button></td></tr>`).join('')}</tbody></table></div>`
           : '<div class="empty-state">No centres here with these filters.</div>'}
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">Past bookings = filled bookings in the RT history HeartBeat holds (about 12 months). Click a centre for its full history, favourite educators and the touch point button. Reactivating a dormant centre makes it yours (Liam, 14 Sep).</div>`;
     }
 
+    async function hideFromDormantList(centreKey) {
+      const name = ((dclData || []).find(c => c.centreKey === centreKey) || {}).name || 'this centre';
+      const reason = prompt(`Remove ${name} from the Dormant Call List? It stays in RT and My Centres. Reason (optional):`);
+      if (reason === null) return;
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/dormant-list-hide`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
+        if (!r.ok) throw new Error((await r.json()).error || 'Could not remove');
+        dclData = (dclData || []).filter(c => c.centreKey !== centreKey); renderDormantCallList(); toast('Removed from the Dormant Call List');
+      } catch (e) { alert(e.message); }
+    }
     async function goToCentre360(centreKey, tab) {
       showSection('my-centres', document.querySelector('[onclick*="my-centres"]'));
       await openCentre360(centreKey);
@@ -12716,27 +12726,73 @@
           <div style="font-weight:700;color:#15803d">Dormant touch point done</div>
           <div style="font-size:12.5px;color:var(--text-muted)">${tp ? `By ${escHtml(tp.by || '')} on ${fmtShortDate(tp.at)}${tp.firstBookingFree ? ' · first booking free offered' : ''}. ` : ''}Still dormant until they book (last booking ${fmtShortDate(c.lastBookingDate)}).</div></div>`;
       }
+      // Guided Step 1/2/3 flow (Liam & Sophia, 10 Nov 2026). Discounts live in notes only.
+      const yn = (name) => `<span style="display:inline-flex;gap:12px"><label><input type="radio" name="${name}" value="yes"> Yes</label><label><input type="radio" name="${name}" value="no"> No</label></span>`;
+      const step = (n, title, body) => `<div style="border:1px solid var(--gray-200);border-radius:10px;padding:12px 14px;margin-top:10px">
+          <div style="font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:8px"><span style="display:inline-block;background:#b45309;color:#fff;border-radius:999px;padding:1px 9px;margin-right:6px;font-size:12px">Step ${n}</span>${title}</div>${body}</div>`;
+      const f = (id, label, type) => `<label style="font-size:12.5px">${label}<input id="${id}" class="form-control" type="${type || 'text'}"></label>`;
+      const key = escHtml(c.centreKey);
       return `<div class="admin-table-card" id="dormantPanel" style="padding:14px 18px;margin-bottom:14px;border-left:4px solid #b45309">
         <div style="font-weight:700;color:#b45309;font-size:14.5px">Centre dormant — no booking since ${fmtShortDate(c.lastBookingDate)} (${c.daysSinceLastBooking} days)</div>
-        <div style="font-size:12.5px;color:var(--text-muted);margin:4px 0 10px">1. Log your call or visit below (notes and voice notes as usual). 2. Tick first booking free if it applies. 3. Press complete. This starts the Dormant email journey once emails are switched on.</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;align-items:end">
-          <label style="font-size:12.5px">Touch point<select id="dtpType" class="form-control"><option value="call">Call</option><option value="visit">Visit</option></select></label>
-          <label style="font-size:12.5px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="dtpFbf"> First booking free <span style="color:var(--text-muted)">(only if they'll use agency consistently)</span></label>
-          <label style="font-size:12.5px">Discount agreed ($/hr, optional)<input id="dtpDiscount" class="form-control" type="number" min="0" step="0.5" placeholder="e.g. 3"></label>
-        </div>
-        <label style="font-size:12.5px;display:block;margin-top:8px">Pricing discussed (optional)<textarea id="dtpPricing" class="form-control" rows="2" placeholder="What was discussed about price"></textarea></label>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Discounts under $5/hr don't need approval. $5/hr or more goes to Liam to approve.</div>
-        <button class="btn-primary" style="margin-top:10px" onclick="completeDormantTouchpoint('${escHtml(c.centreKey)}')">Dormant touch point complete</button>
+        ${step(1, 'Who we spoke to', `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">
+            ${f('dtpFirst', 'First name')}${f('dtpLast', 'Last name')}${f('dtpEmail', 'Email', 'email')}${f('dtpPhone', 'Phone', 'tel')}${f('dtpPosition', 'Position')}</div>
+          <label style="font-size:12.5px;display:block;margin-top:8px">Notes (write any discount or pricing agreed here)<textarea id="dtpNotes" class="form-control" rows="3"></textarea></label>
+          <div style="font-size:12.5px;margin-top:8px">Was pricing discussed? ${yn('dtpPricingDiscussed')}</div>`)}
+        ${step(2, 'First booking free?', `<div style="font-size:12.5px">${yn('dtpFbf')} <span style="color:var(--text-muted);margin-left:8px">Only if they'll use agency consistently.</span></div>`)}
+        ${step(3, 'Log a call or visit', `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <button class="btn-add" onclick="openDormantLogModal('call')">📞 Log a call</button>
+            <button class="btn-add" onclick="openDormantLogModal('visit')">🚗 Log a visit</button>
+            <span id="dtpLogged" style="font-size:12.5px;color:#15803d"></span></div>`)}
+        <button class="btn-primary" style="margin-top:12px;width:100%" onclick="completeDormantTouchpoint('${key}')">Dormant touch point complete</button>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Locks in first booking free and starts the Dormant emails. A summary goes to the RT Portal updater.</div>
       </div>`;
     }
+    let dormantLogged = null; // { channel, id }
+    function openDormantLogModal(channel) {
+      let m = document.getElementById('dormantLogModal');
+      if (!m) { m = document.createElement('div'); m.id = 'dormantLogModal'; m.className = 'modal-overlay'; document.body.appendChild(m); }
+      const today = new Date().toISOString().slice(0, 10);
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;z-index:3000';
+      m.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px 22px;width:min(440px,92vw)">
+        <div style="font-weight:700;color:var(--navy);font-size:16px;margin-bottom:10px">${channel === 'call' ? 'Log a call' : 'Log a visit'}</div>
+        <label style="font-size:12.5px;display:block">Date<input id="dlmDate" type="date" class="form-control" value="${today}"></label>
+        <label style="font-size:12.5px;display:block;margin-top:8px">Follow-up date (optional)<input id="dlmFollow" type="date" class="form-control"></label>
+        <label style="font-size:12.5px;display:block;margin-top:8px">Notes<textarea id="dlmNotes" class="form-control" rows="3"></textarea></label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button class="btn-secondary" onclick="document.getElementById('dormantLogModal').remove()">Cancel</button>
+          <button class="btn-primary" onclick="saveDormantLog('${channel}')">Save</button></div></div>`;
+    }
+    async function saveDormantLog(channel) {
+      const date = document.getElementById('dlmDate').value, follow = document.getElementById('dlmFollow').value, notes = document.getElementById('dlmNotes').value.trim();
+      if (!date) return alert('Pick a date');
+      const contactName = [document.getElementById('dtpFirst')?.value, document.getElementById('dtpLast')?.value].filter(Boolean).join(' ');
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(currentCentreKey)}/visits`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          visitDate: date, status: 'completed', outcome: 'neutral', channel, activityType: 'Dormant touch point', notes: notes || null, contactName: contactName || null,
+          nextStep: follow ? 'Dormant follow-up' : null, nextStepDueDate: follow || null }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        dormantLogged = { channel, id: d.id };
+        document.getElementById('dormantLogModal').remove();
+        const el = document.getElementById('dtpLogged'); if (el) el.textContent = `✓ ${channel === 'call' ? 'Call' : 'Visit'} logged for ${fmtShortDate(date)}`;
+        toast(channel === 'call' ? 'Call logged' : 'Visit logged');
+      } catch (e) { alert(e.message); }
+    }
     async function completeDormantTouchpoint(centreKey) {
-      const body = { touchpointType: document.getElementById('dtpType').value, firstBookingFree: document.getElementById('dtpFbf').checked,
-        discountPerHour: document.getElementById('dtpDiscount').value, pricingNote: document.getElementById('dtpPricing').value };
+      const radio = n => { const el = document.querySelector(`input[name="${n}"]:checked`); return el ? el.value === 'yes' : null; };
+      if (!dormantLogged) return alert('Step 3: log the call or visit first.');
+      const fbfAns = radio('dtpFbf');
+      if (fbfAns === null) return alert('Step 2: choose Yes or No for first booking free.');
+      const v = id => (document.getElementById(id)?.value || '').trim();
+      const notes = v('dtpNotes');
+      const body = { touchpointType: dormantLogged.channel, firstBookingFree: fbfAns, pricingDiscussed: radio('dtpPricingDiscussed'),
+        contactFirstName: v('dtpFirst'), contactLastName: v('dtpLast'), contactEmail: v('dtpEmail'), contactPhone: v('dtpPhone'), contactPosition: v('dtpPosition'),
+        contactNotes: notes, pricingNote: radio('dtpPricingDiscussed') ? notes : '' };
       if (!confirm(`Mark the dormant touch point complete${body.firstBookingFree ? ' with first booking free' : ''}?`)) return;
       try {
         const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/dormant-touchpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
-        toast(d.discountNeedsApproval ? 'Done. The discount was sent to Liam to approve.' : 'Dormant touch point complete');
+        toast('Dormant touch point complete');
+        dormantLogged = null;
         const i = myCentresData.findIndex(x => x.centreKey === centreKey); if (i >= 0) myCentresData[i].dormantNeedsContact = false;
         openCentre360(centreKey);
       } catch (e) { alert(e.message); }
@@ -12813,7 +12869,7 @@
             <button type="button" class="c360-tab" data-tab="account" onclick="switchCentre360Tab('account')" style="${c360TabStyle(false)}">Account history</button>
             <span style="margin-left:auto;align-self:center">${centreStatusBadge(centre.bookingTrend)}</span>
           </div>
-          <div id="c360Overview"><div id="c360Category"></div><div id="c360Talking"></div>${centre.isDormant ? dormantPanelHtml(centre) : ''}${renderCentre360(centre, bookingsRes, educators, activity)}</div>
+          <div id="c360Overview"><div id="c360Category"></div><div id="c360Talking"></div>${renderCentre360(centre, bookingsRes, educators, activity)}</div>
           <div id="c360Tab_bookings" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_educators" class="c360-pane" style="display:none"></div>
           <div id="c360Tab_account" class="c360-pane" style="display:none"></div>`;
@@ -12973,7 +13029,7 @@
              log: the full Log Call/Visit form was so heavy that only 11
              centre calls/visits had ever been logged, so WFP Performance
              read near zero for centres. -->
-        <div class="admin-table-card" style="padding:16px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        ${c.isDormant && c.dormantNeedsContact ? '' : `<div class="admin-table-card" style="padding:16px 24px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div>
             <div class="sd-card-title" style="color:var(--orange)">Quick log</div>
             <div class="sd-card-sub" style="margin-top:2px" data-ql-status="${escHtml(c.centreKey)}">${quickLogStatusHtml(c.centreKey) || 'One click, no form. Add notes with Call/Visit + Notes.'}</div>
@@ -12986,7 +13042,7 @@
         </div>
         <div class="admin-table-card" style="padding:16px 24px;margin-bottom:16px">
           <div id="fbfCentreBox"></div>
-        </div>
+        </div>`}
 
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div class="sd-card-title" style="color:var(--orange)">Overview</div>
@@ -13010,6 +13066,7 @@
             ` : `<span style="font-weight:600;color:var(--navy)">${escHtml(effectivePartner || 'Unassigned')}</span>`}
           </div>
         </div>
+        ${c.isDormant ? dormantPanelHtml(c) : ''}
 
         <!-- Opens as its own popup (openNurtureCadenceModal) — Joy,
              2026-09-02: "should be a popup that looks like this popup

@@ -103,9 +103,13 @@ async function completeTouchpoint(centre, user, body) {
   const pricing = String(body.pricingNote || '').trim().slice(0, 2000) || null;
 
   const row = (await db.execute({
-    sql: `INSERT INTO dormant_touchpoints (centre_key, centre_name, state, partner_label, last_booking_date, touchpoint_type, first_booking_free, pricing_note, discount_per_hour, completed_by_email, completed_by_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING *`,
-    args: [centre.centreKey, centre.name, centre.stateShort, centre.partnerLabel, centre.lastBookingDate, type, fbfOn, pricing, discount, user.email, user.name || user.email]
+    sql: `INSERT INTO dormant_touchpoints (centre_key, centre_name, state, partner_label, last_booking_date, touchpoint_type, first_booking_free, pricing_note, discount_per_hour, completed_by_email, completed_by_name,
+            contact_first_name, contact_last_name, contact_email, contact_phone, contact_position, contact_notes, pricing_discussed)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *`,
+    args: [centre.centreKey, centre.name, centre.stateShort, centre.partnerLabel, centre.lastBookingDate, type, fbfOn, pricing, discount, user.email, user.name || user.email,
+      ...['contactFirstName', 'contactLastName', 'contactEmail', 'contactPhone', 'contactPosition'].map(k => String(body[k] || '').trim().slice(0, 200) || null),
+      String(body.contactNotes || '').trim().slice(0, 2000) || null,
+      typeof body.pricingDiscussed === 'boolean' ? body.pricingDiscussed : null]
   })).rows[0];
 
   // FBF ticked: record the offer so accounts gets the "don't charge" task on the
@@ -134,6 +138,7 @@ async function completeTouchpoint(centre, user, body) {
   }
 
   await sendTouchpointSignal(row.id).catch(() => {});
+  await notifyRtUpdater(row.id).catch(() => {});
   return (await db.execute({ sql: 'SELECT * FROM dormant_touchpoints WHERE id = ?', args: [row.id] })).rows[0];
 }
 
@@ -168,6 +173,32 @@ async function sendTouchpointSignal(id) {
     await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'failed', cio_error = ? WHERE id = ?", args: [String(err.message).slice(0, 300), id] });
     return 'failed';
   }
+}
+
+// Touch-point summary for whoever updates RT Portal (Yuv, 10 Nov 2026): discounts and
+// pricing are written in notes, so RT Portal needs a human to copy them in. Slack DM from
+// the HeartBeat bot to RT_PORTAL_UPDATE_EMAIL (HeartBeat doesn't send email). Not set yet = 'not_configured'.
+async function notifyRtUpdater(id) {
+  const db = getDb();
+  const t = (await db.execute({ sql: 'SELECT * FROM dormant_touchpoints WHERE id = ?', args: [id] })).rows[0];
+  if (!t) return;
+  const to = process.env.RT_PORTAL_UPDATE_EMAIL;
+  let status = 'not_configured';
+  if (to) {
+    const contact = [[t.contact_first_name, t.contact_last_name].filter(Boolean).join(' '), t.contact_position, t.contact_email, t.contact_phone].filter(Boolean).join(' · ');
+    const lines = [
+      `:zzz: *Dormant touch point complete: ${t.centre_name}* (${t.state || ''})`,
+      `By ${t.completed_by_name || t.completed_by_email} · ${t.touchpoint_type}`,
+      contact && `Spoke to: ${contact}`,
+      `Pricing discussed: ${t.pricing_discussed === true ? 'Yes' : t.pricing_discussed === false ? 'No' : 'Not recorded'}`,
+      `First booking free: ${t.first_booking_free ? 'Yes' : 'No'}`,
+      t.pricing_note && `Pricing / discount notes: ${t.pricing_note}`,
+      t.contact_notes && `Notes: ${t.contact_notes}`,
+      'Please update RT Portal if anything above changes their pricing or contact.'
+    ].filter(Boolean);
+    status = (await require('./slackService').sendDmByEmail(to, lines.join('\n'))) ? 'sent' : 'failed';
+  }
+  await db.execute({ sql: 'UPDATE dormant_touchpoints SET rt_notify_status = ? WHERE id = ?', args: [status, id] });
 }
 
 // Retried by the same scheduled job as First Booking Free.

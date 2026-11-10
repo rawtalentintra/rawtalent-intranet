@@ -709,9 +709,10 @@ router.get('/dormant-call-list', async (req, res) => {
     const index = indexBookingsByCentre(bookings);
     const assignments = await getCentrePartnerAssignments();
     const LIVE = new Set([2, 3, 5]);
+    const hidden = new Set((await getDb().execute({ sql: 'SELECT centre_key FROM dormant_list_hidden', args: [] })).rows.map(r => r.centre_key));
     // Liam, 3 Nov: dormant = no booking in 6+ months OR never booked. RT history here is ~12 months,
     // so 'no booking at all' = nothing in the last 12+ months (or never booked).
-    const out = rows.filter(c => c.isDormant || !c.lastBookingDate).map(c => {
+    const out = rows.filter(c => (c.isDormant || !c.lastBookingDate) && !hidden.has(c.centreKey)).map(c => {
       const bs = bookingsForCentre(index, c).filter(b => LIVE.has(b.statusId) && b.bookingDate);
       const n = bs.length;
       const usage = !c.lastBookingDate ? 'none' : n >= 20 ? 'high' : n >= 5 ? 'moderate' : 'light';
@@ -730,6 +731,23 @@ router.get('/dormant-call-list', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Remove a centre from the Dormant Call List (10 Nov 2026): soft-hide with who/when,
+// only affects this list. DELETE undoes it.
+router.post('/:centreKey/dormant-list-hide', async (req, res) => {
+  if (!DORMANT_LIST_VIEWERS.includes(String(req.user && req.user.email || '').toLowerCase())) return res.status(403).json({ error: 'Not available' });
+  try {
+    await getDb().execute({ sql: `INSERT INTO dormant_list_hidden (centre_key, reason, hidden_by_email, hidden_by_name) VALUES (?,?,?,?)
+            ON CONFLICT (centre_key) DO UPDATE SET reason = EXCLUDED.reason, hidden_by_email = EXCLUDED.hidden_by_email, hidden_by_name = EXCLUDED.hidden_by_name, hidden_at = now()`,
+      args: [req.params.centreKey, String(req.body && req.body.reason || '').slice(0, 500) || null, req.user.email, req.user.name || req.user.email] });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.delete('/:centreKey/dormant-list-hide', async (req, res) => {
+  if (!DORMANT_LIST_VIEWERS.includes(String(req.user && req.user.email || '').toLowerCase())) return res.status(403).json({ error: 'Not available' });
+  try { await getDb().execute({ sql: 'DELETE FROM dormant_list_hidden WHERE centre_key = ?', args: [req.params.centreKey] }); res.json({ success: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/:centreKey/dormant-touchpoint', async (req, res) => {

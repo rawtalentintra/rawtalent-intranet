@@ -2789,6 +2789,24 @@ CREATE TABLE IF NOT EXISTS dormant_touchpoints (
   cio_error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dormant_touchpoints_centre ON dormant_touchpoints (centre_key, completed_at DESC);
+-- Step 1 "Who we spoke to" (Liam/Sophia, 10 Nov 2026).
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_first_name TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_last_name TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_email TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_phone TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_position TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS contact_notes TEXT;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS pricing_discussed BOOLEAN;
+ALTER TABLE dormant_touchpoints ADD COLUMN IF NOT EXISTS rt_notify_status TEXT;
+-- Soft-hide a centre from the Dormant Call List only (10 Nov 2026). Never a hard delete.
+CREATE TABLE IF NOT EXISTS dormant_list_hidden (
+  centre_key TEXT PRIMARY KEY,
+  reason TEXT,
+  hidden_by_email CITEXT,
+  hidden_by_name TEXT,
+  hidden_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE dormant_list_hidden ENABLE ROW LEVEL SECURITY;
 
 -- Copy of every timesheet row before it is deleted or overwritten (Joy,
 -- 22 Oct 2026, after deleted weeks for leavers couldn't be recovered for final
