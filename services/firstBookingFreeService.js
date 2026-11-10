@@ -74,12 +74,13 @@ function serviceTypeFields(st) {
 // centre_partner_assignments row, else Liam (same default as My Centres).
 const WFP_EMAIL = { Liam: 'liam@rawtalent.com.au', Justine: 'justine@rawtalent.com.au', Gwen: 'gwen@rawtalent.com.au' };
 async function ownerFields(centreKey) {
-  let name = 'Liam';
+  let name = 'Liam', claimed = false;
   if (centreKey && !String(centreKey).startsWith('lead:')) {
     const r = (await getDb().execute({ sql: 'SELECT workforce_partner FROM centre_partner_assignments WHERE centre_key = ?', args: [centreKey] })).rows[0];
-    if (r && r.workforce_partner) name = r.workforce_partner;
+    if (r && r.workforce_partner) { name = r.workforce_partner; claimed = true; }
   }
-  return { wfp_owner_name: name, wfp_owner_email: WFP_EMAIL[name] || '' };
+  // wfp_owner_claimed=false lets Customer.io fall back to its state rule for unclaimed centres.
+  return { wfp_owner_name: name, wfp_owner_email: WFP_EMAIL[name] || '', wfp_owner_claimed: claimed };
 }
 // Attributes only (no event): keeps each centre's Customer.io profile's owner current.
 async function syncOwnerAttributes(centreKey) {

@@ -54,7 +54,7 @@ async function sendFirstContactSignal(leadId) {
     };
     // Owner by relationship (10 Nov 2026): the lead's assigned WFP, else its RT centre's owner, else Liam.
     const owner = l.assigned_workforce_partner && fbf.WFP_EMAIL[l.assigned_workforce_partner]
-      ? { wfp_owner_name: l.assigned_workforce_partner, wfp_owner_email: fbf.WFP_EMAIL[l.assigned_workforce_partner] }
+      ? { wfp_owner_name: l.assigned_workforce_partner, wfp_owner_email: fbf.WFP_EMAIL[l.assigned_workforce_partner], wfp_owner_claimed: true }
       : await fbf.ownerFields(ct && ct.centreKey);
     Object.assign(data, owner);
     // A brand-new email-only profile gets its email and first name; an existing

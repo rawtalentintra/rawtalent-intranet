@@ -165,7 +165,7 @@ async function sendTouchpointSignal(id) {
     await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!t.first_booking_free, ...(await fbf.ownerFields(t.centre_key)) }, 'dormant_touchpoint_complete', {
       first_booking_free: !!t.first_booking_free, centre_key: t.centre_key, centre_name: t.centre_name, state: t.state || '', partner_name: t.completed_by_name || '',
       // Owner by relationship, not state (Liam, 10 Nov): the centre's HeartBeat owner.
-      wfp_owner_name: t.partner_label || '', wfp_owner_email: fbf.WFP_EMAIL[t.partner_label] || '',
+      ...(await fbf.ownerFields(t.centre_key)),
       ...fbf.serviceTypeFields(cat && cat.service_type)
     });
     await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'sent', cio_sent_at = now(), cio_identifier = ?, cio_error = NULL WHERE id = ?", args: [ident, id] });
