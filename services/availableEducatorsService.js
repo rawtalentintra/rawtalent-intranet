@@ -133,6 +133,8 @@ async function send(target, { source = 'button', user = null } = {}) {
   const data = {
     centre_key: t.key, centre_name: t.name, contact_first_name: firstName, state: t.state,
     partner_name: t.lead?.assigned_workforce_partner || '',
+    // Shows the "Your first booking is on us" box in #41 for leads given FBF.
+    offer_first_booking_free: t.lead?.fbf_choice === 'yes',
     educators: pick.educators.map(e => ({ educator_id: e.id, first_name: e.firstName, full_name: e.fullName, photo_url: '', qualification: e.qualification, shifts_completed: e.shiftsCompleted, availability: e.availability }))
   };
   try {
