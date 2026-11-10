@@ -367,7 +367,7 @@
         <div class="admin-nav-item" onclick="showSection('jobadder-open-ads', this)">
           <span class="admin-nav-icon">📣</span> Open Job Ads
         </div>
-        <div class="admin-nav-item super-admin-only" style="display:none" onclick="showSection('onboarding-beta', this)">
+        <div class="admin-nav-item super-admin-only" id="navOnboardingBeta" style="display:none" onclick="showSection('onboarding-beta', this)">
           <span class="admin-nav-icon">🚀</span> Onboarding (Beta)
         </div>
       </div>
@@ -5605,6 +5605,9 @@
         document.querySelectorAll('.super-admin-only').forEach(el => el.style.display = '');
       } else if (canSeeWfpPerformance()) {
         document.querySelectorAll('.wfp-perf-viewer').forEach(el => el.style.display = '');
+      }
+      if (String(currentUserEmail || '').toLowerCase() === 'sophia@rawtalent.com.au') {
+        const navOb = document.getElementById('navOnboardingBeta'); if (navOb) navOb.style.display = '';
       }
       if (canSeeWfpPerformanceSection()) document.querySelectorAll('.wfp-perf-section').forEach(el => el.style.display = '');
       // Build Training is a per-user grant (e.g. Sophia), not a role — shown

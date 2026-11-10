@@ -3,7 +3,13 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 const svc = require('../services/onboardingBetaService');
-router.use(requireAuth, requireRole('super_admin'));
+// Beta: super_admin plus a named allowlist (Sophia, approved by Joy 10 Nov).
+const ONBOARDING_BETA_EMAILS = ['sophia@rawtalent.com.au'];
+router.use(requireAuth, (req, res, next) => {
+  const u = req.user || {};
+  if (u.role === 'super_admin' || ONBOARDING_BETA_EMAILS.includes(String(u.email || '').toLowerCase())) return next();
+  return res.status(403).json({ error: 'Forbidden' });
+});
 const wrap = fn => async (req, res) => { try { await fn(req, res); } catch (err) { res.status(err.status || 500).json({ error: err.message }); } };
 router.get('/call-list', wrap(async (req, res) => res.json(await svc.callList({
   centreKey: req.query.centreKey || null, suburb: req.query.suburb || null, radiusKm: Math.min(100, Number(req.query.radiusKm) || 25),
