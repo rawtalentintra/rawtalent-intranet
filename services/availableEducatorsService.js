@@ -52,7 +52,7 @@ async function resolveTarget({ centreKey, leadId }) {
     const mine = centresMod.bookingsForCentre(centresMod.indexBookingsByCentre(bookings), c).filter(b => [1, 2, 3, 5].includes(b.statusId));
     return { key: centreKey, kind: 'centre', name: c.name, state: shortState(c.state), lat: geo?.lat ?? c.latitude, lng: geo?.lng ?? c.longitude, bookings: mine, centre: c };
   }
-  const l = (await getDb().execute({ sql: 'SELECT id, centre_name, state, latitude, longitude, contact_first_name, assigned_workforce_partner FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+  const l = (await getDb().execute({ sql: 'SELECT id, centre_name, state, latitude, longitude, contact_first_name, assigned_workforce_partner, fbf_choice FROM leads WHERE id = ?', args: [leadId] })).rows[0];
   if (!l) return null;
   return { key: `lead:${l.id}`, kind: 'lead', leadId: l.id, name: l.centre_name, state: shortState(l.state), lat: l.latitude, lng: l.longitude, bookings: [], lead: l };
 }
