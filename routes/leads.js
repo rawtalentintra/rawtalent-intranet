@@ -492,7 +492,7 @@ router.get('/activities-log', leadsViewAccess, async (req, res) => {
 //      event.
 // With neither, actor is null and the page reports it as unattributed rather
 // than guessing. Feeds WFP Performance's per-partner cards.
-const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au'];
+const STAGE_EVENT_PARTNERS = ['justine@rawtalent.com.au', 'gwen@rawtalent.com.au', 'liam@rawtalent.com.au'];
 // Call Analysis and Insights (bottom of WFP Performance). Same audience as that
 // page: super_admin and Liam (mcpTokenService.canUseMcp covers exactly those).
 // Intelligence Matrix — also opened to the Workforce Partners (Justine, Gwen) on

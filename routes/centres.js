@@ -529,7 +529,7 @@ router.get('/', async (req, res) => {
 router.get('/visits-log', async (req, res) => {
   try {
     const result = await getDb().execute(
-      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits WHERE status = 'completed' ORDER BY visit_date DESC"
+      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits WHERE status = 'completed' AND centre_key NOT IN (SELECT centre_key FROM hidden_centres) ORDER BY visit_date DESC"
     );
     res.json(result.rows);
   } catch (err) {
@@ -642,7 +642,7 @@ function lastCancelReason(b) {
 async function computeFillRateByPartner(fromQ, toQ) {
   const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
   const today = new Date(); const dayMs = 86400000;
-  const ymd = d => d.toISOString().slice(0, 10);
+  const ymd = d => d.toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
   const from = isDay(fromQ) ? fromQ : ymd(new Date(today.getTime() - 30 * dayMs));
   const to = isDay(toQ) ? toQ : ymd(new Date(today.getTime() + dayMs)); // exclusive
   const { centres, bookings } = await getCentresAndBookings();
@@ -655,9 +655,11 @@ async function computeFillRateByPartner(fromQ, toQ) {
     partnerByKey.set(c.centreKey, label);
   }
   const rows = new Map();
-  const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0 }); return rows.get(name); };
+  const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0, other: 0 }); return rows.get(name); };
   for (const b of bookings) {
-    const d = (b.bookingDate || '').slice(0, 10);
+    // Melbourne day when RT sends a full timestamp; a plain date stays as is.
+    const raw = String(b.bookingDate || '');
+    const d = raw.length > 10 && /[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? new Date(raw).toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' }) : raw.slice(0, 10);
     if (!d || d < from || d >= to) continue;
     const key = partnerByKey.has(`loc:${b.locationId}`) ? `loc:${b.locationId}` : `client:${b.clientId}`;
     if (!partnerByKey.has(key)) continue; // hidden centre, or one RT no longer lists
@@ -667,12 +669,13 @@ async function computeFillRateByPartner(fromQ, toQ) {
     else if (b.statusId === UNFILLED_STATUS_ID) r.unfilled++;
     else if (b.statusId === CANCELLED_STATUS_ID) { if (lastCancelReason(b) === UNFILLED_CANCEL_REASON) r.unfilled++; else r.cancelled++; }
     else if (PENDING_STATUS_IDS.has(b.statusId)) r.open++;
+    else r.other++;
   }
-  const withRate = r => ({ partner: r.partner, centres: r.centres.size, filled: r.filled, unfilled: r.unfilled, cancelled: r.cancelled, open: r.open,
+  const withRate = r => ({ partner: r.partner, centres: r.centres.size, filled: r.filled, unfilled: r.unfilled, cancelled: r.cancelled, open: r.open, other: r.other,
     fillRate: (r.filled + r.unfilled) ? Math.round((r.filled / (r.filled + r.unfilled)) * 10000) / 100 : null });
   const list = [...rows.values()].map(withRate).sort((a, b) => (b.filled + b.unfilled) - (a.filled + a.unfilled));
   const sum = k => list.reduce((n, r) => n + r[k], 0);
-  const total = { partner: 'All centres', centres: sum('centres'), filled: sum('filled'), unfilled: sum('unfilled'), cancelled: sum('cancelled'), open: sum('open') };
+  const total = { partner: 'All centres', centres: sum('centres'), filled: sum('filled'), unfilled: sum('unfilled'), cancelled: sum('cancelled'), open: sum('open'), other: sum('other') };
   total.fillRate = (total.filled + total.unfilled) ? Math.round((total.filled / (total.filled + total.unfilled)) * 10000) / 100 : null;
   return { from, to, partners: list, total };
 }
