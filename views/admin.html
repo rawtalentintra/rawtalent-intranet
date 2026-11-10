@@ -11029,6 +11029,11 @@
           <table style="width:100%;border-collapse:collapse;min-width:640px">
             <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Partner', true)}${th('Centres')}${th('Filled')}${th('Unfilled')}${th('Cancelled')}${th('Still open')}${th('Other')}${th('Fill rate')}</tr></thead>
             <tbody>${data.partners.map(r => row(r, false)).join('')}${row(data.total, true)}</tbody>
+          </table>
+          <div style="font-size:12px;color:var(--text-muted);margin:8px 2px 18px">Unclaimed centres count under Liam until a partner claims them, so the partner rows depend on ownership. The state table below does not.</div>
+          <table style="width:100%;border-collapse:collapse;min-width:640px">
+            <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('State', true)}${th('Centres')}${th('Filled')}${th('Unfilled')}${th('Cancelled')}${th('Still open')}${th('Other')}${th('Fill rate')}</tr></thead>
+            <tbody>${(data.states || []).filter(r => r.filled + r.unfilled + r.cancelled + r.open + r.other).map(r => row(r, false)).join('')}${row(data.total, true)}</tbody>
           </table>` : `<div style="font-size:13px;color:var(--text-muted);padding:10px 0">No bookings in this period.</div>`;
       } catch (e) {
         if (mine === wfpFillRateRequest) box.innerHTML = `<div style="font-size:13px;color:#b91c1c;padding:10px 0">${escHtml(e.message)}</div>`;

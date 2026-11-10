@@ -62,8 +62,8 @@ async function buildReport(type = 'week', start = null) {
   const centresMod = require('../routes/centres');
   const [stageEvents, centreVisits, leads, touchpoints, offers, leadRecs, centreRecs, notes, leadActs] = await Promise.all([
     leadsMod.buildStageEvents(),
-    q(`SELECT channel, visit_date, lower(created_by_email) e FROM centre_visits WHERE status = 'completed' AND visit_date >= CAST(? AS date) - 1`, [since]),
-    q(`SELECT id, centre_name, state, lower(submitted_by_email) e, created_at, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at, signed_status, signed_at, centre_phone, contact_email, suburb FROM leads`),
+    q(`SELECT channel, visit_date, lower(created_by_email) e FROM ${require('./centreVisitDedup').COMPLETED_VISITS_DEDUPED} WHERE visit_date >= CAST(? AS date) - 1`, [since]),
+    q(`SELECT id, centre_name, state, lower(submitted_by_email) e, created_at, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at, signed_status, signed_at, centre_phone, contact_email, suburb FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%'`),
     q(`SELECT lower(completed_by_email) e, completed_at, first_booking_free FROM dormant_touchpoints WHERE completed_at >= CAST(? AS date) - 1`, [since]).catch(() => []),
     q(`SELECT lower(offered_by_email) e, offered_at, centre_key, lead_id, booking_id, booking_date FROM first_booking_free_offers`).catch(() => []),
     q(`SELECT lower(uploaded_by_email) e, created_at FROM lead_recordings WHERE created_at >= CAST(? AS date) - 1`, [since]),

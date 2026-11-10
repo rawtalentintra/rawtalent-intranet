@@ -229,7 +229,7 @@ router.get('/mine', async (req, res) => {
 // `mine` wins if somehow both are sent.
 router.get('/', leadsViewAccess, async (req, res) => {
   try {
-    const result = await getDb().execute('SELECT * FROM leads ORDER BY created_at DESC');
+    const result = await getDb().execute("SELECT * FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%' ORDER BY created_at DESC");
     let rows = result.rows;
     const targetLabel = req.query.mine === 'true' ? req.user.wfp_label : (req.query.partnerLabel || null);
     if (targetLabel && !canUsePartnerLabel(req.user, targetLabel)) return res.status(403).json({ error: 'Not authorized for this territory' });
@@ -391,7 +391,7 @@ router.get('/existing-centre-matches', leadsViewAccess, async (req, res) => {
 // confidence bar is reported as unmatched, never given fabricated numbers.
 router.get('/retention', leadsViewAccess, async (req, res) => {
   try {
-    const signedLeads = (await getDb().execute("SELECT * FROM leads WHERE signed_status = 'signed' ORDER BY signed_at DESC")).rows;
+    const signedLeads = (await getDb().execute("SELECT * FROM leads WHERE signed_status = 'signed' AND coalesce(archived_reason,'') NOT LIKE 'duplicate:%' ORDER BY signed_at DESC")).rows;
     if (!signedLeads.length) return res.json([]);
 
     const clients = await getClientsForMatching();
@@ -526,7 +526,7 @@ async function buildStageEvents() {
   const leads = (await db.execute({
     sql: `SELECT id, lower(submitted_by_email) AS submitter, lead_called_status, lead_called_at, centre_visited_status, centre_visited_at
           FROM leads
-          WHERE (lead_called_status = 'done' AND lead_called_at IS NOT NULL) OR (centre_visited_status = 'done' AND centre_visited_at IS NOT NULL)`,
+          WHERE ((lead_called_status = 'done' AND lead_called_at IS NOT NULL) OR (centre_visited_status = 'done' AND centre_visited_at IS NOT NULL)) AND coalesce(archived_reason,'') NOT LIKE 'duplicate:%'`,
     args: []
   })).rows;
   const notes = (await db.execute({
@@ -600,7 +600,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
               COUNT(*) FILTER (WHERE centre_visited_status = 'done') AS visited,
               COUNT(*) FILTER (WHERE signed_status = 'signed') AS signed
             FROM leads
-            WHERE ${conditions.join(' AND ')}
+            WHERE ${conditions.join(' AND ')} AND coalesce(archived_reason,'') NOT LIKE 'duplicate:%'
             GROUP BY state`,
       args
     });

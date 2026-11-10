@@ -1,4 +1,5 @@
 const express = require('express');
+const { COMPLETED_VISITS_DEDUPED, dedupeVisitRows } = require('../services/centreVisitDedup');
 const router = express.Router();
 const path = require('path');
 const multer = require('multer');
@@ -529,7 +530,7 @@ router.get('/', async (req, res) => {
 router.get('/visits-log', async (req, res) => {
   try {
     const result = await getDb().execute(
-      "SELECT channel, created_by_email, created_by_name, visit_date FROM centre_visits WHERE status = 'completed' AND centre_key NOT IN (SELECT centre_key FROM hidden_centres) ORDER BY visit_date DESC"
+      `SELECT channel, created_by_email, created_by_name, visit_date FROM ${COMPLETED_VISITS_DEDUPED} WHERE centre_key NOT IN (SELECT centre_key FROM hidden_centres) ORDER BY visit_date DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -593,7 +594,7 @@ router.get('/activity-log', async (req, res) => {
     const visible = hidden.size ? centres.filter(c => !hidden.has(c.centreKey)) : centres;
     const visits = await visitsByCentreKey(visible.map(c => c.centreKey));
     const rows = Object.entries(visits).flatMap(([centreKey, list]) =>
-      list.filter(v => v.status === 'completed').map(v => ({
+      dedupeVisitRows(list.filter(v => v.status === 'completed')).map(v => ({
         centreKey,
         channel: v.channel || 'visit',
         visitDate: v.visit_date,
@@ -648,14 +649,21 @@ async function computeFillRateByPartner(fromQ, toQ) {
   const { centres, bookings } = await getCentresAndBookings();
   const [hidden, assignments] = await Promise.all([getHiddenCentreKeys(), getCentrePartnerAssignments()]);
   const partnerByKey = new Map();
+  const stateByKey = new Map();
   for (const c of centres) {
     if (hidden.has(c.centreKey)) continue;
+    const st = shortState(c.state) || '';
+    stateByKey.set(c.centreKey, ['VIC', 'SA', 'QLD', 'NT'].includes(st) ? st : 'Other');
     const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || 'Unassigned';
     // The old Liam (north/west) / Justine (east) VIC split is over — all of VIC is Justine's (Joy, 2026-10-08).
     partnerByKey.set(c.centreKey, label);
   }
   const rows = new Map();
-  const row = name => { if (!rows.has(name)) rows.set(name, { partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0, other: 0 }); return rows.get(name); };
+  const mk = name => ({ partner: name, centres: new Set(), filled: 0, unfilled: 0, cancelled: 0, open: 0, other: 0 });
+  const row = name => { if (!rows.has(name)) rows.set(name, mk(name)); return rows.get(name); };
+  // By state (11 Nov 2026): the same bookings bucketed by the centre's state, so
+  // the numbers don't depend on who owns which centre.
+  const stateRows = new Map(['VIC', 'SA', 'QLD', 'NT', 'Other'].map(k => [k, mk(k)]));
   for (const b of bookings) {
     // Melbourne day when RT sends a full timestamp; a plain date stays as is.
     const raw = String(b.bookingDate || '');
@@ -663,13 +671,14 @@ async function computeFillRateByPartner(fromQ, toQ) {
     if (!d || d < from || d >= to) continue;
     const key = partnerByKey.has(`loc:${b.locationId}`) ? `loc:${b.locationId}` : `client:${b.clientId}`;
     if (!partnerByKey.has(key)) continue; // hidden centre, or one RT no longer lists
-    const r = row(partnerByKey.get(key));
-    r.centres.add(key);
-    if (FILLED_STATUS_IDS.has(b.statusId)) r.filled++;
-    else if (b.statusId === UNFILLED_STATUS_ID) r.unfilled++;
-    else if (b.statusId === CANCELLED_STATUS_ID) { if (lastCancelReason(b) === UNFILLED_CANCEL_REASON) r.unfilled++; else r.cancelled++; }
-    else if (PENDING_STATUS_IDS.has(b.statusId)) r.open++;
-    else r.other++;
+    for (const r of [row(partnerByKey.get(key)), stateRows.get(stateByKey.get(key) || 'Other')]) {
+      r.centres.add(key);
+      if (FILLED_STATUS_IDS.has(b.statusId)) r.filled++;
+      else if (b.statusId === UNFILLED_STATUS_ID) r.unfilled++;
+      else if (b.statusId === CANCELLED_STATUS_ID) { if (lastCancelReason(b) === UNFILLED_CANCEL_REASON) r.unfilled++; else r.cancelled++; }
+      else if (PENDING_STATUS_IDS.has(b.statusId)) r.open++;
+      else r.other++;
+    }
   }
   const withRate = r => ({ partner: r.partner, centres: r.centres.size, filled: r.filled, unfilled: r.unfilled, cancelled: r.cancelled, open: r.open, other: r.other,
     fillRate: (r.filled + r.unfilled) ? Math.round((r.filled / (r.filled + r.unfilled)) * 10000) / 100 : null });
@@ -677,7 +686,8 @@ async function computeFillRateByPartner(fromQ, toQ) {
   const sum = k => list.reduce((n, r) => n + r[k], 0);
   const total = { partner: 'All centres', centres: sum('centres'), filled: sum('filled'), unfilled: sum('unfilled'), cancelled: sum('cancelled'), open: sum('open'), other: sum('other') };
   total.fillRate = (total.filled + total.unfilled) ? Math.round((total.filled / (total.filled + total.unfilled)) * 10000) / 100 : null;
-  return { from, to, partners: list, total };
+  const states = [...stateRows.values()].map(withRate).map(r => ({ ...r, state: r.partner }));
+  return { from, to, partners: list, states, total };
 }
 router.get('/fill-rate-by-partner', async (req, res) => {
   try {
@@ -1262,6 +1272,31 @@ router.post('/:centreKey/visits', async (req, res) => {
   const fieldError = validateVisitFields({ visitDate, channel, activityType, outcome, status });
   if (fieldError) return res.status(400).json({ error: fieldError });
   try {
+    // A one-tap Quick log then the full form for the same call/visit used to
+    // leave two completed rows (11 Nov 2026). Fill in that day's Quick log
+    // instead of adding a second row.
+    if ((status || 'planned') === 'completed') {
+      const ql = (await getDb().execute({
+        sql: `SELECT id FROM centre_visits WHERE centre_key = ? AND lower(created_by_email) = lower(?) AND channel = ?
+                AND status = 'completed' AND activity_type = 'Quick log'
+                AND (visit_date AT TIME ZONE 'Australia/Melbourne')::date = (CAST(? AS timestamptz) AT TIME ZONE 'Australia/Melbourne')::date
+              ORDER BY created_at DESC LIMIT 1`,
+        args: [req.params.centreKey, req.user.email, channel || 'visit', visitDate]
+      })).rows[0];
+      if (ql) {
+        await getDb().execute({
+          sql: `UPDATE centre_visits SET visit_date = ?, pre_visit_brief = ?, outcome = ?, notes = ?, next_step = ?, next_step_due_date = ?,
+                  activity_type = ?, contact_name = ?, opportunity_notes = ?, commitment = ?, next_step_owner = ?, attendees = ?,
+                  checklist_completed = ?, updated_at = now() WHERE id = ?`,
+          args: [visitDate, preVisitBrief || null, outcome || null, notes || null, nextStep || null, nextStepDueDate || null,
+            activityType || null, contactName || null, opportunityNotes || null, commitment || null, nextStepOwner || req.user.email,
+            attendees || null, typeof checklistCompleted === 'boolean' ? checklistCompleted : null, ql.id]
+        });
+        await linkRecordingsToVisit(req.params.centreKey, ql.id, recordingIds);
+        const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [ql.id] })).rows[0];
+        return res.json(row);
+      }
+    }
     const id = uuidv4();
     await getDb().execute({
       sql: `INSERT INTO centre_visits (

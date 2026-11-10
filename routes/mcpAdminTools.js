@@ -176,7 +176,7 @@ function registerAdminTools(server) {
               COUNT(*) FILTER (WHERE lead_called_status = 'done' AND lead_called_at >= CAST(? AS date) AND lead_called_at < CAST(? AS date)) AS called,
               COUNT(*) FILTER (WHERE centre_visited_status = 'done' AND centre_visited_at >= CAST(? AS date) AND centre_visited_at < CAST(? AS date)) AS visited,
               COUNT(*) FILTER (WHERE signed_status = 'signed' AND signed_at >= CAST(? AS date) AND signed_at < CAST(? AS date)) AS signed
-            FROM leads GROUP BY 1 ORDER BY 1`,
+            FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%' GROUP BY 1 ORDER BY 1`,
       args: [f, t, f, t, f, t, f, t]
     })).rows;
     const body = rows.map(r => `${r.state}: ${r.created} new · ${r.called} called · ${r.visited} visited · ${r.signed} signed`).join('\n');
@@ -477,8 +477,8 @@ function registerAdminTools(server) {
     const events = log.filter(a => inP(when(a))).map(a => ({ email: String(a.created_by_email || '').toLowerCase(), channel: a.channel }));
     ev.forEach(e => { if (inP(e.at) && !logged.has(`${e.lead_id}|${e.channel}|${dayKey(e.at)}`)) events.push({ email: e.email, channel: e.channel }); });
     const db = getDb();
-    const centreActs = (await db.execute({ sql: "SELECT lower(created_by_email) email, channel, visit_date FROM centre_visits WHERE status = 'completed'", args: [] })).rows.filter(v => inP(v.visit_date));
-    const leadsCreated = (await db.execute({ sql: 'SELECT lower(submitted_by_email) email, created_at FROM leads', args: [] })).rows.filter(l => inP(l.created_at));
+    const centreActs = (await db.execute({ sql: `SELECT lower(created_by_email) email, channel, visit_date FROM ${require('../services/centreVisitDedup').COMPLETED_VISITS_DEDUPED}`, args: [] })).rows.filter(v => inP(v.visit_date));
+    const leadsCreated = (await db.execute({ sql: "SELECT lower(submitted_by_email) email, created_at FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%'", args: [] })).rows.filter(l => inP(l.created_at));
     const partners = [['Justine', 'justine@rawtalent.com.au'], ['Gwen', 'gwen@rawtalent.com.au']];
     const known = new Set(partners.map(p => p[1]));
     const lines = partners.map(([n, e]) => {
