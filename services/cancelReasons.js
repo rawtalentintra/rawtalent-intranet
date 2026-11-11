@@ -41,10 +41,15 @@ const REASONS = {
 };
 const GROUP_LABELS = { centre: 'Cancelled by centre', educator: 'Cancelled by educator', unfilled: 'Unfilled (RT couldn\'t fill)', admin: 'Admin (reassigned, test, duplicate; not a lost booking)', none: 'No reason recorded' };
 
-// The reason code on a cancelled booking: the last "Booking Cancelled" history entry.
+// The reason code on a cancelled booking: the latest "Booking Cancelled" history
+// entry that carries a reason. RT often writes a second "Booking Cancelled" entry
+// with reason 0 right after the real one (11 Nov 2026: 145 of October's 394
+// cancellations), so reading only the last entry showed "No reason picked" and
+// hid 19 Unfilled shifts. Falls back to 0 only when no entry has a reason.
 function reasonCode(b) {
-  const log = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === 6).slice(-1)[0];
-  return log ? Number(log.reason) || 0 : 0;
+  const logs = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === 6);
+  const tagged = [...logs].reverse().find(h => Number(h.reason) > 0);
+  return tagged ? Number(tagged.reason) : 0;
 }
 function classify(b) {
   const code = reasonCode(b);

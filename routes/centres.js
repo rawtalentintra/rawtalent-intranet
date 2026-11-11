@@ -641,9 +641,12 @@ const UNFILLED_STATUS_ID = 7;
 const CANCELLED_STATUS_ID = 6;
 const UNFILLED_CANCEL_REASON = 50;
 const PENDING_STATUS_IDS = new Set([1, 11]); // 11 = Requested (centre asked for a named educator, not assigned yet)
+// Same reading as services/cancelReasons.js: the latest cancel entry WITH a reason
+// (RT adds a reason-0 duplicate entry after many cancellations).
 function lastCancelReason(b) {
-  const log = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === CANCELLED_STATUS_ID).slice(-1)[0];
-  return log ? log.reason : null;
+  const logs = (Array.isArray(b.history) ? b.history : []).filter(h => h.statusId === CANCELLED_STATUS_ID);
+  if (!logs.length) return null;
+  return require('../services/cancelReasons').reasonCode(b);
 }
 async function computeFillRateByPartner(fromQ, toQ) {
   const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
