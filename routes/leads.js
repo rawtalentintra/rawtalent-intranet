@@ -561,7 +561,7 @@ async function buildStageEvents() {
 // clearly describes a call or visit that already happened, or a voice note on a
 // lead (those are visit recordings). WFP Performance adds these only when no
 // call/visit was already logged for that lead, person and day.
-const NOTE_VISIT_RE = /\b(visited|visit today|dropped (in|off|by)|popped in|met with|went (in|to the centre)|in person|walked in)\b/i;
+const NOTE_VISIT_RE = /\b(visited|visit today|dropped (in|into|off|by)|popped in(to)?|met with|went (in|to the centre)|in person|walked in)\b/i;
 const NOTE_CALL_RE = /\b(called|rang|phoned|spoke (to|with)|voicemail|left (a )?(message|vm)|no answer|didn'?t answer)\b/i;
 async function buildDerivedActivity() {
     const db = getDb();
