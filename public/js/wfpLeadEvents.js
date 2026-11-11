@@ -6,8 +6,11 @@
 //    if that lead has NO logged or stage-change entry for the channel on the
 //    same day or in the 14 days before (11 Nov 2026: late voice notes were
 //    counting as a second visit).
+// 4) First-booking-free offers (source 'fbf_offer') count as a visit only if that
+//    lead has no logged/stage-change call OR visit from 14 days before to 3 days
+//    after (11 Nov 2026: offers are often saved the day before the visit is logged).
 (function (root) {
-  const DAY_MS = 86400000, LOOKBACK_DAYS = 14;
+  const DAY_MS = 86400000, LOOKBACK_DAYS = 14, FBF_AFTER_DAYS = 3;
   const dayKey = d => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
   const dayNum = d => Math.floor(Date.parse(dayKey(d) + 'T00:00:00Z') / DAY_MS);
   function wfpLeadEvents({ log = [], stage = [], derived = [], inPeriod, partnerEmails = [] }) {
@@ -24,7 +27,9 @@
     derived.forEach(e => {
       if (!inPeriod(e.at) || !partnerEmails.includes(e.email)) return;
       const d = dayNum(e.at);
-      if ((priorDays.get(e.lead_id + '|' + e.channel) || []).some(p => p <= d && p >= d - LOOKBACK_DAYS)) return;
+      if (e.source === 'fbf_offer') {
+        if (['call', 'visit'].some(ch => (priorDays.get(e.lead_id + '|' + ch) || []).some(p => p <= d + FBF_AFTER_DAYS && p >= d - LOOKBACK_DAYS))) return;
+      } else if ((priorDays.get(e.lead_id + '|' + e.channel) || []).some(p => p <= d && p >= d - LOOKBACK_DAYS)) return;
       const k = `${e.lead_id}|${e.channel}|${d}|${e.email}`;
       if (seen.has(k)) return; seen.add(k);
       events.push({ email: e.email, channel: e.channel, lead_id: e.lead_id, derived: true });

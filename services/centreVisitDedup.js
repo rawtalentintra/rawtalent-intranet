@@ -17,4 +17,15 @@ function dedupeVisitRows(rows, keyOf = r => r.centre_key) {
   }
   return [...best.values()];
 }
-module.exports = { COMPLETED_VISITS_DEDUPED, dedupeVisitRows };
+// First-booking-free offers count as a visit (Joy, 11 Nov 2026), but only when the
+// person logged no call or visit at that centre from 14 days before to 3 days after
+// the offer (offers are often logged a day before the visit itself is).
+const FBF_WINDOW = "(v.visit_date AT TIME ZONE 'Australia/Melbourne')::date BETWEEN (o.offered_at AT TIME ZONE 'Australia/Melbourne')::date - 14 AND (o.offered_at AT TIME ZONE 'Australia/Melbourne')::date + 3";
+const FBF_CENTRE_VISITS = `(SELECT o.centre_key, 'visit'::text AS channel, o.offered_by_email::text AS created_by_email, o.offered_by_name AS created_by_name, o.offered_at AS visit_date
+  FROM first_booking_free_offers o WHERE o.lead_id IS NULL AND o.centre_key IS NOT NULL AND o.offered_by_email IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM centre_visits v WHERE v.centre_key = o.centre_key AND v.status = 'completed'
+    AND lower(v.created_by_email::text) = lower(o.offered_by_email::text) AND ${FBF_WINDOW}))`;
+// Every centre call/visit WFP Performance counts: logged ones (deduped) plus offers above.
+const COUNTED_CENTRE_ACTIVITY = `(SELECT centre_key, channel, created_by_email::text AS created_by_email, created_by_name, visit_date FROM ${COMPLETED_VISITS_DEDUPED}
+  UNION ALL SELECT * FROM ${FBF_CENTRE_VISITS} fbf) cca`;
+module.exports = { COMPLETED_VISITS_DEDUPED, FBF_CENTRE_VISITS, COUNTED_CENTRE_ACTIVITY, dedupeVisitRows };

@@ -573,6 +573,10 @@ async function buildDerivedActivity() {
       if (ch) out.push({ lead_id: n.lead_id, channel: ch, at: n.created_at, email: String(n.author_email).toLowerCase(), source: 'note' });
     }
     for (const r of recs) out.push({ lead_id: r.lead_id, channel: 'visit', at: r.created_at, email: String(r.uploaded_by_email).toLowerCase(), source: 'voice_note' });
+    // First-booking-free offers on a lead count as a visit (Joy, 11 Nov 2026) when no
+    // call or visit was logged around them (rules in public/js/wfpLeadEvents.js).
+    const offers = (await db.execute({ sql: 'SELECT lead_id, offered_by_email, offered_at FROM first_booking_free_offers WHERE lead_id IS NOT NULL AND offered_by_email IS NOT NULL', args: [] })).rows;
+    for (const o of offers) out.push({ lead_id: o.lead_id, channel: 'visit', at: o.offered_at, email: String(o.offered_by_email).toLowerCase(), source: 'fbf_offer' });
     return out;
 }
 router.get('/derived-activity', leadsViewAccess, async (req, res) => {

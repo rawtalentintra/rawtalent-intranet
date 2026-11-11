@@ -478,7 +478,7 @@ function registerAdminTools(server) {
     // Same rules as the page: public/js/wfpLeadEvents.js.
     const events = require('../public/js/wfpLeadEvents').wfpLeadEvents({ log, stage: ev, derived, inPeriod: inP, partnerEmails: partners.map(p => p[1]) });
     const db = getDb();
-    const centreActs = (await db.execute({ sql: `SELECT lower(created_by_email) email, channel, visit_date FROM ${require('../services/centreVisitDedup').COMPLETED_VISITS_DEDUPED}`, args: [] })).rows.filter(v => inP(v.visit_date));
+    const centreActs = (await db.execute({ sql: `SELECT lower(created_by_email) email, channel, visit_date FROM ${require('../services/centreVisitDedup').COUNTED_CENTRE_ACTIVITY} WHERE centre_key NOT IN (SELECT centre_key FROM hidden_centres)`, args: [] })).rows.filter(v => inP(v.visit_date));
     const leadsCreated = (await db.execute({ sql: "SELECT lower(submitted_by_email) email, created_at FROM leads WHERE coalesce(archived_reason,'') NOT LIKE 'duplicate:%'", args: [] })).rows.filter(l => inP(l.created_at));
     const known = new Set(partners.map(p => p[1]));
     const lines = partners.map(([n, e]) => {

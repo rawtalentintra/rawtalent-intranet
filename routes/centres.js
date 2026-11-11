@@ -1,5 +1,5 @@
 const express = require('express');
-const { COMPLETED_VISITS_DEDUPED, dedupeVisitRows } = require('../services/centreVisitDedup');
+const { COMPLETED_VISITS_DEDUPED, COUNTED_CENTRE_ACTIVITY, FBF_CENTRE_VISITS, dedupeVisitRows } = require('../services/centreVisitDedup');
 const router = express.Router();
 const path = require('path');
 const multer = require('multer');
@@ -530,7 +530,7 @@ router.get('/', async (req, res) => {
 router.get('/visits-log', async (req, res) => {
   try {
     const result = await getDb().execute(
-      `SELECT channel, created_by_email, created_by_name, visit_date FROM ${COMPLETED_VISITS_DEDUPED} WHERE centre_key NOT IN (SELECT centre_key FROM hidden_centres) ORDER BY visit_date DESC`
+      `SELECT channel, created_by_email, created_by_name, visit_date FROM ${COUNTED_CENTRE_ACTIVITY} WHERE centre_key NOT IN (SELECT centre_key FROM hidden_centres) ORDER BY visit_date DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -603,6 +603,11 @@ router.get('/activity-log', async (req, res) => {
         createdByName: v.created_by_name
       }))
     );
+    // First-booking-free offers with no logged call/visit around them count as a visit.
+    const keys = new Set(visible.map(c => c.centreKey));
+    for (const o of (await getDb().execute({ sql: `SELECT * FROM ${FBF_CENTRE_VISITS} f`, args: [] })).rows) {
+      if (keys.has(o.centre_key)) rows.push({ centreKey: o.centre_key, channel: 'visit', visitDate: o.visit_date, createdAt: o.visit_date, createdByEmail: o.created_by_email, createdByName: o.created_by_name, fbfOffer: true });
+    }
     res.json(rows);
   } catch (err) {
     res.status(502).json({ error: err.message });
