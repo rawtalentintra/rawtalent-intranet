@@ -1040,7 +1040,7 @@
 <div class="rt-data-banner" data-rt-banner="history" style="display:none"></div>
             <div id="wfpPerfFillRate" style="margin-top:18px;overflow-x:auto"><div style="font-size:13px;color:var(--text-muted);padding:10px 0">Loading…</div></div>
             <div style="margin-top:16px;font-size:12px;color:var(--text-muted);line-height:1.6">
-              <b>Filled</b> — Assigned or Completed. <b>Unfilled</b> — shifts ops couldn't fill and tagged Unfilled in RT; this includes shifts later re-posted as another qualification and filled, so it reads lower than the weekly figure ops quote. <b>Fill rate</b> = filled ÷ (filled + unfilled). Other cancellations and bookings still open are shown but not counted in the rate. A centre belongs to the partner who owns it in HeartBeat (whoever set it up or first called/visited); centres nobody has claimed count under Liam. Other statuses are bookings in any other RT status, shown but not counted in the rate.
+              <b>Filled</b> — Assigned or Completed. <b>Unfilled</b> — shifts ops couldn't fill and tagged Unfilled in RT; this includes shifts later re-posted as another qualification and filled, so it reads lower than the weekly figure ops quote. <b>Fill rate</b> = filled ÷ (filled + unfilled). Other cancellations and bookings still open are shown but not counted in the rate. A centre belongs to the partner who owns it in HeartBeat (whoever set it up or first called/visited); centres nobody has claimed belong to the state's partner (VIC Justine; QLD, SA and NT Gwen). Other statuses are bookings in any other RT status, shown but not counted in the rate.
             </div>
           </div>
 
@@ -10519,13 +10519,12 @@
     async function loadMelbourneTerritoryMap() {
       try { melbourneSuburbPartner = await fetch('/api/centres/territory-map').then(r => r.json()); } catch {}
     }
+    // Liam, 11 Nov 2026: unclaimed centres belong to the state's partner, never
+    // Liam by default: VIC -> Justine, QLD/SA/NT -> Gwen (same as the server).
     function defaultCentrePartner(rawState, suburb) {
       const bucket = wfpCentreStateBucket(rawState);
-      if (bucket === 'VIC') {
-        const key = (suburb || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.,]+$/, '');
-        return melbourneSuburbPartner[key] || 'Justine';
-      }
-      if (bucket === 'SA') return 'Gwen';
+      if (bucket === 'VIC') return 'Justine';
+      if (bucket === 'SA' || bucket === 'QLD' || bucket === 'NT') return 'Gwen';
       return null;
     }
 
@@ -11029,7 +11028,7 @@
             <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Partner', true)}${th('Centres')}${th('Filled')}${th('Unfilled')}${th('Cancelled')}${th('Still open')}${th('Other')}${th('Fill rate')}</tr></thead>
             <tbody>${data.partners.map(r => row(r, false)).join('')}${row(data.total, true)}</tbody>
           </table>
-          <div style="font-size:12px;color:var(--text-muted);margin:8px 2px 18px">Unclaimed centres count under Liam until a partner claims them, so the partner rows depend on ownership. The state table below does not.</div>
+          <div style="font-size:12px;color:var(--text-muted);margin:8px 2px 18px">Centres nobody has claimed count under the state's partner (VIC Justine; QLD, SA and NT Gwen). The state table below doesn't depend on ownership.</div>
           <table style="width:100%;border-collapse:collapse;min-width:640px">
             <thead><tr style="border-bottom:1px solid var(--gray-200)">${th('State', true)}${th('Centres')}${th('Filled')}${th('Unfilled')}${th('Cancelled')}${th('Still open')}${th('Other')}${th('Fill rate')}</tr></thead>
             <tbody>${(data.states || []).filter(r => r.filled + r.unfilled + r.cancelled + r.open + r.other).map(r => row(r, false)).join('')}${row(data.total, true)}</tbody>

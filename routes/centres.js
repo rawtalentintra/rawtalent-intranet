@@ -410,10 +410,17 @@ async function getCentreStopsByKeys(centreKeys) {
 // zero centres for Gwen — leads never showed this bug since a lead's
 // assigned_workforce_partner is set explicitly at creation time
 // (autoAssignWorkforcePartner), so this fallback rarely even runs there.
-// Joy, 6 Nov 2026: every active RT centre nobody has claimed belongs to Liam;
+// (Superseded 11 Nov 2026, see below.) Joy, 6 Nov 2026: unclaimed centres belonged to Liam;
 // Justine and Gwen keep the centres they own or have called/visited.
-const DEFAULT_CENTRE_OWNER = 'Liam';
-const STATE_WORKFORCE_PARTNER = { SA: 'Gwen', QLD: 'Gwen' }; // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
+// Liam, 11 Nov 2026 (replaces Joy's 6 Nov "unclaimed = Liam"): a centre nobody
+// has claimed belongs to the state's partner: VIC -> Justine, QLD/SA/NT -> Gwen.
+// Liam keeps only centres explicitly assigned to him. Other states (NSW, ACT, WA)
+// aren't covered by that ruling and still fall back to Liam.
+const FALLBACK_CENTRE_OWNER = 'Liam';
+const STATE_WORKFORCE_PARTNER = { VIC: 'Justine', SA: 'Gwen', QLD: 'Gwen', NT: 'Gwen' };
+function defaultCentreOwner(c) {
+  return (c && STATE_WORKFORCE_PARTNER[shortState(c.state)]) || FALLBACK_CENTRE_OWNER;
+} // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
 
 // `?partnerLabel=` was previously accepted from any authenticated caller
 // with no server-side check at all — only the frontend hiding the picker
@@ -479,7 +486,7 @@ router.get('/', async (req, res) => {
       // shortState() (already used elsewhere in this file) normalizes it
       // before the STATE_WORKFORCE_PARTNER lookup; partnerForSuburbState
       // does its own normalizing internally already.
-      visible = visible.filter(c => (assignments[c.centreKey] || DEFAULT_CENTRE_OWNER) === targetLabel);
+      visible = visible.filter(c => (assignments[c.centreKey] || defaultCentreOwner(c)) === targetLabel);
     } else if (req.query.state) {
       // `?state=<VIC|SA|QLD|NT>` (2026-09-21) — /wfp's own filter bar, now
       // a plain state pick with no per-person division (Joy: "remove Liam
@@ -662,7 +669,7 @@ async function computeFillRateByPartner(fromQ, toQ) {
     if (hidden.has(c.centreKey)) continue;
     const st = shortState(c.state) || '';
     stateByKey.set(c.centreKey, ['VIC', 'SA', 'QLD', 'NT'].includes(st) ? st : 'Other');
-    const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || 'Unassigned';
+    const label = assignments[c.centreKey] || defaultCentreOwner(c);
     // The old Liam (north/west) / Justine (east) VIC split is over — all of VIC is Justine's (Joy, 2026-10-08).
     partnerByKey.set(c.centreKey, label);
   }
@@ -739,7 +746,7 @@ router.get('/dormant-call-list', async (req, res) => {
       const usage = !c.lastBookingDate ? 'none' : n >= 20 ? 'high' : n >= 5 ? 'moderate' : 'light';
       return {
         centreKey: c.centreKey, name: c.name, suburb: c.suburb || '', state: shortState(c.state) || '',
-        owner: assignments[c.centreKey] || DEFAULT_CENTRE_OWNER,
+        owner: assignments[c.centreKey] || defaultCentreOwner(c),
         lastBookingDate: c.lastBookingDate, daysSinceLastBooking: c.daysSinceLastBooking,
         pastBookings: n, usage,
         lastContactAt: c.lastContactAt || null,
@@ -781,7 +788,7 @@ router.post('/:centreKey/dormant-touchpoint', async (req, res) => {
     const days = last ? (Date.now() - new Date(last).getTime()) / 864e5 : null;
     const dormant = require('../services/dormantService');
     if (days == null || days < dormant.DORMANT_DAYS) return res.status(409).json({ error: 'This centre isn\'t dormant (it has booked in the last 6 months).' });
-    const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || null;
+    const label = assignments[c.centreKey] || defaultCentreOwner(c);
     const row = await dormant.completeTouchpoint({ ...c, stateShort: shortState(c.state), partnerLabel: label, lastBookingDate: new Date(last).toISOString().slice(0, 10) }, req.user, req.body || {});
     res.status(201).json({ id: row.id, completedAt: row.completed_at, firstBookingFree: row.first_booking_free, discountNeedsApproval: !!row.approval_task_id, emailStatus: row.cio_status });
   } catch (err) {
@@ -1561,10 +1568,8 @@ module.exports.bookingsForCentre = bookingsForCentre;
 module.exports.getCentrePartnerAssignments = getCentrePartnerAssignments;
 // Shared with services/wfpReportService.js (weekly/monthly partner report).
 module.exports.centresWithNurture = centresWithNurture;
-module.exports.partnerLabelForCentre = (c, assignments) => {
-  const label = assignments[c.centreKey] || DEFAULT_CENTRE_OWNER || 'Unassigned';
-  return label;
-};
+module.exports.partnerLabelForCentre = (c, assignments) => assignments[c.centreKey] || defaultCentreOwner(c);
+module.exports.defaultCentreOwner = defaultCentreOwner;
 module.exports.shortState = shortState;
 module.exports.getLastBookingDates = getLastBookingDates;
 module.exports.lastCancelReason = lastCancelReason;

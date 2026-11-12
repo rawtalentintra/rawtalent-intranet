@@ -71,13 +71,21 @@ function serviceTypeFields(st) {
 }
 
 // Centre owner by relationship, not state (Liam, 10 Nov 2026). Owner = HeartBeat's
-// centre_partner_assignments row, else Liam (same default as My Centres).
+// centre_partner_assignments row, else the state's partner (Liam, 11 Nov: VIC ->
+// Justine, QLD/SA/NT -> Gwen; same default as My Centres).
 const WFP_EMAIL = { Liam: 'liam@rawtalent.com.au', Justine: 'justine@rawtalent.com.au', Gwen: 'gwen@rawtalent.com.au' };
 async function ownerFields(centreKey) {
   let name = 'Liam', claimed = false;
   if (centreKey && !String(centreKey).startsWith('lead:')) {
     const r = (await getDb().execute({ sql: 'SELECT workforce_partner FROM centre_partner_assignments WHERE centre_key = ?', args: [centreKey] })).rows[0];
     if (r && r.workforce_partner) { name = r.workforce_partner; claimed = true; }
+    else {
+      try {
+        const centresMod = require('../routes/centres');
+        const { centres } = await centresMod.getCentresAndBookings();
+        name = centresMod.defaultCentreOwner(centres.find(c => c.centreKey === centreKey));
+      } catch (_) { /* keep the fallback */ }
+    }
   }
   // wfp_owner_claimed=false lets Customer.io fall back to its state rule for unclaimed centres.
   return { wfp_owner_name: name, wfp_owner_email: WFP_EMAIL[name] || '', wfp_owner_claimed: claimed };

@@ -94,7 +94,7 @@ publicRouter.post('/', async (req, res) => {
 // VIC suburb split, else the state's default partner.
 function partnerForCentre(c, assignments) {
   if (!c) return null;
-  return assignments[c.centreKey] || 'Liam';
+  return assignments[c.centreKey] || require('./centres').defaultCentreOwner(c);
 }
 
 // ── Familiar educators for Workforce Partners (Liam, 13 Oct, point 3) ─

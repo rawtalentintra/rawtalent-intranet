@@ -44,6 +44,7 @@ const leadsViewAccess = requireRole('admin', 'super_admin', 'qa_view', 'workforc
 // melbourneTerritoryService — this map now only covers non-VIC states.
 const STATE_WORKFORCE_PARTNER = {
   SA: 'Gwen',
+  NT: 'Gwen', // Liam, 11 Nov 2026: QLD, SA and NT go to Gwen
   QLD: 'Gwen' // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)
 };
 

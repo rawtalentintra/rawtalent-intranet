@@ -231,7 +231,7 @@ function registerAdminTools(server) {
         ...(partner ? overdue.slice(0, 100).map(c => `    • ${c.name}${c.suburb ? ', ' + c.suburb : ''} — ${days(c) == null ? 'never contacted' : days(c) + ' days since last contact'}${c.lastBookingDate ? ` · last booking ${String(c.lastBookingDate).slice(0, 10)}` : ''}`) : []),
         '');
     }
-    out.push('Ownership: explicit assignment in HeartBeat, else the suburb/state default (VIC Justine or Liam by suburb, SA/QLD/NT Gwen).');
+    out.push('Ownership: explicit assignment in HeartBeat, else the state default (VIC Justine; SA, QLD and NT Gwen; other states Liam).');
     return text(out.join('\n'));
   });
 

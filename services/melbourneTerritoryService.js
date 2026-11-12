@@ -164,9 +164,12 @@ function isVicState(rawState) {
 // script, the frontend's territory-map endpoint) should use — never read
 // MELBOURNE_SUBURB_PARTNER directly, so the VIC-check and the "outside the
 // metro split falls back to Justine" rule can't be forgotten at a new call site.
+// Liam, 11 Nov 2026: new/unclaimed Melbourne centres are set up under Justine,
+// never Liam (all of VIC has been Justine's since 8 Oct). The suburb map above
+// is kept for reference only and no longer decides the owner.
 function partnerForSuburbState(suburb, state) {
   if (!isVicState(state)) return null;
-  return MELBOURNE_SUBURB_PARTNER[normalize(suburb)] || JUSTINE;
+  return JUSTINE;
 }
 
 module.exports = { LIAM, JUSTINE, MELBOURNE_SUBURB_PARTNER, partnerForSuburbState, isVicState, normalize };
