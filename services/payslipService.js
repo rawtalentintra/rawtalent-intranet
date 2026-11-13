@@ -72,9 +72,10 @@ async function listProfiles() {
     FROM team_members tm
     LEFT JOIN users u ON LOWER(u.email) = LOWER(tm.email) AND u.active = true
     LEFT JOIN employee_payroll_profiles epp ON LOWER(epp.user_email) = LOWER(tm.email)
-    WHERE tm.status = 'active'
-      -- an active login, or a leaver kept on until their final pay (payroll_until)
-      AND (u.email IS NOT NULL OR (epp.payroll_until IS NOT NULL AND epp.payroll_until >= (now() AT TIME ZONE 'Australia/Melbourne')::date))
+    -- an active team member with a login, or a leaver (login off, off the org
+    -- chart) kept on payroll until their final pay (payroll_until)
+    WHERE (tm.status = 'active' AND u.email IS NOT NULL)
+       OR (epp.payroll_until IS NOT NULL AND epp.payroll_until >= (now() AT TIME ZONE 'Australia/Melbourne')::date)
     ORDER BY tm.name ASC
   `);
   return res.rows.filter(r => !PAYROLL_EXCLUDED_EMAILS.has((r.user_email || '').toLowerCase()));

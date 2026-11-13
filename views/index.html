@@ -4788,7 +4788,7 @@
         allTeamMembers = await fetch('/api/team').then(r => r.json());
         await ensureLeaveColorMap();
         list.innerHTML = `
-          <div id="teamChartContainer">${renderOrgCanvas(allTeamMembers)}</div>
+          <div id="teamChartContainer">${renderOrgCanvas(allTeamMembers.filter(m => (m.status || 'active') === 'active'))}</div>
           <div style="overflow-x:auto">${renderTeamTable(allTeamMembers)}</div>
         `;
         document.querySelectorAll('#teamChartContainer .org-node').forEach(node => {
