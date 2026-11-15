@@ -3156,3 +3156,23 @@ CREATE TABLE IF NOT EXISTS onboarding_candidate_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_onboarding_candidate_notes_cand ON onboarding_candidate_notes (candidate_id, created_at DESC);
 ALTER TABLE onboarding_candidate_notes ENABLE ROW LEVEL SECURITY;
+
+-- First booking alert (Liam + Sophia, 11 Nov 2026): one row per centre whose first
+-- booking HeartBeat has alerted on (or recorded as baseline when the job first ran).
+CREATE TABLE IF NOT EXISTS first_booking_alerts (
+  centre_key TEXT PRIMARY KEY,
+  centre_name TEXT,
+  booking_id TEXT,
+  booking_date DATE,
+  owner_name TEXT,
+  owner_email TEXT,
+  status TEXT NOT NULL DEFAULT 'created', -- 'baseline' | 'created' | 'done'
+  email_status TEXT,
+  slack_dm BOOLEAN,
+  task_id TEXT,
+  created_alert_at TIMESTAMPTZ,
+  filled_alert_at TIMESTAMPTZ,
+  dead_alert_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE first_booking_alerts ENABLE ROW LEVEL SECURITY;

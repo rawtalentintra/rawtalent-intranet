@@ -726,6 +726,16 @@ router.get('/fill-rate-by-partner', async (req, res) => {
 // the heavy users with First Booking Free). Same centres, owners and dormancy
 // rules as My Centres; the touch point itself is still logged on the centre.
 const DORMANT_LIST_VIEWERS = ['gwen@rawtalent.com.au', 'justine@rawtalent.com.au', 'liam@rawtalent.com.au', 'sophia@rawtalent.com.au', 'joy@rawtalent.com.au'];
+// First booking alert test (super_admin only): sends a sample alert email + Slack DM
+// to the caller only, never to a Workforce Partner.
+router.post('/first-booking-alert/test', async (req, res) => {
+  if (!req.user || req.user.role !== 'super_admin') return res.status(403).json({ error: 'You do not have access to this' });
+  const fba = require('../services/firstBookingAlertService');
+  const email = await fba.sendEmail(req.user.email, 'TEST First booking: Sample Centre', '<p>This is a test of the HeartBeat first booking alert email. Real alerts go to the centre\'s Workforce Partner.</p>');
+  const dm = await require('../services/slackService').sendDmByEmail(req.user.email, 'TEST First booking alert', [{ type: 'section', text: { type: 'mrkdwn', text: ':tada: *TEST First booking: Sample Centre*\nThis is what the centre owner gets.' } }]);
+  res.json({ email, slackDm: dm });
+});
+
 router.get('/dormant-call-list', async (req, res) => {
   if (!DORMANT_LIST_VIEWERS.includes(String(req.user && req.user.email || '').toLowerCase())) return res.status(403).json({ error: 'Not available' });
   try {

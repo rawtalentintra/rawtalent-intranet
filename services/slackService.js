@@ -261,4 +261,14 @@ async function notifyTaskTagged(taskId, emails, verb = 'tagged on') {
   } catch (err) { console.error('Task-tag Slack notify failed:', err.message); }
 }
 
-module.exports = { dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+// First booking alert (16 Nov 2026): Slack user id for an email (null if not on Slack),
+// and a plain post into today's #daily-check-in thread.
+async function slackUserId(email) {
+  try { return (await slackCall('users.lookupByEmail', { email })).user.id; } catch (_) { return null; }
+}
+async function postToDailyThread(text) {
+  const thread_ts = await dailyThreadTs();
+  await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false, ...(thread_ts ? { thread_ts } : {}), text });
+}
+
+module.exports = { slackUserId, postToDailyThread, dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
