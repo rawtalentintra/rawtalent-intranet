@@ -2305,22 +2305,21 @@
         <div class="sub" style="margin:4px 0 8px">Log your call or visit first, then complete the touch point.</div>
         <select id="dtpTypeM" style="width:100%;margin-bottom:8px"><option value="call">Call</option><option value="visit">Visit</option></select>
         <label class="sub" style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="dtpFbfM"> First booking free (only if they'll use agency consistently)</label>
-        <input id="dtpDiscountM" type="text" inputmode="decimal" placeholder="Discount agreed $/hr (optional)" style="width:100%;margin-bottom:8px">
-        <textarea id="dtpPricingM" rows="2" placeholder="Pricing discussed (optional)" style="width:100%"></textarea>
-        <div class="sub" style="margin:4px 0 8px">Under $5/hr needs no approval. $5/hr or more goes to Liam.</div>
+        <textarea id="dtpPricingM" rows="3" placeholder="Notes: pricing discussed, any discount agreed (optional)" style="width:100%"></textarea>
+        <div class="sub" style="margin:4px 0 8px">Put any discount in the notes. It goes to Yuvraj to update the Portal.</div>
         <button class="btn btn-primary" style="width:100%" onclick="completeDormantM('${escHtml(c.centreKey)}')">Dormant touch point complete</button>
       </div>`;
     }
     async function completeDormantM(centreKey) {
       const body = { touchpointType: document.getElementById('dtpTypeM').value, firstBookingFree: document.getElementById('dtpFbfM').checked,
-        discountPerHour: document.getElementById('dtpDiscountM').value, pricingNote: document.getElementById('dtpPricingM').value };
+        pricingNote: document.getElementById('dtpPricingM').value, contactNotes: document.getElementById('dtpPricingM').value };
       if (!confirm('Mark the dormant touch point complete?')) return;
       try {
         const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/dormant-touchpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
         const c = allCentres.find(x => x.centreKey === centreKey);
         if (c) { c.dormantNeedsContact = false; c.lastDormantTouchpoint = { at: d.completedAt, by: 'you', firstBookingFree: d.firstBookingFree }; }
-        toast(d.discountNeedsApproval ? 'Done. Discount sent to Liam to approve.' : 'Dormant touch point complete');
+        toast('Dormant touch point complete');
         paintCentreDetail();
       } catch (e) { alert(e.message); }
     }
