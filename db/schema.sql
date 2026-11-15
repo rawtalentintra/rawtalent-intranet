@@ -3176,3 +3176,13 @@ CREATE TABLE IF NOT EXISTS first_booking_alerts (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE first_booking_alerts ENABLE ROW LEVEL SECURITY;
+
+-- Current centre contact noted in HeartBeat (Justine, 13 Nov 2026). HeartBeat never
+-- writes RT; this is shown on Centre Overview and sent to the RT Portal updater.
+CREATE TABLE IF NOT EXISTS centre_contact_overrides (
+  centre_key TEXT PRIMARY KEY,
+  name TEXT, position TEXT, phone TEXT, email TEXT,
+  updated_by_email TEXT, updated_by_name TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE centre_contact_overrides ENABLE ROW LEVEL SECURITY;

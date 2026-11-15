@@ -1289,6 +1289,47 @@ async function claimCentreOnFirstAction(centreKey, user) {
     .catch(err => console.error('First-action claim failed:', err.message));
 }
 
+// Current contact (Justine, 13 Nov 2026: "edit the contacts ... no longer the director").
+// HeartBeat never writes to RT, so this is HeartBeat's own note of who the contact is now,
+// shown on Centre Overview above RT's contact, and sent to the RT Portal updater by Slack
+// so a person updates RT itself.
+router.get('/:centreKey/contact', async (req, res) => {
+  try {
+    const r = (await getDb().execute({ sql: 'SELECT * FROM centre_contact_overrides WHERE centre_key = ?', args: [req.params.centreKey] })).rows[0];
+    res.json(r || null);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.put('/:centreKey/contact', async (req, res) => {
+  if (!req.user || !['admin', 'super_admin', 'workforce_partner'].includes(req.user.role)) return res.status(403).json({ error: 'You do not have access to this' });
+  const clean = v => (v == null ? '' : String(v)).trim().slice(0, 200);
+  const b = req.body || {};
+  const name = clean(b.name), position = clean(b.position), phone = clean(b.phone), email = clean(b.email).toLowerCase();
+  if (!name && !phone && !email) return res.status(400).json({ error: 'Add at least a name, phone or email' });
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'That email address does not look right' });
+  try {
+    const key = req.params.centreKey;
+    const { centres } = await getCentresAndBookings();
+    const c = centres.find(x => x.centreKey === key);
+    await getDb().execute({ sql: `INSERT INTO centre_contact_overrides (centre_key, name, position, phone, email, updated_by_email, updated_by_name, updated_at)
+      VALUES (?,?,?,?,?,?,?, now()) ON CONFLICT (centre_key) DO UPDATE SET name = EXCLUDED.name, position = EXCLUDED.position, phone = EXCLUDED.phone,
+      email = EXCLUDED.email, updated_by_email = EXCLUDED.updated_by_email, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`,
+      args: [key, name || null, position || null, phone || null, email || null, req.user.email, req.user.name || req.user.email] });
+    let rtNotify = 'not_configured';
+    const to = process.env.RT_PORTAL_UPDATE_EMAIL;
+    if (to) {
+      const lines = [
+        `:bust_in_silhouette: *Centre contact changed: ${c ? c.name : key}*`,
+        `Updated by ${req.user.name || req.user.email} in HeartBeat`,
+        `New contact: ${[name, position, phone, email].filter(Boolean).join(' · ')}`,
+        c && `RT currently has: ${[c.contactName, c.contactNo, c.email].filter(Boolean).join(' · ') || 'nothing'}`,
+        'Please update RT Portal.'
+      ].filter(Boolean);
+      rtNotify = (await require('../services/slackService').sendDmByEmail(to, lines.join('\n'))) ? 'sent' : 'failed';
+    }
+    res.json({ ok: true, rtNotify });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/:centreKey/visits', async (req, res) => {
   const {
     visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,

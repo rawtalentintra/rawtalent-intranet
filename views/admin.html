@@ -12839,7 +12839,7 @@
     let dormantLogged = null; // { channel, id }
     function openDormantLogModal(channel) {
       let m = document.getElementById('dormantLogModal');
-      if (!m) { m = document.createElement('div'); m.id = 'dormantLogModal'; m.className = 'modal-overlay'; document.body.appendChild(m); }
+      if (!m) { m = document.createElement('div'); m.id = 'dormantLogModal'; m.className = 'modal-overlay open'; document.body.appendChild(m); }
       const today = new Date().toISOString().slice(0, 10);
       m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;z-index:3000';
       m.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px 22px;width:min(440px,92vw)">
@@ -12965,6 +12965,7 @@
         currentCentreHistory = null;
         loadCentreCategory(centre.centreKey);
         loadTalkingPoints(centre.centreKey);
+        centreContactOverride = null; loadCentreContact();
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
@@ -13080,6 +13081,51 @@
       loadFbf(kind, id, boxId);
     }
 
+    // Current contact noted in HeartBeat (Justine, 13 Nov 2026). RT itself is updated by a person.
+    let centreContactOverride = null;
+    async function loadCentreContact() {
+      const meta = document.getElementById('c360ContactMeta'); if (!meta) return;
+      try {
+        const o = await fetch(`/api/centres/${encodeURIComponent(meta.dataset.key)}/contact`).then(r => r.json());
+        centreContactOverride = o && !o.error ? o : null;
+        if (!centreContactOverride) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.textContent = v; };
+        set('c360ContactName', [o.name, o.position && `(${o.position})`].filter(Boolean).join(' '));
+        set('c360ContactPhone', o.phone); set('c360ContactEmail', o.email);
+        const note = document.createElement('div');
+        note.style.marginTop = '4px';
+        note.textContent = `Updated in HeartBeat by ${o.updated_by_name || o.updated_by_email} on ${fmtShortDate(o.updated_at)}. RT Portal still shows: ${meta.dataset.rt || 'nothing'}.`;
+        meta.prepend(note);
+      } catch (_) { /* keep RT's contact */ }
+    }
+    function openCentreContactEdit() {
+      const meta = document.getElementById('c360ContactMeta'); if (!meta) return;
+      const o = centreContactOverride || {};
+      let m = document.getElementById('centreContactModal');
+      if (!m) { m = document.createElement('div'); m.id = 'centreContactModal'; m.className = 'modal-overlay open'; document.body.appendChild(m); }
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;z-index:3000';
+      const f = (id, label, v, type) => `<label style="font-size:12.5px;display:block;margin-top:8px">${label}<input id="${id}" type="${type || 'text'}" class="form-control" value="${escHtml(v || '')}"></label>`;
+      m.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px 22px;width:min(460px,92vw)">
+        <div style="font-weight:700;color:var(--navy);font-size:16px">Edit centre contact</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Saved in HeartBeat and sent to whoever updates RT Portal. RT currently has: ${escHtml(meta.dataset.rt || 'nothing')}</div>
+        ${f('ccName', 'Name', o.name)}${f('ccPosition', 'Position (e.g. Centre Director)', o.position)}${f('ccPhone', 'Phone', o.phone, 'tel')}${f('ccEmail', 'Email', o.email, 'email')}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button class="btn-secondary" onclick="document.getElementById('centreContactModal').remove()">Cancel</button>
+          <button class="btn-primary" onclick="saveCentreContact()">Save</button></div></div>`;
+    }
+    async function saveCentreContact() {
+      const meta = document.getElementById('c360ContactMeta'); if (!meta) return;
+      const v = id => document.getElementById(id).value.trim();
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(meta.dataset.key)}/contact`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: v('ccName'), position: v('ccPosition'), phone: v('ccPhone'), email: v('ccEmail') }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        document.getElementById('centreContactModal').remove();
+        meta.querySelectorAll('div').forEach(x => x.remove());
+        await loadCentreContact();
+        toast('Contact updated' + (d.rtNotify === 'sent' ? ', RT Portal updater notified' : ''));
+      } catch (e) { alert(e.message); }
+    }
     function renderCentre360(c, bookingsRes, educators, activity) {
       const upcoming = bookingsRes.bookings.filter(b => new Date(b.bookingDate) >= new Date()).length;
       const effectivePartner = c.assignedWorkforcePartner || defaultCentrePartner(c.state, c.suburb);
@@ -13136,10 +13182,13 @@
         <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
           <div class="sd-card-title" style="color:var(--orange)">Overview</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12.5px;overflow-wrap:break-word">
-            <div><span style="color:var(--text-muted)">Contact:</span> ${escHtml(c.contactName || '—')}</div>
-            <div><span style="color:var(--text-muted)">Phone:</span> ${escHtml(c.contactNo || '—')}</div>
-            <div style="overflow-wrap:break-word;word-break:break-word"><span style="color:var(--text-muted)">Email:</span> ${escHtml(c.email || '—')}</div>
+            <div><span style="color:var(--text-muted)">Contact:</span> <span id="c360ContactName">${escHtml(c.contactName || '—')}</span></div>
+            <div><span style="color:var(--text-muted)">Phone:</span> <span id="c360ContactPhone">${escHtml(c.contactNo || '—')}</span></div>
+            <div style="overflow-wrap:break-word;word-break:break-word"><span style="color:var(--text-muted)">Email:</span> <span id="c360ContactEmail">${escHtml(c.email || '—')}</span></div>
             <div><span style="color:var(--text-muted)">Client since:</span> ${c.createdDate ? fmtDate(c.createdDate) : '—'}</div>
+          </div>
+          <div id="c360ContactMeta" data-key="${escHtml(c.centreKey)}" data-rt="${escHtml([c.contactName, c.contactNo, c.email].filter(Boolean).join(' · '))}" style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">
+            ${['admin', 'super_admin', 'workforce_partner'].includes(currentUserRole) ? `<span style="cursor:pointer;color:var(--orange);font-weight:600;text-decoration:underline" onclick="openCentreContactEdit()">Edit contact</span>` : ''}
           </div>
           <div style="margin-top:8px;font-size:12.5px;display:flex;align-items:center;gap:8px">
             <span style="color:var(--text-muted)">Workforce Partner:</span>
