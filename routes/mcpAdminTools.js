@@ -295,58 +295,111 @@ function registerAdminTools(server) {
   });
 
   server.registerTool('get_profitability', {
-    title: 'Booking Profitability (pay rate, charge rate, margin)',
-    description: 'Revenue, educator pay cost, gross profit and margin for filled RT bookings (assigned, accepted, completed) over a day or date range, straight from RT\'s own booking financials: charge rate per hour, pay rate per hour, paid hours, booking revenue, educator pay cost and gross profit. Breaks down by client (centre) or by state, sorted by gross profit, with average pay rate, average charge rate and margin %. Gross profit is charge minus educator pay as RT calculates it; it does NOT include on-costs (super, workers comp, payroll tax). Defaults to today (Melbourne).',
+    title: 'Financial Report: bookings, hours, revenue, wages, contribution, on-costs',
+    description: 'Complete financial totals for ANY date range (no row limit, every booking counted): total bookings split into completed, other filled (assigned/accepted), open, unfilled and cancelled; billable hours; client revenue excluding GST; educator wages; gross contribution and contribution margin; and estimated employment on-costs (superannuation, payroll tax by state, WorkCover when a rate is given) with contribution after on-costs. Only filled bookings (assigned, accepted, completed) are billable: cancelled and unfilled bookings are excluded from revenue because RT records no cancellation charge on them. Figures are RT\'s own booking financials (charge rate x paid hours, pay rate x paid hours). Breakdown by day, client (centre), state or none. Use this, not search_bookings, for any money or totals question. Defaults to today (Melbourne).',
     inputSchema: {
       date: z.string().optional().describe('One day, YYYY-MM-DD (default today)'),
-      from: z.string().optional(), to: z.string().optional().describe('Range end YYYY-MM-DD, exclusive'),
-      groupBy: z.enum(['client', 'state', 'none']).optional().describe('Breakdown, default client'),
-      state: z.string().optional(), limit: z.number().int().min(1).max(200).optional().describe('Rows in the breakdown, default 50')
+      from: z.string().optional().describe('Range start YYYY-MM-DD, inclusive'),
+      to: z.string().optional().describe('Range end YYYY-MM-DD, exclusive (for 1 to 31 October use from 2026-10-01, to 2026-11-01)'),
+      groupBy: z.enum(['day', 'client', 'state', 'none']).optional().describe('Breakdown, default day for ranges and client for one day'),
+      state: z.string().optional(), centreKey: z.string().optional(),
+      completedOnly: z.boolean().optional().describe('Count only completed shifts as billable (default false: assigned + accepted + completed)'),
+      superRate: z.number().min(0).max(100).optional().describe('Superannuation % of wages, default 12'),
+      workcoverRate: z.number().min(0).max(100).optional().describe('WorkCover premium % of wages (no default; RawTalent\'s own rate)'),
+      payrollTaxRate: z.number().min(0).max(100).optional().describe('Override payroll tax % for every state (default uses each state\'s standard rate)'),
+      limit: z.number().int().min(1).max(5000).optional().describe('Rows in the breakdown, default all')
     }
-  }, async ({ date, from, to, groupBy, state, limit }) => {
+  }, async ({ date, from, to, groupBy, state, centreKey, completedOnly, superRate, workcoverRate, payrollTaxRate, limit }) => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(new Date());
     let f, t;
     if (isDay(from) || isDay(to)) { f = isDay(from) ? from : today; t = isDay(to) ? to : null; } else { f = isDay(date) ? date : today; t = null; }
     const { bookings, centres } = await getCentresAndBookings();
     const cByKey = new Map(centres.map(c => [c.centreKey, c]));
     const shortSt = v => ({ victoria: 'VIC', 'south australia': 'SA', queensland: 'QLD', 'new south wales': 'NSW', 'northern territory': 'NT', 'australian capital territory': 'ACT', 'western australia': 'WA', tasmania: 'TAS' })[String(v || '').toLowerCase()] || String(v || 'Unknown').toUpperCase();
-    const rows = bookings.filter(b => {
+    // Standard state payroll tax rates (2025-26). An estimate: it ignores the
+    // annual threshold and grouping, so it assumes RawTalent is above it.
+    const PTAX = { VIC: 4.85, SA: 4.95, QLD: 4.75, NT: 5.5, NSW: 5.45, ACT: 6.85, WA: 5.5, TAS: 4.0 };
+    const sup = superRate == null ? 12 : superRate;
+    const centreOf = b => cByKey.get(`loc:${b.locationId}`) || cByKey.get(`client:${b.clientId}`);
+    const inRange = bookings.filter(b => {
       const d = (b.bookingDate || '').slice(0, 10);
-      if (!d || (t ? (d < f || d >= t) : d !== f) || ![2, 3, 5].includes(b.statusId)) return false;
-      if (state) { const c = cByKey.get(`loc:${b.locationId}`) || cByKey.get(`client:${b.clientId}`); if (shortSt(c && c.state) !== state.toUpperCase()) return false; }
+      if (!d || (t ? (d < f || d >= t) : d !== f)) return false;
+      if (centreKey && `loc:${b.locationId}` !== centreKey && `client:${b.clientId}` !== centreKey) return false;
+      if (state && shortSt(centreOf(b) && centreOf(b).state) !== state.toUpperCase()) return false;
       return true;
     });
     const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
-    const add = (acc, b) => { acc.n++; acc.hours += num(b.paidHours); acc.rev += num(b.bookingRevenue); acc.cost += num(b.educatorPayCost); acc.gp += num(b.grossProfit); acc.pay += num(b.payRate); acc.charge += num(b.chargeRate); return acc; };
-    const blank = () => ({ n: 0, hours: 0, rev: 0, cost: 0, gp: 0, pay: 0, charge: 0 });
-    const total = rows.reduce(add, blank());
-    const money = v => '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const line = (name, a) => `${name}: ${a.n} shifts · ${a.hours.toFixed(1)} h · revenue ${money(a.rev)} · educator pay ${money(a.cost)} · gross profit ${money(a.gp)} · margin ${a.rev ? (a.gp / a.rev * 100).toFixed(1) : '0.0'}% · avg charge ${money(a.n ? a.charge / a.n : 0)}/h · avg pay ${money(a.n ? a.pay / a.n : 0)}/h`;
-    const out = [`Profitability ${t ? `${f} to ${t} (exclusive)` : f}${state ? ' · ' + state.toUpperCase() : ''} (filled bookings only; RT's figures, before on-costs)`, line('TOTAL', total)];
-    const g = groupBy || 'client';
-    if (g !== 'none' && rows.length) {
+    const blank = () => ({ total: 0, completed: 0, filledOther: 0, open: 0, unfilled: 0, cancelled: 0, n: 0, hours: 0, rev: 0, cost: 0, gp: 0, sup: 0, ptax: 0, wc: 0 });
+    const add = (a, b) => {
+      a.total++;
+      const uf = b.statusId === 7 || (b.statusId === 6 && lastCancelReason(b) === 50);
+      if (uf) a.unfilled++; else if (b.statusId === 6) a.cancelled++; else if (b.statusId === 5) a.completed++; else if ([2, 3].includes(b.statusId)) a.filledOther++; else a.open++;
+      const billable = completedOnly ? b.statusId === 5 : [2, 3, 5].includes(b.statusId);
+      if (!billable) return;
+      const st = shortSt(centreOf(b) && centreOf(b).state);
+      const wage = num(b.educatorPayCost);
+      a.n++; a.hours += num(b.paidHours); a.rev += num(b.bookingRevenue); a.cost += wage; a.gp += num(b.bookingRevenue) - wage;
+      a.sup += wage * sup / 100;
+      a.ptax += wage * (payrollTaxRate != null ? payrollTaxRate : (PTAX[st] || 0)) / 100;
+      if (workcoverRate != null) a.wc += wage * workcoverRate / 100;
+    };
+    const total = blank(); inRange.forEach(b => add(total, b));
+    const money = v => (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const pct = (x, y) => (y ? (x / y * 100).toFixed(1) + '%' : 'n/a');
+    const on = a => a.sup + a.ptax + a.wc;
+    const line = (name, a) => `${name}: ${a.total} bookings (${a.completed} completed, ${a.filledOther} assigned/accepted, ${a.open} open, ${a.unfilled} unfilled, ${a.cancelled} cancelled) · ${a.n} billable · ${a.hours.toFixed(2)} h · revenue ex GST ${money(a.rev)} · wages ${money(a.cost)} · contribution ${money(a.gp)} (${pct(a.gp, a.rev)}) · on-costs ${money(on(a))} · after on-costs ${money(a.gp - on(a))} (${pct(a.gp - on(a), a.rev)})`;
+    const label = t ? `${f} to ${t} (exclusive)` : f;
+    const out = [
+      `FINANCIAL REPORT ${label}${state ? ' · ' + state.toUpperCase() : ''}${centreKey ? ' · ' + centreKey : ''}`,
+      `Complete: every one of the ${inRange.length} bookings in this period is counted, nothing truncated.`,
+      '',
+      `Total bookings: ${total.total}`,
+      `  Completed: ${total.completed}`,
+      `  Filled, not yet completed (assigned/accepted): ${total.filledOther}`,
+      `  Open (no educator yet, incl. requested): ${total.open}`,
+      `  Unfilled: ${total.unfilled}`,
+      `  Cancelled: ${total.cancelled}`,
+      `Billable bookings: ${total.n} (${completedOnly ? 'completed only' : 'assigned + accepted + completed'}; cancelled and unfilled excluded, RT records no cancellation charge)`,
+      `Billable hours: ${total.hours.toFixed(2)}`,
+      `Client revenue (ex GST): ${money(total.rev)}`,
+      `Educator wages: ${money(total.cost)}`,
+      `Gross contribution: ${money(total.gp)}`,
+      `Contribution margin: ${pct(total.gp, total.rev)}`,
+      `Employment on-costs (estimate): ${money(on(total))}`,
+      `  Superannuation ${sup}%: ${money(total.sup)}`,
+      `  Payroll tax (${payrollTaxRate != null ? payrollTaxRate + '% all states' : 'state rates VIC 4.85, SA 4.95, QLD 4.75, NT 5.5, NSW 5.45'}; ignores the annual threshold): ${money(total.ptax)}`,
+      `  WorkCover: ${workcoverRate != null ? `${workcoverRate}%: ${money(total.wc)}` : 'not included (pass workcoverRate, RawTalent\'s premium %)'}`,
+      `Contribution after on-costs: ${money(total.gp - on(total))} (${pct(total.gp - on(total), total.rev)})`,
+      `Average charge rate ${money(total.hours ? total.rev / total.hours : 0)}/h · average pay rate ${money(total.hours ? total.cost / total.hours : 0)}/h`
+    ];
+    const g = groupBy || (t ? 'day' : 'client');
+    if (g !== 'none' && inRange.length) {
       const by = new Map();
-      for (const b of rows) {
-        const c = cByKey.get(`loc:${b.locationId}`) || cByKey.get(`client:${b.clientId}`);
-        const k = g === 'state' ? shortSt(c && c.state) : (b.locationName || b.clientName || (c && c.name) || `centre ${b.locationId || b.clientId}`);
+      for (const b of inRange) {
+        const c = centreOf(b);
+        const k = g === 'day' ? (b.bookingDate || '').slice(0, 10) : g === 'state' ? shortSt(c && c.state) : (b.locationName || b.clientName || (c && c.name) || `centre ${b.locationId || b.clientId}`);
         if (!by.has(k)) by.set(k, blank());
         add(by.get(k), b);
       }
-      out.push('', `By ${g} (highest gross profit first):`, ...[...by.entries()].sort((a, b) => b[1].gp - a[1].gp).slice(0, limit || 50).map(([k, a]) => line('• ' + k, a)));
+      const rows = [...by.entries()].sort((a, b) => (g === 'day' ? a[0].localeCompare(b[0]) : b[1].gp - a[1].gp));
+      const shown = rows.slice(0, limit || rows.length);
+      out.push('', `By ${g}${g === 'day' ? '' : ' (highest contribution first)'}${shown.length < rows.length ? `, top ${shown.length} of ${rows.length}` : ''}:`, ...shown.map(([k, a]) => line('• ' + k, a)));
     }
+    out.push('', 'Source: RT bookings (refreshed every few minutes). Revenue and wages are RT\'s booking financials; on-costs are HeartBeat estimates.');
     return text(out.join('\n'));
   });
 
   server.registerTool('search_bookings', {
     title: 'Search Bookings',
-    description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Returns up to 1000 rows (default 500) and always states the full number matched first. For totals and money, get_bookings_summary and get_profitability are faster and exact.',
+    description: 'List individual RT bookings (shifts) with date, start and finish time, hours, centre, educator and RT Portal status. Filter by centreKey (from search_centres), status and a shift-date range (YYYY-MM-DD, "to" exclusive). Statuses as RT Portal names them: created (no educator yet), assigned, accepted, completed (these three = filled), cancelled, unfilled. Paginated: up to 5000 rows per call (default 1000) with offset for the next page, and the full number matched is always stated first. For totals and money, use get_profitability (full financial report) or get_bookings_summary: they count every booking with no limit.',
     inputSchema: {
       centreKey: z.string().optional(),
       status: z.enum(['filled', 'created', 'requested', 'assigned', 'accepted', 'completed', 'cancelled', 'unfilled']).optional().describe('filled = assigned + accepted + completed (an educator is on it); created = no educator yet'),
       from: z.string().optional(), to: z.string().optional(),
-      limit: z.number().int().min(1).max(1000).optional().describe('Max rows, default 500. The reply always states the full total.')
+      limit: z.number().int().min(1).max(5000).optional().describe('Max rows per page, default 1000. The reply always states the full total.'),
+      offset: z.number().int().min(0).optional().describe('Skip this many rows (pagination: use the next offset the reply gives)')
     }
-  }, async ({ centreKey, status, from, to, limit }) => {
+  }, async ({ centreKey, status, from, to, limit, offset }) => {
     const { bookings, centres } = await getCentresAndBookings();
     const wanted = status ? { created: 1, requested: 11, assigned: 2, accepted: 3, completed: 5, cancelled: 6, unfilled: 7, filled: -1 }[status] : null;
     const nameByKey = new Map(centres.map(c => [c.centreKey, c.name]));
@@ -363,10 +416,12 @@ function registerAdminTools(server) {
       return true;
     }).sort((a, b) => String(b.bookingDate).localeCompare(String(a.bookingDate)));
     const total = matched.length;
-    const rows = matched.slice(0, limit || 500);
-    if (!rows.length) return text('No bookings matched.');
+    const start = offset || 0;
+    const rows = matched.slice(start, start + (limit || 1000));
+    if (!rows.length) return text(total ? `${total} booking(s) matched; offset ${start} is past the end.` : 'No bookings matched.');
+    const more = start + rows.length < total;
     const hm = t => (t ? String(t).slice(11, 16) : '?');
-    return text(`${total} booking(s) matched${total > rows.length ? `, showing the first ${rows.length} (use get_bookings_summary or get_profitability for totals)` : ' (complete list)'}:\n` + rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${b.statusId === 6 ? (c => (c.group === 'unfilled' ? 'Unfilled' : `Cancelled: ${cancelReasons.GROUP_LABELS[c.group]} · ${c.reason}`))(cancelReasons.classify(b)) : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
+    return text(`${total} booking(s) matched, showing ${start + 1} to ${start + rows.length}${more ? `. MORE ROWS: call again with offset ${start + rows.length} to get the next page (for totals and money use get_profitability, which counts every booking)` : ' (complete list)'}:\n` + rows.map(b => `• ${(b.bookingDate || '').slice(0, 10)} ${hm(b.startTime)}-${hm(b.endTime)}${b.paidHours ? ` (${b.paidHours}h paid)` : ''}${b.chargeRate ? ` · charge $${b.chargeRate}/h, pay $${b.payRate}/h` : ''} · ${nameByKey.get(`loc:${b.locationId}`) || nameByKey.get(`client:${b.clientId}`) || `centre ${b.locationId || b.clientId}`} · ${b.statusId === 6 ? (c => (c.group === 'unfilled' ? 'Unfilled' : `Cancelled: ${cancelReasons.GROUP_LABELS[c.group]} · ${c.reason}`))(cancelReasons.classify(b)) : (STATUS_NAMES[b.statusId] || 'status ' + b.statusId)}${b.assignedCandidateName ? ' · ' + b.assignedCandidateName : ''} (booking ${b.clientBookingId})`).join('\n'));
   });
 
   // ── JobAdder (read-only) ──────────────────────────────────────────────
