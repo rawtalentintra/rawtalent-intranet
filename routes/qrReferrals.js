@@ -142,7 +142,8 @@ router.use((req, res, next) => {
 
 const OB_STEPS = ['Register', 'About Us', 'Profile Image', 'Experience', 'Emergency Contact', 'Qualification Level', 'Reference', 'Visa', 'Finance', 'Tax', 'Documents', 'Completed'];
 
-router.get('/attempts', async (req, res) => {
+// Form attempts: Joy only (super_admin), 16 Nov 2026.
+router.get('/attempts', (req, res, next) => req.user.role === 'super_admin' ? next() : res.status(403).json({ error: 'You do not have access to this' }), async (req, res) => {
   try { res.json((await getDb().execute({ sql: 'SELECT id, at, outcome, reason, key_sent, fields, origin, user_agent, referral_id FROM qr_referral_attempts ORDER BY at DESC LIMIT 30', args: [] })).rows); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });

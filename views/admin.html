@@ -1161,11 +1161,14 @@
         <div id="qrError" style="display:none;padding:12px 16px;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:13px;margin-bottom:16px"></div>
         <div id="qrBody" style="display:none">
           <div id="qrNotice"></div>
-          <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
-            <div class="sd-card-title">Form attempts</div>
-            <div class="sd-card-sub">Every time the landing page (or a test) tried to send a registration, including refused ones and why. The form key itself is never stored.</div>
+          <!-- Form attempts: Joy only (super_admin), collapsed by default (Joy, 16 Nov 2026). -->
+          <details id="qrAttemptsCard" class="admin-table-card" style="display:none;padding:16px 24px;margin-bottom:20px">
+            <summary style="cursor:pointer;list-style:revert">
+              <span class="sd-card-title" style="display:inline">Form attempts</span> <span id="qrAttemptsCount" style="font-size:12px;color:var(--text-muted)"></span>
+              <div class="sd-card-sub">Every time the landing page (or a test) tried to send a registration, including refused ones and why. The form key itself is never stored. Only you can see this.</div>
+            </summary>
             <div id="qrAttempts" style="margin-top:12px;font-size:13px;color:var(--text-muted)">Loading…</div>
-          </div>
+          </details>
           <div class="admin-table-card" style="padding:20px 24px;margin-bottom:20px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
               <div>
@@ -11212,8 +11215,13 @@
     }
     async function loadQrAttempts() {
       const box = document.getElementById('qrAttempts');
+      const card = document.getElementById('qrAttemptsCard');
+      if (currentUserRole !== 'super_admin') { if (card) card.style.display = 'none'; return; }
+      if (card) card.style.display = 'block';
       try {
         const rows = await fetch('/api/qr-referrals/attempts').then(r => r.json());
+        const cnt = document.getElementById('qrAttemptsCount');
+        if (cnt) cnt.textContent = Array.isArray(rows) ? `(${rows.length} most recent${rows.some(r => r.outcome !== 'saved') ? ', includes refused' : ''})` : '';
         if (!Array.isArray(rows) || !rows.length) { box.textContent = 'No attempts yet. Nothing has reached HeartBeat from the form.'; return; }
         const label = { saved: ['Saved', '#15803d'], refused_key: ['Refused: form key', '#b91c1c'], refused_fields: ['Refused: missing or invalid details', '#b45309'], error: ['Error while saving', '#b91c1c'] };
         box.innerHTML = `<div style="overflow-x:auto"><table class="data-table data-table-compact"><thead><tr><th>When</th><th>Result</th><th>Why</th><th>Key sent</th><th>Fields received</th><th>From</th></tr></thead><tbody>${rows.map(r => {
