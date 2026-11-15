@@ -1581,7 +1581,7 @@
         </div>
         <div class="wx-sub">Centres they named (${g.leads.length})</div>
         ${g.leads.map(washCardHtml).join('')}
-        ${washAddOpen === g.key ? washAddFormHtml(g) : `<button type="button" class="wx-add" data-key="${keyAttr}" onclick="washAddOpen=this.dataset.key;renderWash()">+ Add a centre they mentioned</button>`}</div>`;
+        ${washAddOpen === g.key ? washAddFormHtml(g) : `<button type="button" class="wx-add" data-key="${keyAttr}" onclick="washAddOpen=this.dataset.key;renderWash()">+ Add Centre</button>`}</div>`;
     }
     // Centre the educator mentions on the call (Liam, 6 Nov): created as a normal lead
     // through the New Lead form's rules, then shown here linked to the educator.
@@ -1594,7 +1594,7 @@
         <label>State<select id="wa-state">${['VIC', 'SA', 'QLD', 'NT', 'ACT', 'NSW', 'WA', 'TAS'].map(s => `<option>${s}</option>`).join('')}</select></label>
         <label>Centre phone<input id="wa-phone"></label>
         <label>Agency usage<select id="wa-agency"><option value="high_agency_user">High agency user</option><option value="target_temp">Target temp</option></select></label>
-        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center"><button type="button" class="btn-primary" style="width:auto;padding:8px 16px" data-key="${escHtml(g.key)}" onclick="washAddCentre(this.dataset.key)">Add centre</button><button type="button" class="btn-secondary" onclick="washAddOpen=null;renderWash()">Cancel</button><span id="wa-msg" style="font-size:12px;color:var(--text-muted)"></span></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center"><button type="button" class="btn-primary" style="width:auto;padding:8px 16px" data-key="${escHtml(g.key)}" onclick="washAddCentre(this.dataset.key)">Add Centre</button><button type="button" class="btn-secondary" onclick="washAddOpen=null;renderWash()">Cancel</button><span id="wa-msg" style="font-size:12px;color:var(--text-muted)"></span></div>
       </div>`;
     }
     async function washAddCentre(key) {
