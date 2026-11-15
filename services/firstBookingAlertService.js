@@ -86,11 +86,21 @@ async function sendEmail(to, subject, html) {
   } catch (err) { console.error('First booking alert email error:', err.message); return 'error'; }
 }
 
-function emailHtml(lines, link) {
+// RT's backoffice has no shareable per-booking URL (its Booking Details page only opens
+// from inside the app; a direct link loads blank), so the email links to the backoffice and
+// gives the Booking ID to search in Bookings.
+const RT_BACKOFFICE_URL = 'https://backoffice.rawtalent.com.au/';
+function firstBookingEmail({ ownerName, centreName, when, bookedBy, status, bookingId, heartbeatLink }) {
+  const p = t => `<p style="margin:0 0 12px">${t}</p>`;
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#21275D;max-width:560px">
-${lines.map(l => `<p style="margin:0 0 12px">${l}</p>`).join('\n')}
-<p style="margin:18px 0 0"><a href="${link}" style="color:#0369a1">Open the centre in HeartBeat</a></p>
-<p style="margin:18px 0 0;font-size:12px;color:#6b7280">Sent automatically by HeartBeat to the centre's Workforce Partner. Internal only.</p></div>`;
+${p(`Hi ${esc(ownerName)},`)}
+${p(`Please be notified that your centre, <strong>${esc(centreName)}</strong>, has made its first booking.`)}
+${p(`<strong>Shift:</strong> ${esc(when)}${bookedBy ? `<br><strong>Booked by:</strong> ${esc(bookedBy)}` : ''}<br><strong>Status:</strong> ${esc(status || 'Open')}<br><strong>Booking ID:</strong> ${esc(bookingId)}`)}
+<p style="margin:18px 0 12px"><a href="${RT_BACKOFFICE_URL}" style="display:inline-block;background:#21275D;color:#ffffff;text-decoration:none;font-weight:bold;padding:10px 18px;border-radius:6px">View the booking in RawTalent Portal</a></p>
+${p(`<span style="font-size:13px;color:#6b7280">In the Portal, go to Bookings and search for booking ${esc(bookingId)}.</span>`)}
+${p(`You'll get another message when it's filled, and a task to call them the morning after the shift.`)}
+${heartbeatLink ? p(`<a href="${heartbeatLink}" style="color:#0369a1">Open ${esc(centreName)} in HeartBeat</a>`) : ''}
+<p style="margin:18px 0 0;font-size:12px;color:#6b7280">Sent automatically by HeartBeat. Internal only.</p></div>`;
 }
 
 async function slackDm(email, text, mrkdwn) {
@@ -155,12 +165,7 @@ async function check() {
       const link = `${APP_URL}/admin?centre=${encodeURIComponent(c.centreKey)}`;
       const ins = await db.execute({ sql: "INSERT INTO first_booking_alerts (centre_key, centre_name, booking_id, booking_date, owner_name, owner_email, status, created_alert_at) VALUES (?,?,?,?,?,?, 'created', now()) ON CONFLICT (centre_key) DO NOTHING RETURNING centre_key", args: [c.centreKey, c.name, String(b.clientBookingId), d.day || null, own.name, own.email] });
       if (!ins.rows.length) continue; // another instance got it first
-      const emailStatus = await sendEmail(own.email, `First booking: ${c.name}`, emailHtml([
-        `Hi ${esc(own.name)},`,
-        `<strong>${esc(c.name)}</strong> has just made their <strong>first booking</strong> with Raw Talent.`,
-        `Shift: ${esc(d.when)}${d.by ? `<br>Booked by: ${esc(d.by)}` : ''}<br>Status: ${esc(b.bookingStatus || 'Open')}`,
-        `You'll get another message when it's filled, and a task to call them the morning after the shift.`
-      ], link));
+      const emailStatus = await sendEmail(own.email, `First booking: ${c.name}`, firstBookingEmail({ ownerName: own.name, centreName: c.name, when: d.when, bookedBy: d.by, status: b.bookingStatus, bookingId: b.clientBookingId, heartbeatLink: link }));
       const dm = await slackDm(own.email, `First booking: ${c.name}`, `:tada: *First booking: ${esc(c.name)}*\nShift: ${esc(d.when)}${d.by ? ` · booked by ${esc(d.by)}` : ''}\nYou'll get a message when it's filled. <${link}|Open in HeartBeat>`);
       await opsPost(`:tada: *First booking:* ${esc(c.name)} (${esc(own.name)}'s centre). Shift ${esc(d.when)}. Let's make sure it's filled.`);
       await db.execute({ sql: 'UPDATE first_booking_alerts SET email_status = ?, slack_dm = ? WHERE centre_key = ?', args: [emailStatus, dm, c.centreKey] });
@@ -199,4 +204,4 @@ function run() {
   return running;
 }
 
-module.exports = { run, check, sendEmail, morningAfter, describe, firstOf };
+module.exports = { run, check, sendEmail, firstBookingEmail, morningAfter, describe, firstOf };

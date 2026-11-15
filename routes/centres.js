@@ -731,7 +731,7 @@ const DORMANT_LIST_VIEWERS = ['gwen@rawtalent.com.au', 'justine@rawtalent.com.au
 router.post('/first-booking-alert/test', async (req, res) => {
   if (!req.user || req.user.role !== 'super_admin') return res.status(403).json({ error: 'You do not have access to this' });
   const fba = require('../services/firstBookingAlertService');
-  const email = await fba.sendEmail(req.user.email, 'TEST First booking: Sample Centre', '<p>This is a test of the HeartBeat first booking alert email. Real alerts go to the centre\'s Workforce Partner.</p>');
+  const email = await fba.sendEmail(req.user.email, 'TEST First booking: Sample Centre', fba.firstBookingEmail({ ownerName: (req.user.name || 'there').split(' ')[0], centreName: 'Sample Centre', when: 'Thursday 20 November, 8:30am to 5:00pm', bookedBy: 'Sample Director', status: 'Open', bookingId: '123456', heartbeatLink: 'https://rawtalent-internal.app/admin' }));
   const dm = await require('../services/slackService').sendDmByEmail(req.user.email, 'TEST First booking alert', [{ type: 'section', text: { type: 'mrkdwn', text: ':tada: *TEST First booking: Sample Centre*\nThis is what the centre owner gets.' } }]);
   res.json({ email, slackDm: dm });
 });
