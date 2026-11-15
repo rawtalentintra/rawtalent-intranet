@@ -3186,3 +3186,9 @@ CREATE TABLE IF NOT EXISTS centre_contact_overrides (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE centre_contact_overrides ENABLE ROW LEVEL SECURITY;
+-- Morning-after follow-up (Liam, 11 Nov 2026): status 'followup' until a call/visit is logged.
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS followup_due DATE;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS followup_done_at TIMESTAMPTZ;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS followup_by TEXT;

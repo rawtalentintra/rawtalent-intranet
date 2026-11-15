@@ -517,6 +517,9 @@ router.get('/', async (req, res) => {
     }));
     // Dormant call list (Liam, 19 Oct): 6+ months since the last booking, and
     // whether a dormant touch point has been done since. See dormantService.
+    // Morning-after first booking call still open (Liam, 11 Nov 2026) -> Urgent on Today.
+    const fbFollow = await require('../services/firstBookingAlertService').openFollowUps().catch(() => ({}));
+    for (const c of withHealth) if (fbFollow[c.centreKey]) c.firstBookingFollowUp = fbFollow[c.centreKey];
     res.json(await require('../services/dormantService').annotateDormancy(withHealth, lastBookingByCentreKey));
   } catch (err) {
     res.status(502).json({ error: err.message });

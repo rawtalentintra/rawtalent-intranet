@@ -119,21 +119,81 @@ async function opsPost(mrkdwn) {
   } catch (err) { console.error('First booking alert Ops post failed:', err.message); return false; }
 }
 
+const melNow = () => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map(p => [p.type, p.value]));
+  return { day: `${parts.year}-${parts.month}-${parts.day}`, hm: `${parts.hour}:${parts.minute}` };
+};
+const REMINDER_AT = '07:30';   // Melbourne, on the morning the call is due
+const ESCALATE_AT = '12:00';   // not logged by midday -> Liam + Ops hear about it
+const ESCALATE_TO = ['liam@rawtalent.com.au'];
+
+const CALL_SCRIPT = `On the call:\n• Ask how the booking went and how the educator did.\n• If it went well, show them how to favourite and request that educator in the Portal.\n• Ask them to rate the educator Positive in the Portal (that rating is what starts the feedback emails).\n• Log the call (or visit) on the centre in HeartBeat. That closes this task automatically.`;
+
 async function createFollowUpTask(row, own, b) {
   const d = describe(b);
-  const due = morningAfter(d.day);
+  const today = melNow().day;
+  const due = [morningAfter(d.day), today].sort().pop(); // filled late -> due today
   const taskId = uuidv4();
   await getDb().execute({
     sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
-          VALUES (?, 'management', ?, ?, ?, 'to_do', 'high', ?, ?, 'system@rawtalent.internal', 'Auto — First booking', '[]', '[]', ?)`,
-    args: [taskId, CLIENT_FOLLOW_UP, `Call ${row.centre_name}: how was their first booking?`,
+          VALUES (?, 'management', ?, ?, ?, 'to_do', 'urgent', ?, ?, 'system@rawtalent.internal', 'Auto — First booking', '[]', '[]', ?)`,
+    args: [taskId, CLIENT_FOLLOW_UP, `URGENT: Call ${row.centre_name} the morning after their first booking`,
       `${row.centre_name} had their first ever booking on ${d.when}${d.educator ? `, filled by ${d.educator}` : ''}.\n\n` +
-      `Please call them on the morning of ${niceDate(due)} (the morning after the shift). This first call is the moment that builds the relationship.\n\n` +
-      `On the call:\n• Ask how the booking went and how the educator did.\n• If it went well, show them how to favourite and request that educator in the Portal.\n• Ask them to rate the educator Positive in the Portal (that rating is what starts the feedback emails).\n• Log the call on the centre in HeartBeat.`,
+      `Call them on the morning of ${niceDate(due)}. Not two days later: the morning after the shift. This is the most important follow-up in the whole relationship (Liam).\n\n` + CALL_SCRIPT,
       JSON.stringify([own.email]), due, JSON.stringify([{ centreKey: row.centre_key, name: row.centre_name }])]
   });
   try { await require('./slackService').notifyTaskTagged(taskId, [own.email], 'assigned to'); } catch (_) { /* best effort */ }
-  return taskId;
+  return { taskId, due };
+}
+
+// Morning-after follow-up (Liam, 11 Nov 2026, Fathom 897427111): reminder at 7:30am on
+// the due morning, done as soon as anyone logs a completed call/visit on that centre
+// from the shift day on (or the task is ticked), Liam + Ops told at midday if not.
+async function followUps() {
+  const db = getDb();
+  const rows = (await db.execute({ sql: "SELECT * FROM first_booking_alerts WHERE status = 'followup'", args: [] })).rows;
+  const now = melNow();
+  const out = { done: 0, reminded: 0, escalated: 0 };
+  for (const r of rows) {
+    const shiftDay = r.booking_date ? String(r.booking_date instanceof Date ? r.booking_date.toISOString() : r.booking_date).slice(0, 10) : null;
+    const due = String(r.followup_due instanceof Date ? r.followup_due.toISOString() : r.followup_due).slice(0, 10);
+    const logged = (await db.execute({ sql: `SELECT created_by_name, created_by_email, channel, visit_date FROM centre_visits
+        WHERE centre_key = ? AND status = 'completed' AND (visit_date AT TIME ZONE 'Australia/Melbourne')::date >= ?::date ORDER BY visit_date LIMIT 1`, args: [r.centre_key, shiftDay || due] })).rows[0];
+    const task = r.task_id ? (await db.execute({ sql: 'SELECT status FROM tasks WHERE id = ?', args: [r.task_id] })).rows[0] : null;
+    if (logged || (task && task.status === 'done')) {
+      await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'done', followup_done_at = now(), followup_by = ? WHERE centre_key = ?", args: [logged ? (logged.created_by_name || logged.created_by_email) : 'task ticked', r.centre_key] });
+      if (logged && task && task.status !== 'done') await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now() WHERE id = ?", args: [r.task_id] });
+      out.done++; continue;
+    }
+    const taskLink = `${APP_URL}/?tab=tasks&task=${r.task_id}`;
+    if (!r.reminder_sent_at && (now.day > due || (now.day === due && now.hm >= REMINDER_AT))) {
+      const first = String(r.owner_name || '').split(' ')[0] || 'there';
+      await slackDm(r.owner_email, `Call ${r.centre_name} this morning`, `:telephone_receiver: *Call ${esc(r.centre_name)} this morning.* Their first booking was ${esc(niceDate(shiftDay))}.\nAsk how it went, show them favourite/request, and ask them to rate the educator Positive in the Portal. Log the call in HeartBeat and this clears. <${taskLink}|Open task>`);
+      await sendEmail(r.owner_email, `Call ${r.centre_name} this morning`, `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#21275D;max-width:560px">
+<p>Hi ${esc(first)},</p><p>Please call <strong>${esc(r.centre_name)}</strong> this morning. Their first booking was ${esc(niceDate(shiftDay))}, and this call is the most important follow-up in the relationship.</p>
+<p>On the call:</p><ul><li>Ask how the booking went and how the educator did.</li><li>If it went well, show them how to favourite and request that educator in the Portal.</li><li>Ask them to rate the educator Positive in the Portal.</li></ul>
+<p>Log the call (or visit) on the centre in HeartBeat and the task closes itself.</p>
+<p><a href="${taskLink}" style="color:#0369a1">Open the task in HeartBeat</a></p>
+<p style="font-size:12px;color:#6b7280">Sent automatically by HeartBeat. Internal only.</p></div>`);
+      await db.execute({ sql: 'UPDATE first_booking_alerts SET reminder_sent_at = now() WHERE centre_key = ?', args: [r.centre_key] });
+      out.reminded++;
+    }
+    if (!r.escalated_at && (now.day > due || (now.day === due && now.hm >= ESCALATE_AT))) {
+      const msg = `:rotating_light: *Morning-after call not logged yet: ${esc(r.centre_name)}* (${esc(r.owner_name)}'s centre). First booking was ${esc(niceDate(shiftDay))}; the call was due this morning. <${taskLink}|Open task>`;
+      for (const e of ESCALATE_TO) await slackDm(e, `Morning-after call not logged: ${r.centre_name}`, msg);
+      await opsPost(msg);
+      await db.execute({ sql: 'UPDATE first_booking_alerts SET escalated_at = now() WHERE centre_key = ?', args: [r.centre_key] });
+      out.escalated++;
+    }
+  }
+  return out;
+}
+
+// For Today on /wfp and Centre 360: centres whose morning-after call is still open.
+async function openFollowUps() {
+  const rows = (await getDb().execute({ sql: "SELECT centre_key, centre_name, booking_date, followup_due, owner_name, task_id, escalated_at FROM first_booking_alerts WHERE status = 'followup'", args: [] })).rows;
+  const ymd = v => v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : null;
+  return Object.fromEntries(rows.map(r => [r.centre_key, { shiftDate: ymd(r.booking_date), due: ymd(r.followup_due), owner: r.owner_name, taskId: r.task_id, escalated: !!r.escalated_at }]));
 }
 
 async function check() {
@@ -148,7 +208,7 @@ async function check() {
 
   for (const c of centres) {
     const row0 = known.get(c.centreKey);
-    if (row0 && (row0.status === 'baseline' || row0.status === 'done')) continue;
+    if (row0 && row0.status !== 'created') continue;
     if (!row0 && !(new Date(c.createdDate).getTime() >= cutoff)) continue;
     const mine = bookingsFor(c, bookings);
     const b = firstOf(mine);
@@ -181,10 +241,10 @@ async function check() {
     const d = describe(cur);
     if (FILLED_STATUSES.has(cur.statusId) && isReal(cur.assignedUserId)) {
       // 2. Filled
-      const taskId = await createFollowUpTask(row, own, cur);
-      await slackDm(own.email, `First booking filled: ${row.centre_name}`, `:white_check_mark: *First booking filled: ${esc(row.centre_name)}*\n${esc(d.when)}${d.educator ? ` · ${esc(d.educator)}` : ''}\nYou have a task to call them the morning after: <${APP_URL}/?tab=tasks&task=${taskId}|open task>`);
-      await opsPost(`:white_check_mark: *First booking filled:* ${esc(row.centre_name)}, ${esc(d.when)}${d.educator ? `, ${esc(d.educator)}` : ''}.`);
-      await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'done', filled_alert_at = now(), task_id = ? WHERE centre_key = ?", args: [taskId, c.centreKey] });
+      const { taskId, due } = await createFollowUpTask(row, own, cur);
+      await slackDm(own.email, `First booking filled: ${row.centre_name}`, `:white_check_mark: *First booking filled: ${esc(row.centre_name)}*\n${esc(d.when)}${d.educator ? ` · ${esc(d.educator)}` : ''}\n*Call them on the morning of ${esc(niceDate(due))}.* You'll get a reminder that morning. <${APP_URL}/?tab=tasks&task=${taskId}|Open task>`);
+      await opsPost(`:white_check_mark: *First booking filled:* ${esc(row.centre_name)}, ${esc(d.when)}${d.educator ? `, ${esc(d.educator)}` : ''}. ${esc(own.name)} calls them the morning of ${esc(niceDate(due))}.`);
+      await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'followup', filled_alert_at = now(), task_id = ?, followup_due = ? WHERE centre_key = ?", args: [taskId, due, c.centreKey] });
       out.filled++;
     } else if (DEAD_STATUSES.has(cur.statusId)) {
       // 3. Cancelled / unfilled before it was filled
@@ -200,8 +260,8 @@ async function check() {
 let running = null;
 function run() {
   if (running) return running;
-  running = check().catch(err => { console.error('First booking alert check failed:', err.message); return { error: err.message }; }).finally(() => { running = null; });
+  running = check().then(async r => ({ ...r, followUps: await followUps() })).catch(err => { console.error('First booking alert check failed:', err.message); return { error: err.message }; }).finally(() => { running = null; });
   return running;
 }
 
-module.exports = { run, check, sendEmail, firstBookingEmail, morningAfter, describe, firstOf };
+module.exports = { run, check, followUps, openFollowUps, melNow, sendEmail, firstBookingEmail, morningAfter, describe, firstOf };

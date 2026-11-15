@@ -1289,6 +1289,8 @@
                Rate here, this page has nothing to do with new leads.
                Fixed to "This Month" (no period selector on this page to
                tie it to) — see renderMyCentresActivityKpis. -->
+          <!-- Morning-after first booking calls (Liam, 11 Nov 2026): urgent, above everything. -->
+          <div id="myCentresUrgent"></div>
           <div class="kpi-row" id="myCentresKpiRow" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px"></div>
 
           <div class="admin-table-card" style="padding:16px 20px;margin-bottom:16px">
@@ -12405,6 +12407,7 @@
       const body = document.getElementById('myCentresTableBody');
       try {
         myCentresData = await fetch('/api/centres').then(r => r.json());
+        renderFirstBookingFollowUps();
         await ensureCentreActivityLogLoaded();
         populateCentresStateFilter();
         populateCentresSuburbFilter();
@@ -12421,6 +12424,25 @@
       }
     }
 
+    // Morning-after call after a centre's first booking (Liam, 11 Nov 2026): "this is the
+    // most pivotal part of the relationship ... literally the next day". Partners see their
+    // own; admins see all with the owner's name. Clears once a call/visit is logged.
+    function renderFirstBookingFollowUps() {
+      const box = document.getElementById('myCentresUrgent'); if (!box) return;
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
+      let rows = (myCentresData || []).filter(c => c.firstBookingFollowUp);
+      if (currentUserRole === 'workforce_partner' && currentUserWfpLabel) rows = rows.filter(c => c.firstBookingFollowUp.owner === currentUserWfpLabel);
+      if (!rows.length) { box.innerHTML = ''; return; }
+      rows.sort((a, b) => a.firstBookingFollowUp.due.localeCompare(b.firstBookingFollowUp.due));
+      box.innerHTML = `<div class="admin-table-card" style="padding:14px 18px;margin-bottom:16px;border:2px solid #dc2626;background:#fef2f2">
+        <div style="font-weight:800;color:#b91c1c;font-size:14.5px">Urgent: morning-after calls after a first booking (${rows.length})</div>
+        <div style="font-size:12.5px;color:#7f1d1d;margin:2px 0 8px">Call the morning after the shift. Ask how it went, show them favourite/request, and ask them to rate the educator Positive in the Portal. Log the call and it clears.</div>
+        ${rows.map(c => { const f = c.firstBookingFollowUp; const when = f.due > today ? `${fmtShortDate(f.due)} morning` : f.due === today ? 'this morning' : `overdue (was ${fmtShortDate(f.due)})`;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid #fecaca;font-size:13px">
+            <span><a href="javascript:void(0)" onclick="goToCentre360('${escHtml(c.centreKey)}')" style="font-weight:700;color:var(--navy)">${escHtml(c.name)}</a> · first booking ${fmtShortDate(f.shiftDate)}${currentUserRole !== 'workforce_partner' ? ` · ${escHtml(f.owner || '')}` : ''}</span>
+            <span style="font-weight:700;color:${f.due < today ? '#b91c1c' : '#b45309'}">Call ${when}</span></div>`; }).join('')}
+      </div>`;
+    }
     function populateCentresSuburbFilter() {
       const select = document.getElementById('centresFilterSuburb');
       const current = select.value;

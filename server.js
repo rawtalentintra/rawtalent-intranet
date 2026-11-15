@@ -660,7 +660,7 @@ async function start() {
     // First booking alert (Liam + Sophia, 11 Nov 2026): owner email + Slack, Ops post,
     // morning-after call task once filled (services/firstBookingAlertService.js).
     const runFirstBookingAlerts = () => require('./services/firstBookingAlertService').run()
-      .then(r => { if (r && (r.created || r.filled || r.dead || r.baseline)) console.log('First booking alerts:', JSON.stringify(r)); });
+      .then(r => { if (r && (r.created || r.filled || r.dead || r.baseline || (r.followUps && (r.followUps.done || r.followUps.reminded || r.followUps.escalated)))) console.log('First booking alerts:', JSON.stringify(r)); });
     setTimeout(runFirstBookingAlerts, 2 * 60 * 1000);
     setInterval(runFirstBookingAlerts, 10 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);

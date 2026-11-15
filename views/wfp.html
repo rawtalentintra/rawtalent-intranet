@@ -1443,7 +1443,12 @@
     function todayBuckets() {
       const attention = [];
       for (const c of allCentres) {
-        if (needsFirstBookingVisit(c)) {
+        if (c.firstBookingFollowUp) {
+          // 0. Morning-after call for a first booking (Liam, 11 Nov 2026): Urgent, above everything.
+          const f = c.firstBookingFollowUp, today = todayDateStr();
+          const when = f.due > today ? `on ${fmtDate(f.due)} morning` : f.due === today ? 'this morning' : `(was due ${fmtDate(f.due)})`;
+          attention.push({ kind: 'centre', centre: c, reason: `URGENT: call ${when}: how was their first booking?`, _tier: 0, urgent: true });
+        } else if (needsFirstBookingVisit(c)) {
           attention.push({ kind: 'centre', centre: c, reason: 'Just got their first booking — needs a visit', _tier: 1 });
         } else if (c.isEscalated) {
           attention.push({ kind: 'centre', centre: c, reason: c.escalationNote ? `${c.escalationNote}` : 'Issue raised — needs attention', _tier: 2 });
@@ -1525,13 +1530,13 @@
       }
       const c = item.centre;
       return `
-        <div class="card${item._tier === 1 ? ' first-booking' : ''}" onclick="openCentre('${c.centreKey}')">
+        <div class="card${item._tier <= 1 ? ' first-booking' : ''}" onclick="openCentre('${c.centreKey}')"${item.urgent ? ' style="border:2px solid #dc2626;background:#fef2f2"' : ''}>
           <div class="name">${escHtml(item.label || c.name)}</div>
           <div class="sub">${escHtml(c.suburb || '')}${c.state ? ', ' + escHtml(c.state) : ''}</div>
-          ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}
+          ${item.reason ? `<div class="why"${item.urgent ? ' style="color:#b91c1c;font-weight:700"' : ''}>${escHtml(item.reason)}</div>` : ''}
           <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
             ${showAddToRoute ? `<button class="qa-btn lightblue" onclick="event.stopPropagation();addStopToRoute('centre','${c.centreKey}')">Add to Route</button>` : ''}
-            <span class="badge neutral corner">Centre</span>
+            <span class="badge neutral corner"${item.urgent ? ' style="background:#dc2626;color:#fff"' : ''}>${item.urgent ? 'Urgent' : 'Centre'}</span>
           </div>
         </div>`;
     }
