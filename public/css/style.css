@@ -2422,3 +2422,11 @@ body:has(> .navbar) { padding-top: 64px; }
 #visitLogModal .modal { display: flex; flex-direction: column; max-height: 90vh; overflow: hidden; }
 #visitLogModal .modal-header, #visitLogModal .modal-footer { flex: 0 0 auto; }
 #visitLogModal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; max-height: none !important; }
+
+/* Phones: vh = the viewport with the browser toolbars hidden, so 88vh
+   pushed Save Visit behind Safari/Chrome's bottom bar (Justine, mobile,
+   17 Nov 2026). svh = the visible area with toolbars showing. */
+@media (max-width: 900px) {
+  #visitLogModal .modal { max-height: 85vh; max-height: 85svh; }
+  #visitLogModal .modal-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); background: white; }
+}
