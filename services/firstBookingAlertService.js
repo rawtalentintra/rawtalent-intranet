@@ -264,4 +264,4 @@ function run() {
   return running;
 }
 
-module.exports = { run, check, followUps, openFollowUps, melNow, sendEmail, firstBookingEmail, morningAfter, describe, firstOf };
+module.exports = { run, check, followUps, openFollowUps, melNow, sendEmail, opsPost, slackDm, firstBookingEmail, morningAfter, describe, firstOf };

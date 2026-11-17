@@ -151,6 +151,20 @@ app.get('/documentation/privacy-policy', (req, res) => {
 app.get('/documentation/terms-of-service', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'documentation-terms-of-service.html'));
 });
+// Public "Create my first booking" confirm page, opened by every Journey 1 email
+// button (Liam, 16 Nov 2026). See services/firstBookingRequestService.js.
+app.get('/first-booking', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'views', 'first-booking.html'));
+});
+{
+  const rateLimit = require('express-rate-limit');
+  const fbLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true });
+  app.post('/api/public/first-booking', fbLimiter, express.json({ limit: '4kb' }), async (req, res) => {
+    try { res.json(await require('./services/firstBookingRequestService').createRequest(req.body || {})); }
+    catch (err) { console.error('First booking request failed:', err.message); res.status(500).json({ error: 'failed' }); }
+  });
+}
 
 // CSS/JS get 'no-cache' (not 'no-store') — every load still revalidates
 // with the server (a fast 304 when unchanged), but a real style.css/app.js

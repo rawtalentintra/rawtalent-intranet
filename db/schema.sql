@@ -3192,3 +3192,24 @@ ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS reminder_sent_at TIMES
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS followup_done_at TIMESTAMPTZ;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS followup_by TEXT;
+
+-- "Create my first booking" requests from Journey 1 email buttons (Liam, 16 Nov 2026,
+-- Fathom 900546391). Every J1 CTA opens /first-booking; Yes lands here, emails
+-- contact@ and gives Ops an urgent task (create centre if lead, create booking,
+-- handpick educator, call to welcome). Public page, so nothing private is shown.
+CREATE TABLE IF NOT EXISTS first_booking_requests (
+  id TEXT PRIMARY KEY,
+  cio_id TEXT,
+  email TEXT,
+  centre_name TEXT,
+  centre_key TEXT,
+  lead_id TEXT,
+  fbf BOOLEAN DEFAULT false,
+  source_email TEXT,
+  owner_name TEXT,
+  task_id TEXT,
+  email_status TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE first_booking_requests ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS first_booking_requests_email_idx ON first_booking_requests (lower(email), created_at);
