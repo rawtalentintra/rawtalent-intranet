@@ -2415,3 +2415,10 @@ body:has(> .navbar) { padding-top: 64px; }
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Log a Call/Visit: keep Save Visit always visible on desktop too.
+   Justine (17 Nov 2026) couldn't find the Save button because the footer
+   sat below the scroll fold, after "Last Booking Date of Centre". */
+#visitLogModal .modal { display: flex; flex-direction: column; max-height: 90vh; overflow: hidden; }
+#visitLogModal .modal-header, #visitLogModal .modal-footer { flex: 0 0 auto; }
+#visitLogModal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; max-height: none !important; }
