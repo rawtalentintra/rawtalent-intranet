@@ -143,7 +143,19 @@ async function sendOfferEmail(offerId) {
     const base = `${cfg.host}/api/v1/customers/${encodeURIComponent(ident)}`;
     const headers = { Authorization: auth, 'Content-Type': 'application/json' };
     const owner = await ownerFields(centreKey);
-    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '', ...owner };
+    // Service type routes the Journey 1 + FBF campaigns (ECEC vs OSHC, Liam 16 Nov).
+    let st = { service_type: '' };
+    try {
+      if (String(centreKey).startsWith('loc:')) {
+        const t = (await require('./centreServiceTypeSync').computeServiceTypes()).get(String(centreKey).slice(4));
+        if (t) st = { service_type: ['early_childhood', 'oshc', 'both'][t.service_type_id], service_type_id: t.service_type_id };
+      }
+      if (!st.service_type && o.lead_id) {
+        const l = (await db.execute({ sql: 'SELECT service_type FROM leads WHERE id = ?', args: [o.lead_id] })).rows[0];
+        st = serviceTypeFields(l && l.service_type);
+      }
+    } catch (_) { /* unknown -> ECEC journey */ }
+    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '', ...st, ...owner };
     const r1 = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({
       first_booking_free: true, first_booking_free_tagged_at: Math.floor(new Date(o.offered_at).getTime() / 1000),
       fbf_centre_name: data.centre_name, fbf_centre_key: centreKey, fbf_state: data.state, fbf_partner_name: data.partner_name, ...owner
