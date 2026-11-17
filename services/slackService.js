@@ -271,4 +271,31 @@ async function postToDailyThread(text) {
   await slackCall('chat.postMessage', { channel: await tagChannel(), unfurl_links: false, ...(thread_ts ? { thread_ts } : {}), text });
 }
 
-module.exports = { slackUserId, postToDailyThread, dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+// Plain post in a public channel by name (bot joins if needed). First booking
+// requests go to #all-raw-talent (Joy, 17 Nov 2026).
+const channelIds = {};
+async function postToChannel(name, text) {
+  if (!channelIds[name]) {
+    const ch = (await listPublicChannels()).find(c => c.name === name);
+    if (!ch) throw new Error('#' + name + ' not found');
+    if (!ch.is_member) await slackCall('conversations.join', { channel: ch.id });
+    channelIds[name] = ch.id;
+  }
+  return slackCall('chat.postMessage', { channel: channelIds[name], unfurl_links: false, text });
+}
+// Delete HeartBeat's own replies in a day's #daily-check-in thread whose text
+// contains `needle` (the bot can only delete its own messages). Returns count.
+async function deleteBotReplies(day, needle) {
+  const row = (await getDb().execute({ sql: 'SELECT channel_id, thread_ts FROM slack_daily_threads WHERE day = ?', args: [day] })).rows[0];
+  if (!row) return 0;
+  const data = await slackCall('conversations.replies', { channel: row.channel_id, ts: row.thread_ts, limit: '200' });
+  let n = 0;
+  for (const m of data.messages || []) {
+    if (m.ts === row.thread_ts || !m.bot_id || !String(m.text || '').includes(needle)) continue;
+    await slackCall('chat.delete', { channel: row.channel_id, ts: m.ts });
+    n++;
+  }
+  return n;
+}
+
+module.exports = { slackUserId, postToDailyThread, postToChannel, deleteBotReplies, dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };

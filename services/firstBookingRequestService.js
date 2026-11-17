@@ -19,6 +19,7 @@ const OPS = ['lorie@rawtalent.com.au', 'sophia@rawtalent.com.au'];
 // Joy gets her own copy of every alert email and is tagged on the task, with Sophia (Joy, 17 Nov).
 const ALSO_EMAIL = ['joy@rawtalent.com.au'];
 const TAGGED = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'];
+const SLACK_CHANNEL = 'all-raw-talent';
 const CLIENT_FOLLOW_UP = '4c6ae463-b50e-43b5-934a-a81572c024e9'; // Tasks: management -> Client Follow up
 const APP_URL = 'https://rawtalent-internal.app';
 
@@ -128,9 +129,16 @@ async function createRequest(input) {
   const emailStatus = await alerts.sendEmail(isTest ? email : INBOX, subject, html);
   if (!isTest) for (const cc of ALSO_EMAIL) await alerts.sendEmail(cc, subject, html);
   await db.execute({ sql: 'UPDATE first_booking_requests SET email_status = ? WHERE id = ?', args: [emailStatus, id] });
-  if (!isTest) try {
-    await alerts.opsPost(`:calendar: *${esc(centreName)} wants to create their first ${fbf ? 'free ' : ''}booking* (clicked Yes in a Journey 1 email).${who.ownerName ? ` Owner: ${esc(who.ownerName)}.` : ''} ${isLead ? 'Not in RT yet: create the centre first. ' : ''}<${taskLink}|Open task>`);
-  } catch (_) { /* best effort */ }
+  if (!isTest) {
+    try {
+      const slack = require('./slackService');
+      if (slack.isConfigured()) {
+        const tags = [];
+        for (const e of TAGGED) { const sid = await slack.slackUserId(e); if (sid) tags.push(`<@${sid}>`); }
+        await slack.postToChannel(SLACK_CHANNEL, `:calendar: *${esc(centreName)} wants to create their first ${fbf ? 'free ' : ''}booking* (clicked Yes in a Journey 1 email).${who.ownerName ? ` Owner: ${esc(who.ownerName)}.` : ''} ${isLead ? 'Not in RT yet: create the centre first. ' : ''}<${taskLink}|Open task>${tags.length ? `\n${tags.join(' ')} for Ops` : ''}`);
+      }
+    } catch (err) { console.error('First booking request Slack post failed:', err.message); }
+  }
   return { ok: true, recorded: true };
 }
 
@@ -138,4 +146,13 @@ async function recent(limit = 50) {
   return (await getDb().execute({ sql: 'SELECT * FROM first_booking_requests ORDER BY created_at DESC LIMIT ?', args: [limit] })).rows;
 }
 
-module.exports = { createRequest, identify, recent };
+// One-off (Joy, 17 Nov 2026): remove the test post for Elevation Early Learning from
+// that day's #daily-check-in thread. Safe to run repeatedly; remove after it has run.
+async function cleanupTestPost() {
+  try {
+    const n = await require('./slackService').deleteBotReplies('2026-11-17', 'Elevation Early Learning wants to create their first');
+    if (n) console.log('First booking request: deleted test Slack post(s):', n);
+  } catch (err) { console.error('Test post cleanup failed:', err.message); }
+}
+
+module.exports = { createRequest, identify, recent, cleanupTestPost };

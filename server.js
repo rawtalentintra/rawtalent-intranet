@@ -676,6 +676,8 @@ async function start() {
     const runFirstBookingAlerts = () => require('./services/firstBookingAlertService').run()
       .then(r => { if (r && (r.created || r.filled || r.dead || r.baseline || (r.followUps && (r.followUps.done || r.followUps.reminded || r.followUps.escalated)))) console.log('First booking alerts:', JSON.stringify(r)); });
     setTimeout(runFirstBookingAlerts, 2 * 60 * 1000);
+    // One-off (17 Nov 2026): delete the test 'Elevation' first booking request post from #daily-check-in.
+    setTimeout(() => require('./services/firstBookingRequestService').cleanupTestPost(), 45 * 1000);
     setInterval(runFirstBookingAlerts, 10 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);
 
