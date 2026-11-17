@@ -160,6 +160,34 @@ async function getValidAccessToken() {
   return refreshAccessToken(db, state);
 }
 
+// Keep-alive (Joy, 17 Nov 2026): JobAdder's refresh token dies after ~2 weeks unused,
+// which silently disconnected HeartBeat from 31 Oct to 17 Nov. Refresh at least once a
+// day so it never sits idle; if JobAdder refuses (needs a human to reconnect), Slack Joy
+// once a day with the reconnect link instead of failing silently.
+const KEEPALIVE_AFTER_MS = 20 * 60 * 60 * 1000;
+const RECONNECT_ALERT_TO = 'joy@rawtalent.com.au';
+let lastAlertDay = null;
+async function keepAlive() {
+  if (!isConfigured()) return 'not_configured';
+  const db = getDb();
+  const state = await loadTokenState(db);
+  if (!state || !state.refresh_token) return 'not_connected';
+  if (Date.now() - new Date(state.updated_at).getTime() < KEEPALIVE_AFTER_MS) return 'fresh';
+  try { await refreshAccessToken(db, state); return 'refreshed'; }
+  catch (err) {
+    const day = new Date().toISOString().slice(0, 10);
+    if (lastAlertDay !== day) {
+      lastAlertDay = day;
+      try {
+        await require('./slackService').sendDmByEmail(RECONNECT_ALERT_TO,
+          'JobAdder has disconnected from HeartBeat',
+          [{ type: 'section', text: { type: 'mrkdwn', text: `:warning: *JobAdder has disconnected from HeartBeat.* Applicant searches, resumes and the JobAdder reports won't work until it's reconnected.\n<https://rawtalent-internal.app/auth/jobadder|Reconnect JobAdder> (sign in and approve).` } }]);
+      } catch (_) { /* best effort */ }
+    }
+    return 'failed: ' + err.message;
+  }
+}
+
 async function connectionStatus() {
   if (!isConfigured()) return { configured: false, connected: false };
   const db = getDb();
@@ -173,6 +201,6 @@ async function connectionStatus() {
 }
 
 module.exports = {
-  isConfigured, buildAuthorizeUrl, exchangeCodeForToken, getValidAccessToken, connectionStatus,
+  isConfigured, buildAuthorizeUrl, exchangeCodeForToken, getValidAccessToken, connectionStatus, keepAlive,
   REDIRECT_URI, SCOPES
 };

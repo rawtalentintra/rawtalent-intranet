@@ -679,6 +679,12 @@ async function start() {
     // One-off (17 Nov 2026): delete the test 'Elevation' first booking request post from #daily-check-in.
     setTimeout(() => require('./services/firstBookingRequestService').cleanupTestPost(), 45 * 1000);
     setInterval(runFirstBookingAlerts, 10 * 60 * 1000);
+    // JobAdder keep-alive (17 Nov 2026): refresh the token at least daily so it can't expire unused.
+    const runJobAdderKeepAlive = () => require('./services/jobAdderService').keepAlive()
+      .then(r => { if (r !== 'fresh' && r !== 'not_configured') console.log('JobAdder keep-alive:', r); })
+      .catch(err => console.error('JobAdder keep-alive error:', err.message));
+    setTimeout(runJobAdderKeepAlive, 5 * 60 * 1000);
+    setInterval(runJobAdderKeepAlive, 6 * 60 * 60 * 1000);
     setInterval(runRecordingTranscripts, 10 * 60 * 1000);
 
     // Warm routes/centres.js's shared centres+bookings cache on boot, not
