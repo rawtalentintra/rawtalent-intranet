@@ -162,11 +162,20 @@ async function sendTouchpointSignal(id) {
     // ECEC vs OSHC Dormant journey: the centre's service type as set in HeartBeat
     // (centre_categories); blank goes to the ECEC journeys.
     const cat = (await db.execute({ sql: 'SELECT service_type FROM centre_categories WHERE centre_key = ?', args: [t.centre_key] })).rows[0];
+    // centre_categories is usually empty: fall back to the type worked out from the centre's
+    // RT bookings + linked lead (centreServiceTypeSync), so OSHC services reach #45/#46 (audit 18 Nov).
+    let stFields = fbf.serviceTypeFields(cat && cat.service_type);
+    if (!stFields.service_type && String(t.centre_key).startsWith('loc:')) {
+      try {
+        const st = (await require('./centreServiceTypeSync').computeServiceTypes()).get(String(t.centre_key).slice(4));
+        if (st) stFields = { service_type: ['early_childhood', 'oshc', 'both'][st.service_type_id], service_type_id: st.service_type_id };
+      } catch (_) { /* unknown -> ECEC */ }
+    }
     await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!t.first_booking_free, ...(await fbf.ownerFields(t.centre_key)) }, 'dormant_touchpoint_complete', {
       first_booking_free: !!t.first_booking_free, centre_key: t.centre_key, centre_name: t.centre_name, state: t.state || '', partner_name: t.completed_by_name || '',
       // Owner by relationship, not state (Liam, 10 Nov): the centre's HeartBeat owner.
       ...(await fbf.ownerFields(t.centre_key)),
-      ...fbf.serviceTypeFields(cat && cat.service_type)
+      ...stFields
     });
     await db.execute({ sql: "UPDATE dormant_touchpoints SET cio_status = 'sent', cio_sent_at = now(), cio_identifier = ?, cio_error = NULL WHERE id = ?", args: [ident, id] });
     if (t.first_booking_free) await db.execute({ sql: "UPDATE first_booking_free_offers SET email_sent_at = COALESCE(email_sent_at, now()), cio_identifier = ?, cio_centre_key = ? WHERE centre_key = ? AND email_status = 'via_dormant'", args: [ident, t.centre_key, t.centre_key] });

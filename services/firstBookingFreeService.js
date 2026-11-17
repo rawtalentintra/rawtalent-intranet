@@ -114,10 +114,18 @@ async function syncAllOwnerAttributes() {
   return out;
 }
 
+async function centreHasLiveBooking(centreKey) {
+  if (!centreKey || !/^(loc|client):/.test(String(centreKey))) return false;
+  const { centres, bookings } = await getCentresAndBookings();
+  const c = centres.find(x => x.centreKey === centreKey);
+  if (!c) return false;
+  const cm = require('../routes/centres');
+  return cm.bookingsForCentre(cm.indexBookingsByCentre(bookings), c).some(b => !b.isDeleted && ![6, 7].includes(b.statusId));
+}
 async function sendOfferEmail(offerId) {
   const db = getDb();
   const o = (await db.execute({ sql: 'SELECT * FROM first_booking_free_offers WHERE id = ?', args: [offerId] })).rows[0];
-  if (!o || ['sent', 'duplicate', 'via_dormant', 'via_lead_journey'].includes(o.email_status)) return o && o.email_status;
+  if (!o || ['sent', 'duplicate', 'via_dormant', 'via_lead_journey', 'skipped_already_booked'].includes(o.email_status)) return o && o.email_status;
   const cfg = cioTrackConfig();
   if (!cfg.ready) return 'pending'; // flag off or credentials missing — retried by the scheduled job
   try {
@@ -134,6 +142,12 @@ async function sendOfferEmail(offerId) {
       return 'no_profile';
     }
     const centreKey = (ct && ct.centreKey) || o.centre_key || `lead:${o.lead_id}`;
+    // Never send "your first booking is on us" to a centre that has already booked
+    // (audit 18 Nov: Kidz Club, Aussie Adventures booked after being tagged).
+    if (o.pay_task_id || (await centreHasLiveBooking(centreKey))) {
+      await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'skipped_already_booked' WHERE id = ?", args: [offerId] });
+      return 'skipped_already_booked';
+    }
     const dup = (await db.execute({ sql: "SELECT 1 FROM first_booking_free_offers WHERE id <> ? AND email_status = 'sent' AND cio_identifier = ? AND cio_centre_key = ?", args: [offerId, ident, centreKey] })).rows[0];
     if (dup) {
       await db.execute({ sql: "UPDATE first_booking_free_offers SET email_status = 'duplicate', cio_identifier = ?, cio_centre_key = ? WHERE id = ?", args: [ident, centreKey, offerId] });
