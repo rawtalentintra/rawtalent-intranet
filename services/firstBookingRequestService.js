@@ -16,6 +16,9 @@ const { getDb } = require('../db/database');
 
 const INBOX = 'contact@rawtalent.com.au';
 const OPS = ['lorie@rawtalent.com.au', 'sophia@rawtalent.com.au'];
+// Joy gets her own copy of every alert email and is tagged on the task, with Sophia (Joy, 17 Nov).
+const ALSO_EMAIL = ['joy@rawtalent.com.au'];
+const TAGGED = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'];
 const CLIENT_FOLLOW_UP = '4c6ae463-b50e-43b5-934a-a81572c024e9'; // Tasks: management -> Client Follow up
 const APP_URL = 'https://rawtalent-internal.app';
 
@@ -99,14 +102,18 @@ async function createRequest(input) {
     const assignees = isTest ? [email] : [...new Set([...OPS, who.ownerEmail].filter(Boolean))];
     await db.execute({
       sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
-            VALUES (?, 'management', ?, ?, ?, 'to_do', 'urgent', ?, (now() AT TIME ZONE 'Australia/Melbourne')::date, 'system@rawtalent.internal', 'Auto — First booking request', '[]', '[]', ?)`,
+            VALUES (?, 'management', ?, ?, ?, 'to_do', 'urgent', ?, (now() AT TIME ZONE 'Australia/Melbourne')::date, 'system@rawtalent.internal', 'Auto — First booking request', ?, '[]', ?)`,
       args: [taskId, CLIENT_FOLLOW_UP, title,
         `${centreName} clicked "Yes, create my first booking" in a Journey 1 email.\n\n` + facts.map(([k, v]) => `${k}: ${v}`).join('\n') +
         `\n\nWhat to do:\n` + steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
-        JSON.stringify(assignees), JSON.stringify(who.centreKey ? [{ centreKey: who.centreKey, name: centreName }] : [])]
+        JSON.stringify(assignees), JSON.stringify(isTest ? [] : TAGGED), JSON.stringify(who.centreKey ? [{ centreKey: who.centreKey, name: centreName }] : [])]
     });
     await db.execute({ sql: 'UPDATE first_booking_requests SET task_id = ? WHERE id = ?', args: [taskId, id] });
-    if (!isTest) { try { await require('./slackService').notifyTaskTagged(taskId, assignees, 'assigned to'); } catch (_) { /* best effort */ } }
+    if (!isTest) {
+      try { await require('./slackService').notifyTaskTagged(taskId, assignees, 'assigned to'); } catch (_) { /* best effort */ }
+      const tagOnly = TAGGED.filter(e => !assignees.includes(e));
+      if (tagOnly.length) { try { await require('./slackService').notifyTaskTagged(taskId, tagOnly, 'tagged on'); } catch (_) { /* best effort */ } }
+    }
   } catch (err) { console.error('First booking request task failed:', err.message); taskId = null; }
 
   const alerts = require('./firstBookingAlertService');
@@ -117,7 +124,9 @@ async function createRequest(input) {
 <p style="margin:0 0 6px"><strong>What to do:</strong></p><ol style="margin:0 0 12px;padding-left:20px">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
 <p style="margin:18px 0 12px"><a href="${taskLink}" style="display:inline-block;background:#21275D;color:#ffffff;text-decoration:none;font-weight:bold;padding:10px 18px;border-radius:6px">Open the task in HeartBeat</a></p>
 <p style="margin:18px 0 0;font-size:12px;color:#6b7280">Sent automatically by HeartBeat. Internal only.</p></div>`;
-  const emailStatus = await alerts.sendEmail(isTest ? email : INBOX, `${isTest ? '[TEST] ' : ''}First booking request: ${centreName}${fbf ? ' (first booking free)' : ''}`, html);
+  const subject = `${isTest ? '[TEST] ' : ''}First booking request: ${centreName}${fbf ? ' (first booking free)' : ''}`;
+  const emailStatus = await alerts.sendEmail(isTest ? email : INBOX, subject, html);
+  if (!isTest) for (const cc of ALSO_EMAIL) await alerts.sendEmail(cc, subject, html);
   await db.execute({ sql: 'UPDATE first_booking_requests SET email_status = ? WHERE id = ?', args: [emailStatus, id] });
   if (!isTest) try {
     await alerts.opsPost(`:calendar: *${esc(centreName)} wants to create their first ${fbf ? 'free ' : ''}booking* (clicked Yes in a Journey 1 email).${who.ownerName ? ` Owner: ${esc(who.ownerName)}.` : ''} ${isLead ? 'Not in RT yet: create the centre first. ' : ''}<${taskLink}|Open task>`);
