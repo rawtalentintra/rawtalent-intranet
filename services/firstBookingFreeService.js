@@ -155,7 +155,7 @@ async function sendOfferEmail(offerId) {
         st = serviceTypeFields(l && l.service_type);
       }
     } catch (_) { /* unknown -> ECEC journey */ }
-    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '', ...st, ...owner };
+    const data = { centre_name: o.centre_name, centre_key: centreKey, state: o.state || '', partner_name: o.offered_by_name || '', contact_first_name: o.contact_first_name || '', first_booking_free: true, ...st, ...owner };
     const r1 = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({
       first_booking_free: true, first_booking_free_tagged_at: Math.floor(new Date(o.offered_at).getTime() / 1000),
       fbf_centre_name: data.centre_name, fbf_centre_key: centreKey, fbf_state: data.state, fbf_partner_name: data.partner_name, ...owner
