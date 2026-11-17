@@ -26,13 +26,34 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// First booking free only for centres that are new with no bookings yet, or
+// dormant (no booking for 6+ months) (Liam, 16 Nov 2026, Fathom 900546391).
+// Cancelled/unfilled bookings don't count; HeartBeat holds ~12 months of RT
+// bookings, so a centre with none in that window counts as dormant.
+async function centreEligibility(centreKey) {
+  try {
+    const centresMod = require('./centres');
+    const { centres, bookings } = await centresMod.getCentresAndBookings();
+    const c = centres.find(x => x.centreKey === centreKey);
+    if (!c) return { eligible: true };
+    const list = centresMod.bookingsForCentre(centresMod.indexBookingsByCentre(bookings), c);
+    const live = list.filter(b => !b.isDeleted && ![6, 7].includes(b.statusId));
+    if (!live.length) return { eligible: true, reason: 'no_bookings' };
+    const { lastMeaningfulBookingDate } = require('../services/centreHealthService');
+    const last = lastMeaningfulBookingDate(list, { rtLocationId: c.rtLocationId, rtClientId: c.rtClientId });
+    const days = last ? (Date.now() - last.getTime()) / 86400000 : null;
+    if (last && days >= require('../services/dormantService').DORMANT_DAYS) return { eligible: true, reason: 'dormant', lastBookingDate: last.toISOString().slice(0, 10) };
+    return { eligible: false, reason: last ? 'active' : 'upcoming_booking', lastBookingDate: last ? last.toISOString().slice(0, 10) : null };
+  } catch (_) { return { eligible: true }; } // RT down: don't hide the button
+}
+
 // Preview who Customer.io would email, shown before and after tagging.
 router.get('/contact', async (req, res) => {
   try {
     const { leadId, centreKey } = req.query;
     const ct = await resolveContact({ leadId, centreKey });
     if (!ct) return res.status(404).json({ error: 'Not found' });
-    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready });
+    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready, ...(centreKey ? await centreEligibility(centreKey) : { eligible: true }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -46,6 +67,10 @@ router.post('/', async (req, res) => {
     const { centreName, email: contactEmail, firstName: contactFirst, state } = ct;
     const existing = (await db.execute({ sql: `SELECT * FROM first_booking_free_offers WHERE ${leadId ? 'lead_id' : 'centre_key'} = ?`, args: [leadId || centreKey] })).rows[0];
     if (existing) return res.json(shape(existing));
+    if (!leadId) {
+      const el = await centreEligibility(centreKey);
+      if (!el.eligible) return res.status(409).json({ error: 'First booking free is only for new centres with no bookings yet, or dormant centres (no booking in 6 months).' });
+    }
     if (leadId) {
       const l = (await db.execute({ sql: 'SELECT fbf_choice FROM leads WHERE id = ?', args: [leadId] })).rows[0];
       if (l && l.fbf_choice === 'no') return res.status(409).json({ error: 'This lead was logged as "No free first booking".' });
