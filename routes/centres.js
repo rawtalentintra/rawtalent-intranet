@@ -1333,6 +1333,15 @@ router.put('/:centreKey/contact', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// First booking outcome: Positive / Negative after the morning-after call (Liam, 16 Nov).
+// Positive releases Journey 2 Email 3 onward in Customer.io. See firstBookingAlertService.
+router.post('/:centreKey/first-booking-outcome', async (req, res) => {
+  try {
+    const out = await require('../services/firstBookingAlertService').registerOutcome(req.params.centreKey, (req.body || {}).outcome, req.user);
+    res.json(out);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 router.post('/:centreKey/visits', async (req, res) => {
   const {
     visitDate, status, preVisitBrief, outcome, notes, nextStep, nextStepDueDate, recordingIds,
@@ -1362,6 +1371,7 @@ router.post('/:centreKey/visits', async (req, res) => {
             attendees || null, typeof checklistCompleted === 'boolean' ? checklistCompleted : null, ql.id]
         });
         await linkRecordingsToVisit(req.params.centreKey, ql.id, recordingIds);
+        if (req.body.firstBookingOutcome) await require('../services/firstBookingAlertService').registerOutcome(req.params.centreKey, req.body.firstBookingOutcome, req.user).catch(e => console.error('Outcome on visit log failed:', e.message));
         const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [ql.id] })).rows[0];
         return res.json(row);
       }
@@ -1384,6 +1394,7 @@ router.post('/:centreKey/visits', async (req, res) => {
     });
     await linkRecordingsToVisit(req.params.centreKey, id, recordingIds);
     await claimCentreOnFirstAction(req.params.centreKey, req.user);
+    if (req.body.firstBookingOutcome) await require('../services/firstBookingAlertService').registerOutcome(req.params.centreKey, req.body.firstBookingOutcome, req.user).catch(e => console.error('Outcome on visit log failed:', e.message));
     const row = (await getDb().execute({ sql: 'SELECT * FROM centre_visits WHERE id = ?', args: [id] })).rows[0];
     res.json(row);
   } catch (err) {

@@ -12427,6 +12427,19 @@
     // Morning-after call after a centre's first booking (Liam, 11 Nov 2026): "this is the
     // most pivotal part of the relationship ... literally the next day". Partners see their
     // own; admins see all with the owner's name. Clears once a call/visit is logged.
+
+    // First booking outcome (Liam, 16 Nov): Positive releases Journey 2 Email 3+ in Customer.io.
+    async function setFirstBookingOutcome(centreKey, outcome) {
+      const name = ((myCentresData || []).find(c => c.centreKey === centreKey) || {}).name || 'this centre';
+      if (!confirm(`Mark ${name}'s first booking as ${outcome === 'positive' ? 'POSITIVE' : 'NEGATIVE'}?` + (outcome === 'positive' ? '\n\nThis starts their next emails.' : ''))) return;
+      try {
+        const r = await fetch(`/api/centres/${encodeURIComponent(centreKey)}/first-booking-outcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save');
+        toast(`First booking marked ${outcome}`, 'success');
+        (myCentresData || []).forEach(c => { if (c.centreKey === centreKey) delete c.firstBookingFollowUp; });
+        renderFirstBookingFollowUps();
+      } catch (e) { toast(e.message, 'error'); }
+    }
     function renderFirstBookingFollowUps() {
       const box = document.getElementById('myCentresUrgent'); if (!box) return;
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
@@ -12436,11 +12449,13 @@
       rows.sort((a, b) => a.firstBookingFollowUp.due.localeCompare(b.firstBookingFollowUp.due));
       box.innerHTML = `<div class="admin-table-card" style="padding:14px 18px;margin-bottom:16px;border:2px solid #dc2626;background:#fef2f2">
         <div style="font-weight:800;color:#b91c1c;font-size:14.5px">Urgent: morning-after calls after a first booking (${rows.length})</div>
-        <div style="font-size:12.5px;color:#7f1d1d;margin:2px 0 8px">Call the morning after the shift. Ask how it went, show them favourite/request, and ask them to rate the educator Positive in the Portal. Log the call and it clears.</div>
+        <div style="font-size:12.5px;color:#7f1d1d;margin:2px 0 8px">Call the morning after the shift. Ask how it went and show them favourite/request. Then choose <b>Positive</b> or <b>Negative</b>: that clears it, and Positive starts their next emails.</div>
         ${rows.map(c => { const f = c.firstBookingFollowUp; const when = f.due > today ? `${fmtShortDate(f.due)} morning` : f.due === today ? 'this morning' : `overdue (was ${fmtShortDate(f.due)})`;
           return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid #fecaca;font-size:13px">
             <span><a href="javascript:void(0)" onclick="goToCentre360('${escHtml(c.centreKey)}')" style="font-weight:700;color:var(--navy)">${escHtml(c.name)}</a> · first booking ${fmtShortDate(f.shiftDate)}${currentUserRole !== 'workforce_partner' ? ` · ${escHtml(f.owner || '')}` : ''}</span>
-            <span style="font-weight:700;color:${f.due < today ? '#b91c1c' : '#b45309'}">Call ${when}</span></div>`; }).join('')}
+            <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end"><span style="font-weight:700;color:${f.due < today ? '#b91c1c' : '#b45309'}">Call ${when}</span>
+              <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:12px;border-color:#16a34a;color:#15803d" onclick="setFirstBookingOutcome('${escHtml(c.centreKey)}','positive')">👍 Positive</button>
+              <button type="button" class="btn-secondary" style="padding:3px 10px;font-size:12px;border-color:#dc2626;color:#b91c1c" onclick="setFirstBookingOutcome('${escHtml(c.centreKey)}','negative')">👎 Negative</button></span></div>`; }).join('')}
       </div>`;
     }
     function populateCentresSuburbFilter() {

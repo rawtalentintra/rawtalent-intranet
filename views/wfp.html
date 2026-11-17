@@ -2340,6 +2340,16 @@
       } catch (e) { box.innerHTML = `<div class="sub">${escHtml(e.message)}</div>`; }
     }
 
+    // First booking outcome (Liam, 16 Nov 2026): Positive releases Journey 2 Email 3+.
+    async function setFbOutcome(outcome) {
+      if (!confirm(`Mark their first booking as ${outcome === 'positive' ? 'POSITIVE' : 'NEGATIVE'}?`)) return;
+      try {
+        await api(`/api/centres/${encodeURIComponent(currentCentreKey)}/first-booking-outcome`, { method: 'POST', body: JSON.stringify({ outcome }) });
+        toast(`First booking marked ${outcome}`);
+        const c = allCentres.find(x => x.centreKey === currentCentreKey); if (c) delete c.firstBookingFollowUp;
+        paintCentreDetail();
+      } catch (e) { toast(e.message, 'error'); }
+    }
     function paintCentreDetail() {
       const main = document.getElementById('mainContent');
       const s = currentSnapshot;
@@ -2354,7 +2364,16 @@
         const bFav = (b.relationships || []).some(r => r.type === 'favourite');
         return aFav === bFav ? 0 : aFav ? -1 : 1;
       });
-      main.innerHTML = `
+      const fbOutcomeCard = c && c.firstBookingFollowUp ? `
+        <div class="card" style="cursor:default;border:2px solid #dc2626;background:#fef2f2;margin-bottom:12px">
+          <div style="font-weight:800;color:#b91c1c">URGENT: how was their first booking?</div>
+          <div class="sub" style="margin:4px 0 10px;color:#7f1d1d">Call them, ask how it went, show them favourite/request. Then choose one. Positive starts their next emails.</div>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn" style="flex:1;background:#16a34a;color:#fff" onclick="setFbOutcome('positive')">👍 Positive</button>
+            <button type="button" class="btn" style="flex:1;background:#dc2626;color:#fff" onclick="setFbOutcome('negative')">👎 Negative</button>
+          </div>
+        </div>` : '';
+      main.innerHTML = `${fbOutcomeCard}
         <div class="card" style="cursor:default">
           <div class="sub" style="margin-bottom:2px">${escHtml(s.streetAddress || '')}${s.streetAddress ? ', ' : ''}${escHtml(s.suburb || '')} ${escHtml(s.state || '')}</div>
           ${c ? `
@@ -2635,6 +2654,14 @@
              <label style="flex:1;display:flex;align-items:center;gap:6px;border:1px solid #d1d5db;border-radius:8px;padding:10px;margin:0;font-weight:500"><input type="radio" name="laFbf" value="no" style="width:auto;margin:0"> No free first booking</label>
            </div>
            <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Only for centres that use agency regularly. Can't be changed later.</div>`;
+      const fbCentre = isCentre ? allCentres.find(x => x.centreKey === logTarget.id) : null;
+      const fbOutcomeBlock = fbCentre && fbCentre.firstBookingFollowUp
+        ? `<label>How was their first booking? <span style="color:#dc2626">*</span></label>
+           <div style="display:flex;gap:8px">
+             <label style="flex:1;display:flex;align-items:center;gap:6px;border:1px solid #16a34a;border-radius:8px;padding:10px;margin:0;font-weight:600;color:#15803d"><input type="radio" name="laFbOutcome" value="positive" style="width:auto;margin:0"> 👍 Positive</label>
+             <label style="flex:1;display:flex;align-items:center;gap:6px;border:1px solid #dc2626;border-radius:8px;padding:10px;margin:0;font-weight:600;color:#b91c1c"><input type="radio" name="laFbOutcome" value="negative" style="width:auto;margin:0"> 👎 Negative</label>
+           </div>
+           <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Positive starts their next emails.</div>` : '';
       const emailBlock = lead && !lead.contact_email
         ? `<label>Contact email <span class="optional">(their welcome emails go here)</span></label>
            <input type="email" id="laContactEmail" placeholder="name@centre.com.au" autocomplete="off">` : '';
@@ -2653,6 +2680,7 @@
           <option value="rescheduled">Rescheduled</option>
         </select>` : `<input type="hidden" id="laStatus" value="completed">`}
         ${fbfBlock}
+        ${fbOutcomeBlock}
         <div id="laOutcomeWrap">
           <label>Who did you speak with?</label>
           <input type="text" id="laContactName" placeholder="Contact name">
@@ -2727,7 +2755,13 @@
           };
           await api(`/api/leads/${logTarget.id}/activities`, { method: 'POST', body: JSON.stringify(body) });
         } else {
+          const fbC = allCentres.find(x => x.centreKey === logTarget.id);
+          const fbPick = document.querySelector('input[name="laFbOutcome"]:checked');
+          if (fbC && fbC.firstBookingFollowUp && el('laStatus').value === 'completed' && !fbPick) {
+            throw new Error('Please choose Positive or Negative for their first booking');
+          }
           const body = {
+            firstBookingOutcome: fbPick ? fbPick.value : undefined,
             visitDate: today0(),
             channel: el('laChannel').value,
             activityType: el('laActivityType') ? el('laActivityType').value : null,

@@ -127,7 +127,7 @@ const REMINDER_AT = '07:30';   // Melbourne, on the morning the call is due
 const ESCALATE_AT = '12:00';   // not logged by midday -> Liam + Ops hear about it
 const ESCALATE_TO = ['liam@rawtalent.com.au'];
 
-const CALL_SCRIPT = `On the call:\n• Ask how the booking went and how the educator did.\n• If it went well, show them how to favourite and request that educator in the Portal.\n• Ask them to rate the educator Positive in the Portal (that rating is what starts the feedback emails).\n• Log the call (or visit) on the centre in HeartBeat. That closes this task automatically.`;
+const CALL_SCRIPT = `On the call:\n• Ask how the booking went and how the educator did.\n• If it went well, show them how to favourite and request that educator in the Portal.\n• Log the call (or visit) on the centre in HeartBeat and choose Positive or Negative for their first booking. That closes this task, and Positive starts their next emails.`;
 
 async function createFollowUpTask(row, own, b) {
   const d = describe(b);
@@ -160,7 +160,7 @@ async function followUps() {
     const logged = (await db.execute({ sql: `SELECT created_by_name, created_by_email, channel, visit_date FROM centre_visits
         WHERE centre_key = ? AND status = 'completed' AND (visit_date AT TIME ZONE 'Australia/Melbourne')::date >= ?::date ORDER BY visit_date LIMIT 1`, args: [r.centre_key, shiftDay || due] })).rows[0];
     const task = r.task_id ? (await db.execute({ sql: 'SELECT status FROM tasks WHERE id = ?', args: [r.task_id] })).rows[0] : null;
-    if (logged || (task && task.status === 'done')) {
+    if ((logged && r.outcome) || (task && task.status === 'done')) {
       await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'done', followup_done_at = now(), followup_by = ? WHERE centre_key = ?", args: [logged ? (logged.created_by_name || logged.created_by_email) : 'task ticked', r.centre_key] });
       if (logged && task && task.status !== 'done') await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now() WHERE id = ?", args: [r.task_id] });
       out.done++; continue;
@@ -168,11 +168,11 @@ async function followUps() {
     const taskLink = `${APP_URL}/?tab=tasks&task=${r.task_id}`;
     if (!r.reminder_sent_at && (now.day > due || (now.day === due && now.hm >= REMINDER_AT))) {
       const first = String(r.owner_name || '').split(' ')[0] || 'there';
-      await slackDm(r.owner_email, `Call ${r.centre_name} this morning`, `:telephone_receiver: *Call ${esc(r.centre_name)} this morning.* Their first booking was ${esc(niceDate(shiftDay))}.\nAsk how it went, show them favourite/request, and ask them to rate the educator Positive in the Portal. Log the call in HeartBeat and this clears. <${taskLink}|Open task>`);
+      await slackDm(r.owner_email, `Call ${r.centre_name} this morning`, `:telephone_receiver: *Call ${esc(r.centre_name)} this morning.* Their first booking was ${esc(niceDate(shiftDay))}.\nAsk how it went and show them favourite/request. Then in HeartBeat log the call and choose Positive or Negative: that clears this and (if Positive) starts their next emails. <${taskLink}|Open task>`);
       await sendEmail(r.owner_email, `Call ${r.centre_name} this morning`, `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#21275D;max-width:560px">
 <p>Hi ${esc(first)},</p><p>Please call <strong>${esc(r.centre_name)}</strong> this morning. Their first booking was ${esc(niceDate(shiftDay))}, and this call is the most important follow-up in the relationship.</p>
-<p>On the call:</p><ul><li>Ask how the booking went and how the educator did.</li><li>If it went well, show them how to favourite and request that educator in the Portal.</li><li>Ask them to rate the educator Positive in the Portal.</li></ul>
-<p>Log the call (or visit) on the centre in HeartBeat and the task closes itself.</p>
+<p>On the call:</p><ul><li>Ask how the booking went and how the educator did.</li><li>If it went well, show them how to favourite and request that educator in the Portal.</li></ul>
+<p>Then log the call (or visit) on the centre in HeartBeat and choose <strong>Positive</strong> or <strong>Negative</strong> for their first booking. That closes the task, and Positive starts their next emails.</p>
 <p><a href="${taskLink}" style="color:#0369a1">Open the task in HeartBeat</a></p>
 <p style="font-size:12px;color:#6b7280">Sent automatically by HeartBeat. Internal only.</p></div>`);
       await db.execute({ sql: 'UPDATE first_booking_alerts SET reminder_sent_at = now() WHERE centre_key = ?', args: [r.centre_key] });
@@ -194,6 +194,65 @@ async function openFollowUps() {
   const rows = (await getDb().execute({ sql: "SELECT centre_key, centre_name, booking_date, followup_due, owner_name, task_id, escalated_at FROM first_booking_alerts WHERE status = 'followup'", args: [] })).rows;
   const ymd = v => v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : null;
   return Object.fromEntries(rows.map(r => [r.centre_key, { shiftDate: ymd(r.booking_date), due: ymd(r.followup_due), owner: r.owner_name, taskId: r.task_id, escalated: !!r.escalated_at }]));
+}
+
+// ── First booking outcome (Liam, 16 Nov 2026, Fathom 900546391 at 20:40 / 34:10) ──────────
+// After the morning-after call the WFP registers Positive or Negative. HeartBeat sends
+// Customer.io `first_booking_outcome_registered` {booking_id, outcome, ...} to the person who
+// created the first booking (RT person id = Customer.io id, same profile Journey 2 runs on),
+// plus attribute first_booking_outcome. Journey 2 (#39 / #44) waits for outcome = positive
+// before Email 3 onward. RT Portal's own outcome can replace this once RT sends it (Joy, 18 Nov).
+const OUTCOMES = new Set(['positive', 'negative']);
+async function sendOutcomeSignal(centreKey) {
+  const db = getDb();
+  const r = (await db.execute({ sql: 'SELECT * FROM first_booking_alerts WHERE centre_key = ?', args: [centreKey] })).rows[0];
+  if (!r || !r.outcome) return 'no_outcome';
+  const fbf = require('./firstBookingFreeService');
+  if (!fbf.cioTrackConfig().ready) {
+    await db.execute({ sql: "UPDATE first_booking_alerts SET outcome_signal = 'pending' WHERE centre_key = ?", args: [centreKey] });
+    return 'pending';
+  }
+  try {
+    const { bookings } = await require('../routes/centres').getCentresAndBookings();
+    const b = bookings.find(x => String(x.clientBookingId) === String(r.booking_id));
+    const ident = b && isReal(b.createdBy) ? String(b.createdBy) : null;
+    if (!ident) {
+      await db.execute({ sql: "UPDATE first_booking_alerts SET outcome_signal = 'no_profile' WHERE centre_key = ?", args: [centreKey] });
+      return 'no_profile';
+    }
+    const at = Math.floor(new Date(r.outcome_at || Date.now()).getTime() / 1000);
+    await fbf.sendCioSignal(ident, { first_booking_outcome: r.outcome, first_booking_outcome_at: at },
+      'first_booking_outcome_registered',
+      { booking_id: String(r.booking_id), outcome: r.outcome, centre_key: centreKey, centre_name: r.centre_name, registered_by: r.outcome_by || '', registered_at: at });
+    await db.execute({ sql: "UPDATE first_booking_alerts SET outcome_signal = 'sent' WHERE centre_key = ?", args: [centreKey] });
+    return 'sent';
+  } catch (err) {
+    console.error('First booking outcome signal failed:', err.message);
+    await db.execute({ sql: "UPDATE first_booking_alerts SET outcome_signal = 'failed' WHERE centre_key = ?", args: [centreKey] });
+    return 'failed';
+  }
+}
+async function registerOutcome(centreKey, outcome, user) {
+  outcome = String(outcome || '').toLowerCase();
+  if (!OUTCOMES.has(outcome)) { const e = new Error('Choose Positive or Negative'); e.status = 400; throw e; }
+  const db = getDb();
+  const r = (await db.execute({ sql: "SELECT * FROM first_booking_alerts WHERE centre_key = ? AND status IN ('created','followup','done')", args: [centreKey] })).rows[0];
+  if (!r) { const e = new Error('No first booking to rate for this centre'); e.status = 404; throw e; }
+  const by = (user && (user.name || user.email)) || '';
+  await db.execute({ sql: "UPDATE first_booking_alerts SET outcome = ?, outcome_by = ?, outcome_at = now() WHERE centre_key = ?", args: [outcome, by, centreKey] });
+  // The outcome completes the morning-after follow-up (and its task).
+  if (r.status === 'followup') {
+    await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'done', followup_done_at = now(), followup_by = ? WHERE centre_key = ?", args: [by, centreKey] });
+    if (r.task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now() WHERE id = ? AND status <> 'done'", args: [r.task_id] });
+  }
+  const signal = await sendOutcomeSignal(centreKey);
+  return { outcome, signal };
+}
+async function retryOutcomeSignals() {
+  const rows = (await getDb().execute({ sql: "SELECT centre_key FROM first_booking_alerts WHERE outcome IS NOT NULL AND outcome_signal IN ('pending','failed','no_profile')", args: [] })).rows;
+  let sent = 0;
+  for (const r of rows) if ((await sendOutcomeSignal(r.centre_key)) === 'sent') sent++;
+  return sent;
 }
 
 async function check() {
@@ -260,8 +319,8 @@ async function check() {
 let running = null;
 function run() {
   if (running) return running;
-  running = check().then(async r => ({ ...r, followUps: await followUps() })).catch(err => { console.error('First booking alert check failed:', err.message); return { error: err.message }; }).finally(() => { running = null; });
+  running = check().then(async r => ({ ...r, followUps: await followUps(), outcomeSignals: await retryOutcomeSignals().catch(() => 0) })).catch(err => { console.error('First booking alert check failed:', err.message); return { error: err.message }; }).finally(() => { running = null; });
   return running;
 }
 
-module.exports = { run, check, followUps, openFollowUps, melNow, sendEmail, opsPost, slackDm, firstBookingEmail, morningAfter, describe, firstOf };
+module.exports = { registerOutcome, sendOutcomeSignal, retryOutcomeSignals, run, check, followUps, openFollowUps, melNow, sendEmail, opsPost, slackDm, firstBookingEmail, morningAfter, describe, firstOf };

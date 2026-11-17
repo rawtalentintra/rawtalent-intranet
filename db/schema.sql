@@ -3213,3 +3213,12 @@ CREATE TABLE IF NOT EXISTS first_booking_requests (
 );
 ALTER TABLE first_booking_requests ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS first_booking_requests_email_idx ON first_booking_requests (lower(email), created_at);
+
+-- First booking outcome (Liam, 16 Nov 2026, Fathom 900546391 at 20:40/34:10): after the
+-- morning-after call the WFP registers Positive or Negative in HeartBeat. Positive releases
+-- Journey 2 Email 3 onward in Customer.io (event first_booking_outcome_registered). Stands in
+-- for RT Portal's own outcome until RT sends it to Customer.io (Joy, 18 Nov).
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome TEXT;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_by TEXT;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_at TIMESTAMPTZ;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_signal TEXT;
