@@ -272,7 +272,7 @@ async function postToDailyThread(text) {
 }
 
 // Plain post in a public channel by name (bot joins if needed). First booking
-// requests go to #all-raw-talent (Joy, 17 Nov 2026).
+// requests post here as their own message in #daily-check-in (Joy, 18 Nov 2026).
 const channelIds = {};
 async function postToChannel(name, text) {
   if (!channelIds[name]) {
@@ -282,6 +282,11 @@ async function postToChannel(name, text) {
     channelIds[name] = ch.id;
   }
   return slackCall('chat.postMessage', { channel: channelIds[name], unfurl_links: false, text });
+}
+// Thread reply under a message posted with postToChannel (same channel name).
+async function replyInChannel(name, threadTs, text) {
+  if (!channelIds[name]) throw new Error('#' + name + ' not resolved yet');
+  return slackCall('chat.postMessage', { channel: channelIds[name], thread_ts: threadTs, unfurl_links: false, text });
 }
 // Delete HeartBeat's own replies in a day's #daily-check-in thread whose text
 // contains `needle` (the bot can only delete its own messages). Returns count.
@@ -298,4 +303,4 @@ async function deleteBotReplies(day, needle) {
   return n;
 }
 
-module.exports = { slackUserId, postToDailyThread, postToChannel, deleteBotReplies, dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };
+module.exports = { slackUserId, postToDailyThread, postToChannel, replyInChannel, deleteBotReplies, dailyThreadTs, melbourneDay, notifyTaskCreator, notifyTaskTagged, runSlackScan, isConfigured: () => !!getToken(), sendDmByEmail, notifyTaskDone, TASK_DONE_RECIPIENTS };

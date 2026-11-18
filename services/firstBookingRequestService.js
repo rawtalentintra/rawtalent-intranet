@@ -8,8 +8,9 @@
 //   2. creates an URGENT task for Ops (Lorie, Sophia) + the centre's owner WFP with
 //      the SOP: create the centre in RT if it's a lead, create the booking,
 //      handpick an educator, call them to welcome,
-//   3. posts in #all-raw-talent tagging Joy + Sophia (was the #daily-check-in thread; changed 17 Nov).
-//   Test mode (@rawtalent.com.au clicker): email + [TEST] task to the clicker only, no Slack.
+//   3. posts its own message in #daily-check-in tagging Joy + Sophia (Joy, 18 Nov).
+//   Test mode (@rawtalent.com.au clicker): email + [TEST] task to the clicker only; the
+//   Slack post goes up with no tags and gets a thread reply "This is a test only."
 // The same person clicking again within 24h is recorded once (no repeat alerts).
 // Reads RT only; never writes to RT.
 const { v4: uuidv4 } = require('uuid');
@@ -20,7 +21,7 @@ const OPS = ['lorie@rawtalent.com.au', 'sophia@rawtalent.com.au'];
 // Joy gets her own copy of every alert email and is tagged on the task, with Sophia (Joy, 17 Nov).
 const ALSO_EMAIL = ['joy@rawtalent.com.au'];
 const TAGGED = ['joy@rawtalent.com.au', 'sophia@rawtalent.com.au'];
-const SLACK_CHANNEL = 'all-raw-talent';
+const SLACK_CHANNEL = 'daily-check-in';
 const CLIENT_FOLLOW_UP = '4c6ae463-b50e-43b5-934a-a81572c024e9'; // Tasks: management -> Client Follow up
 const APP_URL = 'https://rawtalent-internal.app';
 
@@ -130,16 +131,15 @@ async function createRequest(input) {
   const emailStatus = await alerts.sendEmail(isTest ? email : INBOX, subject, html);
   if (!isTest) for (const cc of ALSO_EMAIL) await alerts.sendEmail(cc, subject, html);
   await db.execute({ sql: 'UPDATE first_booking_requests SET email_status = ? WHERE id = ?', args: [emailStatus, id] });
-  if (!isTest) {
-    try {
-      const slack = require('./slackService');
-      if (slack.isConfigured()) {
-        const tags = [];
-        for (const e of TAGGED) { const sid = await slack.slackUserId(e); if (sid) tags.push(`<@${sid}>`); }
-        await slack.postToChannel(SLACK_CHANNEL, `:calendar: *${esc(centreName)} wants to create their first ${fbf ? 'free ' : ''}booking* (clicked Yes in a Journey 1 email).${who.ownerName ? ` Owner: ${esc(who.ownerName)}.` : ''} ${isLead ? 'Not in RT yet: create the centre first. ' : ''}<${taskLink}|Open task>${tags.length ? `\n${tags.join(' ')} for Ops` : ''}`);
-      }
-    } catch (err) { console.error('First booking request Slack post failed:', err.message); }
-  }
+  try {
+    const slack = require('./slackService');
+    if (slack.isConfigured()) {
+      const tags = [];
+      if (!isTest) for (const e of TAGGED) { const sid = await slack.slackUserId(e); if (sid) tags.push(`<@${sid}>`); }
+      const r = await slack.postToChannel(SLACK_CHANNEL, `:calendar: *${esc(centreName)} wants to create their first ${fbf ? 'free ' : ''}booking* (clicked Yes in a Journey 1 email).${who.ownerName ? ` Owner: ${esc(who.ownerName)}.` : ''} ${isLead ? 'Not in RT yet: create the centre first. ' : ''}<${taskLink}|Open task>${tags.length ? `\n${tags.join(' ')} for Ops` : ''}`);
+      if (isTest && r && r.ts) await slack.replyInChannel(SLACK_CHANNEL, r.ts, 'This is a test only.');
+    }
+  } catch (err) { console.error('First booking request Slack post failed:', err.message); }
   return { ok: true, recorded: true };
 }
 
