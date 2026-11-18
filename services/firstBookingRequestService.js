@@ -8,7 +8,8 @@
 //   2. creates an URGENT task for Ops (Lorie, Sophia) + the centre's owner WFP with
 //      the SOP: create the centre in RT if it's a lead, create the booking,
 //      handpick an educator, call them to welcome,
-//   3. posts in today's #daily-check-in thread tagging Ops.
+//   3. posts in #all-raw-talent tagging Joy + Sophia (was the #daily-check-in thread; changed 17 Nov).
+//   Test mode (@rawtalent.com.au clicker): email + [TEST] task to the clicker only, no Slack.
 // The same person clicking again within 24h is recorded once (no repeat alerts).
 // Reads RT only; never writes to RT.
 const { v4: uuidv4 } = require('uuid');
