@@ -13115,7 +13115,8 @@
       </div>`;
     }
     async function setFbfLeadChoice(choice, id, boxId) {
-      if (choice === 'no' && !confirm('Mark this lead as "No free first booking"? Their welcome email won\'t include the offer.')) return;
+      const fbfNm2 = (((window.__fbfContact || {})[boxId] || {}).centreName) || 'this lead';
+      if (choice === 'no' && !confirm(`Are you sure ${fbfNm2} should NOT get a free first booking?\n\nTheir welcome email won't include the offer.`)) return;
       try {
         const r = await fetch('/api/first-booking-free/lead-choice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: id, choice }) });
         const d = await r.json().catch(() => ({}));
@@ -13125,7 +13126,8 @@
       } catch (e) { alert(e.message); }
     }
     async function setFbf(kind, id, boxId) {
-      if (!confirm(kind === 'lead' ? 'Mark this lead as offered "first booking free"? It goes in their first Journey 1 email.' : 'Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
+      const fbfNm = (((window.__fbfContact || {})[boxId] || {}).centreName) || (kind === 'lead' ? 'this lead' : 'this centre');
+      if (!confirm(`Are you sure you want to offer First Booking Free to ${fbfNm}?\n\n` + (kind === 'lead' ? 'Their first welcome email will include the free booking offer, and every email after it will remind them.' : 'They\'ll start receiving the First Booking Free emails.'))) return;
       try {
         const r = await fetch('/api/first-booking-free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'lead' ? { leadId: id } : { centreKey: id }) });
         const o = await r.json();

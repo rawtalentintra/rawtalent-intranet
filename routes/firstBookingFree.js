@@ -78,7 +78,7 @@ router.get('/contact', async (req, res) => {
       const l = (await getDb().execute({ sql: 'SELECT fbf_choice, fbf_choice_by, lead_journey_status FROM leads WHERE id = ?', args: [leadId] })).rows[0];
       if (l) leadChoice = { fbfChoice: l.fbf_choice || null, fbfChoiceBy: l.fbf_choice_by || null, journeySent: l.lead_journey_status === 'sent' };
     }
-    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready, ...leadChoice, ...(centreKey ? await centreEligibility(centreKey) : { eligible: true }) });
+    res.json({ name: ct.name, centreName: ct.centreName || null, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready, ...leadChoice, ...(centreKey ? await centreEligibility(centreKey) : { eligible: true }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
