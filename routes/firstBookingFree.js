@@ -47,13 +47,38 @@ async function centreEligibility(centreKey) {
   } catch (_) { return { eligible: true }; } // RT down: don't hide the button
 }
 
+// Lead: "No free first booking" straight from the lead page (Joy, 18 Nov), same choice
+// the Log call/visit form asks for. 'clear' undoes a No while the welcome email hasn't gone.
+router.post('/lead-choice', async (req, res) => {
+  try {
+    const { leadId, choice } = req.body || {};
+    if (!leadId || !['no', 'clear'].includes(choice)) return res.status(400).json({ error: 'leadId and choice (no|clear) are required' });
+    const db = getDb();
+    const l = (await db.execute({ sql: 'SELECT fbf_choice, lead_journey_status FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+    if (!l) return res.status(404).json({ error: 'Lead not found' });
+    if (choice === 'no') {
+      if (l.fbf_choice === 'yes') return res.status(409).json({ error: 'This lead is already tagged first booking free. Remove that first.' });
+      await db.execute({ sql: "UPDATE leads SET fbf_choice = 'no', fbf_choice_by = ?, fbf_choice_at = now() WHERE id = ? AND fbf_choice IS NULL", args: [req.user.name || req.user.email, leadId] });
+    } else {
+      if (l.lead_journey_status === 'sent') return res.status(409).json({ error: 'Their welcome email has already gone out, so this can no longer be changed.' });
+      await db.execute({ sql: "UPDATE leads SET fbf_choice = NULL, fbf_choice_by = NULL, fbf_choice_at = NULL WHERE id = ? AND fbf_choice = 'no'", args: [leadId] });
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Preview who Customer.io would email, shown before and after tagging.
 router.get('/contact', async (req, res) => {
   try {
     const { leadId, centreKey } = req.query;
     const ct = await resolveContact({ leadId, centreKey });
     if (!ct) return res.status(404).json({ error: 'Not found' });
-    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready, ...(centreKey ? await centreEligibility(centreKey) : { eligible: true }) });
+    let leadChoice = {};
+    if (leadId) {
+      const l = (await getDb().execute({ sql: 'SELECT fbf_choice, fbf_choice_by, lead_journey_status FROM leads WHERE id = ?', args: [leadId] })).rows[0];
+      if (l) leadChoice = { fbfChoice: l.fbf_choice || null, fbfChoiceBy: l.fbf_choice_by || null, journeySent: l.lead_journey_status === 'sent' };
+    }
+    res.json({ name: ct.name, email: ct.email, inRt: !!ct.rtPersonId, live: cioTrackConfig().ready, ...leadChoice, ...(centreKey ? await centreEligibility(centreKey) : { eligible: true }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

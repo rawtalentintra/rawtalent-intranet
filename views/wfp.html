@@ -1760,11 +1760,19 @@
         : `<div style="font-size:12px;color:#b45309;margin-top:2px">No contact found, so no email can go to this centre</div>`;
     }
     function fbfHtml(kind, id, boxId, o) {
+      const fbfLeadRow = kind === 'lead' ? allLeads.find(l => l.id === id) : null;
+      // Lead: both choices side by side (Joy, 18 Nov), same as the Log call/visit form.
+      const fbfC = kind === 'lead' ? ((window.__fbfContact || {})[boxId] || {}) : {};
+      const leadNo = kind === 'lead' && !o && (fbfC.fbfChoice === 'no' || (typeof fbfLeadRow !== 'undefined' && fbfLeadRow && fbfLeadRow.fbf_choice === 'no'));
+      if (leadNo) return `<div style="font-size:13px;color:#374151;font-weight:600">🚫 No free first booking${fbfC.fbfChoiceBy ? ` <span style="color:#6b7590;font-weight:400">(${escHtml(fbfC.fbfChoiceBy)})</span>` : ''}</div>
+        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">They get the welcome email without the offer.</div>${fbfC.journeySent ? '' : `<a href="#" onclick="setFbfLeadChoice('clear','${escHtml(id)}','${boxId}');return false" style="font-size:11.5px;color:#6b7590">Change</a>`}${fbfContactLine(boxId)}`;
+      if (kind === 'lead' && !o) return `<div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-secondary" style="flex:1;min-width:150px" onclick="setFbf('lead','${escHtml(id)}','${boxId}')">🎁 First booking free</button>
+          <button type="button" class="btn btn-secondary" style="flex:1;min-width:150px" onclick="setFbfLeadChoice('no','${escHtml(id)}','${boxId}')">🚫 No free first booking</button></div>
+        <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Pick one. It decides their first welcome email. First booking free is only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const fbfElig = kind === 'centre' ? (window.__fbfContact || {})[boxId] : null;
       if (!o && fbfElig && fbfElig.eligible === false) return `<div style="font-size:12.5px;color:#374151">🎁 First booking free isn't available for this centre</div>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">It's only for new centres with no bookings yet, or dormant centres (no booking in 6 months).${fbfElig.lastBookingDate ? ` Last booking: ${escHtml(fbfElig.lastBookingDate)}.` : ' They already have a booking coming up.'}</div>`;
-      const fbfLead = kind === 'lead' ? allLeads.find(l => l.id === id) : null;
-      if (!o && fbfLead && fbfLead.fbf_choice === 'no') return `<div style="font-size:12.5px;color:#374151">🎁 No free first booking${fbfLead.fbf_choice_by ? ` <span style="color:#6b7590">(${escHtml(fbfLead.fbf_choice_by)})</span>` : ''}</div>`;
       if (!o) return `<button type="button" class="btn btn-secondary" onclick="setFbf('${kind}','${escHtml(id)}','${boxId}')">🎁 First booking free applies</button>
         <div style="font-size:11.5px;color:#6b7590;margin-top:4px">Tick when you've offered their first booking free. Only for centres that use agency regularly.</div>${fbfContactLine(boxId)}`;
       const when = new Date(o.offeredAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -1778,6 +1786,16 @@
         <div style="font-size:12px;color:#374151">${booking}</div>
         ${canUndo ? `<a href="#" onclick="removeFbf(${o.id},'${kind}','${escHtml(id)}','${boxId}');return false" style="font-size:11.5px;color:#6b7590">Remove (tagged by mistake)</a>` : ''}
       </div>`;
+    }
+    async function setFbfLeadChoice(choice, id, boxId) {
+      if (choice === 'no' && !confirm('Mark this lead as "No free first booking"? Their welcome email won\'t include the offer.')) return;
+      try {
+        const r = await fetch('/api/first-booking-free/lead-choice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: id, choice }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Could not save');
+        await ensureDataLoaded(true).catch(() => {});
+        loadFbf('lead', id, boxId);
+      } catch (e) { alert(e.message); }
     }
     async function setFbf(kind, id, boxId) {
       if (!confirm(kind === 'lead' ? 'Mark this lead as offered "first booking free"? It goes in their first Journey 1 email.' : 'Mark this centre as offered "first booking free"? An offer email is sent to the centre contact.')) return;
