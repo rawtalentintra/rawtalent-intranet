@@ -4789,7 +4789,7 @@
         await ensureLeaveColorMap();
         list.innerHTML = `
           <div id="teamChartContainer">${renderOrgCanvas(allTeamMembers.filter(m => (m.status || 'active') === 'active'))}</div>
-          <div style="overflow-x:auto">${renderTeamTable(allTeamMembers)}</div>
+          <div style="overflow-x:auto">${renderTeamTable(allTeamMembers.filter(m => (m.status || 'active') !== 'inactive'))}</div>
         `;
         document.querySelectorAll('#teamChartContainer .org-node').forEach(node => {
           if (node.classList.contains('org-node-tohire')) return;
