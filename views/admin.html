@@ -6521,8 +6521,8 @@
       try {
         allTeamMembers = await fetch('/api/team').then(r => r.json());
         await ensureLeaveColorMap();
-        chartEl.innerHTML = renderOrgCanvas(allTeamMembers);
-        renderTeamTable(allTeamMembers);
+        chartEl.innerHTML = renderOrgCanvas(allTeamMembers.filter(m => (m.status || 'active') !== 'inactive'));
+        renderTeamTable(allTeamMembers.filter(m => (m.status || 'active') !== 'inactive'));
         wireOrgDrag(chartEl);
         drawOrgLines(chartEl);
       } catch {
