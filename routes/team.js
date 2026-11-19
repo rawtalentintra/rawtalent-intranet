@@ -146,7 +146,14 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const db = getDb();
     const existing = await db.execute({ sql: 'SELECT name, email FROM team_members WHERE id = ?', args: [req.params.id] });
-    await db.execute({ sql: 'DELETE FROM team_members WHERE id = ?', args: [req.params.id] });
+    // Joy, 19 Nov 2026: a leaver still owed a final pay (payroll_until today
+    // or later) is never hard-deleted — payroll reads name/position/address
+    // from this row. Delete just marks them inactive (off the org chart and
+    // directory); their login is still removed below.
+    const em = existing.rows[0]?.email;
+    const owed = em && (await db.execute({ sql: `SELECT 1 FROM employee_payroll_profiles WHERE LOWER(user_email) = LOWER(?) AND payroll_until >= (now() AT TIME ZONE 'Australia/Melbourne')::date`, args: [em] })).rows[0];
+    if (owed) await db.execute({ sql: "UPDATE team_members SET status = 'inactive', updated_at = now() WHERE id = ?", args: [req.params.id] });
+    else await db.execute({ sql: 'DELETE FROM team_members WHERE id = ?', args: [req.params.id] });
     // Orphaned reports become top-level rather than vanishing from the chart.
     await db.execute({ sql: 'UPDATE team_members SET manager_id = NULL WHERE manager_id = ?', args: [req.params.id] });
     if (existing.rows[0]) await logActivity('team_member', existing.rows[0].name, 'deleted', `Team member "${existing.rows[0].name}" removed`, req.user.email);
