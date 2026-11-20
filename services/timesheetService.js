@@ -97,9 +97,10 @@ function payPeriodEndOf(ppStartStr) { return addDays(ppStartStr, 13); }
 // Simplified 2026-08-26 from a start/end-time pair to a directly-entered
 // total, per Joy's ask — just validates the number is sane for a single
 // day rather than deriving it from clock-in/out.
-function validateHours(hours) {
+function validateHours(hours, { allowZero = false } = {}) {
   const n = Number(hours);
-  if (!Number.isFinite(n) || n <= 0) throw new Error('Enter the total hours worked');
+  // allowZero: Sophia/Joy's Correct Hours can zero out a day (e.g. a no-show)
+  if (!Number.isFinite(n) || n < 0 || (n === 0 && !allowZero)) throw new Error('Enter the total hours worked');
   if (n > 24) throw new Error('That\'s more hours than a day has — double-check the number');
   return Math.round(n * 100) / 100;
 }
@@ -190,7 +191,7 @@ async function deleteEntry(entryId, userEmail) {
 // already does for a normal entry).
 async function adminAdjustDayHours(userEmail, userName, weekStartDate, approverEmail, entryDate, hours) {
   if (!isFinalApprover(approverEmail)) throw new Error('Only Sophia or Joy can edit hours here');
-  const validHours = validateHours(hours);
+  const validHours = validateHours(hours, { allowZero: true });
   const db = getDb();
   const week = await getOrCreateDraftWeek(db, { id: uuidv4(), userEmail, userName, weekStartDate });
   const prev = (await db.execute({ sql: 'SELECT * FROM timesheet_entries WHERE user_email = ? AND entry_date = ?', args: [userEmail, entryDate] })).rows[0];

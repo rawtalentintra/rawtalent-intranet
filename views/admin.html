@@ -9149,7 +9149,7 @@
       const weekStartDate = document.getElementById('ehWeekStartDate').value;
       const entryDate = document.getElementById('ehDaySelect').value;
       const hours = Number(document.getElementById('ehHours').value);
-      if (!Number.isFinite(hours) || hours <= 0) { toast('Enter a valid number of hours', 'error'); return; }
+      if (document.getElementById('ehHours').value === '' || !Number.isFinite(hours) || hours < 0) { toast('Enter a valid number of hours', 'error'); return; }
       try {
         const res = await fetch('/api/timesheets/admin/weeks/adjust-day', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
