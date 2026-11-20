@@ -13683,12 +13683,17 @@
       const byState = {};
       emData.centres.forEach((c, i) => { if (st && !st.has(c.state || 'Unknown')) return; (byState[c.state || 'Other'] = byState[c.state || 'Other'] || []).push([c, i]); });
       const picked = emLocation && emLocation.centreIndex != null ? emLocation.centreIndex : '';
-      sel.innerHTML = '<option value="">Select a centre</option>' + Object.keys(byState).sort().map(k =>
+      const groups = EM_CENTRE_GROUPS.map(g => {
+        const n = emData.centres.filter(c => g.re.test(c.name) && (!st || st.has(c.state || 'Unknown'))).length;
+        return n ? `<option value="group:${g.key}" ${picked === 'group:' + g.key ? 'selected' : ''}>${escHtml(g.label)} (${n})</option>` : '';
+      }).join('');
+      sel.innerHTML = '<option value="">Select a centre</option>' + (groups ? `<optgroup label="Centre groups">${groups}</optgroup>` : '') + Object.keys(byState).sort().map(k =>
         `<optgroup label="${escHtml(k)}">${byState[k].sort((a, b) => a[0].name.localeCompare(b[0].name)).map(([c, i]) =>
           `<option value="${i}" ${String(picked) === String(i) ? 'selected' : ''}>${escHtml(c.name)}${c.suburb ? ' (' + escHtml(c.suburb) + ')' : ''}</option>`).join('')}</optgroup>`).join('');
     }
     function emOnCentreSelect(sel) {
       if (sel.value === '') { emClearLocation(); return; }
+      if (sel.value.startsWith('group:')) { emPickCentreGroup(sel.value.slice(6)); return; }
       emPickCentre(Number(sel.value));
     }
     function emToggleFilter(cb) {
@@ -13711,6 +13716,13 @@
       if (box && !e.target.closest('.em-search')) box.style.display = 'none';
     });
 
+    // Distance to the picked location; a centre group (e.g. All Montessori)
+    // measures to the nearest centre in the group.
+    function emDistTo(p) {
+      if (emLocation.points) return Math.min(...emLocation.points.map(q => emKm(q, p)));
+      return emKm(emLocation, p);
+    }
+    const EM_CENTRE_GROUPS = [{ key: 'montessori', label: 'All Montessori centres', re: /montessori/i }];
     function emKm(a, b) {
       const R = 6371, toR = x => x * Math.PI / 180;
       const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
@@ -13728,7 +13740,7 @@
         return sel.has(f.get(e));
       }));
       if (emLocation) {
-        list = list.map(e => ({ ...e, distanceKm: emKm(emLocation, e) })).filter(e => e.distanceKm <= radius);
+        list = list.map(e => ({ ...e, distanceKm: emDistTo(e) })).filter(e => e.distanceKm <= radius);
         list.sort((a, b) => a.distanceKm - b.distanceKm);
       } else {
         list.sort((a, b) => EM_SEGMENT_ORDER.indexOf(a.segment) - EM_SEGMENT_ORDER.indexOf(b.segment) || a.name.localeCompare(b.name));
@@ -13738,7 +13750,7 @@
     function emVisibleCentres() {
       const radius = Number(document.getElementById('emRadius').value) || 10;
       const st = emSel.state;
-      return emData.centres.filter(c => emLocation ? emKm(emLocation, c) <= radius : (!st || !st.size || st.has(c.state || 'Unknown')));
+      return emData.centres.filter(c => emLocation ? emDistTo(c) <= radius : (!st || !st.size || st.has(c.state || 'Unknown')));
     }
 
     function emRender() {
@@ -13797,7 +13809,7 @@
         properties: { id: e.userId, color: (SEGMENT_META[e.segment] || {}).dot || '#64748b' }
       }; }) };
       const fit = () => {
-        const pts = emLocation ? [emLocation, ...list] : (list.length ? list : centres);
+        const pts = emLocation ? [...(emLocation.points || [emLocation]), ...list] : (list.length ? list : centres);
         if (!pts.length) return;
         if (emLocation && !list.length) { emMapInstance.flyTo({ center: [emLocation.lng, emLocation.lat], zoom: 11 }); return; }
         const b = new mapboxgl.LngLatBounds();
@@ -13888,6 +13900,13 @@
     }
     let emAddressResults = [];
     function emPickCentre(i) { const c = emData.centres[i]; emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true, centreIndex: i }); }
+    function emPickCentreGroup(key) {
+      const g = EM_CENTRE_GROUPS.find(x => x.key === key);
+      const st = emSel.state && emSel.state.size ? emSel.state : null;
+      const points = emData.centres.filter(c => g.re.test(c.name) && (!st || st.has(c.state || 'Unknown')));
+      if (!points.length) return;
+      emPickLocation({ lat: points[0].lat, lng: points[0].lng, points, label: g.label.replace(/^All /, ''), centre: true, centreIndex: 'group:' + key });
+    }
     function emPickAddress(i) { const a = emAddressResults[i]; emPickLocation({ lat: a.lat, lng: a.lng, label: a.label.split(',')[0], centre: false }); }
     function emPickLocation(loc) {
       emLocation = loc;
