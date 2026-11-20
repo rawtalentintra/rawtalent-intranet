@@ -13638,6 +13638,7 @@
           return;
         }
       }
+      await emLoadCentreGroups();
       emRenderFilters();
       renderMicropodsLegend('emLabelsLegend', 'dot colours on the map; this map shows every educator, use the filters for Active and compliant');
       emRender();
@@ -13684,7 +13685,7 @@
       emData.centres.forEach((c, i) => { if (st && !st.has(c.state || 'Unknown')) return; (byState[c.state || 'Other'] = byState[c.state || 'Other'] || []).push([c, i]); });
       const picked = emLocation && emLocation.centreIndex != null ? emLocation.centreIndex : '';
       const groups = EM_CENTRE_GROUPS.map(g => {
-        const n = emData.centres.filter(c => g.re.test(c.name) && (!st || st.has(c.state || 'Unknown'))).length;
+        const n = emGroupPoints(g).length;
         return n ? `<option value="group:${g.key}" ${picked === 'group:' + g.key ? 'selected' : ''}>${escHtml(g.label)} (${n})</option>` : '';
       }).join('');
       sel.innerHTML = '<option value="">Select a centre</option>' + (groups ? `<optgroup label="Centre groups">${groups}</optgroup>` : '') + Object.keys(byState).sort().map(k =>
@@ -13722,7 +13723,20 @@
       if (emLocation.points) return Math.min(...emLocation.points.map(q => emKm(q, p)));
       return emKm(emLocation, p);
     }
-    const EM_CENTRE_GROUPS = [{ key: 'montessori', label: 'All Montessori centres', re: /montessori/i }];
+    // Montessori Academy signed our Terms of Business (Nov 2026); most of its
+    // centres aren't in RT yet, so the group uses their own published
+    // locations (public/data/montessori-academy-centres.json, from
+    // montessoriacademy.com.au's centre finder, 102 centres).
+    const EM_CENTRE_GROUPS = [{ key: 'montessori-academy', label: 'All Montessori Academy centres', url: '/data/montessori-academy-centres.json', points: null }];
+    async function emLoadCentreGroups() {
+      await Promise.all(EM_CENTRE_GROUPS.filter(g => !g.points).map(async g => {
+        try { g.points = (await fetch(g.url).then(r => r.json())).map(([name, suburb, state, lat, lng]) => ({ name, suburb, state, lat, lng })); } catch { g.points = []; }
+      }));
+    }
+    function emGroupPoints(g) {
+      const st = emSel.state && emSel.state.size ? emSel.state : null;
+      return (g.points || []).filter(c => !st || st.has(c.state));
+    }
     function emKm(a, b) {
       const R = 6371, toR = x => x * Math.PI / 180;
       const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
@@ -13902,8 +13916,7 @@
     function emPickCentre(i) { const c = emData.centres[i]; emPickLocation({ lat: c.lat, lng: c.lng, label: c.name, centre: true, centreIndex: i }); }
     function emPickCentreGroup(key) {
       const g = EM_CENTRE_GROUPS.find(x => x.key === key);
-      const st = emSel.state && emSel.state.size ? emSel.state : null;
-      const points = emData.centres.filter(c => g.re.test(c.name) && (!st || st.has(c.state || 'Unknown')));
+      const points = emGroupPoints(g);
       if (!points.length) return;
       emPickLocation({ lat: points[0].lat, lng: points[0].lng, points, label: g.label.replace(/^All /, ''), centre: true, centreIndex: 'group:' + key });
     }
