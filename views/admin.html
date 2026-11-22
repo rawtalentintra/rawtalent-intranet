@@ -5507,7 +5507,8 @@
       // instead of navigating in place, so a Workforce Partner never loses
       // their spot in the Leads modal they came from. Overrides whichever
       // section the block above just landed on.
-      const openCentreKey = new URLSearchParams(location.search).get('openCentre');
+      // ?centre= is the old format first-booking alert emails sent before 23 Nov 2026; still honoured.
+      const openCentreKey = new URLSearchParams(location.search).get('openCentre') || new URLSearchParams(location.search).get('centre');
       if (openCentreKey) {
         goToCentre360(openCentreKey);
         // Strip the param right after consuming it — otherwise it stays in
