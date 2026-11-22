@@ -800,6 +800,13 @@ router.put('/:id', requireRole('admin', 'super_admin', 'workforce_partner'), asy
     const result = await getDb().execute({ sql: 'SELECT * FROM leads WHERE id = ?', args: [req.params.id] });
     const updated = result.rows[0];
 
+    // Email added to a lead whose Journey 1 was waiting on one ('no_email'):
+    // send it now rather than on the next 3-hourly retry (Joy, 23 Nov 2026).
+    if (updated && updated.lead_journey_status === 'no_email' && updated.contact_email) {
+      require('../services/leadJourneyService').sendFirstContactSignal(updated.id)
+        .catch(err => console.error('Lead journey send after email added:', err.message));
+    }
+
     // One source of truth for "who called/visited what": a Stage change that
     // moves Called or Visited INTO done is a real call/visit by whoever made
     // the change, so it writes the same lead_activities row Log Call/Log

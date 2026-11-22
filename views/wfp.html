@@ -1459,6 +1459,19 @@
           attention.push({ kind: 'centre', centre: c, reason: `Centre dormant — no booking since ${fmtDate(c.lastBookingDate)}`, _tier: 4 });
         }
       }
+      // Lead missing its contact email (Joy, 23 Nov 2026): the partner logged the
+      // first call/visit but Journey 1's "lovely to meet you" email can't go without
+      // an email, and the lead drops out 7 days after that first contact. Shown to
+      // the partner who logged it until the email is added (then the journey sends).
+      const me = currentUser && currentUser.wfpLabel; // a partner sees the leads they logged; admins see all (state filter already applied)
+      for (const l of allLeads) {
+        if (l.lead_journey_status !== 'no_email' || l.contact_email) continue;
+        if (me && l.lead_journey_by !== me) continue;
+        const dropsOut = l.lead_journey_at ? new Date(new Date(l.lead_journey_at).getTime() + 7 * 864e5) : null;
+        if (dropsOut && dropsOut < new Date()) continue;
+        attention.push({ kind: 'lead', lead: l, label: l.centre_name || 'Lead',
+          reason: `Add the contact's email so their welcome email can send${dropsOut ? ` (by ${fmtDate(dropsOut.toISOString().slice(0, 10))})` : ''}`, _tier: 3.5 });
+      }
       attention.sort((a, b) => a._tier - b._tier);
       return { attention };
     }
@@ -1522,6 +1535,7 @@
           <div class="card" onclick="openLead('${l.id}')">
             <div class="name">${escHtml(item.label)}</div>
             <div class="sub">${escHtml(l.suburb || '')}${l.state ? ', ' + escHtml(l.state) : ''}${item.when ? ' · ' + fmtDate(item.when) : ''}</div>
+            ${item.reason ? `<div class="why">${escHtml(item.reason)}</div>` : ''}
             <div class="card-corner-badge" style="justify-content:${showAddToRoute ? 'space-between' : 'flex-end'}">
               ${showAddToRoute ? `<button class="qa-btn lightblue" onclick="event.stopPropagation();addStopToRoute('lead','${l.id}')">Add to Route</button>` : ''}
               <span class="badge neutral corner">Lead</span>

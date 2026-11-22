@@ -678,6 +678,17 @@ async function start() {
     setTimeout(runFirstBookingAlerts, 2 * 60 * 1000);
     // One-off (17 Nov 2026): delete the test 'Elevation' first booking request post from #daily-check-in.
     setTimeout(() => require('./services/firstBookingRequestService').cleanupTestPost(), 45 * 1000);
+    // One-off (23 Nov 2026, remove after it has run): delete the 5 "you were assigned to a
+    // HeartBeat Task" bot posts for Gwen's withdrawn missing-email tasks. Matched by task link only.
+    setTimeout(async () => {
+      const slack = require('./services/slackService');
+      if (!slack.isConfigured()) return;
+      let n = 0;
+      for (const id of ['9280dff3-608e-46e1-8013-4633c7cc5dd9', '4c8a7a1b-cff0-4dd6-ae74-77b0196282f6', 'e6ca3cd2-3862-45d9-b61e-f72e05c1a97b', 'c22bb0ce-1a64-4bdf-9e10-78cacc019d16', 'a4de00f7-c2bc-4d2f-95b3-54ede84c0b3c']) {
+        try { n += await slack.deleteBotReplies('2026-11-23', `task=${id}`); } catch (err) { console.error('Missing-email Slack cleanup:', err.message); }
+      }
+      console.log(`Missing-email Slack cleanup: ${n} post(s) deleted.`);
+    }, 50 * 1000);
     setInterval(runFirstBookingAlerts, 10 * 60 * 1000);
     // JobAdder keep-alive (17 Nov 2026): refresh the token at least daily so it can't expire unused.
     const runJobAdderKeepAlive = () => require('./services/jobAdderService').keepAlive()
