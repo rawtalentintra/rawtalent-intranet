@@ -123,7 +123,11 @@ async function retryPending() {
 // logged but has no contact email can't start Journey 1 Leads, and expires after
 // RETRY_DAYS. One task per lead goes to the WFP who logged it, due the day before
 // it expires. Adding the email sends the journey on the next run and closes the task.
+// Paused 23 Nov 2026: WFPs don't use HeartBeat tasks (Joy). Being moved to a
+// notification instead; until then nothing is created.
+const MISSING_EMAIL_TASKS = false;
 async function remindMissingEmails() {
+  if (!MISSING_EMAIL_TASKS) return 0;
   const db = getDb();
   const rows = (await db.execute({
     sql: `SELECT id, centre_name, state, lead_journey_by, contact_first_name, contact_last_name, centre_phone,
