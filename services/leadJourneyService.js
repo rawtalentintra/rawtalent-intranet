@@ -11,10 +11,12 @@
 //    the email soon after still starts the journey; after that it's 'expired'
 //    (a "lovely to meet you" email weeks later would read wrong).
 // Reads RT only; never writes to RT.
+const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const fbf = require('./firstBookingFreeService');
 
 const RETRY_DAYS = 7;
+const CLIENT_FOLLOW_UP = '4c6ae463-b50e-43b5-934a-a81572c024e9'; // Tasks: management -> Client Follow up
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Profile to send to: the RT client (person id) when the lead matches an RT
@@ -67,6 +69,10 @@ async function sendFirstContactSignal(leadId) {
     Object.assign(attrs, owner);
     await fbf.sendCioSignal(ident, attrs, 'lead_first_contact_logged', data);
     await db.execute({ sql: "UPDATE leads SET lead_journey_status = 'sent', lead_journey_sent_at = now(), lead_journey_identifier = ?, lead_journey_error = NULL WHERE id = ?", args: [ident, leadId] });
+    // The email arrived, so the WFP's "add an email" reminder is done.
+    if (l.lead_journey_email_task_id) {
+      await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now() WHERE id = ? AND status <> 'done'", args: [l.lead_journey_email_task_id] }).catch(() => {});
+    }
     return 'sent';
   } catch (err) {
     await db.execute({ sql: "UPDATE leads SET lead_journey_status = 'failed', lead_journey_error = ? WHERE id = ?", args: [String(err.message).slice(0, 300), leadId] });
@@ -95,7 +101,10 @@ async function onActivityLogged(lead, user, choice) {
   }
   if (user.wfp_label && !lead.lead_journey_status) {
     const r = await db.execute({ sql: "UPDATE leads SET lead_journey_status = 'pending', lead_journey_at = now(), lead_journey_by = ? WHERE id = ? AND lead_journey_status IS NULL", args: [user.wfp_label, lead.id] });
-    if (r.rowsAffected !== 0) await sendFirstContactSignal(lead.id).catch(() => {});
+    if (r.rowsAffected !== 0) {
+      await sendFirstContactSignal(lead.id).catch(() => {});
+      await remindMissingEmails().catch(() => {});
+    }
   }
 }
 
@@ -106,7 +115,46 @@ async function retryPending() {
   if (!fbf.cioTrackConfig().ready) return 0;
   const rows = (await db.execute({ sql: "SELECT id FROM leads WHERE lead_journey_status IN ('pending','failed','no_email','no_profile')", args: [] })).rows;
   for (const r of rows) await sendFirstContactSignal(r.id);
+  await remindMissingEmails().catch(err => console.error('Lead missing-email reminders:', err.message));
   return rows.length;
 }
 
-module.exports = { onActivityLogged, sendFirstContactSignal, retryPending, RETRY_DAYS };
+// Missing-email reminder (Joy, 23 Nov 2026). A lead whose first call/visit was
+// logged but has no contact email can't start Journey 1 Leads, and expires after
+// RETRY_DAYS. One task per lead goes to the WFP who logged it, due the day before
+// it expires. Adding the email sends the journey on the next run and closes the task.
+async function remindMissingEmails() {
+  const db = getDb();
+  const rows = (await db.execute({
+    sql: `SELECT id, centre_name, state, lead_journey_by, contact_first_name, contact_last_name, centre_phone,
+            to_char((lead_journey_at AT TIME ZONE 'Australia/Melbourne') + (? || ' days')::interval, 'Dy DD Mon') AS expires_on,
+            ((lead_journey_at AT TIME ZONE 'Australia/Melbourne')::date + (? - 1)) AS due
+          FROM leads
+          WHERE lead_journey_status = 'no_email' AND lead_journey_email_task_id IS NULL
+            AND lead_journey_at > now() - (? || ' days')::interval`,
+    args: [String(RETRY_DAYS), RETRY_DAYS, String(RETRY_DAYS)]
+  })).rows;
+  let created = 0;
+  for (const l of rows) {
+    const to = fbf.WFP_EMAIL[l.lead_journey_by];
+    if (!to) continue;
+    const contact = [l.contact_first_name, l.contact_last_name].filter(x => x && !/not provided/i.test(x)).join(' ');
+    const taskId = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
+            VALUES (?, 'management', ?, ?, ?, 'to_do', 'high', ?, ?, 'system@rawtalent.internal', 'Auto: Lead missing email', '[]', '[]', '[]')`,
+      args: [taskId, CLIENT_FOLLOW_UP, `Add an email for ${l.centre_name}`,
+        `You logged a call or visit with ${l.centre_name}${l.state ? ` (${l.state})` : ''}, but the lead has no contact email, so their "It was lovely to meet you" email and Journey 1 can't start.\n\n` +
+        (contact ? `Contact: ${contact}\n` : '') + (l.centre_phone ? `Phone: ${l.centre_phone}\n` : '') +
+        `\nWhat to do:\n1. Open the lead in HeartBeat (Leads) and add the contact's email.\n2. That's it. Their Journey 1 email goes out automatically within a few hours, and this task closes itself.\n\nIf no email is added by ${l.expires_on}, the lead drops out of Journey 1.`,
+        JSON.stringify([to]), l.due]
+    });
+    await db.execute({ sql: 'UPDATE leads SET lead_journey_email_task_id = ? WHERE id = ?', args: [taskId, l.id] });
+    try { await require('./slackService').notifyTaskTagged(taskId, [to], 'assigned to'); } catch (_) { /* best effort */ }
+    created++;
+  }
+  if (created) console.log(`Lead missing-email reminders: ${created} task(s) created.`);
+  return created;
+}
+
+module.exports = { onActivityLogged, sendFirstContactSignal, retryPending, remindMissingEmails, RETRY_DAYS };

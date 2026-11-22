@@ -3037,6 +3037,8 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_by TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_sent_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_identifier TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_error TEXT;
+-- Task reminding the WFP to add a contact email when the lead is 'no_email' (Joy, 23 Nov 2026).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_journey_email_task_id TEXT;
 -- Leads already tagged First Booking Free count as 'yes'.
 UPDATE leads SET fbf_choice = 'yes', fbf_choice_by = o.offered_by_name, fbf_choice_at = o.offered_at
   FROM first_booking_free_offers o WHERE o.lead_id = leads.id AND leads.fbf_choice IS NULL;
