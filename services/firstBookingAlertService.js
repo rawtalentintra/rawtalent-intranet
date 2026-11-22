@@ -281,7 +281,7 @@ async function check() {
       // 1. New first booking
       const own = await owner(c.centreKey);
       const d = describe(b);
-      const link = `${APP_URL}/admin?centre=${encodeURIComponent(c.centreKey)}`;
+      const link = `${APP_URL}/go/centre/${encodeURIComponent(c.centreKey)}`;
       const ins = await db.execute({ sql: "INSERT INTO first_booking_alerts (centre_key, centre_name, booking_id, booking_date, owner_name, owner_email, status, created_alert_at) VALUES (?,?,?,?,?,?, 'created', now()) ON CONFLICT (centre_key) DO NOTHING RETURNING centre_key", args: [c.centreKey, c.name, String(b.clientBookingId), d.day || null, own.name, own.email] });
       if (!ins.rows.length) continue; // another instance got it first
       const emailStatus = await sendEmail(own.email, `First booking: ${c.name}`, firstBookingEmail({ ownerName: own.name, centreName: c.name, when: d.when, bookedBy: d.by, status: b.bookingStatus, bookingId: b.clientBookingId, heartbeatLink: link }));

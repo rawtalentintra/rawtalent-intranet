@@ -332,9 +332,21 @@ process.on('unhandledRejection', (err) => {
 // directly, and a plain user with just can_use_wfp_pwa was never sent
 // here via role anyway (they land on "/" as a normal 'user' account,
 // same as before — this redirect is keyed off role, not the grant).
+// One link for "open this centre" in emails and Slack (23 Nov 2026): phones open
+// the centre in the /wfp app, everything else in Desktop's Centre 360. Logged-out
+// clicks go through login and come back here (returnTo).
+app.get('/go/centre/:key', (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect(`/login.html?returnTo=${encodeURIComponent(req.originalUrl)}`);
+  const key = encodeURIComponent(req.params.key);
+  const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(req.get('user-agent') || '');
+  res.redirect(mobile && req.user.wfp_label ? `/wfp?openCentre=${key}` : `/admin?openCentre=${key}`);
+});
+
 app.get('/', (req, res) => {
   // Phones go to the /wfp app; a laptop/desktop gets the full Desktop view (Gwen, 9 Nov).
-  if (req.isAuthenticated() && req.user.role === 'workforce_partner') {
+  // A task link (/?tab=tasks&task=…, from emails and Slack) stays here so the task
+  // opens; redirecting dropped it, so Workforce Partners landed on a generic page.
+  if (req.isAuthenticated() && req.user.role === 'workforce_partner' && !req.query.task) {
     return res.redirect(/Mobi|Android|iPhone|iPad|iPod/i.test(req.get('user-agent') || '') ? '/wfp' : '/admin');
   }
   guardRoute(req, res, 'index.html');

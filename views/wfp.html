@@ -2995,7 +2995,15 @@
       // highlight/header-compact state comes back correct too; push:false
       // since viewStack is already the full restored stack, not one more
       // level to add to it.
-      if (restoreNavStateIfAny()) {
+      // Email/Slack "Open in HeartBeat" links (via /go/centre/:key, 23 Nov 2026)
+      // land here as ?openCentre=<centreKey>: open that centre over Today, then
+      // strip the param so a refresh doesn't reopen it.
+      const deepCentre = new URLSearchParams(location.search).get('openCentre');
+      if (deepCentre) {
+        history.replaceState(null, '', location.pathname);
+        viewStack = ['today'];
+        openCentre(deepCentre);
+      } else if (restoreNavStateIfAny()) {
         setView(viewStack[viewStack.length - 1], false);
         if (viewStack[viewStack.length - 1] === 'plan-route' && routeBuilderStart && routeBuilderStops.length) refreshRouteDraftPreview();
       } else {
