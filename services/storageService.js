@@ -29,7 +29,8 @@ const BUCKETS = {
   centreRecordings: BUCKET_PREFIX + 'centre-recordings',
   payslips: BUCKET_PREFIX + 'payslips',
   taskFiles: BUCKET_PREFIX + 'task-files',
-  signedContracts: BUCKET_PREFIX + 'signed-contracts'
+  signedContracts: BUCKET_PREFIX + 'signed-contracts',
+  termsOfBusiness: BUCKET_PREFIX + 'terms-of-business'
 };
 
 // Every other bucket above was provisioned manually in Supabase ahead of

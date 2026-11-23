@@ -3231,3 +3231,32 @@ ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome TEXT;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_by TEXT;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_at TIMESTAMPTZ;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS outcome_signal TEXT;
+
+-- Terms of Business per company (Liam, 23 Nov 2026): Sales → Terms of
+-- Business. Same access, storage and never-delete rules as signed_contracts
+-- (routes/termsOfBusiness.js, private `terms-of-business` bucket).
+CREATE TABLE IF NOT EXISTS terms_of_business (
+  id SERIAL PRIMARY KEY,
+  company_name TEXT NOT NULL,
+  signed_date DATE,
+  notes TEXT,
+  filename TEXT NOT NULL,
+  mimetype TEXT,
+  filesize INTEGER,
+  storage_path TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',   -- active | replaced | archived
+  replaced_by_id INTEGER,
+  uploaded_by_email CITEXT,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS terms_of_business_events (
+  id SERIAL PRIMARY KEY,
+  terms_id INTEGER,
+  action TEXT NOT NULL,
+  user_email CITEXT,
+  user_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE terms_of_business ENABLE ROW LEVEL SECURITY;
+ALTER TABLE terms_of_business_events ENABLE ROW LEVEL SECURITY;

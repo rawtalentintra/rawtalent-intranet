@@ -391,6 +391,9 @@
         <div class="admin-nav-item" onclick="showSection('my-centres', this)">
           <span class="admin-nav-icon">🏢</span> My Centres
         </div>
+        <div class="admin-nav-item" id="navTermsOfBusiness" style="display:none" onclick="showSection('terms-of-business', this)">
+          <span class="admin-nav-icon">📑</span> Terms of Business
+        </div>
         <div class="admin-nav-item" id="navDormantCalls" style="display:none" onclick="showSection('dormant-calls', this)">
           <span class="admin-nav-icon">📞</span> Dormant Call List
         </div>
@@ -1216,6 +1219,31 @@
           <label style="font-size:13px"><input type="checkbox" id="scShowAll" onchange="loadSignedContracts()"> Show replaced and archived</label>
         </div>
         <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="scTable"></div></div>
+      </div>
+      </template>
+
+      <template id="__lazy_terms_of_business">
+      <div class="admin-section" id="section-terms-of-business">
+        <div class="admin-header">
+          <div>
+            <div class="admin-page-title">Terms of Business</div>
+            <div class="admin-page-sub">Signed Terms of Business for each client company. Files are private and open through a link that expires after a few minutes. Terms can be replaced or archived, never deleted.</div>
+          </div>
+        </div>
+        <div class="admin-table-card" style="padding:18px 22px;margin-bottom:18px">
+          <div class="sd-card-title">Upload Terms of Business</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:12px">
+            <input id="tobName" class="form-control" placeholder="Company name">
+            <input id="tobSigned" class="form-control" type="date" title="Date signed">
+            <input id="tobNotes" class="form-control" placeholder="Notes (optional)">
+            <input id="tobFile" class="form-control" type="file" accept=".pdf,.doc,.docx">
+          </div>
+          <button class="btn-add" style="margin-top:12px" onclick="uploadTerms()">Upload</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <label style="font-size:13px"><input type="checkbox" id="tobShowAll" onchange="loadTerms()"> Show replaced and archived</label>
+        </div>
+        <div class="admin-table-card" style="padding:8px 8px 4px;overflow-x:auto"><div id="tobTable"></div></div>
       </div>
       </template>
 
@@ -5419,7 +5447,7 @@
         currentUserCanViewContracts = !!me.canViewContracts;
         if (me.canWashLeads) { const nw = document.getElementById('navLeadWash'); if (nw) nw.style.display = ''; }
         if (DORMANT_LIST_VIEWERS.includes(String(me.email || '').toLowerCase())) { const nd = document.getElementById('navDormantCalls'); if (nd) nd.style.display = ''; }
-        if (currentUserCanViewContracts) { const n = document.getElementById('navSignedContracts'); if (n) n.style.display = ''; }
+        if (currentUserCanViewContracts) { ['navSignedContracts', 'navTermsOfBusiness'].forEach(x => { const n = document.getElementById(x); if (n) n.style.display = ''; }); }
         currentUserCanBuildTraining = !!me.canBuildTraining;
         currentUserCanCreateOutreachLists = !!me.canCreateOutreachLists;
         currentUserCanCalibrateCalls = !!me.canCalibrateCalls;
@@ -7084,7 +7112,7 @@
       } else if (superAdminSections.includes(id) && currentUserRole !== 'super_admin' && !((id === 'wfp-performance' && canSeeWfpPerformanceSection()) || (id === 'qr-referrals' && canSeeWfpPerformance()))) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
-      } else if (id === 'signed-contracts' && !currentUserCanViewContracts) {
+      } else if ((id === 'signed-contracts' || id === 'terms-of-business') && !currentUserCanViewContracts) {
         showSection('articles', document.querySelector('[onclick*="articles"]'));
         return;
       } else if (id === 'payroll' && !currentUserIsPayrollAdmin) {
@@ -7180,6 +7208,7 @@
       if (id === 'wfp-performance') loadWfpPerformance();
       if (id === 'first-shift') loadFirstShifts();
       if (id === 'signed-contracts') loadSignedContracts();
+      if (id === 'terms-of-business') loadTerms();
       if (id === 'qr-referrals') loadQrReferrals();
       if (id === 'wfp-report') initWfpReport();
       if (id === 'security-report') loadSecurityReport();
@@ -11413,6 +11442,67 @@
       alert(rows.length ? rows.map(r => `${new Date(r.created_at).toLocaleString('en-AU')} — ${r.action} by ${r.user_name}`).join('\n') : 'No history yet.');
     }
 
+
+
+    // ── Terms of Business (per company) ─────────────────────────────────────
+    async function loadTerms() {
+      const box = document.getElementById('tobTable'); if (!box) return;
+      const all = document.getElementById('tobShowAll')?.checked;
+      try {
+        const res = await fetch('/api/terms-of-business' + (all ? '?status=all' : ''));
+        const rows = await res.json();
+        if (!res.ok) throw new Error(rows.error || 'Could not load terms');
+        if (!rows.length) { box.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13.5px">No Terms of Business yet.</div>'; return; }
+        const th = t => `<th style="padding:10px;text-align:left;font-size:12px;font-weight:700;color:var(--text-muted)">${t}</th>`;
+        box.innerHTML = `<table style="width:100%;border-collapse:collapse;min-width:760px"><thead><tr style="border-bottom:1px solid var(--gray-200)">${th('Company')}${th('Signed')}${th('File')}${th('Uploaded')}${th('Status')}${th('')}</tr></thead><tbody>
+          ${rows.map(c => `<tr style="border-bottom:1px solid var(--gray-100)">
+            <td style="padding:10px"><div style="font-weight:700;color:var(--navy)">${escHtml(c.company_name)}</div><div style="font-size:12px;color:var(--text-muted)">${escHtml(c.notes || '')}</div></td>
+            <td style="padding:10px;font-size:13px">${c.signed_date ? fmtDate(c.signed_date) : '—'}</td>
+            <td style="padding:10px;font-size:13px">${escHtml(c.filename)}${Number(c.previous_versions) ? ` <span style="color:var(--text-muted)">(replaces an earlier version)</span>` : ''}</td>
+            <td style="padding:10px;font-size:12.5px">${escHtml(c.uploaded_by_name || '')}<div style="color:var(--text-muted)">${fmtDate(c.created_at)}</div></td>
+            <td style="padding:10px;font-size:12.5px;text-transform:capitalize">${escHtml(c.status)}</td>
+            <td style="padding:10px;white-space:nowrap">
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="openTerms(${c.id})">Open</button>
+              ${c.status === 'active' ? `<label class="btn-secondary" style="padding:4px 10px;font-size:12px;cursor:pointer">Replace<input type="file" accept=".pdf,.doc,.docx" style="display:none" onchange="replaceTerms(${c.id}, this)"></label>
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="archiveTerms(${c.id})">Archive</button>` : ''}
+              <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="termsHistory(${c.id})">History</button>
+            </td></tr>`).join('')}</tbody></table>`;
+      } catch (e) { box.innerHTML = `<div style="padding:14px;color:#b91c1c;font-size:13px">${escHtml(e.message)}</div>`; }
+    }
+    async function uploadTerms() {
+      const f = document.getElementById('tobFile').files[0];
+      const name = document.getElementById('tobName').value.trim();
+      if (!name || !f) { toast('Add the company name and choose a file', 'error'); return; }
+      const fd = new FormData(); fd.append('file', f); fd.append('companyName', name);
+      fd.append('signedDate', document.getElementById('tobSigned').value); fd.append('notes', document.getElementById('tobNotes').value.trim());
+      const res = await fetch('/api/terms-of-business', { method: 'POST', body: fd }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Upload failed', 'error'); return; }
+      ['tobName', 'tobSigned', 'tobNotes', 'tobFile'].forEach(id => document.getElementById(id).value = '');
+      toast('Terms uploaded', 'success'); loadTerms();
+    }
+    async function openTerms(id) {
+      const res = await fetch(`/api/terms-of-business/${id}/open`); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Could not open', 'error'); return; }
+      window.open(d.url, '_blank');
+    }
+    async function replaceTerms(id, input) {
+      const f = input.files[0]; if (!f) return;
+      if (!confirm('Replace these terms with the new file? The current one is kept as a previous version.')) { input.value = ''; return; }
+      const fd = new FormData(); fd.append('file', f);
+      const res = await fetch(`/api/terms-of-business/${id}/replace`, { method: 'POST', body: fd }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Replace failed', 'error'); return; }
+      toast('Terms replaced', 'success'); loadTerms();
+    }
+    async function archiveTerms(id) {
+      if (!confirm('Archive these terms? They stay on file and can be seen with "Show replaced and archived".')) return;
+      const res = await fetch(`/api/terms-of-business/${id}/archive`, { method: 'POST' }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || 'Archive failed', 'error'); return; }
+      loadTerms();
+    }
+    async function termsHistory(id) {
+      const res = await fetch(`/api/terms-of-business/${id}/history`); const rows = await res.json().catch(() => []);
+      alert(rows.length ? rows.map(r => `${new Date(r.created_at).toLocaleString('en-AU')} — ${r.action} by ${r.user_name}`).join('\n') : 'No history yet.');
+    }
 
 
     // ── Export ready-to-roster list (Micropods) ───────────────────────────

@@ -215,6 +215,7 @@ app.use('/api/first-shift', require('./routes/firstShift'));
 app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter);
 app.use('/api/first-booking-free', require('./routes/firstBookingFree'));
 app.use('/api/signed-contracts', require('./routes/signedContracts'));
+app.use('/api/terms-of-business', require('./routes/termsOfBusiness'));
 app.use('/api/wfp-reports', require('./routes/wfpReports'));
 app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/lead-quality', require('./routes/leadQuality'));
