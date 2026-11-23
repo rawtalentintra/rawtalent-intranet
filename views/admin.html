@@ -5530,6 +5530,17 @@
       // hides it entirely for anyone without calibration access) — a link
       // shared with someone off the panel just lands them on Browse Calls
       // instead of a broken/silent deep link.
+      // ?openLead=<id> (Joy, 23 Nov 2026): links in the WFP calls/visits
+      // Google Sheets open that lead's detail popup directly.
+      const openLeadId = new URLSearchParams(location.search).get('openLead');
+      if (openLeadId) {
+        history.replaceState(null, '', location.pathname);
+        (async () => {
+          try { if (!allLeads.length) allLeads = await fetch('/api/leads').then(r => r.json()); } catch {}
+          openLeadDetail(openLeadId);
+        })();
+      }
+
       const openCalibrationId = new URLSearchParams(location.search).get('calibration');
       if (openCalibrationId) {
         showSection('calls', document.querySelector(`[onclick*="showSection('calls'"]`));
