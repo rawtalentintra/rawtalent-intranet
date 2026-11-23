@@ -72,8 +72,9 @@
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Failed');
       if (!document.getElementById('wcnModal')) return;
-      if (!d.transcript) { modal('<div style="font-size:13px">No transcript for this call yet, so there\'s no summary. Webex/Dubber usually has it within the hour. You can still play the recording.</div>'); return; }
-      modal(`${d.outcome ? `<div style="font-size:11.5px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Outcome: ${esc(OUTCOME[d.outcome] || d.outcome)}</div>` : ''}
+      if (!d.transcript) { modal(`<audio controls preload="none" style="width:100%;margin-bottom:10px" src="/api/calls/local/${encodeURIComponent(id)}/audio"></audio>` + '<div style="font-size:13px">No transcript for this call yet, so there\'s no summary. Webex/Dubber usually has it within the hour. You can still play the recording.</div>'); return; }
+      const player = `<audio controls preload="none" style="width:100%;margin-bottom:10px" src="/api/calls/local/${encodeURIComponent(id)}/audio"></audio>`;
+      modal(`${player}${d.outcome ? `<div style="font-size:11.5px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Outcome: ${esc(OUTCOME[d.outcome] || d.outcome)}</div>` : ''}
         <div style="font-size:14px;line-height:1.55;white-space:pre-wrap">${esc(d.summary || 'Summary could not be generated. See the transcript below.')}</div>
         <details style="margin-top:12px"><summary style="cursor:pointer;font-size:12.5px;color:#374151">Full transcript</summary>
         <div style="white-space:pre-wrap;font-size:12.5px;line-height:1.5;margin-top:6px;color:#374151">${esc(d.transcript)}</div></details>

@@ -5541,6 +5541,14 @@
         })();
       }
 
+      // ?call=<recordingId> (Joy, 23 Nov 2026): a shareable link to one
+      // Webex call: recording player, AI summary and transcript popup.
+      const openCallId = new URLSearchParams(location.search).get('call');
+      if (openCallId && window.WebexCallNotes) {
+        history.replaceState(null, '', location.pathname);
+        WebexCallNotes.summary(openCallId, '');
+      }
+
       const openCalibrationId = new URLSearchParams(location.search).get('calibration');
       if (openCalibrationId) {
         showSection('calls', document.querySelector(`[onclick*="showSection('calls'"]`));
