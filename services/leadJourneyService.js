@@ -52,10 +52,16 @@ async function sendFirstContactSignal(leadId) {
       wfp_name: l.lead_journey_by || '',
       lead_id: l.id
     };
-    // Owner by relationship (10 Nov 2026): the lead's assigned WFP, else its RT centre's owner, else Liam.
-    const owner = l.assigned_workforce_partner && fbf.WFP_EMAIL[l.assigned_workforce_partner]
-      ? { wfp_owner_name: l.assigned_workforce_partner, wfp_owner_email: fbf.WFP_EMAIL[l.assigned_workforce_partner], wfp_owner_claimed: true }
-      : await fbf.ownerFields(ct && ct.centreKey);
+    // Owner (Joy, 23 Nov 2026: the owner HeartBeat shows beats the state rule): the lead's
+    // assigned WFP, else its RT centre's owner, else Justine for VIC (HeartBeat's lead
+    // default), else the WFP who logged the first call/visit, else the state rule.
+    const asOwner = n => ({ wfp_owner_name: n, wfp_owner_email: fbf.WFP_EMAIL[n], wfp_owner_claimed: true });
+    const vicDefault = require('./melbourneTerritoryService').partnerForSuburbState(l.suburb, l.state);
+    const owner = l.assigned_workforce_partner && fbf.WFP_EMAIL[l.assigned_workforce_partner] ? asOwner(l.assigned_workforce_partner)
+      : ct && ct.centreKey && !String(ct.centreKey).startsWith('lead:') ? await fbf.ownerFields(ct.centreKey)
+      : vicDefault && fbf.WFP_EMAIL[vicDefault] ? asOwner(vicDefault)
+      : l.lead_journey_by && fbf.WFP_EMAIL[l.lead_journey_by] ? asOwner(l.lead_journey_by)
+      : await fbf.ownerFields(null);
     Object.assign(data, owner);
     // A brand-new email-only profile gets its email and first name; an existing
     // client's profile is left as RT set it.

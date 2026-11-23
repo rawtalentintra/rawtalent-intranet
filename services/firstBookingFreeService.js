@@ -87,7 +87,10 @@ async function ownerFields(centreKey) {
       } catch (_) { /* keep the fallback */ }
     }
   }
-  // wfp_owner_claimed=false lets Customer.io fall back to its state rule for unclaimed centres.
+  // The owner HeartBeat shows always wins over Customer.io's state rule in the email
+  // footer (Joy, 23 Nov 2026), whether assigned or HeartBeat's default. Only a lead
+  // key with no owner falls back to the state rule (claimed=false).
+  if (centreKey && !String(centreKey).startsWith('lead:')) claimed = true;
   return { wfp_owner_name: name, wfp_owner_email: WFP_EMAIL[name] || '', wfp_owner_claimed: claimed };
 }
 // Attributes only (no event): keeps each centre's Customer.io profile's owner current.
