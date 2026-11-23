@@ -74,6 +74,31 @@ async function enrichApplicants(applicants) {
 // out with "Admin access required" on every click. Search/discovery
 // stays admin-only (below); the attachment routes only need a real
 // login, same as the team photo proxy (routes/team.js).
+// Signed resume links (Joy, 23 Nov 2026): the WFP call-list Google Sheet
+// links to resumes, and partners opening them from the sheet often aren't
+// signed in to HeartBeat in that browser ("Login required"). Each link
+// carries an HMAC of candidate id + attachment id, so it opens without a
+// login but can't be edited to reach any other file. Must stay above
+// router.use(requireAuth).
+const crypto = require('crypto');
+function resumeSig(id, attachmentId) {
+  return crypto.createHmac('sha256', process.env.SESSION_SECRET || 'rt-kb-change-this-secret')
+    .update(`resume:${id}:${attachmentId}`).digest('hex').slice(0, 24);
+}
+router.get('/r/:id/:attachmentId/:sig', (req, res) => {
+  const expected = resumeSig(req.params.id, req.params.attachmentId);
+  const given = String(req.params.sig || '');
+  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+    return res.status(403).send('This resume link is not valid.');
+  }
+  return serveAttachment(req, res);
+});
+// Signed links for logged-in admins/partners to generate (used by the
+// call-list scripts): GET /api/jobadder/r-sign?id=..&att=..
+router.get('/r-sign', requireAuth, (req, res) => {
+  res.json({ sig: resumeSig(req.query.id, req.query.att) });
+});
+
 router.use(requireAuth);
 
 // The 10 quick-pick centres (with real, resolved lat/lng) plus the
@@ -375,7 +400,7 @@ router.get('/candidates/:id/attachments', requireAdmin, async (req, res) => {
 // browser never sees the JobAdder access token, only this app's own
 // session cookie, same "server holds the real credential" shape as every
 // other proxied download in this app.
-router.get('/candidates/:id/attachments/:attachmentId', async (req, res) => {
+async function serveAttachment(req, res) {
   try {
     const token = await jobAdderService.getValidAccessToken();
     if (!token) return res.status(400).json({ error: 'JobAdder is not connected.' });
@@ -412,6 +437,7 @@ router.get('/candidates/:id/attachments/:attachmentId', async (req, res) => {
   } catch (err) {
     res.status(500).send(err.message);
   }
-});
+}
+router.get('/candidates/:id/attachments/:attachmentId', serveAttachment);
 
 module.exports = router;
