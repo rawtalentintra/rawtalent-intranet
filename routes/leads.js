@@ -998,6 +998,18 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
 // both the submitting consultant (context for the Workforce Partner) and
 // the Workforce Partner themselves (their own visit notes) need to write
 // here — deleting stays admin/super_admin only, below.
+// Webex calls to/from this lead's numbers (centre phone). See
+// services/webexCallMatchService.js.
+router.get('/:id/webex-calls', leadsViewAccess, async (req, res) => {
+  try {
+    const lead = (await getDb().execute({ sql: 'SELECT centre_phone FROM leads WHERE id = ?', args: [req.params.id] })).rows[0];
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    res.json(await require('../services/webexCallMatchService').findCallsForPhones([lead.centre_phone]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id/notes', leadsViewAccess, async (req, res) => {
   try {
     const result = await getDb().execute({

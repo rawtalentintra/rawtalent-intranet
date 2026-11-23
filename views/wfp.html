@@ -1935,11 +1935,15 @@
             ${lastActivity.notes ? escHtml(lastActivity.notes) : ''}
           </div>` : `<div class="note-line">Nothing logged yet.</div>`}
 
+        <div class="section-title">Call Notes (Webex)</div>
+        <div id="leadWebexCallsM"></div>
+
         ${nextFollowUp ? `<div class="section-title">Next Follow-up</div><div class="note-line">${escHtml(nextFollowUp.next_step)} — ${fmtDate(nextFollowUp.next_step_due_date)}</div>` : ''}
 
         ${l.closed_reason ? `<div class="section-title">Closed Reason</div><div class="note-line">${escHtml(l.closed_reason)}</div>` : ''}
       `;
       loadFbf('lead', currentLeadId, 'fbfLeadBoxM');
+      WebexCallNotes.load('leadWebexCallsM', `/api/leads/${encodeURIComponent(currentLeadId)}/webex-calls`, l.centre_name);
       showLeadFunnelStageM(currentLeadId);
     }
 
@@ -2458,6 +2462,9 @@
           <div class="note-line">${s.contactName || s.contactNo ? `${escHtml(s.contactName || 'Contact')} — ${phoneLink(s.contactNo) || 'no phone on file'}` : 'No contact on file.'}</div>
         </details>
 
+        <div class="section-title" style="margin-top:14px">Call Notes (Webex)</div>
+        <div id="centreWebexCallsM"></div>
+
         <details style="margin-top:10px" ${centreDetailOpen.bookings ? 'open' : ''} ontoggle="centreDetailOpen.bookings=this.open">
           <summary class="section-title" style="display:list-item;cursor:pointer">Bookings</summary>
           <div class="section-title">Today</div>
@@ -2470,6 +2477,7 @@
         </details>
       `;
       loadFbf('centre', currentCentreKey, 'fbfCentreBoxM');
+      WebexCallNotes.load('centreWebexCallsM', `/api/centres/${encodeURIComponent(currentCentreKey)}/webex-calls`, (s && s.name) || '');
     }
     function toggleUpcoming() {
       upcomingExpanded = !upcomingExpanded;
@@ -3011,6 +3019,7 @@
       }
     })();
   </script>
+<script src="/js/webexCallNotes.js"></script>
 <script src="/js/autoUpdate.js"></script>
 </body>
 </html>

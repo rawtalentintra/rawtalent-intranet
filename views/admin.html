@@ -13005,6 +13005,7 @@
         loadTalkingPoints(centre.centreKey);
         centreContactOverride = null; loadCentreContact();
         loadFbf('centre', centre.centreKey, 'fbfCentreBox');
+        if (window.WebexCallNotes) WebexCallNotes.load('c360WebexCalls', `/api/centres/${encodeURIComponent(centre.centreKey)}/webex-calls`, centre.name);
       } catch {
         bodyEl.innerHTML = '<div style="color:#c0392b;padding:20px">Failed to load this centre.</div>';
       }
@@ -13268,6 +13269,12 @@
           </div>
         </div>
         ${c.isDormant ? dormantPanelHtml(c) : ''}
+
+        <div class="admin-table-card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="sd-card-title" style="color:var(--orange)">Call Notes (Webex)</div>
+          <div class="sd-card-sub">Webex calls with this centre's number: play the recording or view the call summary</div>
+          <div id="c360WebexCalls" style="margin-top:10px"></div>
+        </div>
 
         <!-- Opens as its own popup (openNurtureCadenceModal) — Joy,
              2026-09-02: "should be a popup that looks like this popup
@@ -19738,6 +19745,9 @@
         <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">Educators who already work here through other agencies — so a partner can show the centre how to book them. Not a record of work done through Raw Talent.</div>
         <div id="leadEducatorsBox" style="margin-bottom:10px"><div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading…</div></div>
 
+        <div class="lead-group-label" style="margin-top:14px">Call Notes (Webex)</div>
+        <div id="leadWebexCalls" style="margin-bottom:10px"></div>
+
         <div class="lead-group-label" style="margin-top:14px">Notes</div>
         <div id="leadNotesList" style="margin-bottom:10px">
           <div style="font-size:12.5px;color:var(--text-muted);padding:6px 0">Loading notes…</div>
@@ -19759,6 +19769,7 @@
       updateLeadStatusCalendarIcon('centre_visited');
       loadLeadNotes(id);
       loadLeadRecordings(id);
+      if (window.WebexCallNotes) WebexCallNotes.load('leadWebexCalls', `/api/leads/${encodeURIComponent(id)}/webex-calls`, lead.centre_name);
       loadFbf('lead', id, 'fbfLeadBox');
       loadLeadEducators(id);
       resetLeadVoiceRecorder();
@@ -25108,6 +25119,7 @@
     init();
   </script>
 <script src="/js/wfpLeadEvents.js"></script>
+<script src="/js/webexCallNotes.js"></script>
 <script src="/js/autoUpdate.js"></script>
 </body>
 </html>

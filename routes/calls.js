@@ -181,6 +181,18 @@ router.get('/local/:id', async (req, res) => {
 // HTTP Range requests (206 Partial Content) — without this, the browser's
 // <audio> element can't reliably seek/drag the scrubber, since it has no
 // way to fetch just the byte range under the cursor.
+// "View Call Summary" on a lead/centre's Call Notes: cached AI summary of
+// the real transcript (generated on first view). Returns transcript too.
+router.post('/local/:id/summary', async (req, res) => {
+  try {
+    const r = await require('../services/webexCallMatchService').getOrCreateSummary(req.params.id, req.body?.contextName);
+    if (r.error) return res.status(r.status || 500).json({ error: r.error });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/local/:id/audio', async (req, res) => {
   try {
     const result = await getDb().execute({ sql: 'SELECT * FROM call_recording_audio WHERE recording_id = ?', args: [req.params.id] });

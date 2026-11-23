@@ -49,6 +49,7 @@ function flattenCentres(clients) {
         longitude: null,
         contactName: null,
         contactNo: client.contactNo || null,
+        allPhones: [client.contactNo, client.landLineNo].filter(Boolean),
         email: client.email || client.emailAddress || null,
         createdDate: client.createdDate || null,
         isActive: client.isActive !== false
@@ -78,6 +79,7 @@ function flattenCentres(clients) {
         longitude: Number.isFinite(loc.longitude) ? loc.longitude : null,
         contactName: loc.contactName || null,
         contactNo: loc.contactNo || client.landLineNo || client.contactNo || null,
+        allPhones: [loc.contactNo, client.landLineNo, client.contactNo].filter(Boolean),
         email: client.email || client.emailAddress || null,
         createdDate: client.createdDate || null,
         isActive: client.isActive !== false && loc.isActive !== false

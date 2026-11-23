@@ -472,6 +472,13 @@ ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS detected_rubric_reasoning T
 -- the grader can point to specific moments rather than one aggregate number.
 ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS document_emotion JSONB;
 ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS sentence_emotion JSONB;
+-- Webex call -> lead/centre Call Notes (2026-11-23): cached AI summary from
+-- the transcript, plus last-9-digit phone indexes for matching.
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS call_summary TEXT;
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS call_summary_outcome TEXT;
+ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS call_summary_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_call_recordings_to_last9 ON call_recordings ((right(regexp_replace(coalesce(to_number,''), '[^0-9]', '', 'g'), 9)));
+CREATE INDEX IF NOT EXISTS idx_call_recordings_from_last9 ON call_recordings ((right(regexp_replace(coalesce(from_number,''), '[^0-9]', '', 'g'), 9)));
 
 -- `data` (base64 audio blob) is replaced by `storage_path` — populated in
 -- Phase 4 when existing call audio is uploaded to the `call-recordings` bucket.

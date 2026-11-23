@@ -827,6 +827,21 @@ router.get('/:centreKey/history', async (req, res) => {
   }
 });
 
+// Webex calls to/from this centre's numbers: RT contact number, RT landline
+// and any contact override a partner saved. See webexCallMatchService.js.
+router.get('/:centreKey/webex-calls', async (req, res) => {
+  try {
+    const { centres } = await getCentresAndBookings();
+    const centre = centres.find(c => c.centreKey === req.params.centreKey);
+    const phones = [centre?.contactNo, ...(centre?.allPhones || [])];
+    const ov = (await getDb().execute({ sql: 'SELECT phone FROM centre_contact_overrides WHERE centre_key = ?', args: [req.params.centreKey] })).rows[0];
+    if (ov?.phone) phones.push(ov.phone);
+    res.json(await require('../services/webexCallMatchService').findCallsForPhones(phones));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:centreKey', async (req, res) => {
   const parsed = parseCentreKey(req.params.centreKey);
   if (!parsed) return res.status(400).json({ error: 'Invalid centre key' });
