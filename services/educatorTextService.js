@@ -33,7 +33,7 @@ const LIMITS = {
 // Joy + Sophia only (Joy, 25 Nov 2026). Needs its own Customer.io transactional
 // message using the alphanumeric sender, id in SMS_ANNOUNCE_TRANSACTIONAL_ID.
 const ANNOUNCE_EMAILS = (process.env.SMS_ANNOUNCE_EMAILS || 'joy@rawtalent.com.au,sophia@rawtalent.com.au').toLowerCase().split(',').map(s => s.trim());
-const ANNOUNCE_TX = process.env.SMS_ANNOUNCE_TRANSACTIONAL_ID || '';
+const ANNOUNCE_TX = process.env.SMS_ANNOUNCE_TRANSACTIONAL_ID || 'heartbeat_sms_announcement'; // Customer.io transactional #7, sender "RawTalent" (identity 8)
 function canAnnounce(user) { return !!user && ANNOUNCE_EMAILS.includes(String(user.email || '').toLowerCase()); }
 function canSendTexts(user) {
   return !!user && (user.role === 'super_admin' || !!user.can_send_texts);
