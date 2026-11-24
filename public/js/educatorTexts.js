@@ -90,7 +90,7 @@
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
   }
   function threadHtml(conv) {
-    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? ` · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : 'Sending…'}` : ''}</div></div>`).join('');
+    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? ` · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : 'Sending…'}` : ''}</div></div>`).join('');
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>

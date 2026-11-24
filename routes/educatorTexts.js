@@ -59,7 +59,7 @@ router.post('/send', async (req, res) => {
     const ids = new Set((req.body.userIds || []).map(String));
     if (!ids.size) return res.status(400).json({ error: 'Pick at least one educator' });
     const map = await educatorMap();
-    const recipients = map.educators.filter(e => ids.has(e.userId)).map(e => ({ userId: e.userId, name: e.name, phone: e.phone }));
+    const recipients = map.educators.filter(e => ids.has(e.userId)).map(e => ({ userId: e.userId, name: e.name, phone: e.phone, status: e.status, compliant: e.compliant }));
     const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1 });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
@@ -83,7 +83,7 @@ router.get('/conversations', async (req, res) => {
     const rows = (await getDb().execute({
       sql: `SELECT DISTINCT ON (educator_id) educator_id, educator_name, direction, body, status, created_at,
               (SELECT count(*) FROM sms_messages u WHERE u.educator_id = m.educator_id AND u.direction='in' AND u.read_at IS NULL) unread
-            FROM sms_messages m WHERE status <> 'skipped' ORDER BY educator_id, id DESC`, args: []
+            FROM sms_messages m ORDER BY educator_id, id DESC`, args: []
     })).rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 300);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -103,7 +103,7 @@ router.get('/updates', async (req, res) => {
   try {
     const since = Number(req.query.since) || 0;
     const r = (await getDb().execute({ sql: `SELECT max(id) maxid, count(*) FILTER (WHERE direction='in' AND read_at IS NULL) unread, count(*) FILTER (WHERE id > ?) newer FROM sms_messages`, args: [since] })).rows[0];
-    const st = (await getDb().execute({ sql: `SELECT max(id) FILTER (WHERE status IN ('sent','failed')) settled FROM sms_messages`, args: [] })).rows[0];
+    const st = (await getDb().execute({ sql: `SELECT max(id) FILTER (WHERE status IN ('sent','failed','skipped')) settled FROM sms_messages`, args: [] })).rows[0];
     res.json({ maxId: Number(r.maxid) || 0, unread: Number(r.unread) || 0, changed: Number(r.newer) > 0, settled: Number(st.settled) || 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

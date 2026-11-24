@@ -3299,3 +3299,7 @@ CREATE INDEX IF NOT EXISTS idx_sms_messages_queue ON sms_messages(status, id) WH
 CREATE INDEX IF NOT EXISTS idx_sms_messages_created ON sms_messages(created_at DESC);
 ALTER TABLE sms_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sms_messages ENABLE ROW LEVEL SECURITY;
+-- Live pre-send check (Joy, 24 Nov 2026): what the rep saw when they queued the
+-- text, compared with RT live just before it goes out.
+ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS snap_status TEXT;
+ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS snap_compliant BOOLEAN;

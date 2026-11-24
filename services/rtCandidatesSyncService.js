@@ -226,4 +226,4 @@ async function refreshStaleCandidates({ olderThanHours = 20 } = {}) {
   } finally { staleRefreshRunning = false; }
 }
 
-module.exports = { syncAllCandidates, getSyncState, isSyncRunning, refreshStaleCandidates, fetchCandidatesLive };
+module.exports = { syncAllCandidates, getSyncState, isSyncRunning, refreshStaleCandidates, fetchCandidatesLive, upsertCandidates };

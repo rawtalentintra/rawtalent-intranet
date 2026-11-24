@@ -117,9 +117,10 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   })).rows[0];
   for (const r of ok) {
     await db.execute({
-      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name)
-            VALUES (?,?,?,'out',?,?,'queued',?,?,?)`,
-      args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, batch.id, user.email, user.name || user.email]
+      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant)
+            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?)`,
+      args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, batch.id, user.email, user.name || user.email,
+             r.status || null, r.compliant == null ? null : !!r.compliant]
     });
   }
   kick();
@@ -142,6 +143,15 @@ async function drain() {
       })).rows[0];
       if (!m) break;
       let status = 'sent', error = null, deliveryId = null;
+      // Live check just before sending (Joy, 24 Nov 2026): one RT lookup per
+      // text, inside the existing 1.2s gap, so there's no burst on RT. If the
+      // educator changed since the rep picked them, the text is skipped.
+      const live = await liveCheck(m);
+      if (live.skip) {
+        await getDb().execute({ sql: `UPDATE sms_messages SET status = 'skipped', error = ? WHERE id = ?`, args: [live.skip, m.id] });
+        continue;
+      }
+      if (live.phone && live.phone !== m.phone) { m.phone = live.phone; await getDb().execute({ sql: 'UPDATE sms_messages SET phone = ? WHERE id = ?', args: [m.phone, m.id] }); }
       try {
         const r = await fetch(`https://${host}/v1/send/sms`, {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -161,6 +171,22 @@ async function drain() {
   } catch (e) { console.error('SMS queue error:', e.message); }
   finally { draining = false; }
 }
+async function liveCheck(m) {
+  let c;
+  try { c = await require('./rtApiReportService').fetchById('candidates', m.educator_id); }
+  catch (e) { return { note: 'RT lookup failed, sent on the data the rep saw' }; } // RT down: don't hold every text
+  if (!c) return { skip: 'No longer in RT' };
+  require('./rtCandidatesSyncService').upsertCandidates?.([c]).catch?.(() => {});
+  if (c.isDeleted || c.isActive === false) return { skip: 'No longer active in RT' };
+  const now = require('../routes/micropods').complianceForLive(c, new Date().toISOString().slice(0, 10));
+  if ([4, 8].includes(Number(c.status))) return { skip: `Now "${now.status}" in RT` };
+  if (m.snap_status && now.status && now.status !== m.snap_status) return { skip: `Status changed in RT: ${m.snap_status} → ${now.status}` };
+  if (m.snap_compliant === true && !now.compliant) return { skip: 'No longer compliant in RT' };
+  const phone = toE164(c.contactNo);
+  if (!phone) return { skip: 'No valid mobile in RT any more' };
+  return { phone };
+}
+
 // Picks up anything left queued (restart, or sends that waited for 8am).
 function startWorker() {
   getDb().execute({ sql: "UPDATE sms_messages SET status = 'queued' WHERE status = 'sending'", args: [] }).catch(() => {});
