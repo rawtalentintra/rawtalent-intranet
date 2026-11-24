@@ -15,7 +15,7 @@ async function list() {
   if (cache.value && Date.now() - cache.at < 30 * 60 * 1000) return cache.value;
   const rows = (await getDb().execute({
     sql: `SELECT user_id::text uid, first_name, last_name, email, contact_no, raw->'addresses'->0 addr, raw->'qualifications'->0->>'qualificationName' qual,
-                 raw->'attachedRequirements' reqs, raw->'visaDetails' visa
+                 raw->'attachedRequirements' reqs, raw->'visaDetails' visa, raw->'complianceStatusId' csid
           FROM rt_candidates_cache WHERE is_deleted IS NOT TRUE AND status = 1`, args: []
   })).rows;
   const today = new Date().toISOString().slice(0, 10);
@@ -24,7 +24,7 @@ async function list() {
       .sort((a, b) => String(b.expiryDate || '').localeCompare(String(a.expiryDate || '')))[0] || null;
     const exp = dfs?.expiryDate ? String(dfs.expiryDate).slice(0, 10) : null;
     const dfsValid = !!dfs && dfs.isReviewed === true && !(exp && !['0001-01-01', '9999-12-31'].includes(exp) && exp < today);
-    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.uid);
+    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa, complianceStatusId: r.csid }, today, r.uid);
     return {
       userId: r.uid, name: `${r.first_name || ''} ${r.last_name || ''}`.trim(), email: r.email, phone: r.contact_no,
       suburb: r.addr?.suburb || '', state: normalizeStateToShort(r.addr?.state) || '', qualification: r.qual || '',

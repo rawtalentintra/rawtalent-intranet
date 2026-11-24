@@ -44,6 +44,13 @@ function visaAuditValidTo(uid) {
 const visaAuditLabel = to => `Visa from 12 Oct (SA) / 19 Oct (VIC, QLD, NT) audits (RT not sending visa data), valid to ${to.split('-').reverse().join('/')}`;
 
 function complianceReasons(raw, today, uid) {
+  // RT Portal's own verdict (Joy, 24 Nov 2026): RT now sends complianceStatusId
+  // (1 = Compliant, 2 = Not Compliant). Where it's present it is the answer, so
+  // HeartBeat matches RT Portal exactly. The document check below only runs for
+  // records RT sends without it.
+  const csid = raw && raw.complianceStatusId != null ? Number(raw.complianceStatusId) : null;
+  if (csid === 1) return [];
+  if (csid === 2) return ['Not Compliant in RT Portal'];
   const expired = d => d && !SENTINELS.includes(d) && d < today;
   const reasons = [];
   const docs = (raw.attachedRequirements || []).filter(d => !d.isDeleted && d.isActive !== false);

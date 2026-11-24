@@ -101,7 +101,7 @@ async function buildCandidatePoints() {
             ) AS has_current_availability,
             raw->>'obStatus' AS ob_status,
             raw->'attachedRequirements' AS reqs,
-            raw->'visaDetails' AS visa
+            raw->'visaDetails' AS visa, raw->'complianceStatusId' AS csid
           FROM rt_candidates_cache
           WHERE is_active = true
             AND is_deleted IS NOT TRUE
@@ -133,7 +133,7 @@ async function buildCandidatePoints() {
   const { bridgeMap, onboardingCompleted } = require('../services/cioOnboardingBridgeService');
   const cioMap = await bridgeMap();
   const today = new Date().toISOString().slice(0, 10);
-  rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id).length === 0; });
+  rows.forEach(r => { r.fully_compliant = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa, complianceStatusId: r.csid }, today, r.user_id).length === 0; });
 
   const points = rows.map(r => {
     const shiftList = shiftsByUser.get(String(r.user_id)) || [];
@@ -581,7 +581,7 @@ async function buildEducatorMap() {
             (raw->'addresses'->0->>'latitude')::float8 AS lat,
             (raw->'addresses'->0->>'longitude')::float8 AS lng,
             raw->'qualifications'->0->>'qualificationName' AS qualification_name,
-            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa
+            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa, raw->'complianceStatusId' AS csid
           FROM rt_candidates_cache
           WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)
             AND raw->'addresses'->0->>'latitude' IS NOT NULL`,
@@ -606,7 +606,7 @@ async function buildEducatorMap() {
       // e.g. "Registered" / "In Review", that doesn't match what staff see in RT).
       status: RT_STATUS_LABELS[r.status] || r.status_name || null,
       onboarding: r.ob_status || null,
-      compliant: complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id).length === 0,
+      compliant: complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa, complianceStatusId: r.csid }, today, r.user_id).length === 0,
       gender: r.gender || null,
       qualification: r.qualification_name || null,
       segment: engagementTag(shiftList),
@@ -637,6 +637,27 @@ async function buildEducatorMap() {
 router.get('/educator-map', async (req, res) => {
   try { res.json(await buildEducatorMap()); }
   catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Live check (Joy, 24 Nov 2026): after the Educator Map table renders from the
+// cache, the browser sends the ids on screen (max 60). Each is fetched live from
+// RT by id, our cache is refreshed (never writes to RT), and the fresh status and
+// compliance come back so the rows update in place. Page load stays instant.
+router.post('/educator-map/live', async (req, res) => {
+  try {
+    const ids = [...new Set((req.body?.ids || []).map(String).filter(x => /^\d+$/.test(x)))].slice(0, 60);
+    if (!ids.length) return res.json({ educators: [] });
+    const { candidates } = await require('../services/rtCandidatesSyncService').fetchCandidatesLive(ids, { concurrency: 8 });
+    const today = new Date().toISOString().slice(0, 10);
+    const educators = candidates.map(c => ({
+      userId: String(c.userId),
+      status: RT_STATUS_LABELS[c.status] || c.statusName || null,
+      onboarding: c.obStatus || null,
+      compliant: complianceReasons(c, today, c.userId).length === 0
+    }));
+    if (educators.length) educatorMapCache.expiresAt = 0; // next full load picks up the fresh rows
+    res.json({ educators });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Address lookup for a centre not in RT yet (e.g. a new YMCA site being onboarded).

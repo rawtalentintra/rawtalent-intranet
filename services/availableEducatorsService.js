@@ -28,11 +28,11 @@ async function activeEducators() {
   const cioMap = await bridge.bridgeMap();
   const rows = (await getDb().execute({
     sql: `SELECT user_id::text uid, first_name, last_name, raw->'addresses'->0 addr, raw->'qualifications'->0->>'qualificationName' qual,
-                 raw->'availableCandidateList' avail, raw->'attachedRequirements' reqs, raw->'visaDetails' visa
+                 raw->'availableCandidateList' avail, raw->'attachedRequirements' reqs, raw->'visaDetails' visa, raw->'complianceStatusId' csid
           , raw->>'obStatus' ob FROM rt_candidates_cache WHERE is_deleted IS NOT TRUE AND status = 1`, args: []
   })).rows.filter(r => bridge.onboardingCompleted(r.uid, r.ob, cioMap));
   const today = new Date().toISOString().slice(0, 10), now = Date.now();
-  return rows.filter(r => !complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.uid).length).map(r => {
+  return rows.filter(r => !complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa, complianceStatusId: r.csid }, today, r.uid).length).map(r => {
     const days = [...new Set((r.avail || []).filter(a => { const t = new Date(a.date).getTime(); return t >= now - DAY && t <= now + 7 * DAY; }).map(a => new Date(a.date).getDay()))].sort();
     return {
       id: r.uid, firstName: r.first_name || '', fullName: `${r.first_name || ''}${r.last_name ? ' ' + r.last_name.trim()[0] + '.' : ''}`.trim(),

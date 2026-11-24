@@ -32,7 +32,7 @@ async function getDirectory() {
             (raw->'addresses'->0->>'latitude')::float8 AS lat,
             (raw->'addresses'->0->>'longitude')::float8 AS lng,
             raw->'qualifications'->0->>'qualificationName' AS qualification,
-            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa
+            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa, raw->'complianceStatusId' AS csid
           FROM rt_candidates_cache WHERE is_deleted IS NOT TRUE`,
     args: []
   })).rows;
@@ -43,7 +43,7 @@ async function getDirectory() {
   const list = rows.map(r => {
     const shifts = shiftsByUser.get(String(r.user_id)) || [];
     const last = shifts.length ? Math.max(...shifts) : null;
-    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa }, today, r.user_id);
+    const reasons = complianceReasons({ attachedRequirements: r.reqs, visaDetails: r.visa, complianceStatusId: r.csid }, today, r.user_id);
     const geo = Number.isFinite(r.lat) && Number.isFinite(r.lng) && !(r.lat === 0 && r.lng === 0);
     return {
       id: String(r.user_id),
