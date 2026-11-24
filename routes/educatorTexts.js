@@ -18,8 +18,17 @@ const isCentreId = id => /^(loc|client):/.test(String(id));
 // client's RT contact profile in Customer.io (primaryUserId, same as the email
 // journeys). Landline-only centres are listed but can't be picked.
 let centreCache = { at: 0, data: null };
+let centreBuilding = null;
 async function centreAudience() {
-  if (centreCache.data && Date.now() - centreCache.at < 10 * 60 * 1000) return centreCache.data;
+  if (centreCache.data) {
+    if (Date.now() - centreCache.at >= 10 * 60 * 1000 && !centreBuilding)
+      centreBuilding = centreAudienceFresh().catch(e => console.error('[sms] centres refresh', e.message)).finally(() => { centreBuilding = null; });
+    return centreCache.data;
+  }
+  if (!centreBuilding) centreBuilding = centreAudienceFresh().finally(() => { centreBuilding = null; });
+  return centreBuilding;
+}
+async function centreAudienceFresh() {
   const cm = require('./centres');
   const { centres, rawClients, bookings } = await cm.getCentresAndBookings();
   const lastByKey = await cm.getLastBookingDates(centres, bookings);

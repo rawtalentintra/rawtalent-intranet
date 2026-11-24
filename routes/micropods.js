@@ -571,8 +571,20 @@ const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 
 // Bad geocodes (e.g. a centre plotted in Asia) would zoom the map out to the globe.
 const inAustralia = (lat, lng) => (lat = Number(lat), lng = Number(lng), Number.isFinite(lat) && Number.isFinite(lng)) && lat > -44.5 && lat < -9 && lng > 112 && lng < 154.5;
 let educatorMapCache = { data: null, expiresAt: 0 };
+// Stale-while-revalidate (Joy, 24 Nov 2026: SMS page was slow on a cold cache):
+// an expired cache is still served instantly while one rebuild runs behind it.
+let educatorMapBuilding = null;
 async function buildEducatorMap() {
-  if (educatorMapCache.data && Date.now() < educatorMapCache.expiresAt) return educatorMapCache.data;
+  if (educatorMapCache.data) {
+    if (Date.now() >= educatorMapCache.expiresAt && !educatorMapBuilding) {
+      educatorMapBuilding = buildEducatorMapFresh().catch(e => console.error('[educator-map] refresh', e.message)).finally(() => { educatorMapBuilding = null; });
+    }
+    return educatorMapCache.data;
+  }
+  if (!educatorMapBuilding) educatorMapBuilding = buildEducatorMapFresh().finally(() => { educatorMapBuilding = null; });
+  return educatorMapBuilding;
+}
+async function buildEducatorMapFresh() {
   const rows = (await getDb().execute({
     sql: `SELECT user_id, first_name, last_name, email, contact_no, suburb, status,
             raw->>'statusName' AS status_name, raw->>'genderName' AS gender,
@@ -755,4 +767,6 @@ module.exports = router;
 module.exports.getCandidatePoints = getCandidatePoints;
 module.exports.warmMicropods = warmMicropods;
 module.exports.buildEducatorMap = buildEducatorMap;
+// Warm on boot so the first SMS / Educator Map visit after a deploy isn't cold.
+setTimeout(() => buildEducatorMap().catch(e => console.error('[educator-map] warm', e.message)), 15000);
 module.exports.complianceForLive = (c, today) => ({ status: RT_STATUS_LABELS[c.status] || c.statusName || null, onboarding: c.obStatus || null, compliant: complianceReasons(c, today, c.userId).length === 0 });
