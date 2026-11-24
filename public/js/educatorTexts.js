@@ -80,14 +80,26 @@
   }
 
   // ── Inbox ──
-  async function loadConvos() { S.convos = await api('/api/educator-texts/conversations'); }
-  function inboxHtml() {
-    const rows = S.convos.map(c => `<div class="tx-row ${S.open === c.educator_id ? 'on' : ''}" onclick="txOpen('${esc(c.educator_id)}')">
+  async function loadConvos() { S.convos = await api('/api/educator-texts/conversations' + (S.inDate ? '?date=' + S.inDate : '')); }
+  function inboxRows() {
+    const q = S.inQ || '';
+    const list = S.convos.filter(c => matches({ name: c.educator_name, phone: c.phone, suburb: c.body }, q));
+    return list.map(c => `<div class="tx-row ${S.open === c.educator_id ? 'on' : ''}" onclick="txOpen('${esc(c.educator_id)}')">
         <div class="tx-name"><span>${esc(c.educator_name || 'Educator #' + c.educator_id)}</span><span style="font-weight:400;font-size:11.5px;color:var(--text-muted)">${Number(c.unread) ? `<span class="tx-badge">${c.unread}</span> ` : ''}${ago(c.created_at)}</span></div>
-        <div class="tx-snip">${c.direction === 'out' ? 'You: ' : ''}${esc(c.body)}</div></div>`).join('');
+        <div class="tx-snip">${c.direction === 'out' ? 'You: ' : ''}${esc(c.body)}</div></div>`).join('')
+      || `<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">${S.convos.length || S.inDate ? 'No conversations match.' : 'No texts yet. Start one from "New text".'}</div>`;
+  }
+  window.txInSearch = v => { S.inQ = v; const el = document.getElementById('txConvList'); if (el) el.innerHTML = inboxRows(); };
+  window.txInDate = async v => { S.inDate = v; await loadConvos(); const el = document.getElementById('txConvList'); if (el) el.innerHTML = inboxRows(); };
+  function inboxHtml() {
+    const rows = inboxRows();
     const conv = S.convos.find(c => c.educator_id === S.open);
     return `<div class="tx-grid">
-      <div class="tx-card tx-list">${rows || '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">No texts yet. Start one from "New text".</div>'}</div>
+      <div class="tx-card" style="display:flex;flex-direction:column">
+        <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;flex-direction:column;gap:6px">
+          <input type="text" value="${esc(S.inQ || '')}" oninput="txInSearch(this.value)" placeholder="🔍 Name, number or message text" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
+          <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)">On date <input type="date" value="${esc(S.inDate || '')}" onchange="txInDate(this.value)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12.5px">${S.inDate ? '<button class="tx-chip" onclick="txInDate(\'\');this.previousElementSibling.value=\'\'">Clear</button>' : ''}</div></div>
+        <div class="tx-list" id="txConvList">${rows}</div></div>
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
   }
   function threadHtml(conv) {

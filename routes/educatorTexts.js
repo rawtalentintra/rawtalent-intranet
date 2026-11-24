@@ -138,10 +138,15 @@ router.post('/live', async (req, res) => {
 router.get('/conversations', async (req, res) => {
   try {
     const rows = (await getDb().execute({
-      sql: `SELECT DISTINCT ON (educator_id) educator_id, educator_name, direction, body, status, created_at,
+      // ?date=YYYY-MM-DD keeps only conversations with a message that day (Melbourne).
+      sql: `SELECT DISTINCT ON (educator_id) educator_id, educator_name, direction, body, status, created_at, recipient_type,
+              (SELECT max(phone) FROM sms_messages p WHERE p.educator_id = m.educator_id) phone,
               (SELECT count(*) FROM sms_messages u WHERE u.educator_id = m.educator_id AND u.direction='in' AND u.read_at IS NULL) unread
-            FROM sms_messages m ORDER BY educator_id, id DESC`, args: []
-    })).rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 300);
+            FROM sms_messages m
+            ${/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? `WHERE educator_id IN (SELECT educator_id FROM sms_messages WHERE (created_at AT TIME ZONE 'Australia/Melbourne')::date = ?::date)` : ''}
+            ORDER BY educator_id, id DESC`,
+      args: /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? [req.query.date] : []
+    })).rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 500);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
