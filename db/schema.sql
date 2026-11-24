@@ -3303,3 +3303,7 @@ ALTER TABLE sms_messages ENABLE ROW LEVEL SECURITY;
 -- text, compared with RT live just before it goes out.
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS snap_status TEXT;
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS snap_compliant BOOLEAN;
+-- SMS to centres too (Joy, 24 Nov 2026): educator_id holds the centreKey for a
+-- centre; cio_id is the Customer.io profile the text is sent under.
+ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS recipient_type TEXT DEFAULT 'educator';
+ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS cio_id TEXT;

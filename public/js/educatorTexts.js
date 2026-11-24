@@ -23,8 +23,9 @@
   const SEG = { actively_working: 'Actively Working', actively_engaged: 'Actively Engaged', engaged: 'Engaged', disengaged: 'Disengaged', dormant: 'Dormant' };
   const S = { view: 'inbox', usage: null, aud: null, convos: [], open: null, thread: [], maxId: 0, settled: 0, poll: null,
     f: { status: new Set(['Active']), state: new Set(), onboarding: new Set(), compliance: 'any', gender: new Set(), qual: new Set(), segment: new Set(),
-         centre: '', radius: 15, avail: false, worked28: false, notTextedDays: 7, replied: 'any', search: '' },
-    picked: null, body: '' };
+         centre: '', radius: 15, avail: false, worked28: false, notTextedDays: 7, replied: 'any', search: '',
+         cstate: new Set(), booking: new Set(), mobileOnly: true },
+    picked: null, body: '', kind: 'educators', audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
 
   const css = `<style>
     .tx-wrap{max-width:1200px;margin:0 auto}
@@ -94,7 +95,7 @@
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>
-        <a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(S.open)}" target="_blank" rel="noopener" style="font-size:12px;color:#2563eb">Open in RT Portal ↗</a></div>
+        ${/^(loc|client):/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Centre</span>' : `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(S.open)}" target="_blank" rel="noopener" style="font-size:12px;color:#2563eb">Open in RT Portal ↗</a>`}</div>
       <div class="tx-msgs" id="txMsgs">${msgs}</div>
       <div class="tx-compose"><textarea id="txReply" placeholder="Write a reply…" oninput="txCount('txReply','txReplyCount')"></textarea>
         <div class="tx-count" id="txReplyCount"></div>
@@ -121,51 +122,100 @@
   };
 
   // ── New text ──
+  // ── Phone / name matching (04xx, 4xx, +61 4xx, with or without spaces) ──
+  const nd = s => { let d = String(s || '').replace(/\D/g, ''); if (d.startsWith('61')) d = d.slice(2); return d.replace(/^0+/, ''); };
+  function matches(e, q) {
+    q = String(q || '').trim(); if (!q) return true;
+    const digits = q.replace(/\D/g, '');
+    if (digits.length >= 3) {
+      const qd = nd(q);
+      if ([e.phone, ...(e.allPhones || [])].some(p => p && nd(p).includes(qd))) return true;
+    }
+    const hay = [e.name, e.contactName, e.suburb].filter(Boolean).join(' ').toLowerCase();
+    const words = q.toLowerCase().replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.every(w => hay.includes(w));
+  }
+  const isC = () => S.kind === 'centres';
+  const all = () => (isC() ? (S.audC?.recipients || []) : (S.aud?.educators || []));
+  const noun = (n) => isC() ? (n === 1 ? 'centre' : 'centres') : (n === 1 ? 'educator' : 'educators');
+
   function filtered() {
-    const f = S.f, a = S.aud; if (!a) return [];
+    const f = S.f, a = S.aud; if (!a || (isC() && !S.audC)) return [];
     const c = f.centre ? a.centres.find(x => x.centreKey === f.centre) : null;
     const notSince = f.notTextedDays ? Date.now() - f.notTextedDays * 864e5 : null;
-    const q = f.search.trim().toLowerCase();
-    return a.educators.filter(e =>
-      (!f.status.size || f.status.has(e.status)) && (!f.state.size || f.state.has(e.state || 'Unknown')) &&
-      (!f.onboarding.size || f.onboarding.has(e.onboarding || 'Not started')) &&
-      (f.compliance === 'any' || (f.compliance === 'yes') === !!e.compliant) &&
-      (!f.gender.size || f.gender.has(e.gender || 'Unknown')) && (!f.qual.size || f.qual.has(e.qualification || 'Unknown')) &&
-      (!f.segment.size || f.segment.has(e.segment)) && (!f.avail || e.availDays > 0) && (!f.worked28 || e.shifts28d > 0) &&
-      (!notSince || !e.lastTextAt || new Date(e.lastTextAt).getTime() < notSince) &&
-      (f.replied === 'any' || (f.replied === 'yes') === !!e.lastReplyAt) &&
-      (!q || (e.name || '').toLowerCase().includes(q) || (e.suburb || '').toLowerCase().includes(q))
-    ).map(e => c ? { ...e, dist: km(c.lat, c.lng, e.lat, e.lng) } : e)
-     .filter(e => !c || e.dist <= f.radius)
-     .sort((x, y) => c ? x.dist - y.dist : (x.name || '').localeCompare(y.name || ''));
+    const common = e => (!notSince || !e.lastTextAt || new Date(e.lastTextAt).getTime() < notSince) &&
+      (f.replied === 'any' || (f.replied === 'yes') === !!e.lastReplyAt) && matches(e, f.search);
+    let list = isC()
+      ? all().filter(e => (!f.cstate.size || f.cstate.has(e.state || 'Unknown')) && (!f.booking.size || f.booking.has(e.booking)) && (!f.mobileOnly || e.hasMobile) && common(e))
+      : all().filter(e =>
+        (!f.status.size || f.status.has(e.status)) && (!f.state.size || f.state.has(e.state || 'Unknown')) &&
+        (!f.onboarding.size || f.onboarding.has(e.onboarding || 'Not started')) &&
+        (f.compliance === 'any' || (f.compliance === 'yes') === !!e.compliant) &&
+        (!f.gender.size || f.gender.has(e.gender || 'Unknown')) && (!f.qual.size || f.qual.has(e.qualification || 'Unknown')) &&
+        (!f.segment.size || f.segment.has(e.segment)) && (!f.avail || e.availDays > 0) && (!f.worked28 || e.shifts28d > 0) && common(e));
+    list = list.map(e => c && e.lat != null ? { ...e, dist: km(c.lat, c.lng, e.lat, e.lng) } : e)
+      .filter(e => !c || (e.dist != null && e.dist <= f.radius))
+      .sort((x, y) => c ? x.dist - y.dist : (x.name || '').localeCompare(y.name || ''));
+    // People added with the lookup always show, at the top, whatever the filters say.
+    const pinned = all().filter(e => S.pinned.has(e.userId) && !list.some(x => x.userId === e.userId)).map(e => ({ ...e, pinned: true }));
+    return [...pinned, ...list];
   }
-  const opts = key => [...new Set(S.aud.educators.map(e => (key === 'onboarding' ? e.onboarding || 'Not started' : e[key] || 'Unknown')))].sort();
+  const opts = key => [...new Set(all().map(e => (key === 'onboarding' ? e.onboarding || 'Not started' : e[key] || 'Unknown')))].sort();
   function chips(name, values, set, label = v => v) {
     return `<div class="tx-chips">${values.map(v => `<button class="tx-chip ${set.has(v) ? 'on' : ''}" onclick="txChip('${name}','${esc(v).replace(/'/g, '&#39;')}')">${esc(label(v))}</button>`).join('')}</div>`;
   }
-  window.txChip = (name, v) => { const s = S.f[name]; s.has(v) ? s.delete(v) : s.add(v); S.picked = null; renderNew(); };
-  window.txSet = (k, v) => { S.f[k] = v; S.picked = null; renderNew(); };
+  window.txChip = (name, v) => { const s = S.f[name]; s.has(v) ? s.delete(v) : s.add(v); renderNew(); };
+  window.txSet = (k, v) => { S.f[k] = v; renderNew(); };
+  window.txKind = async k => {
+    if (S.kind === k) return;
+    S.kind = k; S.picked = new Set(); S.pinned = new Set(); S.tableQ = ''; S.lookQ = ''; S.f.search = '';
+    renderNew();
+    if (k === 'centres' && !S.audC) { try { S.audC = await api('/api/educator-texts/audience?type=centres'); } catch (e) { say(e.message, 'error'); } renderNew(); }
+  };
+
+  function rowHtml(e) {
+    const box = `<td><input type="checkbox" ${S.picked.has(e.userId) ? 'checked' : ''} ${e.hasMobile ? '' : `disabled title="${isC() ? 'No mobile number (or no RT contact profile)' : 'No valid mobile'}"`} onchange="txPick('${esc(e.userId)}',this.checked)"></td>`;
+    const last = `<td>${e.lastTextAt ? ago(e.lastTextAt) + ' ago' : '-'}${e.lastReplyAt ? ' · replied' : ''}</td>`;
+    const where = `<td>${esc(e.suburb || '')}${e.state ? ', ' + e.state : ''}${e.dist != null ? `<div style="color:var(--text-muted);font-size:11px">${e.dist.toFixed(1)} km</div>` : ''}</td>`;
+    const tag = e.pinned ? ' <span class="tx-pill" style="font-size:10px;padding:1px 6px">added</span>' : '';
+    if (isC()) return `<tr>${box}<td><b>${esc(e.name)}</b>${tag}<div style="color:var(--text-muted);font-size:11px">${esc(e.contactName || '')}${e.contactName ? ' · ' : ''}${esc(e.phone || 'no number')}${e.hasMobile ? '' : ' (not a mobile)'}</div></td>${where}<td>${esc(e.booking)}</td><td>${e.lastBooking ? esc(e.lastBooking.split('-').reverse().join('/')) : '-'}</td>${last}</tr>`;
+    return `<tr>${box}<td><b>${esc(e.name)}</b>${tag}<div style="color:var(--text-muted);font-size:11px">${esc(e.phone || 'no mobile')}</div></td>${where}
+      <td>${esc(e.status || '')}</td><td class="${e.compliant ? 'tx-ok' : 'tx-no'}">${e.compliant ? 'Compliant' : 'Not compliant'}${e.liveAt ? ' <span title="Checked live against RT just now" style="color:#2563eb">●</span>' : ''}</td>
+      <td>${esc(SEG[e.segment] || '')}</td><td>${e.availDays ? e.availDays + ' days' : '-'}</td>${last}</tr>`;
+  }
+  function rowsHtml(list) {
+    const shown = list.filter(e => matches(e, S.tableQ));
+    const cols = isC() ? 6 : 8;
+    return (shown.slice(0, 400).map(rowHtml).join('') || `<tr><td colspan="${cols}" style="text-align:center;padding:24px;color:var(--text-muted)">No ${noun(2)} match.</td></tr>`) +
+      (shown.length > 400 ? `<tr><td colspan="${cols}" style="padding:10px;font-size:12px;color:var(--text-muted)">Showing the first 400 of ${shown.length.toLocaleString()}. Narrow the filters or search.</td></tr>` : '');
+  }
+  window.txTableSearch = v => { S.tableQ = v; const tb = document.getElementById('txRows'); if (tb) tb.innerHTML = rowsHtml(filtered()); };
+  window.txLook = v => {
+    S.lookQ = v; const box = document.getElementById('txLookRes'); if (!box) return;
+    if (String(v).trim().length < 2) { box.innerHTML = ''; return; }
+    const hits = all().filter(e => matches(e, v)).slice(0, 8);
+    box.innerHTML = hits.length ? hits.map(e => `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12.5px">
+        <div><b>${esc(e.name)}</b><div style="color:var(--text-muted);font-size:11px">${esc(e.phone || 'no number')}${e.suburb ? ' · ' + esc(e.suburb) : ''}</div></div>
+        ${e.hasMobile ? (S.picked.has(e.userId) ? '<span style="font-size:11px;color:#15803d">✓ added</span>' : `<button class="tx-chip" onclick="txAdd('${esc(e.userId)}')">+ Add</button>`) : '<span style="font-size:11px;color:var(--text-muted)">no mobile</span>'}</div>`).join('')
+      : `<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No ${noun(2)} found.</div>`;
+  };
+  window.txAdd = id => { S.picked.add(id); S.pinned.add(id); const q = S.lookQ; renderNew(); const el = document.getElementById('txLookIn'); if (el) { el.value = q; txLook(q); } };
 
   function newHtml() {
-    if (!S.aud) return '<div class="spinner-wrap"><div class="spinner"></div></div>';
+    if (!S.aud || (isC() && !S.audC)) return '<div class="spinner-wrap"><div class="spinner"></div></div>';
     const f = S.f, list = filtered();
     if (!S.picked) S.picked = new Set(); // nobody is pre-selected: the rep picks on purpose
     const picked = list.filter(e => S.picked.has(e.userId));
     const centres = S.aud.centres.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     const x = seg((S.body || '').replace(/\{first_name\}/gi, 'Bartholomew'));
     const cost = picked.length * x.s * (S.usage?.costPerSegmentAud || 0.08);
-    const rows = list.slice(0, 400).map(e => `<tr>
-      <td><input type="checkbox" ${S.picked.has(e.userId) ? 'checked' : ''} ${e.hasMobile ? '' : 'disabled title="No valid mobile"'} onchange="txPick('${e.userId}',this.checked)"></td>
-      <td><b>${esc(e.name)}</b><div style="color:var(--text-muted);font-size:11px">${esc(e.phone || 'no mobile')}</div></td>
-      <td>${esc(e.suburb || '')}${e.state ? ', ' + e.state : ''}${e.dist != null ? `<div style="color:var(--text-muted);font-size:11px">${e.dist.toFixed(1)} km</div>` : ''}</td>
-      <td>${esc(e.status || '')}</td><td class="${e.compliant ? 'tx-ok' : 'tx-no'}">${e.compliant ? 'Compliant' : 'Not compliant'}${e.liveAt ? ' <span title="Checked live against RT just now" style="color:#2563eb">●</span>' : ''}</td>
-      <td>${esc(SEG[e.segment] || '')}</td><td>${e.availDays ? e.availDays + ' days' : '-'}</td>
-      <td>${e.lastTextAt ? ago(e.lastTextAt) + ' ago' : '-'}${e.lastReplyAt ? ' · replied' : ''}</td></tr>`).join('');
-    return `<div class="tx-grid">
-      <div class="tx-card tx-filters">
-        <div class="tx-f"><label class="h">Near a centre</label>
-          <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
-          ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
+    const replied = `<div class="tx-chips" style="margin-top:6px">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.replied === v ? 'on' : ''}" onclick="txSet('replied','${v}')">${{ any: 'Any reply history', yes: 'Has replied before', no: 'Never replied' }[v]}</button>`).join('')}</div>`;
+    const notTexted = `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px">Not texted in the last <input type="number" min="0" max="90" value="${f.notTextedDays}" onchange="txSet('notTextedDays',Number(this.value)||0)" style="width:64px"> days</div>`;
+    const filters = isC() ? `
+        <div class="tx-f"><label class="h">State</label>${chips('cstate', opts('state'), f.cstate)}</div>
+        <div class="tx-f"><label class="h">Bookings (RT)</label>${chips('booking', ['Booked in last 30 days', 'Booked in last 4 months', 'Dormant (4+ months)', 'Never booked'], f.booking)}</div>
+        <div class="tx-f"><label class="h">Smart filters</label>
+          <label style="display:block;font-size:13px"><input type="checkbox" ${f.mobileOnly ? 'checked' : ''} onchange="txSet('mobileOnly',this.checked)"> Only centres with a mobile number</label>${notTexted}${replied}</div>` : `
         <div class="tx-f"><label class="h">Status (RT)</label>${chips('status', opts('status'), f.status)}</div>
         <div class="tx-f"><label class="h">State</label>${chips('state', opts('state'), f.state)}</div>
         <div class="tx-f"><label class="h">Compliance (RT)</label><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></div>
@@ -175,23 +225,34 @@
         <div class="tx-f"><label class="h">Gender</label>${chips('gender', opts('gender'), f.gender)}</div>
         <div class="tx-f"><label class="h">Smart filters</label>
           <label style="display:block;font-size:13px"><input type="checkbox" ${f.avail ? 'checked' : ''} onchange="txSet('avail',this.checked)"> Has availability listed in RT</label>
-          <label style="display:block;font-size:13px"><input type="checkbox" ${f.worked28 ? 'checked' : ''} onchange="txSet('worked28',this.checked)"> Worked a shift in the last 28 days</label>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px">Not texted in the last <input type="number" min="0" max="90" value="${f.notTextedDays}" onchange="txSet('notTextedDays',Number(this.value)||0)" style="width:64px"> days</div>
-          <div class="tx-chips" style="margin-top:6px">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.replied === v ? 'on' : ''}" onclick="txSet('replied','${v}')">${{ any: 'Any reply history', yes: 'Has replied before', no: 'Never replied' }[v]}</button>`).join('')}</div></div>
-        <div class="tx-f"><label class="h">Name or suburb</label><input type="text" value="${esc(f.search)}" onchange="txSet('search',this.value)" placeholder="Search…"></div>
+          <label style="display:block;font-size:13px"><input type="checkbox" ${f.worked28 ? 'checked' : ''} onchange="txSet('worked28',this.checked)"> Worked a shift in the last 28 days</label>${notTexted}${replied}</div>`;
+    const head = isC() ? '<th></th><th>Centre</th><th>Suburb</th><th>Bookings</th><th>Last booking</th><th>Last text</th>'
+      : '<th></th><th>Educator</th><th>Suburb</th><th>Status</th><th>Compliance</th><th>Engagement</th><th>Availability</th><th>Last text</th>';
+    return `<div class="tx-grid">
+      <div class="tx-card tx-filters">
+        <div class="tx-f"><label class="h">Sending to</label><div class="tx-switch" style="display:flex"><button style="flex:1" class="${isC() ? '' : 'on'}" onclick="txKind('educators')">👩‍🏫 Educators</button><button style="flex:1" class="${isC() ? 'on' : ''}" onclick="txKind('centres')">🏫 Centres</button></div></div>
+        <div class="tx-f"><label class="h">Find a${isC() ? ' centre' : 'n educator'} by name or phone</label>
+          <input type="text" id="txLookIn" value="${esc(S.lookQ)}" oninput="txLook(this.value)" placeholder="e.g. Sarah, 0412 345 678, +61412…" autocomplete="off">
+          <div id="txLookRes"></div></div>
+        <div class="tx-f"><label class="h">Near a centre</label>
+          <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
+          ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
+        ${filters}
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div class="tx-card" style="padding:14px">
           <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Message</div>
-          <div class="tx-compose" style="border:0;padding:0"><textarea id="txBody" placeholder="Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen." oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
-          <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise</span></div></div>
+          <div class="tx-compose" style="border:0;padding:0"><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
+          <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise${isC() ? ' (centre contact)' : ''}</span></div></div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px">
-            <div style="font-size:13px"><b id="txPickCount">${picked.length}</b> of ${list.length.toLocaleString()} selected · <b id="txCost">≈ $${cost.toFixed(2)}</b> <span style="color:var(--text-muted)">(${picked.length * x.s} segments)</span></div>
+            <div style="font-size:13px"><b id="txPickCount">${picked.length}</b> of ${list.length.toLocaleString()} ${noun(2)} selected · <b id="txCost">≈ $${cost.toFixed(2)}</b> <span style="color:var(--text-muted)">(${picked.length * x.s} segments)</span></div>
             <div style="display:flex;gap:6px"><button class="btn-secondary" onclick="txPickAll(false)">Clear</button><button class="btn-secondary" onclick="txPickAll(true)">Select all</button><button class="btn-add" onclick="txSendMass()">Review & send</button></div></div>
         </div>
-        <div class="tx-card" style="max-height:560px;overflow:auto"><table class="tx-table"><thead><tr><th></th><th>Educator</th><th>Suburb</th><th>Status</th><th>Compliance</th><th>Engagement</th><th>Availability</th><th>Last text</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No educators match these filters.</td></tr>'}</tbody></table>
-          <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).</div>
-          ${list.length > 400 ? `<div style="padding:10px;font-size:12px;color:var(--text-muted)">Showing the first 400 of ${list.length.toLocaleString()}. Narrow the filters.</div>` : ''}</div>
+        <div class="tx-card" style="max-height:600px;overflow:auto">
+          <div style="padding:10px;border-bottom:1px solid var(--gray-100)"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px"></div>
+          <table class="tx-table"><thead><tr>${head}</tr></thead><tbody id="txRows">${rowsHtml(list)}</tbody></table>
+          <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">${isC() ? 'Centres come from RT. Texts go to the centre/location mobile; landline-only centres can\'t be texted.' : `RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).`}</div>
+        </div>
       </div></div>`;
   }
   window.txBodyChange = v => { S.body = v; const sc = document.getElementById('txBodyCount'); const pc = document.getElementById('txCost');
@@ -203,18 +264,18 @@
   window.txPickAll = on => { S.picked = new Set(on ? filtered().filter(e => e.hasMobile).slice(0, S.usage?.maxRecipients || 200).map(e => e.userId) : []); renderNew(); };
   window.txSendMass = async () => {
     const ids = [...S.picked], body = (S.body || '').trim();
-    if (!ids.length) return say('Select at least one educator', 'error');
+    if (!ids.length) return say(`Select at least one ${noun(1)}`, 'error');
     if (!body) return say('Write the message first', 'error');
     const x = seg(body.replace(/\{first_name\}/gi, 'Bartholomew')), segs = ids.length * x.s, cost = segs * (S.usage?.costPerSegmentAud || 0.08);
-    const msg = `Send this text to ${ids.length} educator${ids.length > 1 ? 's' : ''}?\n\n"${body}"\n\n${x.s} segment${x.s > 1 ? 's' : ''} each · ${segs} segments · about $${cost.toFixed(2)}\nAnyone texted in the last ${S.usage?.cooldownHours || 24}h will be skipped.`;
+    const msg = `Send this text to ${ids.length} ${noun(ids.length)}?\n\n"${body}"\n\n${x.s} segment${x.s > 1 ? 's' : ''} each · ${segs} segments · about $${cost.toFixed(2)}\nAnyone texted in the last ${S.usage?.cooldownHours || 24}h will be skipped.`;
     if (ids.length >= 20) { const t = prompt(msg + `\n\nType ${ids.length} to confirm.`); if (String(t || '').trim() !== String(ids.length)) return; }
     else if (!confirm(msg)) return;
     try {
       const f = S.f, c = f.centre && S.aud.centres.find(z => z.centreKey === f.centre);
-      const note = [c ? `${f.radius}km of ${c.name}` : '', [...f.status].join('/'), [...f.state].join('/')].filter(Boolean).join(' · ');
+      const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
       const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note });
       say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
-      S.body = ''; S.picked = null; await loadUsage(); S.aud = await api('/api/educator-texts/audience'); render();
+      S.body = ''; S.picked = null; S.pinned = new Set(); await loadUsage(); if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); render();
     } catch (e) { say(e.message, 'error'); }
   };
 
@@ -227,6 +288,7 @@
     clearTimeout(liveTimer);
     liveTimer = setTimeout(async () => {
       const now = Date.now();
+      if (isC()) return;
       const ids = filtered().slice(0, 400).map(e => e.userId).filter(id => !(checked.get(id) > now - 300000)).slice(0, 60);
       if (!ids.length) return;
       ids.forEach(id => checked.set(id, now));

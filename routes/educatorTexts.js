@@ -12,6 +12,33 @@ router.use((req, res, next) => {
 });
 
 const educatorMap = () => require('./micropods').buildEducatorMap();
+const isCentreId = id => /^(loc|client):/.test(String(id));
+
+// Centres that can be texted: RT centre/location contact mobile, sent under the
+// client's RT contact profile in Customer.io (primaryUserId, same as the email
+// journeys). Landline-only centres are listed but can't be picked.
+let centreCache = { at: 0, data: null };
+async function centreAudience() {
+  if (centreCache.data && Date.now() - centreCache.at < 10 * 60 * 1000) return centreCache.data;
+  const cm = require('./centres');
+  const { centres, rawClients, bookings } = await cm.getCentresAndBookings();
+  const lastByKey = await cm.getLastBookingDates(centres, bookings);
+  const byClient = new Map(rawClients.map(c => [String(c.clientId), c]));
+  const data = centres.filter(c => c.isActive).map(c => {
+    const client = byClient.get(String(c.rtClientId));
+    const phone = (c.allPhones || []).find(p => svc.toE164(p)) || c.contactNo || null;
+    const last = lastByKey[c.centreKey] ? new Date(lastByKey[c.centreKey]) : null;
+    const days = last ? (Date.now() - last.getTime()) / 864e5 : null;
+    return { userId: c.centreKey, type: 'centre', name: c.name, contactName: c.contactName || null, phone, allPhones: c.allPhones || [],
+      hasMobile: !!svc.toE164(phone) && !!(client && client.primaryUserId), cioId: client && client.primaryUserId ? String(client.primaryUserId) : null,
+      suburb: c.suburb, state: require('../services/micropodService').normalizeStateToShort(c.state),
+      lat: Number.isFinite(c.latitude) ? c.latitude : null, lng: Number.isFinite(c.longitude) ? c.longitude : null,
+      lastBooking: last ? last.toISOString().slice(0, 10) : null,
+      booking: days == null ? 'Never booked' : days <= 30 ? 'Booked in last 30 days' : days <= 120 ? 'Booked in last 4 months' : 'Dormant (4+ months)' };
+  });
+  centreCache = { at: Date.now(), data };
+  return data;
+}
 
 // Everyone the filters can pick from (same list and RT accuracy as the
 // Educator Map), plus when each was last texted / last replied.
@@ -29,7 +56,11 @@ router.get('/audience', async (req, res) => {
         segment: e.segment, shifts28d: e.shifts28d, availDays: e.availDays || 0, lastShift: e.lastShift,
         lastTextAt: l?.last_out || null, lastReplyAt: l?.last_in || null };
     });
-    res.json({ educators, centres: map.centres.map(c => ({ centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, lat: c.lat, lng: c.lng })), generatedAt: map.generatedAt });
+    let centreList = [];
+    if (req.query.type === 'centres') {
+      centreList = (await centreAudience()).map(c => { const l = byId.get(c.userId); return { ...c, lastTextAt: l?.last_out || null, lastReplyAt: l?.last_in || null }; });
+    }
+    res.json({ educators: req.query.type === 'centres' ? [] : educators, recipients: centreList, centres: map.centres.map(c => ({ centreKey: c.centreKey, name: c.name, suburb: c.suburb, state: c.state, lat: c.lat, lng: c.lng })), generatedAt: map.generatedAt });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -59,7 +90,14 @@ router.post('/send', async (req, res) => {
     const ids = new Set((req.body.userIds || []).map(String));
     if (!ids.size) return res.status(400).json({ error: 'Pick at least one educator' });
     const map = await educatorMap();
-    const recipients = map.educators.filter(e => ids.has(e.userId)).map(e => ({ userId: e.userId, name: e.name, phone: e.phone, status: e.status, compliant: e.compliant }));
+    const recipients = map.educators.filter(e => ids.has(e.userId)).map(e => ({ userId: e.userId, name: e.name, phone: e.phone, status: e.status, compliant: e.compliant, type: 'educator' }));
+    if ([...ids].some(isCentreId)) {
+      for (const c of await centreAudience()) {
+        if (!ids.has(c.userId)) continue;
+        if (!c.cioId) { continue; }
+        recipients.push({ userId: c.userId, name: c.name, firstName: (c.contactName || '').split(' ')[0] || 'there', phone: (c.allPhones || []).find(p => svc.toE164(p)) || c.phone, type: 'centre', cioId: c.cioId });
+      }
+    }
     const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1 });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }

@@ -79,9 +79,9 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   const text = smart(body).trim();
   if (!text) throw Object.assign(new Error('Write a message first'), { status: 400 });
   if (text.length > 600) throw Object.assign(new Error('Keep texts under 600 characters'), { status: 400 });
-  if (recipients.length > LIMITS.maxRecipientsPerSend) throw Object.assign(new Error(`One send can go to at most ${LIMITS.maxRecipientsPerSend} educators. Narrow the filters.`), { status: 400 });
+  if (recipients.length > LIMITS.maxRecipientsPerSend) throw Object.assign(new Error(`One send can go to at most ${LIMITS.maxRecipientsPerSend} people. Narrow the filters.`), { status: 400 });
   // {first_name} is filled per educator; cost is based on the longest result.
-  const first = r => (String(r.name || '').trim().split(/\s+/)[0] || 'there');
+  const first = r => (String(r.firstName || r.name || '').trim().split(/\s+/)[0] || 'there');
   const render = r => text.replace(/\{first_name\}/gi, first(r));
   const seg = recipients.length ? recipients.map(r => segmentInfo(render(r))).sort((a, b) => b.segments - a.segments)[0] : segmentInfo(text);
   const db = getDb();
@@ -117,10 +117,10 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   })).rows[0];
   for (const r of ok) {
     await db.execute({
-      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant)
-            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?)`,
+      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant, recipient_type, cio_id)
+            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?,?,?)`,
       args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, batch.id, user.email, user.name || user.email,
-             r.status || null, r.compliant == null ? null : !!r.compliant]
+             r.status || null, r.compliant == null ? null : !!r.compliant, r.type || 'educator', String(r.cioId || r.userId)]
     });
   }
   kick();
@@ -155,7 +155,7 @@ async function drain() {
       try {
         const r = await fetch(`https://${host}/v1/send/sms`, {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transactional_message_id: TX_MESSAGE, identifiers: { id: m.educator_id }, to: m.phone, message_data: { body: m.body } })
+          body: JSON.stringify({ transactional_message_id: TX_MESSAGE, identifiers: { id: m.cio_id || m.educator_id }, to: m.phone, message_data: { body: m.body } })
         });
         const d = await r.json().catch(() => ({}));
         if (r.status === 429) { status = 'queued'; await new Promise(res => setTimeout(res, 5000)); }
@@ -172,6 +172,7 @@ async function drain() {
   finally { draining = false; }
 }
 async function liveCheck(m) {
+  if (m.recipient_type === 'centre') return {}; // centres: RT has no by-id lookup for contacts; sent as picked
   let c;
   try { c = await require('./rtApiReportService').fetchById('candidates', m.educator_id); }
   catch (e) { return { note: 'RT lookup failed, sent on the data the rep saw' }; } // RT down: don't hold every text
@@ -196,20 +197,26 @@ function startWorker() {
 // Reply from Customer.io's inbound automation webhook.
 async function recordInbound({ customerId, from, body }) {
   const db = getDb();
-  let id = customerId ? String(customerId) : null, name = null;
+  let id = customerId ? String(customerId) : null, name = null, type = 'educator';
+  // A centre's texts go out under its RT contact's Customer.io id: map the
+  // reply back to the centre most recently texted under that id.
+  if (id) {
+    const c = (await db.execute({ sql: `SELECT educator_id, educator_name FROM sms_messages WHERE cio_id = ? AND recipient_type = 'centre' ORDER BY id DESC LIMIT 1`, args: [id] })).rows[0];
+    if (c) { id = c.educator_id; name = c.educator_name; type = 'centre'; }
+  }
   if (!id && from) {
     const last9 = String(from).replace(/\D/g, '').slice(-9);
     const r = (await db.execute({ sql: `SELECT educator_id, educator_name FROM sms_messages WHERE right(regexp_replace(phone,'\\D','','g'),9) = ? ORDER BY id DESC LIMIT 1`, args: [last9] })).rows[0];
     if (r) { id = r.educator_id; name = r.educator_name; }
   }
   if (!id) return null;
-  if (!name) {
+  if (!name && type === 'educator') {
     const c = (await db.execute({ sql: 'SELECT first_name, last_name FROM rt_candidates_cache WHERE user_id::text = ?', args: [id] })).rows[0];
     name = c ? [c.first_name, c.last_name].filter(Boolean).join(' ') : null;
   }
   const row = (await db.execute({
-    sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status) VALUES (?,?,?,'in',?,?, 'received') RETURNING id`,
-    args: [id, name, from || null, String(body || '').slice(0, 2000), segmentInfo(body).segments]
+    sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, recipient_type) VALUES (?,?,?,'in',?,?, 'received', ?) RETURNING id`,
+    args: [id, name, from || null, String(body || '').slice(0, 2000), segmentInfo(body).segments, type]
   })).rows[0];
   return row.id;
 }
