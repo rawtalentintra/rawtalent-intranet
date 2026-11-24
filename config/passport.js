@@ -26,7 +26,12 @@ passport.deserializeUser(async (id, done) => {
       return done(null, cached.user);
     }
     const result = await getDb().execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] });
-    const user = result.rows[0] || false;
+    // A disabled account's existing session counts as signed out everywhere
+    // (Joy, 24 Nov 2026): page guards like /wfp only checked "is there a
+    // session", so a deactivated user's old session could still open the
+    // mobile app. Now every guard sees them as logged out within 20s.
+    const row = result.rows[0];
+    const user = row && row.active !== false && row.active !== 0 ? row : false;
     userCache.set(id, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
     done(null, user);
   } catch (err) {
