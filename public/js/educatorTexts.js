@@ -325,7 +325,11 @@
       const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
       const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames });
       say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
-      S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = []; await loadUsage(); if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); render();
+      S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = [];
+      // Jump straight to the Inbox with the new message showing (Joy, 24 Nov).
+      await Promise.all([loadUsage(), loadConvos()]);
+      S.view = 'inbox'; render();
+      api('/api/educator-texts/audience' + (isC() ? '?type=centres' : '')).then(a => { if (isC()) S.audC = a; else S.aud = a; }).catch(() => {});
     } catch (e) { say(e.message, 'error'); }
   };
 
