@@ -36,7 +36,20 @@ router.get('/audience', async (req, res) => {
 router.get('/usage', async (req, res) => {
   try {
     const used = await svc.segmentsSentToday(req.user.email);
-    res.json({ usedToday: used, dailyLimit: svc.LIMITS.dailySegmentsPerSender, maxRecipients: svc.LIMITS.maxRecipientsPerSend,
+    // Spend counter: segments sent (or waiting to send) x the per-segment rate.
+    const sp = (await getDb().execute({
+      sql: `WITH m AS (SELECT segments, sent_by_email, created_at AT TIME ZONE 'Australia/Melbourne' t FROM sms_messages
+                       WHERE direction = 'out' AND status IN ('queued','sending','sent'))
+            SELECT coalesce(sum(segments) FILTER (WHERE t >= date_trunc('day', now() AT TIME ZONE 'Australia/Melbourne')),0) day_all,
+                   coalesce(sum(segments) FILTER (WHERE t >= date_trunc('day', now() AT TIME ZONE 'Australia/Melbourne') AND sent_by_email = ?),0) day_me,
+                   coalesce(sum(segments) FILTER (WHERE t >= date_trunc('month', now() AT TIME ZONE 'Australia/Melbourne')),0) month_all,
+                   coalesce(sum(segments) FILTER (WHERE t >= date_trunc('month', now() AT TIME ZONE 'Australia/Melbourne') AND sent_by_email = ?),0) month_me
+            FROM m`,
+      args: [req.user.email, req.user.email]
+    })).rows[0];
+    const cost = n => +(Number(n) * svc.LIMITS.costPerSegmentAud).toFixed(2);
+    const spend = { todayMine: cost(sp.day_me), todayTeam: cost(sp.day_all), monthMine: cost(sp.month_me), monthTeam: cost(sp.month_all) };
+    res.json({ spend, usedToday: used, dailyLimit: svc.LIMITS.dailySegmentsPerSender, maxRecipients: svc.LIMITS.maxRecipientsPerSend,
       cooldownHours: svc.LIMITS.cooldownHours, costPerSegmentAud: svc.LIMITS.costPerSegmentAud, inSendWindow: svc.inSendWindow() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -50,6 +63,18 @@ router.post('/send', async (req, res) => {
     const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1 });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// Live re-check (same as the Educator Map): the browser sends the ids on
+// screen (max 60); each is fetched from RT by id so status/compliance are current.
+router.post('/live', async (req, res) => {
+  try {
+    const ids = [...new Set((req.body?.ids || []).map(String).filter(x => /^\d+$/.test(x)))].slice(0, 60);
+    if (!ids.length) return res.json({ educators: [] });
+    const { candidates } = await require('../services/rtCandidatesSyncService').fetchCandidatesLive(ids, { concurrency: 8 });
+    const today = new Date().toISOString().slice(0, 10), mp = require('./micropods');
+    res.json({ educators: candidates.map(c => ({ userId: String(c.userId), phone: c.contactNo || null, ...mp.complianceForLive(c, today) })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Inbox: one row per educator, newest first.

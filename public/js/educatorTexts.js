@@ -72,7 +72,7 @@
     return `<div class="tx-bar">
       <div class="tx-switch"><button class="${S.view === 'inbox' ? 'on' : ''}" onclick="txView('inbox')">💬 Inbox</button><button class="${S.view === 'new' ? 'on' : ''}" onclick="txView('new')">✉️ New text</button></div>
       <span class="tx-pill ${left < 30 ? 'warn' : ''}" title="Each SMS is billed per 160-character segment">${u.usedToday} / ${u.dailyLimit} segments used today</span>
-      <span class="tx-pill" title="Estimate; the real price comes from Twilio">≈ $${u.costPerSegmentAud.toFixed(2)} per segment</span>
+      <span class="tx-pill" title="Estimated at $${u.costPerSegmentAud.toFixed(2)} per segment; Twilio's bill is the final figure">💲 Spent today $${u.spend.todayMine.toFixed(2)} (team $${u.spend.todayTeam.toFixed(2)}) · this month $${u.spend.monthMine.toFixed(2)} (team $${u.spend.monthTeam.toFixed(2)})</span>
       ${u.inSendWindow ? '' : '<span class="tx-pill warn">Outside 8am-8pm: texts wait until morning</span>'}
       <span style="color:var(--text-muted);font-size:12px">Educators texted in the last ${u.cooldownHours}h are skipped unless they replied. STOP replies opt them out automatically.</span>
     </div>`;
@@ -158,7 +158,7 @@
       <td><input type="checkbox" ${S.picked.has(e.userId) ? 'checked' : ''} ${e.hasMobile ? '' : 'disabled title="No valid mobile"'} onchange="txPick('${e.userId}',this.checked)"></td>
       <td><b>${esc(e.name)}</b><div style="color:var(--text-muted);font-size:11px">${esc(e.phone || 'no mobile')}</div></td>
       <td>${esc(e.suburb || '')}${e.state ? ', ' + e.state : ''}${e.dist != null ? `<div style="color:var(--text-muted);font-size:11px">${e.dist.toFixed(1)} km</div>` : ''}</td>
-      <td>${esc(e.status || '')}</td><td class="${e.compliant ? 'tx-ok' : 'tx-no'}">${e.compliant ? 'Compliant' : 'Not compliant'}</td>
+      <td>${esc(e.status || '')}</td><td class="${e.compliant ? 'tx-ok' : 'tx-no'}">${e.compliant ? 'Compliant' : 'Not compliant'}${e.liveAt ? ' <span title="Checked live against RT just now" style="color:#2563eb">●</span>' : ''}</td>
       <td>${esc(SEG[e.segment] || '')}</td><td>${e.availDays ? e.availDays + ' days' : '-'}</td>
       <td>${e.lastTextAt ? ago(e.lastTextAt) + ' ago' : '-'}${e.lastReplyAt ? ' · replied' : ''}</td></tr>`).join('');
     return `<div class="tx-grid">
@@ -190,6 +190,7 @@
             <div style="display:flex;gap:6px"><button class="btn-secondary" onclick="txPickAll(false)">Clear</button><button class="btn-secondary" onclick="txPickAll(true)">Select all</button><button class="btn-add" onclick="txSendMass()">Review & send</button></div></div>
         </div>
         <div class="tx-card" style="max-height:560px;overflow:auto"><table class="tx-table"><thead><tr><th></th><th>Educator</th><th>Suburb</th><th>Status</th><th>Compliance</th><th>Engagement</th><th>Availability</th><th>Last text</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No educators match these filters.</td></tr>'}</tbody></table>
+          <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).</div>
           ${list.length > 400 ? `<div style="padding:10px;font-size:12px;color:var(--text-muted)">Showing the first 400 of ${list.length.toLocaleString()}. Narrow the filters.</div>` : ''}</div>
       </div></div>`;
   }
@@ -217,7 +218,30 @@
     } catch (e) { say(e.message, 'error'); }
   };
 
-  function renderNew() { const box = document.getElementById('txBox'); if (box) box.innerHTML = newHtml(); }
+  function renderNew() { const box = document.getElementById('txBox'); if (box) box.innerHTML = newHtml(); liveCheck(); }
+
+  // Re-checks the educators on screen live against RT in the background
+  // (max 60, each at most once per 5 minutes), then updates them in place.
+  const checked = new Map(); let liveTimer = null;
+  function liveCheck() {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(async () => {
+      const now = Date.now();
+      const ids = filtered().slice(0, 400).map(e => e.userId).filter(id => !(checked.get(id) > now - 300000)).slice(0, 60);
+      if (!ids.length) return;
+      ids.forEach(id => checked.set(id, now));
+      try {
+        const { educators } = await post('/api/educator-texts/live', { ids });
+        for (const f of educators || []) {
+          const e = S.aud.educators.find(x => x.userId === f.userId);
+          if (!e) continue;
+          e.liveAt = now;
+          for (const k of ['status', 'onboarding', 'compliant', 'phone']) if (f[k] !== undefined && f[k] !== null) e[k] = f[k];
+        }
+        if (S.view === 'new') { const box = document.getElementById('txBox'); if (box) box.innerHTML = newHtml(); }
+      } catch (err) { /* cached values stay */ }
+    }, 500);
+  }
   function render() {
     const root = document.getElementById('resultsList'); if (!root || (typeof currentMode !== 'undefined' && currentMode !== 'texts')) return;
     root.innerHTML = `${css}<div class="tx-wrap">${usageBar()}<div id="txBox">${S.view === 'inbox' ? inboxHtml() : newHtml()}</div></div>`;
