@@ -98,6 +98,25 @@ router.post('/send', async (req, res) => {
         recipients.push({ userId: c.userId, name: c.name, firstName: (c.contactName || '').split(' ')[0] || 'there', phone: (c.allPhones || []).find(p => svc.toE164(p)) || c.phone, type: 'centre', cioId: c.cioId });
       }
     }
+    // Any number (Joy, 24 Nov 2026): ids "tel:+61…". If the number already
+    // belongs to an RT educator or centre, it's sent as them (so replies land in
+    // their conversation); otherwise under a Customer.io profile "sms_61…".
+    const names = req.body.numberNames || {};
+    const telIds = [...ids].filter(id => String(id).startsWith('tel:'));
+    if (telIds.length) {
+      const centresList = await centreAudience();
+      for (const id of telIds) {
+        const e164 = svc.toE164(id.slice(4));
+        if (!e164) { recipients.push({ userId: id, name: names[id] || id.slice(4), phone: null, type: 'number' }); continue; }
+        const last9 = e164.slice(-9), same = p => String(p || '').replace(/\D/g, '').slice(-9) === last9;
+        const ed = map.educators.find(e => same(e.phone));
+        if (ed) { if (!recipients.some(r => r.userId === ed.userId)) recipients.push({ userId: ed.userId, name: ed.name, phone: ed.phone, status: ed.status, compliant: ed.compliant, type: 'educator' }); continue; }
+        const ce = centresList.find(c => c.cioId && (c.allPhones || []).some(same));
+        if (ce) { if (!recipients.some(r => r.userId === ce.userId)) recipients.push({ userId: ce.userId, name: ce.name, firstName: (ce.contactName || '').split(' ')[0] || 'there', phone: e164, type: 'centre', cioId: ce.cioId }); continue; }
+        const nm = String(names[id] || '').trim();
+        recipients.push({ userId: 'tel:' + e164, name: nm || e164, firstName: nm ? nm.split(/\s+/)[0] : 'there', phone: e164, type: 'number', cioId: 'sms_' + e164.slice(1) });
+      }
+    }
     const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1 });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }

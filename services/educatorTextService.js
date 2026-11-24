@@ -175,7 +175,7 @@ async function drain() {
   finally { draining = false; }
 }
 async function liveCheck(m) {
-  if (m.recipient_type === 'centre') return {}; // centres: RT has no by-id lookup for contacts; sent as picked
+  if (m.recipient_type && m.recipient_type !== 'educator') return {}; // centres / any number: sent as picked
   let c;
   try { c = await require('./rtApiReportService').fetchById('candidates', m.educator_id); }
   catch (e) { return { note: 'RT lookup failed, sent on the data the rep saw' }; } // RT down: don't hold every text
@@ -204,8 +204,8 @@ async function recordInbound({ customerId, from, body }) {
   // A centre's texts go out under its RT contact's Customer.io id: map the
   // reply back to the centre most recently texted under that id.
   if (id) {
-    const c = (await db.execute({ sql: `SELECT educator_id, educator_name FROM sms_messages WHERE cio_id = ? AND recipient_type = 'centre' ORDER BY id DESC LIMIT 1`, args: [id] })).rows[0];
-    if (c) { id = c.educator_id; name = c.educator_name; type = 'centre'; }
+    const c = (await db.execute({ sql: `SELECT educator_id, educator_name FROM sms_messages WHERE cio_id = ? AND recipient_type IN ('centre','number') ORDER BY id DESC LIMIT 1`, args: [id] })).rows[0];
+    if (c) { const t = (await db.execute({ sql: `SELECT recipient_type FROM sms_messages WHERE educator_id = ? ORDER BY id DESC LIMIT 1`, args: [c.educator_id] })).rows[0]; id = c.educator_id; name = c.educator_name; type = (t && t.recipient_type) || 'centre'; }
   }
   if (!id && from) {
     const last9 = String(from).replace(/\D/g, '').slice(-9);

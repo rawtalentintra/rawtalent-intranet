@@ -25,7 +25,7 @@
     f: { status: new Set(['Active']), state: new Set(), onboarding: new Set(), compliance: 'any', gender: new Set(), qual: new Set(), segment: new Set(),
          centre: '', radius: 15, avail: false, worked28: false, notTextedDays: 7, replied: 'any', search: '',
          cstate: new Set(), booking: new Set(), mobileOnly: true },
-    picked: null, body: '', kind: 'educators', audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
+    numbers: [], picked: null, body: '', kind: 'educators', audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
 
   const css = `<style>
     .tx-wrap{max-width:1200px;margin:0 auto}
@@ -95,7 +95,7 @@
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>
-        ${/^(loc|client):/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Centre</span>' : `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(S.open)}" target="_blank" rel="noopener" style="font-size:12px;color:#2563eb">Open in RT Portal ↗</a>`}</div>
+        ${/^(loc|client):/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Centre</span>' : /^tel:/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Not in RT</span>' : `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(S.open)}" target="_blank" rel="noopener" style="font-size:12px;color:#2563eb">Open in RT Portal ↗</a>`}</div>
       <div class="tx-msgs" id="txMsgs">${msgs}</div>
       <div class="tx-compose"><textarea id="txReply" placeholder="Write a reply…" oninput="txCount('txReply','txReplyCount')"></textarea>
         <div class="tx-count" id="txReplyCount"></div>
@@ -158,8 +158,11 @@
       .sort((x, y) => c ? x.dist - y.dist : (x.name || '').localeCompare(y.name || ''));
     // People added with the lookup always show, at the top, whatever the filters say.
     const pinned = all().filter(e => S.pinned.has(e.userId) && !list.some(x => x.userId === e.userId)).map(e => ({ ...e, pinned: true }));
-    return [...pinned, ...list];
+    return [...S.numbers.filter(n => n.kind === S.kind), ...pinned, ...list];
   }
+  const OB_STEPS = ['Register', 'AboutUs', 'Profile Image', 'Experience', 'Emergency Contact', 'Qualification Level', 'Reference', 'Visa', 'Finance', 'Tax', 'Documents', 'Completed'];
+  const OB_LABEL = { Register: 'Step 0 · Registered', AboutUs: 'Step 1 · About Us', 'Profile Image': 'Step 2 · Profile Image', Experience: 'Step 3 · Experience', 'Emergency Contact': 'Step 4 · Emergency Contact', 'Qualification Level': 'Step 5 · Qualification Level', Reference: 'Step 6 · Reference', Visa: 'Step 7 · Visa', Finance: 'Step 8 · Finance', Tax: 'Step 9 · Tax', Documents: 'Step 10 · Documents', Completed: '✓ Completed' };
+  const obSort = vals => vals.slice().sort((a, b) => ((OB_STEPS.indexOf(a) + 1) || 99) - ((OB_STEPS.indexOf(b) + 1) || 99));
   const opts = key => [...new Set(all().map(e => (key === 'onboarding' ? e.onboarding || 'Not started' : e[key] || 'Unknown')))].sort();
   function chips(name, values, set, label = v => v) {
     return `<div class="tx-chips">${values.map(v => `<button class="tx-chip ${set.has(v) ? 'on' : ''}" onclick="txChip('${name}','${esc(v).replace(/'/g, '&#39;')}')">${esc(label(v))}</button>`).join('')}</div>`;
@@ -178,6 +181,7 @@
     const last = `<td>${e.lastTextAt ? ago(e.lastTextAt) + ' ago' : '-'}${e.lastReplyAt ? ' · replied' : ''}</td>`;
     const where = `<td>${esc(e.suburb || '')}${e.state ? ', ' + e.state : ''}${e.dist != null ? `<div style="color:var(--text-muted);font-size:11px">${e.dist.toFixed(1)} km</div>` : ''}</td>`;
     const tag = e.pinned ? ' <span class="tx-pill" style="font-size:10px;padding:1px 6px">added</span>' : '';
+    if (e.type === 'number') return `<tr>${box}<td><b>${esc(e.name)}</b> <span class="tx-pill" style="font-size:10px;padding:1px 6px">any number</span><div style="color:var(--text-muted);font-size:11px">${esc(e.phone)}</div></td><td colspan="${isC() ? 3 : 5}" style="color:var(--text-muted);font-size:12px">Matched to an RT ${isC() ? 'centre' : 'educator'} automatically if the number is in RT</td><td><button class="tx-chip" onclick="txRemoveNum('${esc(e.userId)}')">Remove</button></td></tr>`;
     if (isC()) return `<tr>${box}<td><b>${esc(e.name)}</b>${tag}<div style="color:var(--text-muted);font-size:11px">${esc(e.contactName || '')}${e.contactName ? ' · ' : ''}${esc(e.phone || 'no number')}${e.hasMobile ? '' : ' (not a mobile)'}</div></td>${where}<td>${esc(e.booking)}</td><td>${e.lastBooking ? esc(e.lastBooking.split('-').reverse().join('/')) : '-'}</td>${last}</tr>`;
     return `<tr>${box}<td><b>${esc(e.name)}</b>${tag}<div style="color:var(--text-muted);font-size:11px">${esc(e.phone || 'no mobile')}</div></td>${where}
       <td>${esc(e.status || '')}</td><td class="${e.compliant ? 'tx-ok' : 'tx-no'}">${e.compliant ? 'Compliant' : 'Not compliant'}${e.liveAt ? ' <span title="Checked live against RT just now" style="color:#2563eb">●</span>' : ''}</td>
@@ -199,6 +203,19 @@
         ${e.hasMobile ? (S.picked.has(e.userId) ? '<span style="font-size:11px;color:#15803d">✓ added</span>' : `<button class="tx-chip" onclick="txAdd('${esc(e.userId)}')">+ Add</button>`) : '<span style="font-size:11px;color:var(--text-muted)">no mobile</span>'}</div>`).join('')
       : `<div style="font-size:12px;color:var(--text-muted);padding:6px 0">No ${noun(2)} found.</div>`;
   };
+  const toE164 = p => { let d = String(p || '').replace(/[^\d+]/g, ''); if (d.startsWith('+')) return /^\+61[2-9]\d{8}$/.test(d) ? d : null; if (d.startsWith('61')) d = d.slice(2); d = d.replace(/^0/, ''); return /^4\d{8}$/.test(d) ? '+61' + d : null; };
+  window.txAddNum = () => {
+    const raw = document.getElementById('txNumIn').value, nm = document.getElementById('txNumName').value.trim();
+    const e164 = toE164(raw);
+    if (!e164) return say('Enter an Australian mobile, e.g. 0412 345 678', 'error');
+    if (!e164.startsWith('+614')) return say('Only mobiles can receive texts', 'error');
+    const id = 'tel:' + e164;
+    const known = all().find(e => e.hasMobile && nd(e.phone) === nd(e164));
+    if (known) { S.picked.add(known.userId); S.pinned.add(known.userId); say(`That number belongs to ${known.name} in RT. Added them.`, 'success'); renderNew(); return; }
+    if (!S.numbers.some(n => n.userId === id)) S.numbers.push({ userId: id, name: nm || e164, phone: e164, hasMobile: true, type: 'number', kind: S.kind });
+    S.picked.add(id); renderNew();
+  };
+  window.txRemoveNum = id => { S.numbers = S.numbers.filter(n => n.userId !== id); S.picked.delete(id); renderNew(); };
   window.txAdd = id => { S.picked.add(id); S.pinned.add(id); const q = S.lookQ; renderNew(); const el = document.getElementById('txLookIn'); if (el) { el.value = q; txLook(q); } };
 
   function newHtml() {
@@ -219,7 +236,7 @@
         <div class="tx-f"><label class="h">Status (RT)</label>${chips('status', opts('status'), f.status)}</div>
         <div class="tx-f"><label class="h">State</label>${chips('state', opts('state'), f.state)}</div>
         <div class="tx-f"><label class="h">Compliance (RT)</label><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></div>
-        <div class="tx-f"><label class="h">Onboarding</label>${chips('onboarding', opts('onboarding'), f.onboarding)}</div>
+        <div class="tx-f"><label class="h">Onboarding</label>${chips('onboarding', obSort(opts('onboarding')), f.onboarding, v => OB_LABEL[v] || v)}</div>
         <div class="tx-f"><label class="h">Engagement</label>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v])}</div>
         <div class="tx-f"><label class="h">Qualification</label>${chips('qual', opts('qualification'), f.qual)}</div>
         <div class="tx-f"><label class="h">Gender</label>${chips('gender', opts('gender'), f.gender)}</div>
@@ -234,6 +251,9 @@
         <div class="tx-f"><label class="h">Find a${isC() ? ' centre' : 'n educator'} by name or phone</label>
           <input type="text" id="txLookIn" value="${esc(S.lookQ)}" oninput="txLook(this.value)" placeholder="e.g. Sarah, 0412 345 678, +61412…" autocomplete="off">
           <div id="txLookRes"></div></div>
+        <div class="tx-f"><label class="h">Or send to any number</label>
+          <div style="display:flex;gap:6px"><input type="text" id="txNumIn" placeholder="0412 345 678" style="flex:1.2"><input type="text" id="txNumName" placeholder="Name (optional)" style="flex:1"></div>
+          <button class="tx-chip" style="margin-top:6px" onclick="txAddNum()">+ Add number</button></div>
         <div class="tx-f"><label class="h">Near a centre</label>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
           ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
@@ -273,9 +293,10 @@
     try {
       const f = S.f, c = f.centre && S.aud.centres.find(z => z.centreKey === f.centre);
       const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
-      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note });
+      const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
+      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames });
       say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
-      S.body = ''; S.picked = null; S.pinned = new Set(); await loadUsage(); if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); render();
+      S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = []; await loadUsage(); if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); render();
     } catch (e) { say(e.message, 'error'); }
   };
 
