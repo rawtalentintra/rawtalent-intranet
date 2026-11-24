@@ -97,10 +97,13 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   })).rows : [];
   const blocked = new Set(recent.filter(r => r.last_out && !(r.last_in && r.last_in > r.last_out)).map(r => r.educator_id));
 
-  const ok = [];
+  const ok = [], seenPhones = new Set();
   for (const r of recipients) {
     const phone = toE164(r.phone);
     if (!phone) { skipped.push({ ...r, why: 'No valid mobile number' }); continue; }
+    // Several centres in a group often share one mobile: text it once.
+    if (seenPhones.has(phone)) { skipped.push({ ...r, why: 'Same mobile as another recipient in this send' }); continue; }
+    seenPhones.add(phone);
     if (!ignoreCooldown && blocked.has(String(r.userId))) { skipped.push({ ...r, why: `Texted in the last ${LIMITS.cooldownHours} hours` }); continue; }
     ok.push({ ...r, phone });
   }
