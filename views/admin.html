@@ -9400,7 +9400,7 @@
     // old separate "(SA)"/"(QLD)" labels collapse into this one entry).
     // WORKFORCE_PARTNER_SHORT (a full-name -> first-name display map) is
     // gone with it — full IS short now, nothing left to shorten.
-    const WORKFORCE_PARTNER_OPTIONS = ['Gwen', 'Justine'];
+    const WORKFORCE_PARTNER_OPTIONS = ['Gwen', 'Liam']; // Justine left 24 Nov 2026
     // Real, selectable "this one's RT's, not a partner's" value (2026-09-22,
     // Joy, per Liam — until now that state only existed implicitly as
     // "nobody picked a partner", indistinguishable from "nobody's decided
@@ -10577,7 +10577,7 @@
     // Liam by default: VIC -> Justine, QLD/SA/NT -> Gwen (same as the server).
     function defaultCentrePartner(rawState, suburb) {
       const bucket = wfpCentreStateBucket(rawState);
-      if (bucket === 'VIC') return 'Justine';
+      if (bucket === 'VIC') return 'Liam'; // Justine left 24 Nov 2026: her work went to Liam
       if (bucket === 'SA' || bucket === 'QLD' || bucket === 'NT') return 'Gwen';
       return null;
     }

@@ -19,7 +19,7 @@
 // state). This suburb split is still real geography, just no longer
 // spelled out in the identity string it resolves to.
 const LIAM = 'Liam';
-const JUSTINE = 'Justine';
+const JUSTINE = 'Liam'; // Justine left 24 Nov 2026: her east/south-east/bayside suburbs go to Liam
 
 const LIAM_SUBURBS = [
   // Yarra

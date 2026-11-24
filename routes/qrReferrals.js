@@ -22,7 +22,7 @@ const { partnerForSuburbState } = require('../services/melbourneTerritoryService
 const RT_STATUS_LABELS = { 0: 'Vetting Call', 1: 'Active', 2: 'In Progress', 4: 'Do Not Use', 5: 'Awaiting Activation', 8: 'Not Interested', 9: 'Student', 10: 'Pending Reference' };
 
 const STATUSES = ['new', 'contacted', 'onboarding', 'active', 'not_proceeding'];
-const STATE_DEFAULT_PARTNER = { VIC: 'Justine', SA: 'Gwen', QLD: 'Gwen' };
+const STATE_DEFAULT_PARTNER = { VIC: 'Liam', SA: 'Gwen', QLD: 'Gwen' }; // Justine left 24 Nov 2026
 const clean = (v, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '') || null;
 const digits = v => String(v || '').replace(/\D/g, '');
 const norm = s => String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();

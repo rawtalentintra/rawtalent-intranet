@@ -417,7 +417,7 @@ async function getCentreStopsByKeys(centreKeys) {
 // Liam keeps only centres explicitly assigned to him. Other states (NSW, ACT, WA)
 // aren't covered by that ruling and still fall back to Liam.
 const FALLBACK_CENTRE_OWNER = 'Liam';
-const STATE_WORKFORCE_PARTNER = { VIC: 'Justine', SA: 'Gwen', QLD: 'Gwen', NT: 'Gwen' };
+const STATE_WORKFORCE_PARTNER = { VIC: 'Liam', SA: 'Gwen', QLD: 'Gwen', NT: 'Gwen' }; // Justine left 24 Nov 2026: VIC default is Liam
 function defaultCentreOwner(c) {
   return (c && STATE_WORKFORCE_PARTNER[shortState(c.state)]) || FALLBACK_CENTRE_OWNER;
 } // Gwen covers both non-VIC states under one identity (2026-09-21 label simplification — was two separate "(SA)"/"(QLD)" labels)

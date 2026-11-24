@@ -2577,7 +2577,7 @@
       try { if (localStorage.getItem(reminderDismissKey())) return ''; } catch {}
       const label = currentUser?.wfpLabel;
       // Owner = explicit assignment, else the state's partner (all VIC is Justine's, SA/QLD Gwen's).
-      const stateOwner = st => ({ victoria: 'Justine', vic: 'Justine', 'south australia': 'Gwen', sa: 'Gwen', queensland: 'Gwen', qld: 'Gwen' })[String(st || '').trim().toLowerCase()] || null;
+      const stateOwner = st => ({ victoria: 'Liam', vic: 'Liam', 'south australia': 'Gwen', sa: 'Gwen', queensland: 'Gwen', qld: 'Gwen' })[String(st || '').trim().toLowerCase()] || null;
       const mine = allCentres.filter(c => !label || (c.assignedWorkforcePartner || stateOwner(c.state)) === label);
       const loggedToday = mine.some(c => c.lastContactAt && new Date(c.lastContactAt).toDateString() === new Date().toDateString())
         || Object.keys(quickLogged).length > 0;
