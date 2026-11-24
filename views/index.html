@@ -879,7 +879,7 @@
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
       <button class="mode-tab" id="tabWash" onclick="setMode('wash')" style="display:none">🧽 Lead Wash</button>
       <button class="mode-tab" id="tabCalls" onclick="setMode('calls')" style="display:none">📞 Call List</button>
-      <button class="mode-tab" id="tabTexts" onclick="setMode('texts')" style="display:none">💬 Educator Texts</button>
+      <button class="mode-tab" id="tabTexts" onclick="setMode('texts')" style="display:none">💬 SMS</button>
       <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
@@ -2706,7 +2706,7 @@
         : isLeads ? 'Submit a Lead'
         : isWash ? 'Lead Wash'
         : isCalls ? 'Call List'
-        : isTexts ? 'Educator Texts'
+        : isTexts ? 'SMS'
         : isTasks ? 'Tasks'
         : isHours ? 'Log My Hours'
         : 'How can we help you?';
@@ -2722,7 +2722,7 @@
         : isLeads ? 'Log a potential client centre from an educator vetting call'
         : isWash ? 'Re-call every existing lead as if it were brand new, and keep only the solid ones'
         : isCalls ? 'Every centre gets a call from us about once a month. These are due now.'
-        : isTexts ? 'Text educators through Customer.io and see their replies here'
+        : isTexts ? 'Send texts through Customer.io and see replies here'
         : isTasks ? 'Everything the team is working on, by department'
         : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
@@ -6475,7 +6475,7 @@
       const list = document.getElementById('resultsList');
       list.innerHTML = `
         <div class="home-tile-grid">
-          ${(currentUserCanSendTexts ? [...HOME_TILES, { icon: '💬', label: 'Educator Texts', desc: 'Text educators and see their replies', mode: 'texts' }] : HOME_TILES).map(t => `
+          ${(currentUserCanSendTexts ? [...HOME_TILES, { icon: '💬', label: 'SMS', desc: 'Send texts and see replies', mode: 'texts' }] : HOME_TILES).map(t => `
             <div class="article-card home-tile" style="cursor:pointer" onclick="setMode('${t.mode}')">
               <div style="font-size:26px;margin-bottom:8px">${t.icon}</div>
               <div class="card-title">${escHtml(t.label)}</div>
