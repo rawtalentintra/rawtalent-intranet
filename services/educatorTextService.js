@@ -12,7 +12,7 @@
 //  - every message's segment count and estimated cost is shown before sending
 //  - per-person daily segment cap, max recipients per mass send
 //  - an educator texted in the last 24 hours is skipped unless they replied
-//  - sends only go out 8am to 8pm Melbourne time; anything later waits
+//  - no time-of-day limit: Joy asked to allow after-hours sends (25 Nov 2026)
 //  - the queue drains one message every ~1.2s (Twilio long code pace), in the
 //    background, so a mass send never blocks the page or the server
 // STOP / START replies are handled by Customer.io itself (opted-out numbers
@@ -26,7 +26,7 @@ const LIMITS = {
   maxRecipientsPerSend: Number(process.env.SMS_MAX_RECIPIENTS) || 200,
   cooldownHours: Number(process.env.SMS_COOLDOWN_HOURS) || 24,
   costPerSegmentAud: Number(process.env.SMS_COST_PER_SEGMENT_AUD) || 0.08,
-  sendFromHour: 8, sendToHour: 20
+  sendFromHour: 0, sendToHour: 24
 };
 
 function canSendTexts(user) {
