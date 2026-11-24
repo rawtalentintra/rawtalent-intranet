@@ -110,7 +110,7 @@
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
   }
   function threadHtml(conv) {
-    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? ` · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : 'Sending…'}` : ''}</div></div>`).join('');
+    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? `${m.sender === 'announcement' ? ' · 📣 RawTalent announcement' : ''} · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : 'Sending…'}` : ''}</div></div>`).join('');
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>
@@ -287,6 +287,9 @@
       <div style="display:flex;flex-direction:column;gap:14px">
         <div class="tx-card" style="padding:14px">
           <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Message</div>
+          ${S.usage?.canAnnounce ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Send as</span>
+            <div class="tx-switch"><button class="${S.sender !== 'announcement' ? 'on' : ''}" onclick="txSender('number')">📱 Our number (replies come here)</button><button class="${S.sender === 'announcement' ? 'on' : ''}" onclick="txSender('announcement')">📣 RawTalent announcement (no replies)</button></div>
+            ${S.sender === 'announcement' && !S.usage.announceReady ? '<span class="tx-pill warn">Not set up in Customer.io yet</span>' : ''}</div>` : ''}
           <div class="tx-compose" style="border:0;padding:0"><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
           <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise${isC() ? ' (centre contact)' : ''}</span></div></div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px">
@@ -307,6 +310,7 @@
     pc.textContent = `≈ $${(n * x.s * (S.usage?.costPerSegmentAud || 0.08)).toFixed(2)}`; pc.nextElementSibling.textContent = `(${n * x.s} segments)`; };
   window.txPick = (id, on) => { on ? S.picked.add(id) : S.picked.delete(id); const keep = S.body; renderNew(); S.body = keep; };
   window.txPickAll = on => { S.picked = new Set(on ? filtered().filter(e => e.hasMobile).slice(0, S.usage?.maxRecipients || 200).map(e => e.userId) : []); renderNew(); };
+  window.txSender = v => { S.sender = v; renderNew(); };
   window.txSec = (k, o) => { S.secs = S.secs || {}; S.secs[k] = o; };
   window.txSendMass = async () => {
     // A number typed in "send to any number" but not yet added counts (Joy, 24 Nov).
@@ -323,7 +327,7 @@
       const f = S.f, c = f.centre && S.aud.centres.find(z => z.centreKey === f.centre);
       const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
       const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
-      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames });
+      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
       say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
       S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = [];
       // Jump straight to the Inbox with the new message showing (Joy, 24 Nov).

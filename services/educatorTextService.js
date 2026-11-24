@@ -29,6 +29,12 @@ const LIMITS = {
   sendFromHour: 0, sendToHour: 24
 };
 
+// RawTalent announcements (one-way, sender name "RawTalent", replies impossible):
+// Joy + Sophia only (Joy, 25 Nov 2026). Needs its own Customer.io transactional
+// message using the alphanumeric sender, id in SMS_ANNOUNCE_TRANSACTIONAL_ID.
+const ANNOUNCE_EMAILS = (process.env.SMS_ANNOUNCE_EMAILS || 'joy@rawtalent.com.au,sophia@rawtalent.com.au').toLowerCase().split(',').map(s => s.trim());
+const ANNOUNCE_TX = process.env.SMS_ANNOUNCE_TRANSACTIONAL_ID || '';
+function canAnnounce(user) { return !!user && ANNOUNCE_EMAILS.includes(String(user.email || '').toLowerCase()); }
 function canSendTexts(user) {
   return !!user && (user.role === 'super_admin' || !!user.can_send_texts);
 }
@@ -75,7 +81,12 @@ async function segmentsSentToday(email) {
 }
 
 // recipients: [{ userId, name, phone }] from the server-side educator list.
-async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown = false }) {
+async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown = false, sender = 'number' }) {
+  if (sender !== 'number' && sender !== 'announcement') sender = 'number';
+  if (sender === 'announcement') {
+    if (!canAnnounce(user)) throw Object.assign(new Error('Only Joy and Sophia can send RawTalent announcements.'), { status: 403 });
+    if (!ANNOUNCE_TX) throw Object.assign(new Error('RawTalent announcement sender is not set up in Customer.io yet.'), { status: 400 });
+  }
   const text = smart(body).trim();
   if (!text) throw Object.assign(new Error('Write a message first'), { status: 400 });
   if (text.length > 600) throw Object.assign(new Error('Keep texts under 600 characters'), { status: 400 });
@@ -120,10 +131,10 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   })).rows[0];
   for (const r of ok) {
     await db.execute({
-      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant, recipient_type, cio_id)
-            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant, recipient_type, cio_id, sender)
+            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?,?,?,?)`,
       args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, batch.id, user.email, user.name || user.email,
-             r.status || null, r.compliant == null ? null : !!r.compliant, r.type || 'educator', String(r.cioId || r.userId)]
+             r.status || null, r.compliant == null ? null : !!r.compliant, r.type || 'educator', String(r.cioId || r.userId), sender]
     });
   }
   kick();
@@ -158,7 +169,7 @@ async function drain() {
       try {
         const r = await fetch(`https://${host}/v1/send/sms`, {
           method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transactional_message_id: TX_MESSAGE, identifiers: { id: m.cio_id || m.educator_id }, to: m.phone, message_data: { body: m.body } })
+          body: JSON.stringify({ transactional_message_id: m.sender === 'announcement' ? ANNOUNCE_TX : TX_MESSAGE, identifiers: { id: m.cio_id || m.educator_id }, to: m.phone, message_data: { body: m.body } })
         });
         const d = await r.json().catch(() => ({}));
         if (r.status === 429) { status = 'queued'; await new Promise(res => setTimeout(res, 5000)); }
@@ -224,4 +235,4 @@ async function recordInbound({ customerId, from, body }) {
   return row.id;
 }
 
-module.exports = { canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };
+module.exports = { canAnnounce, announceReady: () => !!ANNOUNCE_TX, canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };

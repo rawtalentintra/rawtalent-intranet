@@ -3307,3 +3307,5 @@ ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS snap_compliant BOOLEAN;
 -- centre; cio_id is the Customer.io profile the text is sent under.
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS recipient_type TEXT DEFAULT 'educator';
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS cio_id TEXT;
+-- 'number' = replyable +61 number; 'announcement' = one-way "RawTalent" sender (Joy/Sophia only)
+ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sender TEXT DEFAULT 'number';

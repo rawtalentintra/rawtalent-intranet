@@ -90,7 +90,7 @@ router.get('/usage', async (req, res) => {
     const cost = n => +(Number(n) * svc.LIMITS.costPerSegmentAud).toFixed(2);
     const spend = { todayMine: cost(sp.day_me), todayTeam: cost(sp.day_all), monthMine: cost(sp.month_me), monthTeam: cost(sp.month_all) };
     res.json({ spend, usedToday: used, dailyLimit: svc.LIMITS.dailySegmentsPerSender, maxRecipients: svc.LIMITS.maxRecipientsPerSend,
-      cooldownHours: svc.LIMITS.cooldownHours, costPerSegmentAud: svc.LIMITS.costPerSegmentAud, inSendWindow: svc.inSendWindow() });
+      cooldownHours: svc.LIMITS.cooldownHours, costPerSegmentAud: svc.LIMITS.costPerSegmentAud, inSendWindow: svc.inSendWindow(), canAnnounce: svc.canAnnounce(req.user), announceReady: svc.announceReady() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -126,7 +126,7 @@ router.post('/send', async (req, res) => {
         recipients.push({ userId: 'tel:' + e164, name: nm || e164, firstName: nm ? nm.split(/\s+/)[0] : 'there', phone: e164, type: 'number', cioId: 'sms_' + e164.slice(1) });
       }
     }
-    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1 });
+    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number' });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
@@ -163,7 +163,7 @@ router.get('/conversations', async (req, res) => {
 router.get('/conversations/:id', async (req, res) => {
   try {
     const db = getDb();
-    const msgs = (await db.execute({ sql: `SELECT id, direction, body, status, error, segments, sent_by_name, created_at, sent_at FROM sms_messages WHERE educator_id = ? ORDER BY id DESC LIMIT 200`, args: [req.params.id] })).rows.reverse();
+    const msgs = (await db.execute({ sql: `SELECT id, direction, body, status, error, segments, sent_by_name, sender, created_at, sent_at FROM sms_messages WHERE educator_id = ? ORDER BY id DESC LIMIT 200`, args: [req.params.id] })).rows.reverse();
     await db.execute({ sql: `UPDATE sms_messages SET read_at = now() WHERE educator_id = ? AND direction = 'in' AND read_at IS NULL`, args: [req.params.id] });
     res.json(msgs);
   } catch (err) { res.status(500).json({ error: err.message }); }
