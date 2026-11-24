@@ -54,6 +54,13 @@
     .tx-count{font-size:11.5px;color:var(--text-muted);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
     .tx-count.bad{color:#b45309;font-weight:600}
     .tx-filters{padding:14px;display:flex;flex-direction:column;gap:12px;max-height:760px;overflow:auto}
+    .tx-sec{border-top:1px solid var(--gray-100);padding-top:8px}
+    .tx-sec summary.h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+    .tx-sec summary.h::-webkit-details-marker{display:none}
+    .tx-sec summary.h::after{content:'▸';margin-left:auto;font-size:12px}
+    .tx-sec[open] summary.h::after{content:'▾'}
+    .tx-sec[open] summary.h{margin-bottom:6px}
+    .tx-secn{background:var(--navy);color:#fff;border-radius:999px;padding:0 7px;font-size:10.5px;letter-spacing:0}
     .tx-f label.h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:5px}
     .tx-chips{display:flex;flex-wrap:wrap;gap:5px}
     .tx-chip{border:1px solid var(--gray-200);background:#fff;border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:inherit}
@@ -240,21 +247,27 @@
     const cost = picked.length * x.s * (S.usage?.costPerSegmentAud || 0.08);
     const replied = `<div class="tx-chips" style="margin-top:6px">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.replied === v ? 'on' : ''}" onclick="txSet('replied','${v}')">${{ any: 'Any reply history', yes: 'Has replied before', no: 'Never replied' }[v]}</button>`).join('')}</div>`;
     const notTexted = `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px">Not texted in the last <input type="number" min="0" max="90" value="${f.notTextedDays}" onchange="txSet('notTextedDays',Number(this.value)||0)" style="width:64px"> days</div>`;
+    const cnt = v => v instanceof Set ? v.size : Array.isArray(v) ? v.length : 0;
+    const SEC_N = { 'Status (RT)': cnt(f.status), 'State': cnt(isC() ? f.cstate : f.state), 'Compliance (RT)': f.compliance && f.compliance !== 'any' ? 1 : 0,
+      'Onboarding': cnt(f.onboarding), 'Engagement': cnt(f.segment), 'Qualification': cnt(f.qual), 'Gender': cnt(f.gender), 'Bookings (RT)': cnt(f.booking),
+      'Smart filters': [f.avail, f.worked28, f.mobileOnly, f.notTextedDays > 0, f.replied && f.replied !== 'any'].filter(Boolean).length };
+    const secOpen = k => (S.secs || {})[k] ? 'open' : '';
+    const secCount = k => SEC_N[k] ? ` <span class="tx-secn">${SEC_N[k]}</span>` : '';
     const filters = isC() ? `
-        <div class="tx-f"><label class="h">State</label>${chips('cstate', opts('state'), f.cstate)}</div>
-        <div class="tx-f"><label class="h">Bookings (RT)</label>${chips('booking', ['Booked in last 30 days', 'Booked in last 4 months', 'Dormant (4+ months)', 'Never booked'], f.booking)}</div>
-        <div class="tx-f"><label class="h">Smart filters</label>
-          <label style="display:block;font-size:13px"><input type="checkbox" ${f.mobileOnly ? 'checked' : ''} onchange="txSet('mobileOnly',this.checked)"> Only centres with a mobile number</label>${notTexted}${replied}</div>` : `
-        <div class="tx-f"><label class="h">Status (RT)</label>${chips('status', opts('status'), f.status)}</div>
-        <div class="tx-f"><label class="h">State</label>${chips('state', opts('state'), f.state)}</div>
-        <div class="tx-f"><label class="h">Compliance (RT)</label><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></div>
-        <div class="tx-f"><label class="h">Onboarding</label>${chips('onboarding', obSort(opts('onboarding')), f.onboarding, v => OB_LABEL[v] || v)}</div>
-        <div class="tx-f"><label class="h">Engagement</label>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v])}</div>
-        <div class="tx-f"><label class="h">Qualification</label>${chips('qual', opts('qualification'), f.qual)}</div>
-        <div class="tx-f"><label class="h">Gender</label>${chips('gender', opts('gender'), f.gender)}</div>
-        <div class="tx-f"><label class="h">Smart filters</label>
+        <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('cstate', opts('state'), f.cstate)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Bookings (RT)')} ontoggle="txSec('Bookings (RT)',this.open)"><summary class="h">Bookings (RT)${secCount('Bookings (RT)')}</summary>${chips('booking', ['Booked in last 30 days', 'Booked in last 4 months', 'Dormant (4+ months)', 'Never booked'], f.booking)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Smart filters')} ontoggle="txSec('Smart filters',this.open)"><summary class="h">Smart filters${secCount('Smart filters')}</summary>
+          <label style="display:block;font-size:13px"><input type="checkbox" ${f.mobileOnly ? 'checked' : ''} onchange="txSet('mobileOnly',this.checked)"> Only centres with a mobile number</label>${notTexted}${replied}</details>` : `
+        <details class="tx-f tx-sec" ${secOpen('Status (RT)')} ontoggle="txSec('Status (RT)',this.open)"><summary class="h">Status (RT)${secCount('Status (RT)')}</summary>${chips('status', opts('status'), f.status)}</details>
+        <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('state', opts('state'), f.state)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Compliance (RT)')} ontoggle="txSec('Compliance (RT)',this.open)"><summary class="h">Compliance (RT)${secCount('Compliance (RT)')}</summary><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></details>
+        <details class="tx-f tx-sec" ${secOpen('Onboarding')} ontoggle="txSec('Onboarding',this.open)"><summary class="h">Onboarding${secCount('Onboarding')}</summary>${chips('onboarding', obSort(opts('onboarding')), f.onboarding, v => OB_LABEL[v] || v)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Engagement')} ontoggle="txSec('Engagement',this.open)"><summary class="h">Engagement${secCount('Engagement')}</summary>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v])}</details>
+        <details class="tx-f tx-sec" ${secOpen('Qualification')} ontoggle="txSec('Qualification',this.open)"><summary class="h">Qualification${secCount('Qualification')}</summary>${chips('qual', opts('qualification'), f.qual)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Gender')} ontoggle="txSec('Gender',this.open)"><summary class="h">Gender${secCount('Gender')}</summary>${chips('gender', opts('gender'), f.gender)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Smart filters')} ontoggle="txSec('Smart filters',this.open)"><summary class="h">Smart filters${secCount('Smart filters')}</summary>
           <label style="display:block;font-size:13px"><input type="checkbox" ${f.avail ? 'checked' : ''} onchange="txSet('avail',this.checked)"> Has availability listed in RT</label>
-          <label style="display:block;font-size:13px"><input type="checkbox" ${f.worked28 ? 'checked' : ''} onchange="txSet('worked28',this.checked)"> Worked a shift in the last 28 days</label>${notTexted}${replied}</div>`;
+          <label style="display:block;font-size:13px"><input type="checkbox" ${f.worked28 ? 'checked' : ''} onchange="txSet('worked28',this.checked)"> Worked a shift in the last 28 days</label>${notTexted}${replied}</details>`;
     const head = isC() ? '<th></th><th>Centre</th><th>Suburb</th><th>Bookings</th><th>Last booking</th><th>Last text</th>'
       : '<th></th><th>Educator</th><th>Suburb</th><th>Status</th><th>Compliance</th><th>Engagement</th><th>Availability</th><th>Last text</th>';
     return `<div class="tx-grid">
@@ -264,7 +277,7 @@
           <input type="text" id="txLookIn" value="${esc(S.lookQ)}" oninput="txLook(this.value)" placeholder="e.g. Sarah, 0412 345 678, +61412…" autocomplete="off">
           <div id="txLookRes"></div></div>
         <div class="tx-f"><label class="h">Or send to any number</label>
-          <div style="display:flex;gap:6px"><input type="text" id="txNumIn" placeholder="0412 345 678" style="flex:1.2"><input type="text" id="txNumName" placeholder="Name (optional)" style="flex:1"></div>
+          <div style="display:flex;gap:6px"><input type="text" id="txNumIn" placeholder="0412 345 678" style="flex:1.2" onkeydown="if(event.key==='Enter')txAddNum()"><input type="text" id="txNumName" placeholder="Name (optional)" style="flex:1"></div>
           <button class="tx-chip" style="margin-top:6px" onclick="txAddNum()">+ Add number</button></div>
         <div class="tx-f"><label class="h">Near a centre</label>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
@@ -294,7 +307,11 @@
     pc.textContent = `≈ $${(n * x.s * (S.usage?.costPerSegmentAud || 0.08)).toFixed(2)}`; pc.nextElementSibling.textContent = `(${n * x.s} segments)`; };
   window.txPick = (id, on) => { on ? S.picked.add(id) : S.picked.delete(id); const keep = S.body; renderNew(); S.body = keep; };
   window.txPickAll = on => { S.picked = new Set(on ? filtered().filter(e => e.hasMobile).slice(0, S.usage?.maxRecipients || 200).map(e => e.userId) : []); renderNew(); };
+  window.txSec = (k, o) => { S.secs = S.secs || {}; S.secs[k] = o; };
   window.txSendMass = async () => {
+    // A number typed in "send to any number" but not yet added counts (Joy, 24 Nov).
+    const numIn = document.getElementById('txNumIn');
+    if (numIn && numIn.value.trim()) { const before = S.picked.size; txAddNum(); if (S.picked.size === before && !S.numbers.length) return; }
     const ids = [...S.picked], body = (S.body || '').trim();
     if (!ids.length) return say(`Select at least one ${noun(1)}`, 'error');
     if (!body) return say('Write the message first', 'error');
