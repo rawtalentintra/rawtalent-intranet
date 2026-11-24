@@ -149,7 +149,7 @@
   function newHtml() {
     if (!S.aud) return '<div class="spinner-wrap"><div class="spinner"></div></div>';
     const f = S.f, list = filtered();
-    if (!S.picked) S.picked = new Set(list.filter(e => e.hasMobile).slice(0, S.usage?.maxRecipients || 200).map(e => e.userId));
+    if (!S.picked) S.picked = new Set(); // nobody is pre-selected: the rep picks on purpose
     const picked = list.filter(e => S.picked.has(e.userId));
     const centres = S.aud.centres.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     const x = seg((S.body || '').replace(/\{first_name\}/gi, 'Bartholomew'));
