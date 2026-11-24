@@ -879,12 +879,13 @@
       <button class="mode-tab" id="tabLeads" onclick="setMode('leads')">📋 Leads</button>
       <button class="mode-tab" id="tabWash" onclick="setMode('wash')" style="display:none">🧽 Lead Wash</button>
       <button class="mode-tab" id="tabCalls" onclick="setMode('calls')" style="display:none">📞 Call List</button>
+      <button class="mode-tab" id="tabTexts" onclick="setMode('texts')" style="display:none">💬 Educator Texts</button>
       <button class="mode-tab" id="tabTasks" onclick="setMode('tasks')">✅ Tasks</button>
       <button class="mode-tab" id="tabTraining" onclick="setMode('training')">🎓 Training</button>
       <button class="mode-tab" id="tabIdeas" onclick="setMode('ideas')">💡 Submit Ideas</button>
-      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')">📅 Calendar</button>
+      <button class="mode-tab" id="tabLeave" onclick="setMode('leave')" style="display:none">📅 Calendar</button>
       <button class="mode-tab" id="tabHours" onclick="setMode('hours')">🕒 Log My Hours</button>
-      <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
+      <button class="mode-tab" id="tabTeam" onclick="setMode('team')">🧑‍🤝‍🧑 Team &amp; Calendar</button>
       </div>
       <!-- Relocated out of the top navbar (2026-09-01, Joy: simplify the
            header down to hamburger/logo/bell/admin-button only) — same
@@ -1793,6 +1794,7 @@
         currentUserEmail = me.email;
         currentUserName = me.name || me.email;
         currentUserRestrictedAppSection = me.restrictedAppSection || null;
+        if (me.canSendTexts) { currentUserCanSendTexts = true; document.getElementById('tabTexts').style.display = ''; }
         if (me.canWashLeads) { document.getElementById('tabWash').style.display = ''; document.getElementById('tabCalls').style.display = ''; }
         // Per-user restriction (Joy, 2026-09-11 — Nancy: sees nothing but
         // Tasks) — hide every other sidebar tab so there's nothing to even
@@ -2669,6 +2671,8 @@
       const isLeads = mode === 'leads';
       const isWash = mode === 'wash';
       const isCalls = mode === 'calls';
+      const isTexts = mode === 'texts';
+      document.getElementById('tabTexts').classList.toggle('active', isTexts);
       document.getElementById('tabWash').classList.toggle('active', isWash);
       document.getElementById('tabCalls').classList.toggle('active', isCalls);
       const isTasks = mode === 'tasks';
@@ -2681,12 +2685,12 @@
       document.getElementById('tabAnnouncements').classList.toggle('active', isAnnouncements);
       document.getElementById('tabGlossary').classList.toggle('active', isGlossary);
       document.getElementById('tabFaq').classList.toggle('active', isFaq);
-      document.getElementById('tabTeam').classList.toggle('active', isTeam);
+      document.getElementById('tabTeam').classList.toggle('active', isTeam || isLeave);
       document.getElementById('tabTraining').classList.toggle('active', isTraining);
       document.getElementById('tabLeave').classList.toggle('active', isLeave);
       document.getElementById('tabIdeas').classList.toggle('active', isIdeas);
       document.getElementById('tabLeads').classList.toggle('active', isLeads);
-      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours || isWash || isCalls);
+      document.querySelector('.results-wrap').classList.toggle('results-wrap--wide', isTeam || isTraining || isLeave || isIdeas || isHome || isTasks || isHours || isWash || isCalls || isTexts);
       document.getElementById('searchArea').style.display = mode === 'search' ? '' : 'none';
       document.getElementById('aiArea').style.display = isAI ? '' : 'none';
       document.getElementById('catBar').style.display = mode === 'search' ? '' : 'none';
@@ -2695,13 +2699,14 @@
         : isAnnouncements ? 'Announcements'
         : isGlossary ? 'Glossary of terms'
         : isFaq ? 'Frequently asked questions'
-        : isTeam ? 'Our Team'
+        : isTeam ? 'Team & Calendar'
         : isTraining ? 'Training'
-        : isLeave ? 'Calendar'
+        : isLeave ? 'Team & Calendar'
         : isIdeas ? 'Submit Ideas'
         : isLeads ? 'Submit a Lead'
         : isWash ? 'Lead Wash'
         : isCalls ? 'Call List'
+        : isTexts ? 'Educator Texts'
         : isTasks ? 'Tasks'
         : isHours ? 'Log My Hours'
         : 'How can we help you?';
@@ -2717,11 +2722,12 @@
         : isLeads ? 'Log a potential client centre from an educator vetting call'
         : isWash ? 'Re-call every existing lead as if it were brand new, and keep only the solid ones'
         : isCalls ? 'Every centre gets a call from us about once a month. These are due now.'
+        : isTexts ? 'Text educators through Customer.io and see their replies here'
         : isTasks ? 'Everything the team is working on, by department'
         : isHours ? 'Log your time daily, submit weekly, get paid right'
         : 'Search RawTalent HeartBeat for answers, guides, and resources';
       document.getElementById('resultsLabel').style.display = 'none';
-      renderHeroTabs(isTasks);
+      renderHeroTabs(isTasks, isTeam || isLeave ? mode : null);
       if (isHome) {
         loadHomeView();
       } else if (isLeads) {
@@ -2730,6 +2736,9 @@
         loadWashView();
       } else if (isCalls) {
         loadCallsView();
+      } else if (isTexts) {
+        if (!currentUserCanSendTexts) { setMode('home'); return; }
+        loadTextsView();
       } else if (isTasks) {
         if (tasksSubView === 'performance' && canSeeTaskPerformance()) loadTaskPerformanceView(); else loadTasksView();
       } else if (isHours) {
@@ -2896,9 +2905,16 @@
     let tasksSubView = 'user';
     const TASK_PERF_VIEWERS = ['sophia@rawtalent.com.au', 'liam@rawtalent.com.au', 'joy@rawtalent.com.au'];
     function canSeeTaskPerformance() { return TASK_PERF_VIEWERS.includes((currentUserEmail || '').toLowerCase()); }
-    function renderHeroTabs(isTasks) {
+    function renderHeroTabs(isTasks, teamMode) {
       const el = document.getElementById('heroTabs');
       if (!el) return;
+      // Our Team and Calendar share one section (Joy, 24 Nov 2026).
+      if (teamMode) {
+        el.style.display = 'flex';
+        el.innerHTML = `<button class="hero-tab ${teamMode === 'team' ? 'active' : ''}" onclick="setMode('team')">🧑‍🤝‍🧑 Our Team</button>
+          <button class="hero-tab ${teamMode === 'leave' ? 'active' : ''}" onclick="setMode('leave')">📅 Calendar</button>`;
+        return;
+      }
       if (!isTasks || !canSeeTaskPerformance()) { el.style.display = 'none'; el.innerHTML = ''; return; }
       el.style.display = 'flex';
       el.innerHTML = `<button class="hero-tab ${tasksSubView === 'user' ? 'active' : ''}" onclick="setTasksSubView('user')">User View</button>
@@ -6449,15 +6465,17 @@
       { icon: '✅', label: 'Tasks', desc: 'Everything the team is working on', mode: 'tasks' },
       { icon: '🎓', label: 'Training', desc: 'Courses assigned to you', mode: 'training' },
       { icon: '💡', label: 'Submit Ideas', desc: "Suggest an improvement", mode: 'ideas' },
-      { icon: '📅', label: 'Calendar', desc: 'Who is on shift and who is on leave', mode: 'leave' },
       { icon: '🕒', label: 'Log My Hours', desc: 'Log your time, submit weekly', mode: 'hours' },
-      { icon: '🧑‍🤝‍🧑', label: 'Our Team', desc: 'Team hierarchy & profiles', mode: 'team' }
+      { icon: '🧑‍🤝‍🧑', label: 'Team & Calendar', desc: 'Team profiles, who is on shift and who is on leave', mode: 'team' }
     ];
+    // Educator Texts (Joy, 24 Nov 2026): only shown to super_admin (or a user
+    // given can_send_texts) until it's opened to reps.
+    let currentUserCanSendTexts = false;
     function loadHomeView() {
       const list = document.getElementById('resultsList');
       list.innerHTML = `
         <div class="home-tile-grid">
-          ${HOME_TILES.map(t => `
+          ${(currentUserCanSendTexts ? [...HOME_TILES, { icon: '💬', label: 'Educator Texts', desc: 'Text educators and see their replies', mode: 'texts' }] : HOME_TILES).map(t => `
             <div class="article-card home-tile" style="cursor:pointer" onclick="setMode('${t.mode}')">
               <div style="font-size:26px;margin-bottom:8px">${t.icon}</div>
               <div class="card-title">${escHtml(t.label)}</div>
@@ -6881,5 +6899,6 @@
     init();
   </script>
 <script src="/js/autoUpdate.js"></script>
+<script src="/js/educatorTexts.js"></script>
 </body>
 </html>

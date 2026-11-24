@@ -3260,3 +3260,42 @@ CREATE TABLE IF NOT EXISTS terms_of_business_events (
 );
 ALTER TABLE terms_of_business ENABLE ROW LEVEL SECURITY;
 ALTER TABLE terms_of_business_events ENABLE ROW LEVEL SECURITY;
+
+-- Educator Texts (Joy, 24 Nov 2026): HeartBeat sends SMS to educators through
+-- Customer.io (transactional SMS 'heartbeat_sms', Twilio +61420116632) and
+-- shows their replies, which Customer.io posts back to /api/public/sms-inbound.
+-- Visible to super_admin, plus anyone later given users.can_send_texts.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_send_texts BOOLEAN DEFAULT false;
+CREATE TABLE IF NOT EXISTS sms_batches (
+  id SERIAL PRIMARY KEY,
+  sent_by_email CITEXT,
+  sent_by_name TEXT,
+  body TEXT NOT NULL,
+  audience_note TEXT,
+  recipient_count INTEGER DEFAULT 0,
+  segments_per_message INTEGER DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS sms_messages (
+  id SERIAL PRIMARY KEY,
+  educator_id TEXT NOT NULL,             -- RT userId = Customer.io id
+  educator_name TEXT,
+  phone TEXT,
+  direction TEXT NOT NULL,               -- out | in
+  body TEXT NOT NULL,
+  segments INTEGER DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'queued', -- out: queued | sent | failed | skipped ; in: received
+  error TEXT,
+  cio_delivery_id TEXT,
+  batch_id INTEGER,
+  sent_by_email CITEXT,
+  sent_by_name TEXT,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  sent_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_educator ON sms_messages(educator_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_queue ON sms_messages(status, id) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS idx_sms_messages_created ON sms_messages(created_at DESC);
+ALTER TABLE sms_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sms_messages ENABLE ROW LEVEL SECURITY;

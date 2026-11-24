@@ -581,7 +581,9 @@ async function buildEducatorMap() {
             (raw->'addresses'->0->>'latitude')::float8 AS lat,
             (raw->'addresses'->0->>'longitude')::float8 AS lng,
             raw->'qualifications'->0->>'qualificationName' AS qualification_name,
-            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa, raw->'complianceStatusId' AS csid
+            raw->'attachedRequirements' AS reqs, raw->'visaDetails' AS visa, raw->'complianceStatusId' AS csid,
+            (SELECT count(*) FROM jsonb_array_elements(coalesce(raw->'availableCandidateList','[]'::jsonb)) a
+              WHERE left(a->>'date', 10) >= to_char(current_date, 'YYYY-MM-DD')) AS avail_days
           FROM rt_candidates_cache
           WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)
             AND raw->'addresses'->0->>'latitude' IS NOT NULL`,
@@ -611,6 +613,7 @@ async function buildEducatorMap() {
       qualification: r.qualification_name || null,
       segment: engagementTag(shiftList),
       shifts28d: shiftList.filter(t => Date.now() - t <= 28 * 864e5).length,
+      availDays: Number(r.avail_days) || 0,
       lastShift: lastShift ? new Date(lastShift).toISOString().slice(0, 10) : null
     });
   }
@@ -751,3 +754,5 @@ router.get('/:podId', async (req, res) => {
 module.exports = router;
 module.exports.getCandidatePoints = getCandidatePoints;
 module.exports.warmMicropods = warmMicropods;
+module.exports.buildEducatorMap = buildEducatorMap;
+module.exports.complianceForLive = (c, today) => ({ status: RT_STATUS_LABELS[c.status] || c.statusName || null, onboarding: c.obStatus || null, compliant: complianceReasons(c, today, c.userId).length === 0 });

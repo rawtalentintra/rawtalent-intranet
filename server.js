@@ -166,6 +166,22 @@ app.get('/first-booking', (req, res) => {
   });
 }
 
+// Educator Texts: Customer.io's inbound-SMS automation posts each reply here.
+// The path secret is derived from SESSION_SECRET (services/educatorTextService.js).
+{
+  const rateLimit = require('express-rate-limit');
+  const smsLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true });
+  app.post('/api/public/sms-inbound/:secret', smsLimiter, express.json({ limit: '16kb' }), async (req, res) => {
+    const svc = require('./services/educatorTextService');
+    if (req.params.secret !== svc.inboundSecret()) return res.status(404).json({ error: 'Not found' });
+    try {
+      const b = req.body || {};
+      const id = await svc.recordInbound({ customerId: b.customer_id || b.id, from: b.from, body: b.body });
+      res.json({ ok: true, id });
+    } catch (err) { console.error('SMS inbound failed:', err.message); res.status(500).json({ error: 'failed' }); }
+  });
+}
+
 // CSS/JS get 'no-cache' (not 'no-store') — every load still revalidates
 // with the server (a fast 304 when unchanged), but a real style.css/app.js
 // change is picked up on the very next normal reload instead of silently
@@ -216,6 +232,7 @@ app.use('/api/public/qr-referrals', require('./routes/qrReferrals').publicRouter
 app.use('/api/first-booking-free', require('./routes/firstBookingFree'));
 app.use('/api/signed-contracts', require('./routes/signedContracts'));
 app.use('/api/terms-of-business', require('./routes/termsOfBusiness'));
+app.use('/api/educator-texts', require('./routes/educatorTexts'));
 app.use('/api/wfp-reports', require('./routes/wfpReports'));
 app.use('/api/rto-lookup', require('./routes/rtoLookup'));
 app.use('/api/lead-quality', require('./routes/leadQuality'));
@@ -731,6 +748,7 @@ async function start() {
     maybeRunWeeklyAcecqaSync().catch(err => console.error('Weekly ACECQA sync check error:', err.message));
   }, 30 * 60 * 1000);
 
+  require('./services/educatorTextService').startWorker();
   app.listen(PORT, () => {
     console.log(`\n🚀 RawTalent Knowledge Base → http://localhost:${PORT}`);
     console.log(`   Admin: ${process.env.ADMIN_EMAIL || 'joy@rawtalent.com.au'}\n`);
