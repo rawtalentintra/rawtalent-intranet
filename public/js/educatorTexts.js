@@ -390,9 +390,9 @@
         <div class="tx-f"><label class="h">Or send to any number</label>
           <div style="display:flex;gap:6px"><input type="text" id="txNumIn" placeholder="0412 345 678" style="flex:1.2" onkeydown="if(event.key==='Enter')txAddNum()"><input type="text" id="txNumName" placeholder="Name (optional)" style="flex:1"></div>
           <button class="tx-chip" style="margin-top:6px" onclick="txAddNum()">+ Add number</button></div>
-        <div class="tx-f"><label class="h">Near a centre</label>
+        <details class="tx-f tx-sec" ${(S.secs || {})['Near a centre'] !== false ? 'open' : ''} ontoggle="txSec('Near a centre',this.open)"><summary class="h">Near a centre${f.centre ? ' <span class="tx-secn">1</span>' : ''}</summary>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
-          ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
+          ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</details>
         ${stateSec}
         ${groupsHtml()}
         ${filters}
