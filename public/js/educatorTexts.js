@@ -178,7 +178,7 @@
   function groupsHtml() {
     const mine = S.groups.filter(g => g.kind === (isC() ? 'centres' : 'educators'));
     const n = S.picked ? S.picked.size : 0;
-    return `<details class="tx-f tx-sec" ${(S.secs || {})['Saved groups'] !== false ? 'open' : ''} ontoggle="txSec('Saved groups',this.open)"><summary class="h">Saved groups${mine.length ? ` <span class="tx-secn">${mine.length}</span>` : ''}</summary>
+    return `<details class="tx-f tx-sec" ${(S.secs || {})['Saved groups'] ? 'open' : ''} ontoggle="txSec('Saved groups',this.open)"><summary class="h">Saved groups${mine.length ? ` <span class="tx-secn">${mine.length}</span>` : ''}</summary>
       ${mine.length ? `<select onchange="txUseGroup(this.value);this.value=''"><option value="">Select a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)} (${(g.member_ids || []).length})</option>`).join('')}</select>` : '<div class="tx-legend">No groups yet. Tick people in the list, then save them as a group.</div>'}
       <div class="tx-tools"><button class="tx-chip" onclick="txSaveGroup()" ${n ? '' : 'disabled'}>Save ${n || ''} selected as group</button>
       ${mine.length ? `<select onchange="txEditGroup(this.value);this.value=''"><option value="">✏️ Edit a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}</div></details>`;
@@ -390,7 +390,7 @@
         <div class="tx-f"><label class="h">Or send to any number</label>
           <div style="display:flex;gap:6px"><input type="text" id="txNumIn" placeholder="0412 345 678" style="flex:1.2" onkeydown="if(event.key==='Enter')txAddNum()"><input type="text" id="txNumName" placeholder="Name (optional)" style="flex:1"></div>
           <button class="tx-chip" style="margin-top:6px" onclick="txAddNum()">+ Add number</button></div>
-        <details class="tx-f tx-sec" ${(S.secs || {})['Near a centre'] !== false ? 'open' : ''} ontoggle="txSec('Near a centre',this.open)"><summary class="h">Near a centre${f.centre ? ' <span class="tx-secn">1</span>' : ''}</summary>
+        <details class="tx-f tx-sec" ${(S.secs || {})['Near a centre'] ? 'open' : ''} ontoggle="txSec('Near a centre',this.open)"><summary class="h">Near a centre${f.centre ? ' <span class="tx-secn">1</span>' : ''}</summary>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
           <div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px;white-space:nowrap">Within</span>
             <select onchange="txSet('radius',Number(this.value))" ${f.centre ? '' : 'disabled title="Pick a centre first"'}>${[2, 5, 10, 15, 20, 30, 50, 100].map(k => `<option value="${k}" ${Number(f.radius) === k ? 'selected' : ''}>${k} km</option>`).join('')}</select></div></details>
@@ -510,12 +510,19 @@
     restoreScroll(keep, skip || []);
     if (S.view === 'inbox' && S.open) txCount('txReply', 'txReplyCount');
   }
-  const viewScroll = {};
+  // Switching Inbox <-> New text keeps the page exactly where it is: the tab bar
+  // stays at the same spot on screen (Joy, 25 Nov 2026).
+  function keepBarInPlace(fn) {
+    const bar = () => document.querySelector('.tx-bar');
+    const before = bar() ? bar().getBoundingClientRect().top : null;
+    fn();
+    const after = bar() ? bar().getBoundingClientRect().top : null;
+    if (before != null && after != null) window.scrollBy(0, after - before);
+  }
   window.txView = async v => {
     if (v === S.view) return;
-    viewScroll[S.view] = snapScroll();
-    S.view = v; render(viewScroll[v] || { y: window.scrollY, p: {} });
-    if (v === 'new' && !S.aud) { try { S.aud = await api('/api/educator-texts/audience'); } catch (e) { say(e.message, 'error'); } render(); }
+    S.view = v; keepBarInPlace(() => render({ y: window.scrollY, p: {} }));
+    if (v === 'new' && !S.aud) { try { S.aud = await api('/api/educator-texts/audience'); } catch (e) { say(e.message, 'error'); } keepBarInPlace(() => render()); }
   };
 
   // Poll our own DB every 8s while the tab is open (cheap; no Customer.io calls).
