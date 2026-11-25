@@ -112,9 +112,11 @@ async function desiredContacts() {
   return { want, jobAdder };
 }
 
-const displayName = c => c.kind === 'Centre' ? `${c.first} (Centre)` : `${[c.first, c.last].filter(Boolean).join(' ') || 'Unknown'} (${c.kind})`;
+// Same style as the contacts already saved in Webex (plain name, phone as "Work" in +61 format);
+// the type (Educator / Centre / JobAdder) goes in the company field instead.
+const displayName = c => c.kind === 'Centre' ? c.first : ([c.first, c.last].filter(Boolean).join(' ') || 'Unknown');
 const body = c => ({ schemas: SCHEMA, displayName: displayName(c), firstName: c.first || displayName(c), lastName: c.last || c.kind,
-  companyName: `${TAG} ${c.kind}${c.company ? ' · ' + c.company : ''}`, phoneNumbers: [{ type: c.kind === 'Centre' ? 'work' : 'mobile', value: c.phone }], source: 'CH' });
+  companyName: `${TAG} ${c.kind}${c.company ? ' · ' + c.company : ''}`, phoneNumbers: [{ type: 'work', value: c.phone }], source: 'CH' });
 
 let running = null;
 async function sync({ dryRun = false } = {}) {
