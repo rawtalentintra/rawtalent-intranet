@@ -597,8 +597,7 @@ async function buildEducatorMapFresh() {
             (SELECT count(*) FROM jsonb_array_elements(coalesce(raw->'availableCandidateList','[]'::jsonb)) a
               WHERE left(a->>'date', 10) >= to_char(current_date, 'YYYY-MM-DD')) AS avail_days
           FROM rt_candidates_cache
-          WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)
-            AND raw->'addresses'->0->>'latitude' IS NOT NULL`,
+          WHERE is_active = true AND is_deleted IS NOT TRUE AND status NOT IN (4, 8)`,
     args: []
   })).rows;
   const { completedShiftsByUser, engagementTag } = require('../services/educatorIndicatorsService');
@@ -607,7 +606,9 @@ async function buildEducatorMapFresh() {
   const today = new Date().toISOString().slice(0, 10);
   const educators = [];
   for (const r of rows) {
-    if (!inAustralia(r.lat, r.lng)) continue;
+    // No usable map position in RT (e.g. lat/lng 0): still listed for SMS, just
+    // not on the map and never inside a "near a centre" radius (Joy, 25 Nov 2026).
+    const placed = inAustralia(r.lat, r.lng);
     const shiftList = shiftsByUser.get(String(r.user_id)) || [];
     const lastShift = shiftList.length ? Math.max(...shiftList) : null;
     educators.push({
@@ -615,7 +616,7 @@ async function buildEducatorMapFresh() {
       name: [r.first_name, r.last_name].filter(Boolean).join(' ') || `Candidate #${r.user_id}`,
       email: r.email || null, phone: r.contact_no || null, suburb: r.suburb || null,
       state: normalizeStateToShort(r.addr_state),
-      lat: r.lat, lng: r.lng,
+      lat: placed ? r.lat : null, lng: placed ? r.lng : null,
       // RT Portal's own labels for candidate.status (raw statusName uses older wording,
       // e.g. "Registered" / "In Review", that doesn't match what staff see in RT).
       status: RT_STATUS_LABELS[r.status] || r.status_name || null,
@@ -650,7 +651,8 @@ async function buildEducatorMapFresh() {
 }
 
 router.get('/educator-map', async (req, res) => {
-  try { res.json(await buildEducatorMap()); }
+  // The map page only plots educators RT has a real position for.
+  try { const d = await buildEducatorMap(); res.json({ ...d, educators: d.educators.filter(e => e.lat != null && e.lng != null) }); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
