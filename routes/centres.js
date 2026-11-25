@@ -1630,6 +1630,11 @@ module.exports = router;
 // exporting the function lets it share the one in-memory cache instead of
 // doubling the RT API calls on every load.
 module.exports.getCentresAndBookings = getCentresAndBookings;
+// Manual "refresh now" (SMS page, 25 Nov 2026): reuses the in-flight fetch if one is running.
+module.exports.refreshCentresAndBookings = () => {
+  if (!refreshInFlight) refreshInFlight = fetchCentresAndBookings().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+};
 module.exports.computeFillRateByPartner = computeFillRateByPartner;
 // Client Retention (routes/leads.js) needs the same centre_visits lookup
 // this file already has — exported rather than duplicated.

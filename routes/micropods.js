@@ -767,6 +767,11 @@ module.exports = router;
 module.exports.getCandidatePoints = getCandidatePoints;
 module.exports.warmMicropods = warmMicropods;
 module.exports.buildEducatorMap = buildEducatorMap;
+// Manual refresh (SMS page): rebuild now and wait for it; keeps serving the old copy until done.
+module.exports.rebuildEducatorMap = () => {
+  if (!educatorMapBuilding) educatorMapBuilding = buildEducatorMapFresh().finally(() => { educatorMapBuilding = null; });
+  return educatorMapBuilding;
+};
 // Warm on boot so the first SMS / Educator Map visit after a deploy isn't cold.
 setTimeout(() => buildEducatorMap().catch(e => console.error('[educator-map] warm', e.message)), 15000);
 module.exports.complianceForLive = (c, today) => ({ status: RT_STATUS_LABELS[c.status] || c.statusName || null, onboarding: c.obStatus || null, compliant: complianceReasons(c, today, c.userId).length === 0 });

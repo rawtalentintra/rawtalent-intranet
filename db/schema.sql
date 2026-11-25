@@ -3327,3 +3327,30 @@ CREATE TABLE IF NOT EXISTS webex_contacts_auth (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE webex_contacts_auth ENABLE ROW LEVEL SECURITY;
+
+-- SMS extras (Joy, 25 Nov 2026): conversation tags, saved groups, message templates.
+CREATE TABLE IF NOT EXISTS sms_tags (
+  educator_id TEXT PRIMARY KEY,
+  tag TEXT,                       -- Booking | Onboarding
+  tagged_by CITEXT,
+  tagged_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE sms_tags ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS sms_groups (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'educators',   -- educators | centres
+  member_ids JSONB NOT NULL DEFAULT '[]',
+  created_by CITEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE sms_groups ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS sms_templates (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_by CITEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE sms_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS tag TEXT;

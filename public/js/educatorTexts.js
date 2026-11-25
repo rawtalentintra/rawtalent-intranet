@@ -28,7 +28,7 @@
     f: { status: new Set(['Active']), state: new Set(), onboarding: new Set(), compliance: 'any', gender: new Set(), qual: new Set(), segment: new Set(),
          centre: '', radius: 15, avail: false, worked28: false, notTextedDays: 7, replied: 'any', search: '',
          cstate: new Set(), booking: new Set(), mobileOnly: true },
-    numbers: [], picked: null, body: '', kind: 'educators', audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
+    numbers: [], picked: null, body: '', kind: 'educators', unread: 0, inTag: 'all', sendTag: '', groups: [], templates: [], refresh: null, audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
 
   const css = `<style>
     .tx-wrap{max-width:1200px;margin:0 auto}
@@ -45,7 +45,12 @@
     .tx-row:hover,.tx-row.on{background:#f8fafc}
     .tx-name{font-weight:700;color:var(--navy);font-size:13.5px;display:flex;justify-content:space-between;gap:8px}
     .tx-snip{font-size:12.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-    .tx-badge{background:#2563eb;color:#fff;border-radius:999px;font-size:11px;padding:1px 7px}
+    .tx-badge{background:#dc2626;color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 7px}
+    .tx-tag{border-radius:999px;font-size:10.5px;font-weight:600;padding:1px 8px;margin-left:6px}
+    .tx-tag.Booking{background:#dcfce7;color:#166534}.tx-tag.Onboarding{background:#ede9fe;color:#5b21b6}
+    .tx-row.unread .tx-name span:first-child{font-weight:800}
+    .tx-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+    .tx-tools select{border:1px solid var(--gray-200);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12.5px;max-width:220px}
     .tx-thread{display:flex;flex-direction:column;height:620px}
     .tx-msgs{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:#f8fafc}
     .tx-b{max-width:72%;padding:9px 12px;border-radius:14px;font-size:13.5px;line-height:1.4;white-space:pre-wrap}
@@ -82,7 +87,7 @@
     const u = S.usage; if (!u) return '';
     const left = Math.max(0, u.dailyLimit - u.usedToday);
     return `<div class="tx-bar">
-      <div class="tx-switch"><button class="${S.view === 'inbox' ? 'on' : ''}" onclick="txView('inbox')">💬 Inbox</button><button class="${S.view === 'new' ? 'on' : ''}" onclick="txView('new')">✉️ New text</button></div>
+      <div class="tx-switch"><button class="${S.view === 'inbox' ? 'on' : ''}" onclick="txView('inbox')">💬 Inbox${S.unread ? ` <span class="tx-badge" id="txUnreadBadge">${S.unread}</span>` : ''}</button><button class="${S.view === 'new' ? 'on' : ''}" onclick="txView('new')">✉️ New text</button></div>
       <span class="tx-pill ${left < 30 ? 'warn' : ''}" title="Each SMS is billed per 160-character segment">${u.usedToday} / ${u.dailyLimit} segments used today</span>
       <span class="tx-pill" title="Estimated at $${u.costPerSegmentAud.toFixed(2)} per segment; Twilio's bill is the final figure">💲 Spent today $${u.spend.todayMine.toFixed(2)} (team $${u.spend.todayTeam.toFixed(2)}) · this month $${u.spend.monthMine.toFixed(2)} (team $${u.spend.monthTeam.toFixed(2)})</span>
       ${u.inSendWindow ? '' : '<span class="tx-pill warn">Outside 8am-8pm: texts wait until morning</span>'}
@@ -94,12 +99,14 @@
   async function loadConvos() { S.convos = await api('/api/educator-texts/conversations' + (S.inDate ? '?date=' + S.inDate : '')); }
   function inboxRows() {
     const q = S.inQ || '';
-    const list = S.convos.filter(c => matches({ name: c.educator_name, phone: c.phone, suburb: c.body }, q));
-    return list.map(c => `<div class="tx-row ${S.open === c.educator_id ? 'on' : ''}" onclick="txOpen('${esc(c.educator_id)}')">
-        <div class="tx-name"><span>${esc(c.educator_name || 'Educator #' + c.educator_id)}</span><span style="font-weight:400;font-size:11.5px;color:var(--text-muted)">${Number(c.unread) ? `<span class="tx-badge">${c.unread}</span> ` : ''}${ago(c.created_at)}</span></div>
+    const list = S.convos.filter(c => matches({ name: c.educator_name, phone: c.phone, suburb: c.body }, q)
+      && (S.inTag === 'all' || (S.inTag === 'unread' ? Number(c.unread) > 0 : c.tag === S.inTag)));
+    return list.map(c => `<div class="tx-row ${S.open === c.educator_id ? 'on' : ''} ${Number(c.unread) ? 'unread' : ''}" onclick="txOpen('${esc(c.educator_id)}')">
+        <div class="tx-name"><span>${esc(c.educator_name || 'Educator #' + c.educator_id)}${c.tag ? `<span class="tx-tag ${esc(c.tag)}">${esc(c.tag)}</span>` : ''}</span><span style="font-weight:400;font-size:11.5px;color:var(--text-muted)">${Number(c.unread) ? `<span class="tx-badge">${c.unread}</span> ` : ''}${ago(c.created_at)}</span></div>
         <div class="tx-snip">${c.direction === 'out' ? 'You: ' : ''}${esc(c.body)}</div></div>`).join('')
       || `<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">${S.convos.length || S.inDate ? 'No conversations match.' : 'No texts yet. Start one from "New text".'}</div>`;
   }
+  window.txInTag = v => { S.inTag = v; render(); };
   window.txInSearch = v => { S.inQ = v; const el = document.getElementById('txConvList'); if (el) el.innerHTML = inboxRows(); };
   window.txInDate = async v => { S.inDate = v; await loadConvos(); const el = document.getElementById('txConvList'); if (el) el.innerHTML = inboxRows(); };
   function inboxHtml() {
@@ -109,7 +116,8 @@
       <div class="tx-card" style="display:flex;flex-direction:column">
         <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;flex-direction:column;gap:6px">
           <input type="text" value="${esc(S.inQ || '')}" oninput="txInSearch(this.value)" placeholder="🔍 Name, number or message text" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
-          <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)">On date <input type="date" value="${esc(S.inDate || '')}" onchange="txInDate(this.value)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12.5px">${S.inDate ? '<button class="tx-chip" onclick="txInDate(\'\');this.previousElementSibling.value=\'\'">Clear</button>' : ''}</div></div>
+          <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)">On date <input type="date" value="${esc(S.inDate || '')}" onchange="txInDate(this.value)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12.5px">${S.inDate ? '<button class="tx-chip" onclick="txInDate(\'\');this.previousElementSibling.value=\'\'">Clear</button>' : ''}</div>
+          <div class="tx-chips">${[['all', 'All'], ['unread', `Unread${S.unread ? ' (' + S.unread + ')' : ''}`], ['Booking', 'Booking'], ['Onboarding', 'Onboarding']].map(([v, l]) => `<button class="tx-chip ${S.inTag === v ? 'on' : ''}" onclick="txInTag('${v}')">${l}</button>`).join('')}</div></div>
         <div class="tx-list" id="txConvList">${rows}</div></div>
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
   }
@@ -117,16 +125,108 @@
     const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? `${m.sender === 'announcement' ? ' · 📣 RawTalent announcement' : ''} · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : m.status === 'pending_approval' ? '⏳ Waiting for Sophia' : 'Sending…'}` : ''}</div></div>`).join('');
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
-        <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</span>
+          <span class="tx-chips">${['Booking', 'Onboarding'].map(t => `<button class="tx-chip ${conv?.tag === t ? 'on' : ''}" title="Tag this conversation" onclick="txTag('${t}')">${t}</button>`).join('')}</span></div>
         ${/^(loc|client):/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Centre</span>' : /^tel:/.test(S.open) ? '<span style="font-size:12px;color:var(--text-muted)">Not in RT</span>' : `<a href="https://backoffice.rawtalent.com.au/#/candidateDetails?userID=${encodeURIComponent(S.open)}" target="_blank" rel="noopener" style="font-size:12px;color:#2563eb">Open in RT Portal ↗</a>`}</div>
       <div class="tx-msgs" id="txMsgs">${msgs}</div>
-      <div class="tx-compose"><textarea id="txReply" placeholder="Write a reply…" oninput="txCount('txReply','txReplyCount')"></textarea>
+      <div class="tx-compose">${tplBar('txReply')}<textarea id="txReply" placeholder="Write a reply…" oninput="txCount('txReply','txReplyCount')"></textarea>
         <div class="tx-count" id="txReplyCount"></div>
         <div style="display:flex;justify-content:flex-end"><button class="btn-add" onclick="txReply()">Send</button></div></div></div>`;
   }
+  // ── Templates (shared) ──
+  async function loadTemplates() { try { S.templates = await api('/api/educator-texts/templates'); } catch { S.templates = []; } }
+  function tplBar(target) {
+    return `<div class="tx-tools"><select onchange="txUseTpl('${target}',this.value);this.value=''"><option value="">📝 Insert a template…</option>${S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>
+      <button class="tx-chip" onclick="txSaveTpl('${target}')">Save as template</button>
+      ${S.templates.length ? `<select onchange="txEditTpl(this.value);this.value=''"><option value="">✏️ Edit or delete a template…</option>${S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>` : ''}</div>`;
+  }
+  window.txUseTpl = (target, id) => {
+    const t = S.templates.find(x => String(x.id) === String(id)); const el = document.getElementById(target); if (!t || !el) return;
+    el.value = t.body; if (target === 'txBody') txBodyChange(t.body); else txCount('txReply', 'txReplyCount');
+  };
+  window.txSaveTpl = async target => {
+    const body = (document.getElementById(target)?.value || '').trim(); if (!body) return say('Write the message first, then save it as a template', 'error');
+    const name = (prompt('Name this template:') || '').trim(); if (!name) return;
+    try { await post('/api/educator-texts/templates', { name, body }); await loadTemplates(); say(`Template "${name}" saved`, 'success'); rerender(target); } catch (e) { say(e.message, 'error'); }
+  };
+  window.txEditTpl = async id => {
+    const t = S.templates.find(x => String(x.id) === String(id)); if (!t) return;
+    const action = prompt(`Template "${t.name}"\n\nType 1 to edit the text, 2 to rename, 3 to delete:`, '1'); if (!action) return;
+    try {
+      if (action.trim() === '3') { if (!confirm(`Delete template "${t.name}"?`)) return; await call('DELETE', `/api/educator-texts/templates/${t.id}`); }
+      else if (action.trim() === '2') { const name = (prompt('New name:', t.name) || '').trim(); if (!name) return; await call('PUT', `/api/educator-texts/templates/${t.id}`, { name, body: t.body }); }
+      else { const body = (prompt('Template text ({first_name} works):', t.body) || '').trim(); if (!body) return; await call('PUT', `/api/educator-texts/templates/${t.id}`, { name: t.name, body }); }
+      await loadTemplates(); say('Template updated', 'success'); rerender();
+    } catch (e) { say(e.message, 'error'); }
+  };
+  async function call(method, url, body) {
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Request failed'); return d;
+  }
+  function rerender(target) {
+    const keepReply = document.getElementById('txReply')?.value || '';
+    if (S.view === 'new') renderNew(); else { render(); const ta = document.getElementById('txReply'); if (ta) ta.value = keepReply; }
+  }
+  window.txSendTag = v => { S.sendTag = v; renderNew(); };
+  window.txTag = async t => {
+    const c = S.convos.find(x => x.educator_id === S.open); const next = c?.tag === t ? null : t;
+    try { await call('PUT', `/api/educator-texts/conversations/${encodeURIComponent(S.open)}/tag`, { tag: next }); if (c) c.tag = next; rerender(); } catch (e) { say(e.message, 'error'); }
+  };
+
+  // ── Saved groups (shared) ──
+  async function loadGroups() { try { S.groups = await api('/api/educator-texts/groups'); } catch { S.groups = []; } }
+  function groupsHtml() {
+    const mine = S.groups.filter(g => g.kind === (isC() ? 'centres' : 'educators'));
+    const n = S.picked ? S.picked.size : 0;
+    return `<div class="tx-f"><label class="h">Saved groups</label>
+      ${mine.length ? `<select onchange="txUseGroup(this.value);this.value=''"><option value="">Select a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)} (${(g.member_ids || []).length})</option>`).join('')}</select>` : '<div class="tx-legend">No groups yet. Tick people in the list, then save them as a group.</div>'}
+      <div class="tx-tools"><button class="tx-chip" onclick="txSaveGroup()" ${n ? '' : 'disabled'}>Save ${n || ''} selected as group</button>
+      ${mine.length ? `<select onchange="txEditGroup(this.value);this.value=''"><option value="">✏️ Edit a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}</div></div>`;
+  }
+  window.txUseGroup = id => {
+    const g = S.groups.find(x => String(x.id) === String(id)); if (!g) return;
+    const known = new Set(all().map(e => e.userId)); const ids = (g.member_ids || []).filter(i => known.has(i));
+    S.picked = new Set(ids); ids.forEach(i => S.pinned.add(i));
+    const missing = (g.member_ids || []).length - ids.length;
+    say(`Selected ${ids.length} from "${g.name}"${missing ? `. ${missing} are no longer in the list` : ''}`, 'success'); renderNew();
+  };
+  window.txSaveGroup = async () => {
+    const ids = [...(S.picked || [])].filter(i => !String(i).startsWith('tel:')); if (!ids.length) return say('Tick people in the list first', 'error');
+    const name = (prompt(`Name this group (${ids.length} ${noun(ids.length)}):`) || '').trim(); if (!name) return;
+    try { await post('/api/educator-texts/groups', { name, kind: isC() ? 'centres' : 'educators', memberIds: ids }); await loadGroups(); say(`Group "${name}" saved`, 'success'); renderNew(); } catch (e) { say(e.message, 'error'); }
+  };
+  window.txEditGroup = async id => {
+    const g = S.groups.find(x => String(x.id) === String(id)); if (!g) return;
+    const n = S.picked ? S.picked.size : 0;
+    const action = prompt(`Group "${g.name}" (${(g.member_ids || []).length} people)\n\nType 1 to replace its members with the ${n} selected now, 2 to rename, 3 to delete:`, '2'); if (!action) return;
+    try {
+      if (action.trim() === '3') { if (!confirm(`Delete group "${g.name}"?`)) return; await call('DELETE', `/api/educator-texts/groups/${g.id}`); }
+      else if (action.trim() === '1') { if (!n) return say('Tick people in the list first', 'error'); await call('PUT', `/api/educator-texts/groups/${g.id}`, { memberIds: [...S.picked].filter(i => !String(i).startsWith('tel:')) }); }
+      else { const name = (prompt('New name:', g.name) || '').trim(); if (!name) return; await call('PUT', `/api/educator-texts/groups/${g.id}`, { name }); }
+      await loadGroups(); say('Group updated', 'success'); renderNew();
+    } catch (e) { say(e.message, 'error'); }
+  };
+
+  // ── Refresh from RT ──
+  window.txRefresh = async () => {
+    try {
+      const r = await post('/api/educator-texts/refresh', {});
+      if (r.recent) return say('The list was refreshed from RT in the last 5 minutes, so it is already up to date', 'success');
+      S.refresh = r; renderNew(); pollRefresh();
+    } catch (e) { say(e.message, 'error'); }
+  };
+  async function pollRefresh() {
+    const r = await api('/api/educator-texts/refresh').catch(() => null); if (!r) return;
+    S.refresh = r;
+    if (r.running) { const el = document.getElementById('txRefreshState'); if (el) el.textContent = r.step || 'Refreshing…'; return setTimeout(pollRefresh, 3000); }
+    if (r.error) say('Refresh failed: ' + r.error, 'error');
+    else { const keep = S.body; if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); S.body = keep; say('Updated from RT', 'success'); }
+    renderNew();
+  }
+
   window.txOpen = async id => {
     S.open = id; S.thread = await api(`/api/educator-texts/conversations/${encodeURIComponent(id)}`);
-    const c = S.convos.find(x => x.educator_id === id); if (c) c.unread = 0;
+    const c = S.convos.find(x => x.educator_id === id); if (c && Number(c.unread)) { S.unread = Math.max(0, S.unread - Number(c.unread)); c.unread = 0; setUnread(); }
     render(); const m = document.getElementById('txMsgs'); if (m) m.scrollTop = m.scrollHeight;
   };
   window.txReply = async () => {
@@ -287,6 +387,7 @@
         <div class="tx-f"><label class="h">Near a centre</label>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
           ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
+        ${groupsHtml()}
         ${filters}
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
@@ -295,14 +396,17 @@
           ${S.usage?.canAnnounce ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Send as</span>
             <div class="tx-switch"><button class="${S.sender !== 'announcement' ? 'on' : ''}" onclick="txSender('number')">📱 Our number · REPLIES ENABLED</button><button class="${S.sender === 'announcement' ? 'on' : ''}" onclick="txSender('announcement')">📣 RawTalent · REPLIES DISABLED (for announcements only)</button></div>
             ${S.sender === 'announcement' && !S.usage.announceReady ? '<span class="tx-pill warn">Not set up in Customer.io yet</span>' : ''}</div>` : ''}
-          <div class="tx-compose" style="border:0;padding:0"><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
+          <div class="tx-compose" style="border:0;padding:0">${tplBar('txBody')}
+          <div class="tx-tools"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Tag</span>${[['', 'None'], ['Booking', 'Booking'], ['Onboarding', 'Onboarding']].map(([v, l]) => `<button class="tx-chip ${S.sendTag === v ? 'on' : ''}" onclick="txSendTag('${v}')">${l}</button>`).join('')}</div><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
           <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise${isC() ? ' (centre contact)' : ''}</span></div></div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px">
             <div style="font-size:13px"><b id="txPickCount">${picked.length}</b> of ${list.length.toLocaleString()} ${noun(2)} selected · <b id="txCost">≈ $${cost.toFixed(2)}</b> <span style="color:var(--text-muted)">(${picked.length * x.s} segments)</span></div>
             <div style="display:flex;gap:6px"><button class="btn-secondary" onclick="txPickAll(false)">Clear</button><button class="btn-secondary" onclick="txPickAll(true)">Select all</button><button class="btn-add" onclick="txSendMass()">Review & send</button></div></div>
         </div>
         <div class="tx-card" style="max-height:600px;overflow:auto">
-          <div style="padding:10px;border-bottom:1px solid var(--gray-100)"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px"></div>
+          <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;gap:8px;align-items:center"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
+            ${S.refresh?.running ? `<span id="txRefreshState" style="font-size:12px;color:var(--text-muted);white-space:nowrap">${esc(S.refresh.step || 'Refreshing…')}</span><button class="btn-secondary" disabled>⟳ Refreshing…</button>`
+              : `<button class="btn-secondary" style="white-space:nowrap" title="Pull the latest status, onboarding, compliance and shifts from RT before you send" onclick="txRefresh()">⟳ Refresh from RT</button>`}</div>
           <table class="tx-table"><thead><tr>${head}</tr></thead><tbody id="txRows">${rowsHtml(list)}</tbody></table>
           <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">${isC() ? 'Centres come from RT. Texts go to the centre/location mobile; landline-only centres can\'t be texted.' : `RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).`}</div>
         </div>
@@ -335,7 +439,7 @@
       const f = S.f, c = f.centre && S.aud.centres.find(z => z.centreKey === f.centre);
       const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
       const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
-      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
+      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, tag: S.sendTag || undefined, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
       if (r.pendingApproval) say(`Sent to Sophia for approval (${r.pendingApproval} texts). They go out once she approves.`, 'success'); else say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
       S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = [];
       // Jump straight to the Inbox with the new message showing (Joy, 24 Nov).
@@ -383,6 +487,7 @@
     if (document.hidden) return;
     try {
       const u = await api('/api/educator-texts/updates?since=' + S.maxId);
+      if (u.unread !== S.unread) { S.unread = u.unread; setUnread(); }
       if (u.maxId !== S.maxId || u.settled !== S.settled) {
         S.maxId = u.maxId; S.settled = u.settled;
         if (S.view === 'inbox') {
@@ -395,13 +500,25 @@
     } catch { /* try again next tick */ }
   }
 
+  // Red unread count on the Inbox button and the sidebar SMS item.
+  function setUnread() {
+    const b = document.getElementById('txUnreadBadge');
+    if (b) { b.textContent = S.unread; b.style.display = S.unread ? '' : 'none'; }
+    else if (S.unread && S.view !== 'inbox') render();
+    const side = document.getElementById('tabTexts');
+    if (side) { let sb = side.querySelector('.tx-side-badge'); if (!sb) { sb = document.createElement('span'); sb.className = 'tx-side-badge'; sb.style.cssText = 'background:#dc2626;color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 7px;margin-left:6px'; side.appendChild(sb); }
+      sb.textContent = S.unread; sb.style.display = S.unread ? '' : 'none'; }
+  }
+
   window.loadTextsView = async function () {
     const root = document.getElementById('resultsList');
     root.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
     try {
       await Promise.all([loadUsage(), loadConvos()]);
-      const u = await api('/api/educator-texts/updates?since=0'); S.maxId = u.maxId; S.settled = u.settled;
-      render();
+      const u = await api('/api/educator-texts/updates?since=0'); S.maxId = u.maxId; S.settled = u.settled; S.unread = u.unread || 0;
+      await Promise.all([loadTemplates(), loadGroups()]);
+      api('/api/educator-texts/refresh').then(r => { if (r.running) { S.refresh = r; pollRefresh(); } }).catch(() => {});
+      render(); setUnread();
       if (!S.poll) S.poll = setInterval(tick, 8000);
     } catch (e) { root.innerHTML = `<div class="empty-wrap"><div class="empty-title">${esc(e.message)}</div></div>`; }
   };

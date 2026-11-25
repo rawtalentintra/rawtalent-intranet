@@ -126,7 +126,7 @@ router.post('/send', async (req, res) => {
         recipients.push({ userId: 'tel:' + e164, name: nm || e164, firstName: nm ? nm.split(/\s+/)[0] : 'there', phone: e164, type: 'number', cioId: 'sms_' + e164.slice(1) });
       }
     }
-    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number' });
+    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number', tag: TAGS.includes(req.body.tag) ? req.body.tag : null });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
@@ -150,12 +150,13 @@ router.get('/conversations', async (req, res) => {
       // ?date=YYYY-MM-DD keeps only conversations with a message that day (Melbourne).
       sql: `SELECT DISTINCT ON (educator_id) educator_id, educator_name, direction, body, status, created_at, recipient_type,
               (SELECT max(phone) FROM sms_messages p WHERE p.educator_id = m.educator_id) phone,
-              (SELECT count(*) FROM sms_messages u WHERE u.educator_id = m.educator_id AND u.direction='in' AND u.read_at IS NULL) unread
+              (SELECT count(*) FROM sms_messages u WHERE u.educator_id = m.educator_id AND u.direction='in' AND u.read_at IS NULL) unread,
+              (SELECT tag FROM sms_tags t WHERE t.educator_id = m.educator_id) tag
             FROM sms_messages m
             ${/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? `WHERE educator_id IN (SELECT educator_id FROM sms_messages WHERE (created_at AT TIME ZONE 'Australia/Melbourne')::date = ?::date)` : ''}
             ORDER BY educator_id, id DESC`,
       args: /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? [req.query.date] : []
-    })).rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 500);
+    })).rows.sort((a, b) => (Number(b.unread) > 0) - (Number(a.unread) > 0) || new Date(b.created_at) - new Date(a.created_at)).slice(0, 500);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -170,6 +171,100 @@ router.get('/conversations/:id', async (req, res) => {
 });
 
 // Cheap poll for the open page: anything newer than the last id it has.
+// ── Tags (Booking / Onboarding) ──
+const TAGS = ['Booking', 'Onboarding'];
+router.put('/conversations/:id/tag', async (req, res) => {
+  try {
+    const tag = TAGS.includes(req.body.tag) ? req.body.tag : null;
+    if (tag) await getDb().execute({ sql: `INSERT INTO sms_tags (educator_id, tag, tagged_by, tagged_at) VALUES (?,?,?,now())
+      ON CONFLICT (educator_id) DO UPDATE SET tag = excluded.tag, tagged_by = excluded.tagged_by, tagged_at = now()`, args: [req.params.id, tag, req.user.email] });
+    else await getDb().execute({ sql: 'DELETE FROM sms_tags WHERE educator_id = ?', args: [req.params.id] });
+    res.json({ ok: true, tag });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Saved groups (shared with the team) ──
+router.get('/groups', async (req, res) => {
+  try { res.json((await getDb().execute({ sql: 'SELECT id, name, kind, member_ids, created_by, updated_at FROM sms_groups ORDER BY lower(name)', args: [] })).rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.post('/groups', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 80), ids = [...new Set((req.body.memberIds || []).map(String))].slice(0, 2000);
+    if (!name || !ids.length) return res.status(400).json({ error: 'Give the group a name and pick at least one person' });
+    res.json((await getDb().execute({ sql: `INSERT INTO sms_groups (name, kind, member_ids, created_by) VALUES (?,?,?::jsonb,?) RETURNING *`,
+      args: [name, req.body.kind === 'centres' ? 'centres' : 'educators', JSON.stringify(ids), req.user.email] })).rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.put('/groups/:id', async (req, res) => {
+  try {
+    const name = req.body.name != null ? String(req.body.name).trim().slice(0, 80) : null;
+    const ids = Array.isArray(req.body.memberIds) ? JSON.stringify([...new Set(req.body.memberIds.map(String))].slice(0, 2000)) : null;
+    const r = (await getDb().execute({ sql: `UPDATE sms_groups SET name = COALESCE(NULLIF(?,''), name), member_ids = COALESCE(?::jsonb, member_ids), updated_at = now() WHERE id = ? RETURNING *`,
+      args: [name, ids, Number(req.params.id)] })).rows[0];
+    r ? res.json(r) : res.status(404).json({ error: 'Group not found' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.delete('/groups/:id', async (req, res) => {
+  try { await getDb().execute({ sql: 'DELETE FROM sms_groups WHERE id = ?', args: [Number(req.params.id)] }); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Templates (shared with the team) ──
+router.get('/templates', async (req, res) => {
+  try { res.json((await getDb().execute({ sql: 'SELECT id, name, body, created_by, updated_at FROM sms_templates ORDER BY lower(name)', args: [] })).rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.post('/templates', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 80), body = String(req.body.body || '').trim().slice(0, 1600);
+    if (!name || !body) return res.status(400).json({ error: 'A template needs a name and a message' });
+    res.json((await getDb().execute({ sql: 'INSERT INTO sms_templates (name, body, created_by) VALUES (?,?,?) RETURNING *', args: [name, body, req.user.email] })).rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.put('/templates/:id', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 80), body = String(req.body.body || '').trim().slice(0, 1600);
+    if (!name || !body) return res.status(400).json({ error: 'A template needs a name and a message' });
+    const r = (await getDb().execute({ sql: 'UPDATE sms_templates SET name = ?, body = ?, updated_at = now() WHERE id = ? RETURNING *', args: [name, body, Number(req.params.id)] })).rows[0];
+    r ? res.json(r) : res.status(404).json({ error: 'Template not found' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+router.delete('/templates/:id', async (req, res) => {
+  try { await getDb().execute({ sql: 'DELETE FROM sms_templates WHERE id = ?', args: [Number(req.params.id)] }); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Manual refresh (Joy, 25 Nov 2026): pull RT candidates + bookings now so the
+// list's status/onboarding/compliance/engagement are current before a send.
+// One refresh at a time for everyone; RT's own sync lock prevents overlap with
+// the scheduled syncs; a refresh within 5 minutes of the last one is skipped.
+const refreshJob = { running: false, step: null, startedAt: null, finishedAt: null, error: null, by: null };
+router.get('/refresh', (req, res) => res.json(refreshJob));
+router.post('/refresh', async (req, res) => {
+  if (refreshJob.running) return res.json({ ...refreshJob, alreadyRunning: true });
+  if (refreshJob.finishedAt && !refreshJob.error && Date.now() - refreshJob.finishedAt < 5 * 60 * 1000) return res.json({ ...refreshJob, recent: true });
+  Object.assign(refreshJob, { running: true, step: 'Pulling educators from RT', startedAt: Date.now(), finishedAt: null, error: null, by: req.user.name || req.user.email });
+  res.json(refreshJob);
+  (async () => {
+    const sync = require('../services/rtCandidatesSyncService');
+    const st = await sync.getSyncState();
+    if (sync.isSyncRunning(st)) {
+      // A scheduled sync is already pulling RT; wait for it rather than start a second one.
+      for (let i = 0; i < 120 && sync.isSyncRunning(await sync.getSyncState()); i++) await new Promise(r => setTimeout(r, 5000));
+    } else {
+      await sync.syncAllCandidates('sms-refresh:' + (req.user.email || ''));
+    }
+    refreshJob.step = 'Pulling bookings from RT';
+    await require('./centres').refreshCentresAndBookings();
+    refreshJob.step = 'Rebuilding the list';
+    await require('./micropods').rebuildEducatorMap();
+    centreCache = { at: 0, data: null };
+    await centreAudience();
+  })().then(() => { Object.assign(refreshJob, { running: false, step: null, finishedAt: Date.now() }); })
+    .catch(err => { console.error('[sms] refresh failed:', err.message); Object.assign(refreshJob, { running: false, step: null, finishedAt: Date.now(), error: err.message }); });
+});
+
 router.get('/updates', async (req, res) => {
   try {
     const since = Number(req.query.since) || 0;
