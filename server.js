@@ -565,7 +565,7 @@ async function start() {
     if (h < 2 || wxContactsDay === day) return;
     wxContactsDay = day;
     const wxc = require('./services/webexContactsService');
-    wxc.status().then(s => s.connected ? wxc.sync() : null)
+    wxc.sync()
       .then(r => r && console.log('Webex contacts sync:', JSON.stringify(r))).catch(err => console.error('Webex contacts sync error:', err.message));
   }, 15 * 60 * 1000);
   setTimeout(ownerSync, 3 * 60 * 1000);
