@@ -20,6 +20,8 @@
   const ago = iso => { if (!iso) return ''; const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
   const when = iso => new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
+  // Based on the centre's last meaningful booking in RT (lastMeaningfulBookingDate, same as the Dormant checks).
+  const BOOK_TIP = { 'Booked in last 30 days': 'Last booking in RT was within the past 30 days', 'Booked in last 4 months': 'Last booking was 31 to 120 days ago', 'Dormant (4+ months)': 'Has booked before, but not in the last 120 days', 'Never booked': 'No bookings in RT yet' };
   const SEG_TIP = { actively_working: '3+ shifts in the last 7 days', actively_engaged: 'At least 1 shift in the last 30 days', engaged: 'At least 1 shift in the last 3 months', disengaged: 'Has worked with us, but nothing in the last 3 months', dormant: 'Never worked a shift with us' };
   const SEG = { actively_working: 'Actively Working', actively_engaged: 'Actively Engaged', engaged: 'Engaged', disengaged: 'Disengaged', dormant: 'Dormant' };
   const S = { view: 'inbox', usage: null, aud: null, convos: [], open: null, thread: [], maxId: 0, settled: 0, poll: null,
@@ -258,7 +260,7 @@
     const secCount = k => SEC_N[k] ? ` <span class="tx-secn">${SEC_N[k]}</span>` : '';
     const filters = isC() ? `
         <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('cstate', opts('state'), f.cstate)}</details>
-        <details class="tx-f tx-sec" ${secOpen('Bookings (RT)')} ontoggle="txSec('Bookings (RT)',this.open)"><summary class="h">Bookings (RT)${secCount('Bookings (RT)')}</summary>${chips('booking', ['Booked in last 30 days', 'Booked in last 4 months', 'Dormant (4+ months)', 'Never booked'], f.booking)}</details>
+        <details class="tx-f tx-sec" ${secOpen('Bookings (RT)')} ontoggle="txSec('Bookings (RT)',this.open)"><summary class="h">Bookings (RT)${secCount('Bookings (RT)')}</summary><div class="tx-legend">Hover a button to see what it means.</div>${chips('booking', Object.keys(BOOK_TIP), f.booking, v => v, v => BOOK_TIP[v])}</details>
         <details class="tx-f tx-sec" ${secOpen('Smart filters')} ontoggle="txSec('Smart filters',this.open)"><summary class="h">Smart filters${secCount('Smart filters')}</summary>
           <label style="display:block;font-size:13px"><input type="checkbox" ${f.mobileOnly ? 'checked' : ''} onchange="txSet('mobileOnly',this.checked)"> Only centres with a mobile number</label>${notTexted}${replied}</details>` : `
         <details class="tx-f tx-sec" ${secOpen('Status (RT)')} ontoggle="txSec('Status (RT)',this.open)"><summary class="h">Status (RT)${secCount('Status (RT)')}</summary>${chips('status', opts('status'), f.status)}</details>
