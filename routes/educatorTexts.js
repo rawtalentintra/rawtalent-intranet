@@ -75,6 +75,17 @@ router.get('/audience', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Joy-only: re-post the latest reply from one person to the Slack thread (testing the alert).
+router.post('/test-reply-alert/:id', async (req, res) => {
+  if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Joy only' });
+  try {
+    const m = (await getDb().execute({ sql: `SELECT educator_name, body FROM sms_messages WHERE educator_id = ? AND direction = 'in' ORDER BY id DESC LIMIT 1`, args: [req.params.id] })).rows[0];
+    if (!m) return res.status(404).json({ error: 'No reply found' });
+    await svc.notifyReply(req.params.id, m.educator_name, m.body);
+    res.json({ ok: true, name: m.educator_name });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/usage', async (req, res) => {
   try {
     const used = await svc.segmentsSentToday(req.user.email);

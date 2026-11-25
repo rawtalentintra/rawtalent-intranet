@@ -286,4 +286,4 @@ async function decideBatch(batchId, user, approve) {
   return b;
 }
 
-module.exports = { decideBatch, needsApproval, APPROVAL_OVER, isApprover, canAnnounce, announceReady: () => !!ANNOUNCE_TX, canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };
+module.exports = { notifyReply, decideBatch, needsApproval, APPROVAL_OVER, isApprover, canAnnounce, announceReady: () => !!ANNOUNCE_TX, canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };
