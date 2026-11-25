@@ -88,8 +88,8 @@
     const left = Math.max(0, u.dailyLimit - u.usedToday);
     return `<div class="tx-bar">
       <div class="tx-switch"><button class="${S.view === 'inbox' ? 'on' : ''}" onclick="txView('inbox')">💬 Inbox${S.unread ? ` <span class="tx-badge" id="txUnreadBadge">${S.unread}</span>` : ''}</button><button class="${S.view === 'new' ? 'on' : ''}" onclick="txView('new')">✉️ New text</button></div>
-      <span class="tx-pill ${left < 30 ? 'warn' : ''}" title="Each SMS is billed per 160-character segment">${u.usedToday} / ${u.dailyLimit} segments used today</span>
-      <span class="tx-pill" title="Estimated at $${u.costPerSegmentAud.toFixed(2)} per segment; Twilio's bill is the final figure">💲 Spent today $${u.spend.todayMine.toFixed(2)} (team $${u.spend.todayTeam.toFixed(2)}) · this month $${u.spend.monthMine.toFixed(2)} (team $${u.spend.monthTeam.toFixed(2)})</span>
+      <span class="tx-pill ${left < 30 ? 'warn' : ''}" title="Your own daily limit: counts only texts you sent today. Each SMS is billed per 160-character segment">You: ${u.usedToday} / ${u.dailyLimit} segments today</span>
+      ${u.spend ? `<span class="tx-pill" title="Estimated at $${u.costPerSegmentAud.toFixed(2)} per segment; Twilio's bill is the final figure">💲 Spent today $${u.spend.todayMine.toFixed(2)} (team $${u.spend.todayTeam.toFixed(2)}) · this month $${u.spend.monthMine.toFixed(2)} (team $${u.spend.monthTeam.toFixed(2)})</span>` : ''}
       ${u.inSendWindow ? '' : '<span class="tx-pill warn">Outside 8am-8pm: texts wait until morning</span>'}
       <span style="color:var(--text-muted);font-size:12px">Educators texted in the last ${u.cooldownHours}h are skipped unless they replied. STOP replies opt them out automatically.</span>
     </div>`;

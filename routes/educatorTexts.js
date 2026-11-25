@@ -89,7 +89,7 @@ router.get('/usage', async (req, res) => {
     })).rows[0];
     const cost = n => +(Number(n) * svc.LIMITS.costPerSegmentAud).toFixed(2);
     const spend = { todayMine: cost(sp.day_me), todayTeam: cost(sp.day_all), monthMine: cost(sp.month_me), monthTeam: cost(sp.month_all) };
-    res.json({ spend, usedToday: used, dailyLimit: svc.LIMITS.dailySegmentsPerSender, maxRecipients: svc.LIMITS.maxRecipientsPerSend,
+    res.json({ spend: svc.canAnnounce(req.user) ? spend : null, usedToday: used, dailyLimit: svc.LIMITS.dailySegmentsPerSender, maxRecipients: svc.LIMITS.maxRecipientsPerSend,
       cooldownHours: svc.LIMITS.cooldownHours, costPerSegmentAud: svc.LIMITS.costPerSegmentAud, inSendWindow: svc.inSendWindow(), canAnnounce: svc.canAnnounce(req.user), announceReady: svc.announceReady(), approvalOver: svc.APPROVAL_OVER, isApprover: svc.isApprover(req.user) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

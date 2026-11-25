@@ -81,7 +81,7 @@ const inboundSecret = () => crypto.createHmac('sha256', process.env.SESSION_SECR
 
 async function segmentsSentToday(email) {
   const r = (await getDb().execute({
-    sql: `SELECT coalesce(sum(segments),0) n FROM sms_messages WHERE direction = 'out' AND sent_by_email = ? AND status IN ('queued','sent','pending_approval')
+    sql: `SELECT coalesce(sum(segments),0) n FROM sms_messages WHERE direction = 'out' AND sent_by_email = ? AND status IN ('queued','sending','sent','pending_approval')
             AND created_at >= (date_trunc('day', now() AT TIME ZONE 'Australia/Melbourne') AT TIME ZONE 'Australia/Melbourne')`,
     args: [email]
   })).rows[0];
@@ -109,7 +109,7 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   const ids = recipients.map(r => String(r.userId));
   // Cool-down: last outbound in the window, unless they've replied since.
   const recent = ids.length ? (await db.execute({
-    sql: `SELECT educator_id, max(created_at) FILTER (WHERE direction='out' AND status IN ('queued','sent','pending_approval')) last_out,
+    sql: `SELECT educator_id, max(created_at) FILTER (WHERE direction='out' AND status IN ('queued','sending','sent','pending_approval')) last_out,
                  max(created_at) FILTER (WHERE direction='in') last_in
           FROM sms_messages WHERE educator_id = ANY(?) AND created_at > now() - make_interval(hours => ?) GROUP BY educator_id`,
     args: [ids, LIMITS.cooldownHours]
