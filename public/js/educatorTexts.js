@@ -20,6 +20,7 @@
   const ago = iso => { if (!iso) return ''; const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
   const when = iso => new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
+  const SEG_TIP = { actively_working: '3+ shifts in the last 7 days', actively_engaged: 'At least 1 shift in the last 30 days', engaged: 'At least 1 shift in the last 3 months', disengaged: 'Has worked with us, but nothing in the last 3 months', dormant: 'Never worked a shift with us' };
   const SEG = { actively_working: 'Actively Working', actively_engaged: 'Actively Engaged', engaged: 'Engaged', disengaged: 'Disengaged', dormant: 'Dormant' };
   const S = { view: 'inbox', usage: null, aud: null, convos: [], open: null, thread: [], maxId: 0, settled: 0, poll: null,
     f: { status: new Set(['Active']), state: new Set(), onboarding: new Set(), compliance: 'any', gender: new Set(), qual: new Set(), segment: new Set(),
@@ -54,8 +55,9 @@
     .tx-count{font-size:11.5px;color:var(--text-muted);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
     .tx-count.bad{color:#b45309;font-weight:600}
     .tx-filters{padding:14px;display:flex;flex-direction:column;gap:12px;max-height:760px;overflow:auto}
-    .tx-sec{border-top:1px solid var(--gray-100);padding-top:8px}
-    .tx-sec summary.h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+    .tx-sec{padding-top:2px}
+    .tx-legend{font-size:11px;color:var(--text-muted);margin-bottom:5px}
+    .tx-sec summary.h{background:#eef5ff;border-radius:6px;padding:6px 8px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
     .tx-sec summary.h::-webkit-details-marker{display:none}
     .tx-sec summary.h::after{content:'▸';margin-left:auto;font-size:12px}
     .tx-sec[open] summary.h::after{content:'▾'}
@@ -180,11 +182,12 @@
     return [...S.numbers.filter(n => n.kind === S.kind), ...pinned, ...list];
   }
   const OB_STEPS = ['Register', 'AboutUs', 'Profile Image', 'Experience', 'Emergency Contact', 'Qualification Level', 'Reference', 'Visa', 'Finance', 'Tax', 'Documents', 'Completed'];
-  const OB_LABEL = { Register: 'Step 0 · Registered', AboutUs: 'Step 1 · About Us', 'Profile Image': 'Step 2 · Profile Image', Experience: 'Step 3 · Experience', 'Emergency Contact': 'Step 4 · Emergency Contact', 'Qualification Level': 'Step 5 · Qualification Level', Reference: 'Step 6 · Reference', Visa: 'Step 7 · Visa', Finance: 'Step 8 · Finance', Tax: 'Step 9 · Tax', Documents: 'Step 10 · Documents', Completed: '✓ Completed' };
+  // Same wording as RT backoffice's "Onboarding Steps" filter (checked 25 Nov 2026).
+  const OB_LABEL = { AboutUs: 'AboutUs', Completed: 'Complete' };
   const obSort = vals => vals.slice().sort((a, b) => ((OB_STEPS.indexOf(a) + 1) || 99) - ((OB_STEPS.indexOf(b) + 1) || 99));
   const opts = key => [...new Set(all().map(e => (key === 'onboarding' ? e.onboarding || 'Not started' : e[key] || 'Unknown')))].sort();
-  function chips(name, values, set, label = v => v) {
-    return `<div class="tx-chips">${values.map(v => `<button class="tx-chip ${set.has(v) ? 'on' : ''}" onclick="txChip('${name}','${esc(v).replace(/'/g, '&#39;')}')">${esc(label(v))}</button>`).join('')}</div>`;
+  function chips(name, values, set, label = v => v, tip = () => '') {
+    return `<div class="tx-chips">${values.map(v => `<button class="tx-chip ${set.has(v) ? 'on' : ''}"${tip(v) ? ` title="${esc(tip(v))}"` : ''} onclick="txChip('${name}','${esc(v).replace(/'/g, '&#39;')}')">${esc(label(v))}</button>`).join('')}</div>`;
   }
   window.txChip = (name, v) => { const s = S.f[name]; s.has(v) ? s.delete(v) : s.add(v); renderNew(); };
   window.txSet = (k, v) => { S.f[k] = v; renderNew(); };
@@ -262,7 +265,7 @@
         <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('state', opts('state'), f.state)}</details>
         <details class="tx-f tx-sec" ${secOpen('Compliance (RT)')} ontoggle="txSec('Compliance (RT)',this.open)"><summary class="h">Compliance (RT)${secCount('Compliance (RT)')}</summary><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></details>
         <details class="tx-f tx-sec" ${secOpen('Onboarding')} ontoggle="txSec('Onboarding',this.open)"><summary class="h">Onboarding${secCount('Onboarding')}</summary>${chips('onboarding', obSort(opts('onboarding')), f.onboarding, v => OB_LABEL[v] || v)}</details>
-        <details class="tx-f tx-sec" ${secOpen('Engagement')} ontoggle="txSec('Engagement',this.open)"><summary class="h">Engagement${secCount('Engagement')}</summary>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v])}</details>
+        <details class="tx-f tx-sec" ${secOpen('Engagement')} ontoggle="txSec('Engagement',this.open)"><summary class="h">Engagement${secCount('Engagement')}</summary><div class="tx-legend">Hover a button to see what it means.</div>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v], v => SEG_TIP[v])}</details>
         <details class="tx-f tx-sec" ${secOpen('Qualification')} ontoggle="txSec('Qualification',this.open)"><summary class="h">Qualification${secCount('Qualification')}</summary>${chips('qual', opts('qualification'), f.qual)}</details>
         <details class="tx-f tx-sec" ${secOpen('Gender')} ontoggle="txSec('Gender',this.open)"><summary class="h">Gender${secCount('Gender')}</summary>${chips('gender', opts('gender'), f.gender)}</details>
         <details class="tx-f tx-sec" ${secOpen('Smart filters')} ontoggle="txSec('Smart filters',this.open)"><summary class="h">Smart filters${secCount('Smart filters')}</summary>
@@ -288,7 +291,7 @@
         <div class="tx-card" style="padding:14px">
           <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Message</div>
           ${S.usage?.canAnnounce ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Send as</span>
-            <div class="tx-switch"><button class="${S.sender !== 'announcement' ? 'on' : ''}" onclick="txSender('number')">📱 Our number (replies come here)</button><button class="${S.sender === 'announcement' ? 'on' : ''}" onclick="txSender('announcement')">📣 RawTalent announcement (no replies)</button></div>
+            <div class="tx-switch"><button class="${S.sender !== 'announcement' ? 'on' : ''}" onclick="txSender('number')">📱 Our number · REPLIES ENABLED</button><button class="${S.sender === 'announcement' ? 'on' : ''}" onclick="txSender('announcement')">📣 RawTalent · REPLIES DISABLED (for announcements only)</button></div>
             ${S.sender === 'announcement' && !S.usage.announceReady ? '<span class="tx-pill warn">Not set up in Customer.io yet</span>' : ''}</div>` : ''}
           <div class="tx-compose" style="border:0;padding:0"><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
           <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise${isC() ? ' (centre contact)' : ''}</span></div></div>
