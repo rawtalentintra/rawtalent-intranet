@@ -33,7 +33,9 @@ async function centreAudienceFresh() {
   const { centres, rawClients, bookings } = await cm.getCentresAndBookings();
   const lastByKey = await cm.getLastBookingDates(centres, bookings);
   const byClient = new Map(rawClients.map(c => [String(c.clientId), c]));
-  const data = centres.filter(c => c.isActive).map(c => {
+  // Joy, 25 Nov 2026: hide RT's test centres (set up by Yuvraj, the RT dev) from texting.
+  const isTest = c => /yuvraj/i.test(`${c.contactName || ''} ${c.name || ''}`);
+  const data = centres.filter(c => c.isActive && !isTest(c)).map(c => {
     const client = byClient.get(String(c.rtClientId));
     const phone = (c.allPhones || []).find(p => svc.toE164(p)) || c.contactNo || null;
     const last = lastByKey[c.centreKey] ? new Date(lastByKey[c.centreKey]) : null;
