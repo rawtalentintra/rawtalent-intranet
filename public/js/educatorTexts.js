@@ -178,10 +178,10 @@
   function groupsHtml() {
     const mine = S.groups.filter(g => g.kind === (isC() ? 'centres' : 'educators'));
     const n = S.picked ? S.picked.size : 0;
-    return `<div class="tx-f"><label class="h">Saved groups</label>
+    return `<details class="tx-f tx-sec" ${(S.secs || {})['Saved groups'] !== false ? 'open' : ''} ontoggle="txSec('Saved groups',this.open)"><summary class="h">Saved groups${mine.length ? ` <span class="tx-secn">${mine.length}</span>` : ''}</summary>
       ${mine.length ? `<select onchange="txUseGroup(this.value);this.value=''"><option value="">Select a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)} (${(g.member_ids || []).length})</option>`).join('')}</select>` : '<div class="tx-legend">No groups yet. Tick people in the list, then save them as a group.</div>'}
       <div class="tx-tools"><button class="tx-chip" onclick="txSaveGroup()" ${n ? '' : 'disabled'}>Save ${n || ''} selected as group</button>
-      ${mine.length ? `<select onchange="txEditGroup(this.value);this.value=''"><option value="">✏️ Edit a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}</div></div>`;
+      ${mine.length ? `<select onchange="txEditGroup(this.value);this.value=''"><option value="">✏️ Edit a group…</option>${mine.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}</div></details>`;
   }
   window.txUseGroup = id => {
     const g = S.groups.find(x => String(x.id) === String(id)); if (!g) return;
