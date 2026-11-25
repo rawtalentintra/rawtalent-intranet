@@ -28,7 +28,7 @@
     f: { status: new Set(['Active']), state: new Set(), onboarding: new Set(), compliance: 'any', gender: new Set(), qual: new Set(), segment: new Set(),
          centre: '', radius: 15, avail: false, worked28: false, notTextedDays: 7, replied: 'any', search: '',
          cstate: new Set(), booking: new Set(), mobileOnly: true },
-    numbers: [], picked: null, body: '', kind: 'educators', unread: 0, inTag: 'all', sendTag: '', groups: [], templates: [], refresh: null, audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
+    numbers: [], picked: null, body: '', kind: 'educators', unread: 0, inTag: 'all', title: '', inBatch: '', batches: [], sendTag: '', groups: [], templates: [], refresh: null, audC: null, pinned: new Set(), tableQ: '', lookQ: '' };
 
   const css = `<style>
     .tx-wrap{max-width:1200px;margin:0 auto}
@@ -96,7 +96,12 @@
   }
 
   // ── Inbox ──
-  async function loadConvos() { S.convos = await api('/api/educator-texts/conversations' + (S.inDate ? '?date=' + S.inDate : '')); }
+  async function loadConvos() {
+    const q = new URLSearchParams(); if (S.inDate) q.set('date', S.inDate); if (S.inBatch) q.set('batch', S.inBatch);
+    S.convos = await api('/api/educator-texts/conversations' + (q.toString() ? '?' + q : ''));
+  }
+  async function loadBatches() { try { S.batches = await api('/api/educator-texts/batches'); } catch { S.batches = []; } }
+  window.txInBatch = async v => { S.inBatch = v; await loadConvos(); render(); };
   function inboxRows() {
     const q = S.inQ || '';
     const list = S.convos.filter(c => matches({ name: c.educator_name, phone: c.phone, suburb: c.body }, q)
@@ -117,6 +122,8 @@
         <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;flex-direction:column;gap:6px">
           <input type="text" value="${esc(S.inQ || '')}" oninput="txInSearch(this.value)" placeholder="🔍 Name, number or message text" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
           <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)">On date <input type="date" value="${esc(S.inDate || '')}" onchange="txInDate(this.value)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12.5px">${S.inDate ? '<button class="tx-chip" onclick="txInDate(\'\');this.previousElementSibling.value=\'\'">Clear</button>' : ''}</div>
+          <select onchange="txInBatch(this.value)" style="width:100%;border:1px solid var(--gray-200);border-radius:8px;padding:6px 8px;font-family:inherit;font-size:12.5px">
+            <option value="">📨 All texts (no group filter)</option>${S.batches.map(b => `<option value="${b.id}" ${String(S.inBatch) === String(b.id) ? 'selected' : ''}>${esc(b.title)} · ${b.recipient_count} people · ${esc(new Date(b.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }))}${b.sent_by_name ? ' · ' + esc(String(b.sent_by_name).split(' ')[0]) : ''}</option>`).join('')}</select>
           <div class="tx-chips">${[['all', 'All'], ['unread', `Unread${S.unread ? ' (' + S.unread + ')' : ''}`], ['Booking', 'Booking'], ['Onboarding', 'Onboarding']].map(([v, l]) => `<button class="tx-chip ${S.inTag === v ? 'on' : ''}" onclick="txInTag('${v}')">${l}</button>`).join('')}</div></div>
         <div class="tx-list" id="txConvList">${rows}</div></div>
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
@@ -167,6 +174,7 @@
     const keepReply = document.getElementById('txReply')?.value || '';
     if (S.view === 'new') renderNew(); else { render(); const ta = document.getElementById('txReply'); if (ta) ta.value = keepReply; }
   }
+  window.S_title = v => { S.title = v; };
   window.txSendTag = v => { S.sendTag = v; renderNew(); };
   window.txTag = async t => {
     const c = S.convos.find(x => x.educator_id === S.open); const next = c?.tag === t ? null : t;
@@ -405,7 +413,9 @@
             <div class="tx-switch"><button class="${S.sender !== 'announcement' ? 'on' : ''}" onclick="txSender('number')">📱 Our number · REPLIES ENABLED</button><button class="${S.sender === 'announcement' ? 'on' : ''}" onclick="txSender('announcement')">📣 RawTalent · REPLIES DISABLED (for announcements only)</button></div>
             ${S.sender === 'announcement' && !S.usage.announceReady ? '<span class="tx-pill warn">Not set up in Customer.io yet</span>' : ''}</div>` : ''}
           <div class="tx-compose" style="border:0;padding:0">${tplBar('txBody')}
-          <div class="tx-tools"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Tag *</span>${['Booking', 'Onboarding'].map(v => `<button class="tx-chip ${S.sendTag === v ? 'on' : ''}" onclick="txSendTag('${v}')">${v}</button>`).join('')}${S.sendTag ? '' : '<span style="font-size:12px;color:#b45309">Required: pick Booking or Onboarding</span>'}</div><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
+          <div class="tx-tools"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Tag *</span>${['Booking', 'Onboarding'].map(v => `<button class="tx-chip ${S.sendTag === v ? 'on' : ''}" onclick="txSendTag('${v}')">${v}</button>`).join('')}${S.sendTag ? '' : '<span style="font-size:12px;color:#b45309">Required: pick Booking or Onboarding</span>'}</div>
+          <div class="tx-tools"><span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Group title</span>
+            <input type="text" id="txTitle" value="${esc(S.title)}" oninput="S_title(this.value)" maxlength="80" placeholder="e.g. 25-Nov Strat (required when texting more than 1 person)" style="flex:1;min-width:220px;border:1px solid var(--gray-200);border-radius:8px;padding:6px 8px;font-family:inherit;font-size:13px"></div><textarea id="txBody" placeholder="${isC() ? "Hi {first_name}, it's RawTalent. Do you need casual educators this week? Reply and we'll sort it." : "Hi {first_name}, it's RawTalent. We have shifts near you this week. Reply YES if you're keen."}" oninput="txBodyChange(this.value)">${esc(S.body)}</textarea>
           <div class="tx-count ${x.s > 1 || x.enc !== 'GSM-7' ? 'bad' : ''}" id="txBodyCount"><span>${x.n}/${x.max} characters · ${x.s} segment${x.s > 1 ? 's' : ''} per text${x.enc !== 'GSM-7' ? ' · emoji/special characters cut the limit to 70' : ''}</span><span>Use {first_name} to personalise${isC() ? ' (centre contact)' : ''}</span></div></div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px">
             <div style="font-size:13px"><b id="txPickCount">${picked.length}</b> of ${list.length.toLocaleString()} ${noun(2)} selected · <b id="txCost">≈ $${cost.toFixed(2)}</b> <span style="color:var(--text-muted)">(${picked.length * x.s} segments)</span></div>
@@ -437,6 +447,7 @@
     if (!ids.length) return say(`Select at least one ${noun(1)}`, 'error');
     if (!body) return say('Write the message first', 'error');
     if (!S.sendTag) return say('Tag this text as Booking or Onboarding before sending', 'error');
+    if (ids.length > 1 && !(S.title || '').trim()) { say('Give this group text a title (e.g. 25-Nov Strat) so you can find it in the Inbox', 'error'); document.getElementById('txTitle')?.focus(); return; }
     // Approval gate (Joy, 25 Nov 2026): more than 10 people needs Sophia.
     if (ids.length > (S.usage?.approvalOver ?? 10) && !S.usage?.isApprover &&
         !confirm(`You are sending more than ${S.usage?.approvalOver ?? 10} texts and need Sophia's approval.\n\nProceed? Sophia will get a Slack message to approve it, and the texts go out once she does.`)) return;
@@ -448,9 +459,9 @@
       const f = S.f, c = f.centre && S.aud.centres.find(z => z.centreKey === f.centre);
       const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
       const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
-      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, tag: S.sendTag || undefined, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
+      const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, tag: S.sendTag || undefined, title: (S.title || '').trim() || undefined, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
       if (r.pendingApproval) say(`Sent to Sophia for approval (${r.pendingApproval} texts). They go out once she approves.`, 'success'); else say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
-      S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = [];
+      S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = []; S.title = ''; loadBatches();
       // Jump straight to the Inbox with the new message showing (Joy, 24 Nov).
       await Promise.all([loadUsage(), loadConvos()]);
       S.view = 'inbox'; render();
@@ -564,7 +575,7 @@
     try {
       await Promise.all([loadUsage(), loadConvos()]);
       const u = await api('/api/educator-texts/updates?since=0'); S.maxId = u.maxId; S.settled = u.settled; S.unread = u.unread || 0;
-      await Promise.all([loadTemplates(), loadGroups()]);
+      await Promise.all([loadTemplates(), loadGroups(), loadBatches()]);
       api('/api/educator-texts/refresh').then(r => { if (r.running) { S.refresh = r; pollRefresh(); } }).catch(() => {});
       render(); setUnread();
       if (!S.poll) S.poll = setInterval(tick, 8000);

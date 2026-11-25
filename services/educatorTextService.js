@@ -89,7 +89,7 @@ async function segmentsSentToday(email) {
 }
 
 // recipients: [{ userId, name, phone }] from the server-side educator list.
-async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown = false, sender = 'number', tag = null }) {
+async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown = false, sender = 'number', tag = null, title = null }) {
   if (sender !== 'number' && sender !== 'announcement') sender = 'number';
   if (sender === 'announcement') {
     if (!canAnnounce(user)) throw Object.assign(new Error('Only Joy and Sophia can send RawTalent announcements.'), { status: 403 });
@@ -138,8 +138,8 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   if (tag) await db.execute({ sql: `INSERT INTO sms_tags (educator_id, tag, tagged_by, tagged_at) SELECT x, ?, ?, now() FROM unnest(?::text[]) x
     ON CONFLICT (educator_id) DO UPDATE SET tag = excluded.tag, tagged_by = excluded.tagged_by, tagged_at = now()`, args: [tag, user.email, ok.map(r => String(r.userId))] });
   const batch = (await db.execute({
-    sql: `INSERT INTO sms_batches (sent_by_email, sent_by_name, body, audience_note, recipient_count, segments_per_message, approval_status, tag) VALUES (?,?,?,?,?,?,?,?) RETURNING id`,
-    args: [user.email, user.name || user.email, text, audienceNote || null, ok.length, seg.segments, gated ? 'pending' : null, tag]
+    sql: `INSERT INTO sms_batches (sent_by_email, sent_by_name, body, audience_note, recipient_count, segments_per_message, approval_status, tag, title) VALUES (?,?,?,?,?,?,?,?,?) RETURNING id`,
+    args: [user.email, user.name || user.email, text, audienceNote || null, ok.length, seg.segments, gated ? 'pending' : null, tag, title ? String(title).trim().slice(0, 80) : null]
   })).rows[0];
   for (const r of ok) {
     await db.execute({

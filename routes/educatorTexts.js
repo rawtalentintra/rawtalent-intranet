@@ -128,7 +128,10 @@ router.post('/send', async (req, res) => {
     }
     // Every new send must be tagged Booking or Onboarding (Joy, 25 Nov 2026); replies keep the conversation's tag.
     if (req.body.audienceNote !== 'Reply' && !TAGS.includes(req.body.tag)) return res.status(400).json({ error: 'Tag this text as Booking or Onboarding before sending' });
-    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number', tag: TAGS.includes(req.body.tag) ? req.body.tag : null });
+    // Group texts need a title so the Inbox can filter to everyone who got it.
+    const title = String(req.body.title || '').trim();
+    if (req.body.audienceNote !== 'Reply' && ids.size > 1 && !title) return res.status(400).json({ error: 'Give this group text a title (e.g. 25-Nov Strat) so you can find it in the Inbox' });
+    const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number', tag: TAGS.includes(req.body.tag) ? req.body.tag : null, title: title || null });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
@@ -155,9 +158,11 @@ router.get('/conversations', async (req, res) => {
               (SELECT count(*) FROM sms_messages u WHERE u.educator_id = m.educator_id AND u.direction='in' AND u.read_at IS NULL) unread,
               (SELECT tag FROM sms_tags t WHERE t.educator_id = m.educator_id) tag
             FROM sms_messages m
-            ${/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? `WHERE educator_id IN (SELECT educator_id FROM sms_messages WHERE (created_at AT TIME ZONE 'Australia/Melbourne')::date = ?::date)` : ''}
+            WHERE true
+            ${/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? `AND educator_id IN (SELECT educator_id FROM sms_messages WHERE (created_at AT TIME ZONE 'Australia/Melbourne')::date = ?::date)` : ''}
+            ${/^\d+$/.test(req.query.batch || '') ? `AND educator_id IN (SELECT educator_id FROM sms_messages WHERE batch_id = ?)` : ''}
             ORDER BY educator_id, id DESC`,
-      args: /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? [req.query.date] : []
+      args: [...(/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? [req.query.date] : []), ...(/^\d+$/.test(req.query.batch || '') ? [Number(req.query.batch)] : [])]
     })).rows.sort((a, b) => (Number(b.unread) > 0) - (Number(a.unread) > 0) || new Date(b.created_at) - new Date(a.created_at)).slice(0, 500);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -173,6 +178,13 @@ router.get('/conversations/:id', async (req, res) => {
 });
 
 // Cheap poll for the open page: anything newer than the last id it has.
+// Titled group texts, newest first, for the Inbox filter.
+router.get('/batches', async (req, res) => {
+  try {
+    res.json((await getDb().execute({ sql: `SELECT id, title, tag, sent_by_name, recipient_count, created_at FROM sms_batches WHERE title IS NOT NULL ORDER BY id DESC LIMIT 200`, args: [] })).rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Tags (Booking / Onboarding) ──
 const TAGS = ['Booking', 'Onboarding'];
 router.put('/conversations/:id/tag', async (req, res) => {

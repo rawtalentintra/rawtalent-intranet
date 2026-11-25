@@ -3354,3 +3354,6 @@ CREATE TABLE IF NOT EXISTS sms_templates (
 );
 ALTER TABLE sms_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS tag TEXT;
+
+-- Group text title (Joy, 25 Nov 2026), e.g. "25-Nov Strat": lets the Inbox filter to everyone in one mass send.
+ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS title TEXT;
