@@ -364,13 +364,13 @@
       'Smart filters': [f.avail, f.worked28, f.mobileOnly, f.notTextedDays > 0, f.replied && f.replied !== 'any'].filter(Boolean).length };
     const secOpen = k => (S.secs || {})[k] ? 'open' : '';
     const secCount = k => SEC_N[k] ? ` <span class="tx-secn">${SEC_N[k]}</span>` : '';
+    // State sits right under "Near a centre" (Joy, 25 Nov 2026).
+    const stateSec = `<details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${isC() ? chips('cstate', opts('state'), f.cstate) : chips('state', opts('state'), f.state)}</details>`;
     const filters = isC() ? `
-        <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('cstate', opts('state'), f.cstate)}</details>
         <details class="tx-f tx-sec" ${secOpen('Bookings (RT)')} ontoggle="txSec('Bookings (RT)',this.open)"><summary class="h">Bookings (RT)${secCount('Bookings (RT)')}</summary><div class="tx-legend">Hover a button to see what it means.</div>${chips('booking', Object.keys(BOOK_TIP), f.booking, v => v, v => BOOK_TIP[v])}</details>
         <details class="tx-f tx-sec" ${secOpen('Smart filters')} ontoggle="txSec('Smart filters',this.open)"><summary class="h">Smart filters${secCount('Smart filters')}</summary>
           <label style="display:block;font-size:13px"><input type="checkbox" ${f.mobileOnly ? 'checked' : ''} onchange="txSet('mobileOnly',this.checked)"> Only centres with a mobile number</label>${notTexted}${replied}</details>` : `
         <details class="tx-f tx-sec" ${secOpen('Status (RT)')} ontoggle="txSec('Status (RT)',this.open)"><summary class="h">Status (RT)${secCount('Status (RT)')}</summary>${chips('status', opts('status'), f.status)}</details>
-        <details class="tx-f tx-sec" ${secOpen('State')} ontoggle="txSec('State',this.open)"><summary class="h">State${secCount('State')}</summary>${chips('state', opts('state'), f.state)}</details>
         <details class="tx-f tx-sec" ${secOpen('Compliance (RT)')} ontoggle="txSec('Compliance (RT)',this.open)"><summary class="h">Compliance (RT)${secCount('Compliance (RT)')}</summary><div class="tx-chips">${['any', 'yes', 'no'].map(v => `<button class="tx-chip ${f.compliance === v ? 'on' : ''}" onclick="txSet('compliance','${v}')">${{ any: 'Any', yes: 'Compliant', no: 'Not compliant' }[v]}</button>`).join('')}</div></details>
         <details class="tx-f tx-sec" ${secOpen('Onboarding')} ontoggle="txSec('Onboarding',this.open)"><summary class="h">Onboarding${secCount('Onboarding')}</summary>${chips('onboarding', obSort(opts('onboarding')), f.onboarding, v => OB_LABEL[v] || v)}</details>
         <details class="tx-f tx-sec" ${secOpen('Engagement')} ontoggle="txSec('Engagement',this.open)"><summary class="h">Engagement${secCount('Engagement')}</summary><div class="tx-legend">Hover a button to see what it means.</div>${chips('segment', Object.keys(SEG), f.segment, v => SEG[v], v => SEG_TIP[v])}</details>
@@ -393,6 +393,7 @@
         <div class="tx-f"><label class="h">Near a centre</label>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
           ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</div>
+        ${stateSec}
         ${groupsHtml()}
         ${filters}
       </div>
