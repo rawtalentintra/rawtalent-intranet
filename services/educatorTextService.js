@@ -36,6 +36,13 @@ const ANNOUNCE_EMAILS = (process.env.SMS_ANNOUNCE_EMAILS || 'joy@rawtalent.com.a
 const ANNOUNCE_TX = process.env.SMS_ANNOUNCE_TRANSACTIONAL_ID || 'heartbeat_sms_announcement'; // Customer.io transactional #7, sender "RawTalent" (identity 8)
 function canAnnounce(user) { return !!user && ANNOUNCE_EMAILS.includes(String(user.email || '').toLowerCase()); }
 // Live for everyone (Joy, 25 Nov 2026). Announcements stay Joy/Sophia only (canAnnounce).
+// Approval gate (Joy, 25 Nov 2026): a send to more than APPROVAL_OVER people waits
+// for Sophia, who gets a Slack DM linking to /sms-approval/:batchId.
+const APPROVAL_OVER = 10;
+const APPROVER_EMAIL = (process.env.SMS_APPROVER_EMAIL || 'sophia@rawtalent.com.au').toLowerCase();
+const isApprover = user => !!user && String(user.email || '').toLowerCase() === APPROVER_EMAIL;
+function needsApproval(user, count) { return count > APPROVAL_OVER && !isApprover(user); }
+
 function canSendTexts(user) {
   return !!user && user.active !== false;
 }
@@ -74,7 +81,7 @@ const inboundSecret = () => crypto.createHmac('sha256', process.env.SESSION_SECR
 
 async function segmentsSentToday(email) {
   const r = (await getDb().execute({
-    sql: `SELECT coalesce(sum(segments),0) n FROM sms_messages WHERE direction = 'out' AND sent_by_email = ? AND status IN ('queued','sent')
+    sql: `SELECT coalesce(sum(segments),0) n FROM sms_messages WHERE direction = 'out' AND sent_by_email = ? AND status IN ('queued','sent','pending_approval')
             AND created_at >= (date_trunc('day', now() AT TIME ZONE 'Australia/Melbourne') AT TIME ZONE 'Australia/Melbourne')`,
     args: [email]
   })).rows[0];
@@ -102,7 +109,7 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   const ids = recipients.map(r => String(r.userId));
   // Cool-down: last outbound in the window, unless they've replied since.
   const recent = ids.length ? (await db.execute({
-    sql: `SELECT educator_id, max(created_at) FILTER (WHERE direction='out' AND status IN ('queued','sent')) last_out,
+    sql: `SELECT educator_id, max(created_at) FILTER (WHERE direction='out' AND status IN ('queued','sent','pending_approval')) last_out,
                  max(created_at) FILTER (WHERE direction='in') last_in
           FROM sms_messages WHERE educator_id = ANY(?) AND created_at > now() - make_interval(hours => ?) GROUP BY educator_id`,
     args: [ids, LIMITS.cooldownHours]
@@ -126,17 +133,22 @@ async function queueSend({ recipients, body, user, audienceNote, ignoreCooldown 
   }
   if (!ok.length) return { queued: 0, skipped, segments: seg.segments, estCostAud: 0 };
 
+  const gated = needsApproval(user, ok.length);
   const batch = (await db.execute({
-    sql: `INSERT INTO sms_batches (sent_by_email, sent_by_name, body, audience_note, recipient_count, segments_per_message) VALUES (?,?,?,?,?,?) RETURNING id`,
-    args: [user.email, user.name || user.email, text, audienceNote || null, ok.length, seg.segments]
+    sql: `INSERT INTO sms_batches (sent_by_email, sent_by_name, body, audience_note, recipient_count, segments_per_message, approval_status) VALUES (?,?,?,?,?,?,?) RETURNING id`,
+    args: [user.email, user.name || user.email, text, audienceNote || null, ok.length, seg.segments, gated ? 'pending' : null]
   })).rows[0];
   for (const r of ok) {
     await db.execute({
       sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, batch_id, sent_by_email, sent_by_name, snap_status, snap_compliant, recipient_type, cio_id, sender)
-            VALUES (?,?,?,'out',?,?,'queued',?,?,?,?,?,?,?,?)`,
-      args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, batch.id, user.email, user.name || user.email,
+            VALUES (?,?,?,'out',?,?,?,?,?,?,?,?,?,?,?)`,
+      args: [String(r.userId), r.name || null, r.phone, render(r), segmentInfo(render(r)).segments, gated ? 'pending_approval' : 'queued', batch.id, user.email, user.name || user.email,
              r.status || null, r.compliant == null ? null : !!r.compliant, r.type || 'educator', String(r.cioId || r.userId), sender]
     });
+  }
+  if (gated) {
+    notifyApprover(batch.id, user, ok.length, text, audienceNote).catch(e => console.error('[sms] approval Slack:', e.message));
+    return { queued: 0, pendingApproval: ok.length, skipped, segments: seg.segments, estCostAud: +(need * LIMITS.costPerSegmentAud).toFixed(2), batchId: batch.id };
   }
   kick();
   return { queued: ok.length, skipped, segments: seg.segments, estCostAud: +(need * LIMITS.costPerSegmentAud).toFixed(2), batchId: batch.id, waitsForMorning: !inSendWindow() };
@@ -236,4 +248,26 @@ async function recordInbound({ customerId, from, body }) {
   return row.id;
 }
 
-module.exports = { canAnnounce, announceReady: () => !!ANNOUNCE_TX, canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };
+async function notifyApprover(batchId, user, count, text, note) {
+  const url = `${process.env.APP_URL || 'https://rawtalent-internal.app'}/sms-approval/${batchId}`;
+  const msg = `📱 *SMS approval needed*\n${user.name || user.email} wants to text *${count} people*${note ? ` (${note})` : ''}:\n> ${String(text).slice(0, 300)}\n<${url}|Review and approve>`;
+  await require('./slackService').sendDmByEmail(APPROVER_EMAIL, msg);
+}
+
+// Sophia approves or rejects a whole batch.
+async function decideBatch(batchId, user, approve) {
+  if (!isApprover(user) && user.role !== 'super_admin') throw Object.assign(new Error('Only Sophia can approve SMS sends.'), { status: 403 });
+  const db = getDb();
+  const b = (await db.execute({ sql: `UPDATE sms_batches SET approval_status = ?, approved_by = ?, approved_at = now() WHERE id = ? AND approval_status = 'pending' RETURNING *`,
+    args: [approve ? 'approved' : 'rejected', user.email, batchId] })).rows[0];
+  if (!b) throw Object.assign(new Error('This send was already decided or does not exist.'), { status: 409 });
+  await db.execute({ sql: `UPDATE sms_messages SET status = ?, error = ? WHERE batch_id = ? AND status = 'pending_approval'`,
+    args: approve ? ['queued', null, batchId] : ['skipped', 'Not approved by ' + (user.name || user.email), batchId] });
+  if (approve) kick();
+  require('./slackService').sendDmByEmail(b.sent_by_email, approve
+    ? `✅ Your SMS to ${b.recipient_count} people was approved by ${user.name || user.email} and is sending now.`
+    : `❌ Your SMS to ${b.recipient_count} people was not approved by ${user.name || user.email}.`).catch(() => {});
+  return b;
+}
+
+module.exports = { decideBatch, needsApproval, APPROVAL_OVER, isApprover, canAnnounce, announceReady: () => !!ANNOUNCE_TX, canSendTexts, segmentInfo, toE164, queueSend, recordInbound, startWorker, inboundSecret, segmentsSentToday, LIMITS, inSendWindow };

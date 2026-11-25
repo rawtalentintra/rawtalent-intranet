@@ -114,7 +114,7 @@
       <div class="tx-card">${S.open ? threadHtml(conv) : '<div style="padding:60px;text-align:center;color:var(--text-muted)">Pick a conversation</div>'}</div></div>`;
   }
   function threadHtml(conv) {
-    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? `${m.sender === 'announcement' ? ' · 📣 RawTalent announcement' : ''} · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : 'Sending…'}` : ''}</div></div>`).join('');
+    const msgs = S.thread.map(m => `<div class="tx-b ${m.direction}">${esc(m.body)}<div class="tx-meta">${when(m.created_at)}${m.direction === 'out' ? `${m.sender === 'announcement' ? ' · 📣 RawTalent announcement' : ''} · ${esc(m.sent_by_name || '')} · ${m.status === 'sent' ? 'Sent' : m.status === 'failed' ? '⚠️ Failed: ' + esc(m.error || '') : m.status === 'skipped' ? '⏭ Not sent: ' + esc(m.error || '') : m.status === 'pending_approval' ? '⏳ Waiting for Sophia' : 'Sending…'}` : ''}</div></div>`).join('');
     return `<div class="tx-thread">
       <div style="padding:12px 16px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:700;color:var(--navy)">${esc(conv?.educator_name || 'Educator')}</div>
@@ -324,6 +324,9 @@
     const ids = [...S.picked], body = (S.body || '').trim();
     if (!ids.length) return say(`Select at least one ${noun(1)}`, 'error');
     if (!body) return say('Write the message first', 'error');
+    // Approval gate (Joy, 25 Nov 2026): more than 10 people needs Sophia.
+    if (ids.length > (S.usage?.approvalOver ?? 10) && !S.usage?.isApprover &&
+        !confirm(`You are sending more than ${S.usage?.approvalOver ?? 10} texts and need Sophia's approval.\n\nProceed? Sophia will get a Slack message to approve it, and the texts go out once she does.`)) return;
     const x = seg(body.replace(/\{first_name\}/gi, 'Bartholomew')), segs = ids.length * x.s, cost = segs * (S.usage?.costPerSegmentAud || 0.08);
     const msg = `Send this text to ${ids.length} ${noun(ids.length)}?\n\n"${body}"\n\n${x.s} segment${x.s > 1 ? 's' : ''} each · ${segs} segments · about $${cost.toFixed(2)}\nAnyone texted in the last ${S.usage?.cooldownHours || 24}h will be skipped.`;
     if (ids.length >= 20) { const t = prompt(msg + `\n\nType ${ids.length} to confirm.`); if (String(t || '').trim() !== String(ids.length)) return; }
@@ -333,7 +336,7 @@
       const note = [isC() ? 'Centres' : 'Educators', c ? `${f.radius}km of ${c.name}` : '', ...(isC() ? [[...f.cstate].join('/'), [...f.booking].join('/')] : [[...f.status].join('/'), [...f.state].join('/')])].filter(Boolean).join(' · ');
       const numberNames = Object.fromEntries(S.numbers.map(n => [n.userId, n.name === n.phone ? '' : n.name]));
       const r = await post('/api/educator-texts/send', { userIds: ids, body, audienceNote: note, numberNames, sender: S.usage?.canAnnounce && S.sender === 'announcement' ? 'announcement' : 'number' });
-      say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
+      if (r.pendingApproval) say(`Sent to Sophia for approval (${r.pendingApproval} texts). They go out once she approves.`, 'success'); else say(`${r.queued} text${r.queued === 1 ? '' : 's'} queued${r.skipped.length ? `, ${r.skipped.length} skipped (${[...new Set(r.skipped.map(s => s.why))].join('; ')})` : ''}${r.waitsForMorning ? '. They will go out after 8am.' : ''}`, 'success');
       S.body = ''; S.picked = null; S.pinned = new Set(); S.numbers = [];
       // Jump straight to the Inbox with the new message showing (Joy, 24 Nov).
       await Promise.all([loadUsage(), loadConvos()]);

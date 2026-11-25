@@ -210,6 +210,7 @@ app.use('/auth', require('./routes/auth'));
 // through to this router untouched — order here matters for that reason.
 app.use('/auth/jobadder', require('./routes/jobadderOAuth'));
 app.use('/auth/webex-contacts', require('./routes/webexContacts'));
+app.use('/sms-approval', require('./routes/smsApproval'));
 app.use('/api/articles', require('./routes/articles'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/sources', require('./routes/sources'));

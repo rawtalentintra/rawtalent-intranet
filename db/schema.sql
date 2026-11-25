@@ -3309,6 +3309,10 @@ ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS recipient_type TEXT DEFAULT 'e
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS cio_id TEXT;
 -- 'number' = replyable +61 number; 'announcement' = one-way "RawTalent" sender (Joy/Sophia only)
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sender TEXT DEFAULT 'number';
+-- Approval gate (Joy, 25 Nov 2026): sends to more than 10 people wait for Sophia.
+ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS approval_status TEXT;   -- null = not needed | pending | approved | rejected
+ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS approved_by CITEXT;
+ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 
 -- Webex caller ID sync (Joy only, 25 Nov 2026): token with Identity:contact scope + last run.
 CREATE TABLE IF NOT EXISTS webex_contacts_auth (
