@@ -240,9 +240,14 @@ router.delete('/templates/:id', async (req, res) => {
 // One refresh at a time for everyone; RT's own sync lock prevents overlap with
 // the scheduled syncs; a refresh within 5 minutes of the last one is skipped.
 const refreshJob = { running: false, step: null, startedAt: null, finishedAt: null, error: null, by: null };
-router.get('/refresh', (req, res) => res.json(refreshJob));
+// Also reports a scheduled RT sync in progress, so everyone's button greys out.
+router.get('/refresh', async (req, res) => {
+  let rtSync = false;
+  try { const sync = require('../services/rtCandidatesSyncService'); rtSync = sync.isSyncRunning(await sync.getSyncState()); } catch {}
+  res.json({ ...refreshJob, running: refreshJob.running || rtSync, step: refreshJob.step || (rtSync ? 'RT sync already running' : null) });
+});
 router.post('/refresh', async (req, res) => {
-  if (refreshJob.running) return res.json({ ...refreshJob, alreadyRunning: true });
+  if (refreshJob.running) return res.status(409).json({ ...refreshJob, alreadyRunning: true, error: `Already refreshing (started by ${refreshJob.by || 'someone'}). Please wait.` });
   if (refreshJob.finishedAt && !refreshJob.error && Date.now() - refreshJob.finishedAt < 5 * 60 * 1000) return res.json({ ...refreshJob, recent: true });
   Object.assign(refreshJob, { running: true, step: 'Pulling educators from RT', startedAt: Date.now(), finishedAt: null, error: null, by: req.user.name || req.user.email });
   res.json(refreshJob);

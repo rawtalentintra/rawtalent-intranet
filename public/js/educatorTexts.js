@@ -213,12 +213,15 @@
       const r = await post('/api/educator-texts/refresh', {});
       if (r.recent) return say('The list was refreshed from RT in the last 5 minutes, so it is already up to date', 'success');
       S.refresh = r; renderNew(); pollRefresh();
-    } catch (e) { say(e.message, 'error'); }
+    } catch (e) { say(e.message, 'error'); pollRefresh(); }
   };
+  let refreshPolling = false;
   async function pollRefresh() {
-    const r = await api('/api/educator-texts/refresh').catch(() => null); if (!r) return;
+    refreshPolling = true;
+    const r = await api('/api/educator-texts/refresh').catch(() => null); if (!r) { refreshPolling = false; return; }
     S.refresh = r;
-    if (r.running) { const el = document.getElementById('txRefreshState'); if (el) el.textContent = r.step || 'Refreshing…'; return setTimeout(pollRefresh, 3000); }
+    if (r.running) { const el = document.getElementById('txRefreshState'); if (el) el.textContent = (r.step || 'Refreshing…') + (r.by ? ' · ' + r.by : ''); return setTimeout(pollRefresh, 3000); }
+    refreshPolling = false;
     if (r.error) say('Refresh failed: ' + r.error, 'error');
     else { const keep = S.body; if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); S.body = keep; say('Updated from RT', 'success'); }
     renderNew();
@@ -405,7 +408,7 @@
         </div>
         <div class="tx-card" style="max-height:600px;overflow:auto">
           <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;gap:8px;align-items:center"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
-            ${S.refresh?.running ? `<span id="txRefreshState" style="font-size:12px;color:var(--text-muted);white-space:nowrap">${esc(S.refresh.step || 'Refreshing…')}</span><button class="btn-secondary" disabled>⟳ Refreshing…</button>`
+            ${S.refresh?.running ? `<span id="txRefreshState" style="font-size:12px;color:var(--text-muted);white-space:nowrap">${esc(S.refresh.step || 'Refreshing…')}${S.refresh.by ? ' · ' + esc(S.refresh.by) : ''}</span><button class="btn-secondary" disabled style="opacity:.5;cursor:not-allowed">⟳ Refreshing…</button>`
               : `<button class="btn-secondary" style="white-space:nowrap" title="Pull the latest status, onboarding, compliance and shifts from RT before you send" onclick="txRefresh()">⟳ Refresh from RT</button>`}</div>
           <table class="tx-table"><thead><tr>${head}</tr></thead><tbody id="txRows">${rowsHtml(list)}</tbody></table>
           <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">${isC() ? 'Centres come from RT. Texts go to the centre/location mobile; landline-only centres can\'t be texted.' : `RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).`}</div>
@@ -488,6 +491,10 @@
     try {
       const u = await api('/api/educator-texts/updates?since=' + S.maxId);
       if (u.unread !== S.unread) { S.unread = u.unread; setUnread(); }
+      if (S.view === 'new' && !refreshPolling) {
+        const rr = await api('/api/educator-texts/refresh').catch(() => null);
+        if (rr && !!rr.running !== !!S.refresh?.running) { S.refresh = rr; renderNew(); if (rr.running) pollRefresh(); }
+      }
       if (u.maxId !== S.maxId || u.settled !== S.settled) {
         S.maxId = u.maxId; S.settled = u.settled;
         if (S.view === 'inbox') {
