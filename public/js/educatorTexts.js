@@ -210,7 +210,10 @@
   // ── Refresh from RT ──
   window.txRefresh = async () => {
     try {
-      const r = await post('/api/educator-texts/refresh', {});
+      // Only the people in the current filtered list are re-checked (fast and exact).
+      const ids = isC() ? [] : filtered().map(e => e.userId).filter(id => /^\d+$/.test(id));
+      if (ids.length > 1000 && !confirm(`Your filters match ${ids.length} educators. Only the first 1,000 can be re-checked at once. Narrow the filters for a full check, or continue?`)) return;
+      const r = await post('/api/educator-texts/refresh', { ids: ids.slice(0, 1000) });
       if (r.recent) return say('The list was refreshed from RT in the last 5 minutes, so it is already up to date', 'success');
       S.refresh = r; renderNew(); pollRefresh();
     } catch (e) { say(e.message, 'error'); pollRefresh(); }
@@ -223,7 +226,7 @@
     if (r.running) { const el = document.getElementById('txRefreshState'); if (el) el.textContent = (r.step || 'Refreshing…') + (r.by ? ' · ' + r.by : ''); return setTimeout(pollRefresh, 3000); }
     refreshPolling = false;
     if (r.error) say('Refresh failed: ' + r.error, 'error');
-    else { const keep = S.body; if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); S.body = keep; say('Updated from RT', 'success'); }
+    else { const keep = S.body; if (r.failed) say(`${r.failed} educators couldn't be checked in RT just now`, 'error'); if (isC()) S.audC = await api('/api/educator-texts/audience?type=centres'); else S.aud = await api('/api/educator-texts/audience'); S.body = keep; say('Updated from RT', 'success'); }
     renderNew();
   }
 
@@ -409,7 +412,7 @@
         <div class="tx-card" style="max-height:600px;overflow:auto">
           <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;gap:8px;align-items:center"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
             ${S.refresh?.running ? `<span id="txRefreshState" style="font-size:12px;color:var(--text-muted);white-space:nowrap">${esc(S.refresh.step || 'Refreshing…')}${S.refresh.by ? ' · ' + esc(S.refresh.by) : ''}</span><button class="btn-secondary" disabled style="opacity:.5;cursor:not-allowed">⟳ Refreshing…</button>`
-              : `<button class="btn-secondary" style="white-space:nowrap" title="Pull the latest status, onboarding, compliance and shifts from RT before you send" onclick="txRefresh()">⟳ Refresh from RT</button>`}</div>
+              : `<button class="btn-secondary" style="white-space:nowrap" title="Re-checks everyone in your current filtered list against RT (status, onboarding, compliance, phone) and refreshes shifts, so the list is exact before you send" onclick="txRefresh()">⟳ Refresh from RT</button>`}</div>
           <table class="tx-table"><thead><tr>${head}</tr></thead><tbody id="txRows">${rowsHtml(list)}</tbody></table>
           <div style="padding:8px 10px;font-size:11.5px;color:var(--text-muted)">${isC() ? 'Centres come from RT. Texts go to the centre/location mobile; landline-only centres can\'t be texted.' : `RT copy as of ${S.aud.generatedAt ? when(S.aud.generatedAt) : 'now'}. <span style="color:#2563eb">●</span> = re-checked live against RT just now (rows on screen are checked automatically).`}</div>
         </div>

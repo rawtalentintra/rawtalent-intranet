@@ -251,16 +251,17 @@ router.get('/refresh', async (req, res) => {
 router.post('/refresh', async (req, res) => {
   if (refreshJob.running) return res.status(409).json({ ...refreshJob, alreadyRunning: true, error: `Already refreshing (started by ${refreshJob.by || 'someone'}). Please wait.` });
   if (refreshJob.finishedAt && !refreshJob.error && Date.now() - refreshJob.finishedAt < 5 * 60 * 1000) return res.json({ ...refreshJob, recent: true });
-  Object.assign(refreshJob, { running: true, step: 'Pulling educators from RT', startedAt: Date.now(), finishedAt: null, error: null, by: req.user.name || req.user.email });
+  // Fast + exact (Joy, 25 Nov 2026): re-fetch only the educators in the sender's
+  // current filtered list, one by one from RT's by-id endpoint, instead of
+  // pulling all ~15,000. The 2-hourly RT sync still picks up brand-new sign-ups.
+  const ids = [...new Set((req.body.ids || []).map(String).filter(id => /^\d+$/.test(id)))].slice(0, 1000);
+  Object.assign(refreshJob, { running: true, step: ids.length ? `Checking ${ids.length} educators in RT` : 'Pulling bookings from RT', startedAt: Date.now(), finishedAt: null, error: null, by: req.user.name || req.user.email, count: ids.length, failed: 0 });
   res.json(refreshJob);
   (async () => {
     const sync = require('../services/rtCandidatesSyncService');
-    const st = await sync.getSyncState();
-    if (sync.isSyncRunning(st)) {
-      // A scheduled sync is already pulling RT; wait for it rather than start a second one.
-      for (let i = 0; i < 120 && sync.isSyncRunning(await sync.getSyncState()); i++) await new Promise(r => setTimeout(r, 5000));
-    } else {
-      await sync.syncAllCandidates('sms-refresh:' + (req.user.email || ''));
+    if (ids.length) {
+      const { failed } = await sync.fetchCandidatesLive(ids, { concurrency: 8, onProgress: (d, n) => { refreshJob.step = `Checking educators in RT (${d}/${n})`; } });
+      refreshJob.failed = failed.length;
     }
     refreshJob.step = 'Pulling bookings from RT';
     await require('./centres').refreshCentresAndBookings();
