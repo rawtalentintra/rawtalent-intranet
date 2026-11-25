@@ -468,4 +468,4 @@ async function getWorkforceStats(rangeDays = 7) {
   return { reps, gaps: gapsRes.rows, rangeDays };
 }
 
-module.exports = { isConfigured, getAgentStatuses, syncCallHistory, getCdrSyncStatus, getWorkforceStats, buildCdrNameMatcher };
+module.exports = { isConfigured, getAccessToken, getAgentStatuses, syncCallHistory, getCdrSyncStatus, getWorkforceStats, buildCdrNameMatcher };
