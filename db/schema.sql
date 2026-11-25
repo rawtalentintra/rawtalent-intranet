@@ -3309,3 +3309,17 @@ ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS recipient_type TEXT DEFAULT 'e
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS cio_id TEXT;
 -- 'number' = replyable +61 number; 'announcement' = one-way "RawTalent" sender (Joy/Sophia only)
 ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sender TEXT DEFAULT 'number';
+
+-- Webex caller ID sync (Joy only, 25 Nov 2026): token with Identity:contact scope + last run.
+CREATE TABLE IF NOT EXISTS webex_contacts_auth (
+  id INTEGER PRIMARY KEY,
+  access_token TEXT,
+  refresh_token TEXT,
+  access_token_expires_at BIGINT,
+  connected_by TEXT,
+  connected_at TIMESTAMPTZ,
+  last_sync_at TIMESTAMPTZ,
+  last_sync_result TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE webex_contacts_auth ENABLE ROW LEVEL SECURITY;

@@ -209,6 +209,7 @@ app.use('/auth', require('./routes/auth'));
 // routes/auth.js above has no /jobadder route of its own, so requests fall
 // through to this router untouched — order here matters for that reason.
 app.use('/auth/jobadder', require('./routes/jobadderOAuth'));
+app.use('/auth/webex-contacts', require('./routes/webexContacts'));
 app.use('/api/articles', require('./routes/articles'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/sources', require('./routes/sources'));
@@ -555,6 +556,18 @@ async function start() {
     require('./services/firstBookingFreeService').syncAllOwnerAttributes()
       .then(r => console.log('Customer.io owner sync:', JSON.stringify(r))).catch(err => console.error('Owner sync error:', err.message));
   };
+  // Webex caller ID contacts (Joy, 25 Nov 2026): once a day after 2am Melbourne.
+  let wxContactsDay = null;
+  setInterval(() => {
+    const now = new Date();
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(now);
+    const h = +new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', hour: 'numeric', hourCycle: 'h23' }).format(now);
+    if (h < 2 || wxContactsDay === day) return;
+    wxContactsDay = day;
+    const wxc = require('./services/webexContactsService');
+    wxc.status().then(s => s.connected ? wxc.sync() : null)
+      .then(r => r && console.log('Webex contacts sync:', JSON.stringify(r))).catch(err => console.error('Webex contacts sync error:', err.message));
+  }, 15 * 60 * 1000);
   setTimeout(ownerSync, 3 * 60 * 1000);
   setInterval(ownerSync, 60 * 60 * 1000);
   // initDatabase() only clears expired sessions on boot — keep sweeping
