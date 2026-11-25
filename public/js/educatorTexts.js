@@ -392,7 +392,8 @@
           <button class="tx-chip" style="margin-top:6px" onclick="txAddNum()">+ Add number</button></div>
         <details class="tx-f tx-sec" ${(S.secs || {})['Near a centre'] !== false ? 'open' : ''} ontoggle="txSec('Near a centre',this.open)"><summary class="h">Near a centre${f.centre ? ' <span class="tx-secn">1</span>' : ''}</summary>
           <select onchange="txSet('centre',this.value)"><option value="">Any location</option>${centres.map(c => `<option value="${esc(c.centreKey)}" ${f.centre === c.centreKey ? 'selected' : ''}>${esc(c.name)}${c.suburb ? ' (' + esc(c.suburb) + ')' : ''}</option>`).join('')}</select>
-          ${f.centre ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px">Within</span><input type="number" min="1" max="200" value="${f.radius}" onchange="txSet('radius',Number(this.value)||15)" style="width:80px"><span style="font-size:12px">km</span></div>` : ''}</details>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:12px;white-space:nowrap">Within</span>
+            <select onchange="txSet('radius',Number(this.value))" ${f.centre ? '' : 'disabled title="Pick a centre first"'}>${[2, 5, 10, 15, 20, 30, 50, 100].map(k => `<option value="${k}" ${Number(f.radius) === k ? 'selected' : ''}>${k} km</option>`).join('')}</select></div></details>
         ${stateSec}
         ${groupsHtml()}
         ${filters}
