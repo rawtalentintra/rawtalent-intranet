@@ -540,6 +540,10 @@ async function maybeRunWeeklyAcecqaSync() {
 
 async function start() {
   await initDatabase();
+  // A deploy restart kills any RT candidates sync mid-way; its "running" row would
+  // otherwise block the next syncs (and the SMS Refresh button) for 20 minutes.
+  require('./db/database').getDb().execute(`UPDATE rt_candidates_sync_state SET status = 'failed', finished_at = now(), error_message = 'Interrupted by a server restart' WHERE id = 1 AND status = 'running'`)
+    .catch(err => console.error('RT sync state reset failed:', err.message));
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
     syncFromDrive().catch(err => console.error('Drive sync error:', err.message));
   }
