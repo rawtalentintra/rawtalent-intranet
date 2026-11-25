@@ -411,7 +411,7 @@
             <div style="font-size:13px"><b id="txPickCount">${picked.length}</b> of ${list.length.toLocaleString()} ${noun(2)} selected · <b id="txCost">≈ $${cost.toFixed(2)}</b> <span style="color:var(--text-muted)">(${picked.length * x.s} segments)</span></div>
             <div style="display:flex;gap:6px"><button class="btn-secondary" onclick="txPickAll(false)">Clear</button><button class="btn-secondary" onclick="txPickAll(true)">Select all</button><button class="btn-add" onclick="txSendMass()">Review & send</button></div></div>
         </div>
-        <div class="tx-card" style="max-height:600px;overflow:auto">
+        <div class="tx-card" id="txListCard" style="max-height:600px;overflow:auto">
           <div style="padding:10px;border-bottom:1px solid var(--gray-100);display:flex;gap:8px;align-items:center"><input type="text" value="${esc(S.tableQ)}" oninput="txTableSearch(this.value)" placeholder="🔍 Search this list by name or number (0412 345 678, 412345678, +61 412…)" style="flex:1;border:1px solid var(--gray-200);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:13px">
             ${S.refresh?.running ? `<span id="txRefreshState" style="font-size:12px;color:var(--text-muted);white-space:nowrap">${esc(S.refresh.step || 'Refreshing…')}${S.refresh.by ? ' · ' + esc(S.refresh.by) : ''}</span><button class="btn-secondary" disabled style="opacity:.5;cursor:not-allowed">⟳ Refreshing…</button>`
               : `<button class="btn-secondary" style="white-space:nowrap" title="Re-checks everyone in your current filtered list against RT (status, onboarding, compliance, phone) and refreshes shifts, so the list is exact before you send" onclick="txRefresh()">⟳ Refresh from RT</button>`}</div>
@@ -458,7 +458,27 @@
     } catch (e) { say(e.message, 'error'); }
   };
 
-  function renderNew() { const box = document.getElementById('txBox'); if (box) box.innerHTML = newHtml(); liveCheck(); }
+  // Keep scroll positions when the SMS area redraws (Joy, 25 Nov 2026): filter
+  // clicks and tab switches used to jump the page and reset the panels to the top.
+  const PANELS = ['.tx-filters', '#txListCard', '#txConvList', '#txMsgs'];
+  function snapScroll() {
+    const p = {}; PANELS.forEach(sel => { const el = document.querySelector(sel); if (el) p[sel] = el.scrollTop; });
+    return { y: window.scrollY, p };
+  }
+  function restoreScroll(snap, skip = []) {
+    if (!snap) return;
+    PANELS.forEach(sel => { if (skip.includes(sel)) return; const el = document.querySelector(sel); if (el && snap.p[sel] != null) el.scrollTop = snap.p[sel]; });
+    window.scrollTo(0, snap.y);
+  }
+  // Redraw while holding the page height, so nothing below collapses and jumps.
+  function swap(el, html) {
+    const h = el.offsetHeight; el.style.minHeight = h + 'px'; el.innerHTML = html;
+    requestAnimationFrame(() => { el.style.minHeight = ''; });
+  }
+  function renderNew() {
+    const box = document.getElementById('txBox'); if (!box) return;
+    const snap = snapScroll(); swap(box, newHtml()); restoreScroll(snap); liveCheck();
+  }
 
   // Re-checks the educators on screen live against RT in the background
   // (max 60, each at most once per 5 minutes), then updates them in place.
@@ -479,16 +499,24 @@
           e.liveAt = now;
           for (const k of ['status', 'onboarding', 'compliant', 'phone']) if (f[k] !== undefined && f[k] !== null) e[k] = f[k];
         }
-        if (S.view === 'new') { const box = document.getElementById('txBox'); if (box) box.innerHTML = newHtml(); }
+        if (S.view === 'new') renderNew();
       } catch (err) { /* cached values stay */ }
     }, 500);
   }
-  function render() {
+  function render(snap, skip) {
     const root = document.getElementById('resultsList'); if (!root || (typeof currentMode !== 'undefined' && currentMode !== 'texts')) return;
-    root.innerHTML = `${css}<div class="tx-wrap">${usageBar()}<div id="txBox">${S.view === 'inbox' ? inboxHtml() : newHtml()}</div></div>`;
+    const keep = snap || snapScroll();
+    swap(root, `${css}<div class="tx-wrap">${usageBar()}<div id="txBox">${S.view === 'inbox' ? inboxHtml() : newHtml()}</div></div>`);
+    restoreScroll(keep, skip || []);
     if (S.view === 'inbox' && S.open) txCount('txReply', 'txReplyCount');
   }
-  window.txView = async v => { S.view = v; render(); if (v === 'new' && !S.aud) { try { S.aud = await api('/api/educator-texts/audience'); } catch (e) { say(e.message, 'error'); } render(); } };
+  const viewScroll = {};
+  window.txView = async v => {
+    if (v === S.view) return;
+    viewScroll[S.view] = snapScroll();
+    S.view = v; render(viewScroll[v] || { y: window.scrollY, p: {} });
+    if (v === 'new' && !S.aud) { try { S.aud = await api('/api/educator-texts/audience'); } catch (e) { say(e.message, 'error'); } render(); }
+  };
 
   // Poll our own DB every 8s while the tab is open (cheap; no Customer.io calls).
   async function tick() {
