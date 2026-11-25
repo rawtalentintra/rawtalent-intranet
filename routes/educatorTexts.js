@@ -126,6 +126,8 @@ router.post('/send', async (req, res) => {
         recipients.push({ userId: 'tel:' + e164, name: nm || e164, firstName: nm ? nm.split(/\s+/)[0] : 'there', phone: e164, type: 'number', cioId: 'sms_' + e164.slice(1) });
       }
     }
+    // Every new send must be tagged Booking or Onboarding (Joy, 25 Nov 2026); replies keep the conversation's tag.
+    if (req.body.audienceNote !== 'Reply' && !TAGS.includes(req.body.tag)) return res.status(400).json({ error: 'Tag this text as Booking or Onboarding before sending' });
     const out = await svc.queueSend({ recipients, body: req.body.body, user: req.user, audienceNote: req.body.audienceNote, ignoreCooldown: !!req.body.ignoreCooldown && ids.size === 1, sender: req.body.sender === 'announcement' ? 'announcement' : 'number', tag: TAGS.includes(req.body.tag) ? req.body.tag : null });
     res.json(out);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
