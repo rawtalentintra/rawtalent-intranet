@@ -248,7 +248,20 @@ async function recordInbound({ customerId, from, body }) {
     sql: `INSERT INTO sms_messages (educator_id, educator_name, phone, direction, body, segments, status, recipient_type) VALUES (?,?,?,'in',?,?, 'received', ?) RETURNING id`,
     args: [id, name, from || null, String(body || '').slice(0, 2000), segmentInfo(body).segments, type]
   })).rows[0];
+  notifyReply(id, name, body).catch(e => console.error('[sms] reply Slack:', e.message));
   return row.id;
+}
+
+// Joy, 25 Nov 2026: every reply goes to the HeartBeat daily thread in #daily-check-in,
+// tagging whoever last texted that person.
+async function notifyReply(id, name, body) {
+  const slack = require('./slackService');
+  if (!slack.isConfigured()) return;
+  const last = (await getDb().execute({ sql: `SELECT sent_by_email FROM sms_messages WHERE educator_id = ? AND direction = 'out' AND sent_by_email IS NOT NULL ORDER BY id DESC LIMIT 1`, args: [id] })).rows[0];
+  const uid = last ? await slack.slackUserId(last.sent_by_email).catch(() => null) : null;
+  const url = `${process.env.APP_URL || 'https://rawtalent-internal.app'}/?tab=texts`;
+  const text = String(body || '').replace(/\s+/g, ' ').slice(0, 300);
+  await slack.postToDailyThread(`💬 *SMS reply from ${name || 'unknown'}*${uid ? ` <@${uid}>` : ''}\n> ${text}\n<${url}|Open in HeartBeat Texts>`);
 }
 
 async function notifyApprover(batchId, user, count, text, note) {
