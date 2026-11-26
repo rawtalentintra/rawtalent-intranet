@@ -25,6 +25,21 @@ router.post('/login', (req, res, next) => {
   })(req, res, next);
 });
 
+// Change own password (forced on first login after Joy sets a temporary one).
+router.post('/change-password', async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not signed in' });
+  const { current, next: pw } = req.body || {};
+  if (!pw || String(pw).length < 10) return res.status(400).json({ error: 'New password must be at least 10 characters.' });
+  try {
+    const u = (await getDb().execute({ sql: 'SELECT password_hash FROM users WHERE id = ?', args: [req.user.id] })).rows[0];
+    if (!u || !u.password_hash || !(await bcrypt.compare(String(current || ''), u.password_hash))) return res.status(400).json({ error: 'Current password is wrong.' });
+    if (await bcrypt.compare(String(pw), u.password_hash)) return res.status(400).json({ error: 'Pick a different password from the temporary one.' });
+    await getDb().execute({ sql: 'UPDATE users SET password_hash = ?, must_change_password = false WHERE id = ?', args: [await bcrypt.hash(String(pw), 12), req.user.id] });
+    require('../config/passport').invalidateUserCache(req.user.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
 // Same-origin-relative-path check as public/login.html's own returnTo
 // guard — this one matters more, since it's what stops someone crafting
 // a /auth/google?returnTo=https://evil.example link from turning Google

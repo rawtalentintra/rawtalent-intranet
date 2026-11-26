@@ -115,6 +115,13 @@ require('./config/passport');
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(require('./services/userActivityService').middleware);
+// Temporary password set by Joy: nothing but the change-password page until they pick their own.
+app.use((req, res, next) => {
+  if (!req.user || !req.user.must_change_password) return next();
+  if (req.path.startsWith('/auth/') || req.path === '/change-password.html' || /\.(css|js|png|svg|ico|woff2?)$/.test(req.path)) return next();
+  if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'Please set a new password first.' });
+  return res.redirect('/change-password.html');
+});
 
 // `index: false` matters here, not just cosmetically — without it,
 // express.static auto-serves public/index.html for GET '/' itself, before

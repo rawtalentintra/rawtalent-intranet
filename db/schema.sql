@@ -3376,3 +3376,7 @@ CREATE TABLE IF NOT EXISTS user_activity_log (
 );
 CREATE INDEX IF NOT EXISTS user_activity_log_user_time ON user_activity_log (user_id, created_at);
 ALTER TABLE user_activity_log ENABLE ROW LEVEL SECURITY;
+
+-- First-login password change (Joy, 26 Nov 2026): set whenever Joy sets someone else's
+-- password in Admin > Users; they must pick their own before using HeartBeat.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;

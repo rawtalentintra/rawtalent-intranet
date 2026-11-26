@@ -388,7 +388,7 @@ router.put('/users/:id', requireSuperAdmin, async (req, res) => {
     const changes = [];
     if (password) {
       const hash = await bcrypt.hash(password, 12);
-      await db.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [hash, req.params.id] });
+      await db.execute({ sql: 'UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?', args: [hash, Number(req.params.id) !== req.user.id, req.params.id] });
       changes.push('Password reset');
     }
     if (name !== undefined && name !== target.name) { await db.execute({ sql: 'UPDATE users SET name = ? WHERE id = ?', args: [name, req.params.id] }); changes.push(`Name: "${target.name}" → "${name}"`); }
