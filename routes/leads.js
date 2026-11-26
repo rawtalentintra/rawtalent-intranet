@@ -516,7 +516,9 @@ router.get('/voice-insights/matrix', async (req, res) => {
     const state = ['VIC', 'SA', 'QLD', 'ACT', 'NT'].includes(String(req.query.state || '').toUpperCase()) ? String(req.query.state).toUpperCase() : (states.slice().sort((a, b) => b.recordings - a.recordings)[0] || {}).state || 'VIC';
     res.json({ states, ...(await svc.buildMatrix(state)) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // 26 Nov 2026: a rejected Anthropic key showed raw JSON here. Say what's wrong in plain words.
+    const aiKey = err && (err.status === 401 || /x-api-key|authentication_error/i.test(String(err.message)));
+    res.status(aiKey ? 503 : 500).json({ error: aiKey ? "The AI service isn't connected right now (HeartBeat's AI key needs updating), so the Intelligence Matrix can't be built. Everything else on this page is fine." : err.message });
   }
 });
 
