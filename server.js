@@ -208,6 +208,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 app.use('/auth/login', loginLimiter);
+app.use('/auth/setup-password', loginLimiter);
 app.use('/auth', require('./routes/auth'));
 // JobAdder's registered "Authorized redirect URI" for this application is
 // fixed at /auth/jobadder/callback — mounted under the same /auth prefix

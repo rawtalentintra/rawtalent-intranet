@@ -25,6 +25,21 @@ router.post('/login', (req, res, next) => {
   })(req, res, next);
 });
 
+// One-time setup link: the person chooses their own password (no temporary password needed).
+router.post('/setup-password', async (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !password || String(password).length < 10) return res.status(400).json({ error: 'Password must be at least 10 characters.' });
+  try {
+    const db = getDb();
+    const hash = require('crypto').createHash('sha256').update(String(token)).digest('hex');
+    const t = (await db.execute({ sql: 'UPDATE password_setup_tokens SET used_at = now() WHERE token_hash = ? AND used_at IS NULL AND expires_at > now() RETURNING user_id', args: [hash] })).rows[0];
+    if (!t) return res.status(400).json({ error: 'This link has expired or was already used. Ask Joy for a new one.' });
+    await db.execute({ sql: 'UPDATE users SET password_hash = ?, must_change_password = false WHERE id = ?', args: [await bcrypt.hash(String(password), 12), t.user_id] });
+    require('../config/passport').invalidateUserCache(t.user_id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
 // Change own password (forced on first login after Joy sets a temporary one).
 router.post('/change-password', async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not signed in' });

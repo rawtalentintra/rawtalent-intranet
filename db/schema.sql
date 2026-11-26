@@ -3380,3 +3380,14 @@ ALTER TABLE user_activity_log ENABLE ROW LEVEL SECURITY;
 -- First-login password change (Joy, 26 Nov 2026): set whenever Joy sets someone else's
 -- password in Admin > Users; they must pick their own before using HeartBeat.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
+
+-- One-time "set your password" links (Joy, 26 Nov 2026). Only a SHA-256 of the token is stored.
+CREATE TABLE IF NOT EXISTS password_setup_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE password_setup_tokens ENABLE ROW LEVEL SECURITY;

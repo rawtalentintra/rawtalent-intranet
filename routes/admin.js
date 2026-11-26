@@ -348,6 +348,19 @@ router.get('/activity-log', requireSuperAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Joy only: one-time "set your password" link for a user (valid 48h, single use).
+router.post('/users/:id/setup-link', requireSuperAdmin, async (req, res) => {
+  try {
+    const crypto = require('crypto');
+    const token = crypto.randomBytes(32).toString('base64url');
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const db = getDb();
+    await db.execute({ sql: 'UPDATE password_setup_tokens SET used_at = now() WHERE user_id = ? AND used_at IS NULL', args: [req.params.id] });
+    await db.execute({ sql: `INSERT INTO password_setup_tokens (token_hash, user_id, expires_at, created_by) VALUES (?, ?, now() + interval '48 hours', ?)`, args: [hash, req.params.id, req.user.email] });
+    res.json({ url: `${process.env.APP_URL || 'https://rawtalent-internal.app'}/set-password.html?t=${token}`, expiresInHours: 48 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/users', requireSuperAdmin, async (req, res) => {
   const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false, wfpLabel, additionalWfpTerritories = [] } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });
