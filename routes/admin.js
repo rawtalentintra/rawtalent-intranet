@@ -339,6 +339,15 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Joy only: full activity log for a tracked (external) account.
+router.get('/activity-log', requireSuperAdmin, async (req, res) => {
+  try {
+    const rows = (await getDb().execute({ sql: `SELECT created_at AT TIME ZONE 'Australia/Melbourne' AS at, method, path, query, status, body_keys FROM user_activity_log
+      WHERE email = ? ORDER BY id DESC LIMIT 2000`, args: [String(req.query.email || '').toLowerCase()] })).rows;
+    res.json({ email: req.query.email, count: rows.length, rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/users', requireSuperAdmin, async (req, res) => {
   const { email, name, password, role = 'user', active = true, canBuildTraining = false, canCreateOutreachLists = false, wfpLabel, additionalWfpTerritories = [] } = req.body;
   if (!email || !name) return res.status(400).json({ error: 'Email and name are required' });

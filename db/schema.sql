@@ -3357,3 +3357,22 @@ ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS tag TEXT;
 
 -- Group text title (Joy, 25 Nov 2026), e.g. "25-Nov Strat": lets the Inbox filter to everyone in one mass send.
 ALTER TABLE sms_batches ADD COLUMN IF NOT EXISTS title TEXT;
+
+-- External/temporary accounts (Joy, 26 Nov 2026: Peter Griffith, sales consultant hired by Liam).
+-- access_expires_at: after this the account is treated as signed out. track_activity: every
+-- request is written to user_activity_log, and Joy gets a daily Slack DM summary (Joy only).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS track_activity BOOLEAN DEFAULT false;
+CREATE TABLE IF NOT EXISTS user_activity_log (
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  email TEXT,
+  method TEXT,
+  path TEXT,
+  query TEXT,
+  status INTEGER,
+  body_keys TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_activity_log_user_time ON user_activity_log (user_id, created_at);
+ALTER TABLE user_activity_log ENABLE ROW LEVEL SECURITY;

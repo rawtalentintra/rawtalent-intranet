@@ -31,7 +31,8 @@ passport.deserializeUser(async (id, done) => {
     // session", so a deactivated user's old session could still open the
     // mobile app. Now every guard sees them as logged out within 20s.
     const row = result.rows[0];
-    const user = row && row.active !== false && row.active !== 0 ? row : false;
+    const expired = row && row.access_expires_at && new Date(row.access_expires_at) < new Date();
+    const user = row && row.active !== false && row.active !== 0 && !expired ? row : false;
     userCache.set(id, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
     done(null, user);
   } catch (err) {
@@ -51,6 +52,7 @@ passport.use(new LocalStrategy({ usernameField: 'email' }, async (email, passwor
     }
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return done(null, false, { message: 'Invalid email or password.' });
+    if (user.access_expires_at && new Date(user.access_expires_at) < new Date()) return done(null, false, { message: 'This temporary access has expired.' });
     return done(null, user);
   } catch (err) {
     return done(err);

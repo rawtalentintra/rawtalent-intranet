@@ -114,6 +114,7 @@ app.use(session({
 require('./config/passport');
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(require('./services/userActivityService').middleware);
 
 // `index: false` matters here, not just cosmetically — without it,
 // express.static auto-serves public/index.html for GET '/' itself, before
@@ -547,6 +548,14 @@ async function start() {
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.DRIVE_FOLDER_ID) {
     syncFromDrive().catch(err => console.error('Drive sync error:', err.message));
   }
+  // 6pm Melbourne: Joy's daily Slack DM of tracked (external) users' HeartBeat activity.
+  let activityDay = null;
+  setInterval(() => {
+    const now = new Date();
+    const h = +new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', hour: 'numeric', hourCycle: 'h23' }).format(now);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne' }).format(now);
+    if (h === 18 && activityDay !== day) { activityDay = day; require('./services/userActivityService').dailyReport().catch(err => console.error('Activity report error:', err.message)); }
+  }, 5 * 60 * 1000);
   // 5am Melbourne: open today's "HeartBeat Tasks for today" thread in #daily-check-in.
   setInterval(() => {
     const h = +new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Melbourne', hour: 'numeric', hourCycle: 'h23' }).format(new Date());
