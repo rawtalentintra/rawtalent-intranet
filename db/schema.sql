@@ -3398,3 +3398,8 @@ ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAUL
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS cancel_task_id TEXT;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS last_cancel_reason TEXT;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS cancel_kind TEXT;
+-- Fell-through nurture (Joy, 27 Nov 2026): 3 days after a first booking dies with nothing else
+-- booked, the centre re-enters the Dormant journey (#34/#45, FBF #38/#46) via dormant_touchpoint_complete.
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS nurture_due_at TIMESTAMPTZ;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS nurture_status TEXT;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS nurture_sent_at TIMESTAMPTZ;

@@ -287,7 +287,7 @@ async function check() {
     if (row0 && !['created', 'rearm', 'followup'].includes(row0.status)) continue;
     if (!row0 && !(new Date(c.createdDate).getTime() >= cutoff)) continue;
     const mine = bookingsFor(c, bookings);
-    if (row0 && row0.status === 'rearm') { await rearmed(c, row0, mine, out); continue; }
+    if (row0 && row0.status === 'rearm') { await rearmed(c, row0, mine, out); await maybeNurture(c, row0, mine, out); continue; }
     if (row0 && row0.status === 'followup') { await deadAfterFill(c, row0, mine, out); continue; }
     const b = nextLive(mine, '') || firstOf(mine);
     if (!b) continue;
@@ -403,7 +403,7 @@ async function handleDead(c, row, mine, cur, own, wasFilled) {
     if (P.ops) await opsPost(`${P.icon} ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${what}${why ? ` (${esc(why)})` : ''}. ${esc(nextLine)}`);
   }
   await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'rearm', dead_alert_at = now(), tried_booking_ids = ?, cancel_task_id = ?, last_cancel_reason = ?,
-      cancel_kind = ?, task_id = NULL, followup_due = NULL, filled_alert_at = NULL, reminder_sent_at = NULL, escalated_at = NULL WHERE centre_key = ?`, args: [tried, taskId, why || what, kind, c.centreKey] });
+      cancel_kind = ?, nurture_due_at = ${(!next && kind !== 'silent') ? "now() + interval '3 days'" : 'NULL'}, nurture_status = ${(!next && kind !== 'silent') ? "'scheduled'" : 'NULL'}, nurture_sent_at = NULL, task_id = NULL, followup_due = NULL, filled_alert_at = NULL, reminder_sent_at = NULL, escalated_at = NULL WHERE centre_key = ?`, args: [tried, taskId, why || what, kind, c.centreKey] });
   row.status = 'rearm'; row.tried_booking_ids = tried; row.cancel_kind = kind; row.cancel_task_id = taskId;
   if (next) await rearmed(c, row, mine, { created: 0 }, true);
 }
@@ -426,7 +426,7 @@ async function rearmed(c, row, mine, out, immediate = false) {
   const own = await owner(c.centreKey);
   const d = describe(b);
   const link = `${APP_URL}/go/centre/${encodeURIComponent(c.centreKey)}`;
-  const upd = await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'created', booking_id = ?, booking_date = ?, owner_name = ?, owner_email = ?, created_alert_at = now(), attempt = coalesce(attempt,1) + 1 WHERE centre_key = ? AND status = 'rearm' RETURNING attempt`, args: [String(b.clientBookingId), d.day || null, own.name, own.email, c.centreKey] });
+  const upd = await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'created', booking_id = ?, booking_date = ?, owner_name = ?, owner_email = ?, created_alert_at = now(), nurture_status = CASE WHEN nurture_status = 'scheduled' THEN 'cancelled_rebooked' ELSE nurture_status END, attempt = coalesce(attempt,1) + 1 WHERE centre_key = ? AND status = 'rearm' RETURNING attempt`, args: [String(b.clientBookingId), d.day || null, own.name, own.email, c.centreKey] });
   if (!upd.rows.length) return;
   // If they rebooked, the "call them, help them rebook" task is done.
   if (row.cancel_task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now(), description = description || ? WHERE id = ? AND status <> 'done'", args: [`\n\nClosed automatically: ${row.centre_name} posted a new booking (${d.when}).`, row.cancel_task_id] });
@@ -452,6 +452,37 @@ function firstBookingDeadEmail({ ownerName, centreName, when, what, why, wasFill
     p(esc(nextLine)) +
     p(`<a href="${esc(link)}">Open in HeartBeat</a>`) +
     `<p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#888">Sent automatically by HeartBeat. Internal only.</p>`;
+}
+
+// 3 days after a first booking fell through with nothing else booked, put the centre back into
+// nurture: the Dormant journey (FBF version if the centre was offered First Booking Free). Uses the
+// same event HeartBeat sends for a dormant touch point; the journeys leave on booking_posted.
+async function maybeNurture(c, row, mine, out) {
+  if (row.nurture_status !== 'scheduled' || !row.nurture_due_at || new Date(row.nurture_due_at) > new Date()) return;
+  const db = getDb();
+  if (nextLive(mine, row.tried_booking_ids)) return; // rebooked: rearmed() handles it
+  const fbf = require('./firstBookingFreeService');
+  if (!fbf.cioTrackConfig().ready) return; // stays scheduled until Customer.io signals are on
+  let status;
+  try {
+    const ct = await fbf.resolveContact({ centreKey: c.centreKey });
+    const ident = await fbf.cioIdentifierFor({ contact_email: ct && ct.email }, ct);
+    if (!ident) status = 'no_profile';
+    else {
+      const offer = (await db.execute({ sql: "SELECT 1 FROM first_booking_free_offers WHERE centre_key = ? AND pay_task_id IS NULL LIMIT 1", args: [c.centreKey] })).rows[0];
+      let st = { service_type: '' };
+      if (String(c.centreKey).startsWith('loc:')) {
+        try { const t = (await require('./centreServiceTypeSync').computeServiceTypes()).get(String(c.centreKey).slice(4)); if (t) st = { service_type: ['early_childhood', 'oshc', 'both'][t.service_type_id], service_type_id: t.service_type_id }; } catch (_) { /* ECEC */ }
+      }
+      const owner = await fbf.ownerFields(c.centreKey);
+      await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!offer, first_booking_fell_through_at: Math.floor(Date.now() / 1000), ...owner }, 'dormant_touchpoint_complete', {
+        first_booking_free: !!offer, centre_key: c.centreKey, centre_name: row.centre_name, state: c.state || '', partner_name: owner.wfp_owner_name || '',
+        source: 'first_booking_fell_through', ...owner, ...st });
+      status = 'sent';
+    }
+  } catch (err) { console.error('Fell-through nurture failed:', err.message); status = 'failed'; }
+  await db.execute({ sql: `UPDATE first_booking_alerts SET nurture_status = ?, nurture_sent_at = CASE WHEN ? = 'sent' THEN now() ELSE nurture_sent_at END WHERE centre_key = ?`, args: [status, status, c.centreKey] });
+  out.nurtured = (out.nurtured || 0) + (status === 'sent' ? 1 : 0);
 }
 
 let running = null;
