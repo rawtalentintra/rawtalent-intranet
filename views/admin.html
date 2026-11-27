@@ -1738,6 +1738,7 @@
              not a small select easy to miss. -->
         <div class="leads-closed-tabs" id="leadsClosedTabs">
           <button type="button" class="leads-closed-tab active" data-value="active" onclick="setLeadsClosedFilter('active')">Open Leads</button>
+          <button type="button" class="leads-closed-tab" data-value="closed" onclick="setLeadsClosedFilter('signed')">Signed</button>
           <button type="button" class="leads-closed-tab" data-value="closed" onclick="setLeadsClosedFilter('closed')">Closed Leads</button>
           <button type="button" class="leads-closed-tab" data-value="all" onclick="setLeadsClosedFilter('all')">All</button>
         </div>
@@ -9996,8 +9997,12 @@
       // applies the closed filter, since that one genuinely is about
       // which rows to show, not what happened historically.
       renderLeadsKpis(filtered, periodKey);
-      if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at);
-      else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at);
+      // Signed centres (Gwen, 27 Nov 2026) leave Open Leads and get their own
+      // tab; they still count as Signed in the KPIs above.
+      const isSigned = l => l.signed_status === 'signed';
+      if (closedFilter === 'active') filtered = filtered.filter(l => !l.closed_at && !isSigned(l));
+      else if (closedFilter === 'signed') filtered = filtered.filter(isSigned);
+      else if (closedFilter === 'closed') filtered = filtered.filter(l => !!l.closed_at && !isSigned(l));
       leadsPage = 1; // any filter change starts back at page 1 — a stale page number from a much larger previous result set would otherwise show "no results" instead of the new filtered set
       renderLeadsTableRows(filtered);
 

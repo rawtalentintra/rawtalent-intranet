@@ -1711,7 +1711,7 @@
       // Affinity/G8 — routes/leads.js's archived_reason) were never
       // excluded here, unlike Desktop's default "Metro Leads" filter —
       // mobile just showed everything closed_at didn't already hide.
-      const open = allLeads.filter(l => !l.closed_at && !l.archived_at);
+      const open = allLeads.filter(l => !l.closed_at && !l.archived_at && l.signed_status !== 'signed'); // signed centres leave the list (Gwen, 27 Nov)
       const filtered = open.filter(l => !searchVal || (l.centre_name || '').toLowerCase().includes(searchVal.toLowerCase()) || (l.suburb || '').toLowerCase().includes(searchVal.toLowerCase()));
       main.innerHTML = `
         ${wfpFilterBarHtml()}
