@@ -455,8 +455,22 @@ function firstBookingDeadEmail({ ownerName, centreName, when, what, why, wasFill
 }
 
 // 3 days after a first booking fell through with nothing else booked, put the centre back into
-// nurture: the Dormant journey (FBF version if the centre was offered First Booking Free). Uses the
-// same event HeartBeat sends for a dormant touch point; the journeys leave on booking_posted.
+// Journey 1 where it left off (Joy, 27 Nov 2026: not Dormant, its wording differs). HeartBeat sends
+// first_booking_fell_through with skip_e2..skip_e7 = "true" for each Journey 1 email the centre has
+// already received (any journey: J1, FBF J1, Leads J1 share these emails), so the Customer.io resume
+// journeys (ECEC + OSHC) only send the ones they missed. They leave on booking_posted.
+const J1_EMAILS = { skip_e2: /got everything you need/i, skip_e3: /how we choose/i, skip_e4: /meet an educator/i,
+  skip_e5: /other centres are saying/i, skip_e6: /morning doesn.?t go to plan|morning does not go to plan/i, skip_e7: /when you need us/i };
+async function journey1Received(ident) {
+  const out = Object.fromEntries(Object.keys(J1_EMAILS).map(k => [k, 'false']));
+  const key = process.env.CUSTOMERIO_APP_API_KEY;
+  if (!key) return out;
+  const r = await fetch(`https://api.customer.io/v1/customers/${encodeURIComponent(ident)}/messages?limit=100`, { headers: { Authorization: `Bearer ${key}` } });
+  if (!r.ok) return out;
+  const subs = ((await r.json()).messages || []).filter(m => m.type === 'email' || !m.type).map(m => String(m.subject || m.name || ''));
+  for (const [k, re] of Object.entries(J1_EMAILS)) if (subs.some(x => re.test(x))) out[k] = 'true';
+  return out;
+}
 async function maybeNurture(c, row, mine, out) {
   if (row.nurture_status !== 'scheduled' || !row.nurture_due_at || new Date(row.nurture_due_at) > new Date()) return;
   const db = getDb();
@@ -476,9 +490,10 @@ async function maybeNurture(c, row, mine, out) {
         try { const t = (await require('./centreServiceTypeSync').computeServiceTypes()).get(String(c.centreKey).slice(4)); if (t) st = { service_type: ['early_childhood', 'oshc', 'both'][t.service_type_id], service_type_id: t.service_type_id }; } catch (_) { /* ECEC */ }
       }
       const owner = await fbf.ownerFields(c.centreKey);
-      await fbf.sendCioSignal(ident, { dormant_touchpoint_fbf: !!offer, first_booking_fell_through_at: Math.floor(Date.now() / 1000), ...owner }, 'dormant_touchpoint_complete', {
-        first_booking_free: !!offer, centre_key: c.centreKey, centre_name: row.centre_name, state: c.state || '', partner_name: owner.wfp_owner_name || '',
-        source: 'first_booking_fell_through', ...owner, ...st });
+      const skips = await journey1Received(ident);
+      await fbf.sendCioSignal(ident, { first_booking_fell_through_at: Math.floor(Date.now() / 1000), ...owner }, 'first_booking_fell_through', {
+        first_booking_free: !!offer, centre_key: c.centreKey, centre_name: row.centre_name, state: c.state || '', reason: row.last_cancel_reason || '',
+        ...skips, ...owner, ...st });
       status = 'sent';
     }
   } catch (err) { console.error('Fell-through nurture failed:', err.message); status = 'failed'; }
