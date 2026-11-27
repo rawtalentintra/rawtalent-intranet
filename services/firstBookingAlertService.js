@@ -462,6 +462,7 @@ async function maybeNurture(c, row, mine, out) {
   const db = getDb();
   if (nextLive(mine, row.tried_booking_ids)) return; // rebooked: rearmed() handles it
   const fbf = require('./firstBookingFreeService');
+  if (process.env.FELL_THROUGH_NURTURE !== 'on') return; // paused until the Journey 1 resume journey is live (Joy, 27 Nov)
   if (!fbf.cioTrackConfig().ready) return; // stays scheduled until Customer.io signals are on
   let status;
   try {
