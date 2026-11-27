@@ -339,9 +339,10 @@ async function check() {
 //            email + DM + Ops post, urgent call task today if nothing else is booked.
 //   check  - no reason recorded: email + DM, normal-priority "find out why" task.
 //   fyi    - the centre simply didn't need it any more (no longer needed, fewer children, staff
-//            back, internal staff, room/centre changes): a Slack DM only, no task, no email.
+//            back, internal staff, room/centre changes): email + Slack DM to the owner, no task.
 //   silent - housekeeping (added by mistake, duplicate, wrong date/role, admin reassign/test):
-//            no messages at all; the centre's next booking quietly becomes the first booking.
+//            an email to the owner explaining it, no Slack, no task; the next booking becomes
+//            the first booking (Joy, 27 Nov 2026).
 function deadKind(b) {
   if (b.statusId === 7) return 'urgent';
   let r; try { r = require('./cancelReasons').classify(b); } catch (_) { return 'check'; }
@@ -361,9 +362,10 @@ const DEAD_PLAYBOOK = {
   check: { icon: ':warning:', email: true, ops: false, task: { priority: 'high',
     title: (n, w) => `${n}'s first booking was ${w} (no reason given), check in`,
     steps: `No reason was recorded, so check in:\n• Find out why, and whether anything on our side went wrong.\n• Help them post their next booking.` } },
-  fyi: { icon: ':information_source:', email: false, ops: false, task: null,
+  fyi: { icon: ':information_source:', email: true, ops: false, task: null,
     fyiLine: `Looks like they just didn't need it any more, so there's no task. Their next booking will restart the first-booking follow-up.` },
-  silent: { icon: '', email: false, ops: false, task: null, fyiLine: '' }
+  silent: { icon: '', email: true, slack: false, ops: false, task: null,
+    fyiLine: `Looks like a booking mistake or admin change (not a lost booking), so there's no task. Their next booking will restart the first-booking follow-up.` }
 };
 
 async function handleDead(c, row, mine, cur, own, wasFilled) {
@@ -392,12 +394,12 @@ async function handleDead(c, row, mine, cur, own, wasFilled) {
     });
     try { await require('./slackService').notifyTaskTagged(taskId, [own.email], 'assigned to'); } catch (_) { /* best effort */ }
   }
-  if (kind !== 'silent') {
+  {
     const nextLine = next ? `They still have another booking (${describe(next).when}); HeartBeat now follows that one as their first booking.`
       : taskId ? `They have no other bookings, so there's a task for you to call them today.` : P.fyiLine;
     const tgt = taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link;
     if (P.email) await sendEmail(own.email, `First booking ${what}: ${row.centre_name}`, firstBookingDeadEmail({ ownerName: own.name, centreName: row.centre_name, when: d.when, what, why, wasFilled, nextLine, link: tgt }));
-    await slackDm(own.email, `First booking ${what}: ${row.centre_name}`, `${P.icon} *${esc(row.centre_name)}'s first booking was ${what}* (${esc(d.when)})${why ? ` · ${esc(why)}` : ''}.\n${esc(nextLine)} <${tgt}|${taskId ? 'Open task' : 'Open in HeartBeat'}>`);
+    if (P.slack !== false) await slackDm(own.email, `First booking ${what}: ${row.centre_name}`, `${P.icon} *${esc(row.centre_name)}'s first booking was ${what}* (${esc(d.when)})${why ? ` · ${esc(why)}` : ''}.\n${esc(nextLine)} <${tgt}|${taskId ? 'Open task' : 'Open in HeartBeat'}>`);
     if (P.ops) await opsPost(`${P.icon} ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${what}${why ? ` (${esc(why)})` : ''}. ${esc(nextLine)}`);
   }
   await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'rearm', dead_alert_at = now(), tried_booking_ids = ?, cancel_task_id = ?, last_cancel_reason = ?,
