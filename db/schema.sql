@@ -3391,3 +3391,9 @@ CREATE TABLE IF NOT EXISTS password_setup_tokens (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE password_setup_tokens ENABLE ROW LEVEL SECURITY;
+-- First booking cancelled/unfilled (Liam, 27 Nov 2026): the centre is re-armed instead of
+-- closed, so its next live booking becomes the new "first booking" and the whole flow restarts.
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS tried_booking_ids TEXT DEFAULT '';
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 1;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS cancel_task_id TEXT;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS last_cancel_reason TEXT;

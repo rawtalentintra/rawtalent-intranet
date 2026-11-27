@@ -15,7 +15,14 @@
 //                          favourite/request and asked to rate the educator
 //                          positive in the Portal (that rating drives the
 //                          Customer.io feedback journey, so it stays in the Portal).
-//   3. Booking cancelled or unfilled before it was filled -> one heads-up to the owner.
+//   3. Booking cancelled or unfilled (before OR after it was filled, as long as the
+//      shift hasn't happened) -> the centre is RE-ARMED, not closed (Liam, 27 Nov 2026):
+//      - owner gets an email + Slack DM, Ops a thread post;
+//      - any morning-after "how was your first booking" task is closed (no shift happened);
+//      - if the centre has NO other live booking, the owner gets an urgent task due today:
+//        "call them, find out why, help them rebook";
+//      - the next live booking at that centre becomes the new first booking and the whole
+//        flow (alert -> filled -> morning-after call -> Positive/Negative) runs again.
 //
 // "First booking" = the earliest-created, non-deleted RT booking at that centre.
 // HeartBeat holds ~12 months of RT bookings, so only centres created in RT in the
@@ -45,6 +52,16 @@ function bookingsFor(centre, bookings) {
     ? String(b.locationId) === String(centre.rtLocationId)
     : String(b.clientId) === String(centre.rtClientId)));
 }
+const isDead = b => DEAD_STATUSES.has(b.statusId);
+// Earliest live booking we haven't already tried as this centre's first booking.
+function nextLive(list, tried) {
+  const t = new Set(String(tried || '').split(',').filter(Boolean));
+  return firstOf(list.filter(b => !isDead(b) && !t.has(String(b.clientBookingId))));
+}
+const cancelReason = b => {
+  if (b.statusId === 7) return 'unfilled';
+  try { const r = require('./cancelReasons').classify(b); return r.code ? `${r.category}: ${r.reason}` : ''; } catch (_) { return ''; }
+};
 function firstOf(list) {
   return [...list].sort((a, b) => new Date(a.createdDate || a.bookingDate) - new Date(b.createdDate || b.bookingDate))[0] || null;
 }
@@ -267,10 +284,12 @@ async function check() {
 
   for (const c of centres) {
     const row0 = known.get(c.centreKey);
-    if (row0 && row0.status !== 'created') continue;
+    if (row0 && !['created', 'rearm', 'followup'].includes(row0.status)) continue;
     if (!row0 && !(new Date(c.createdDate).getTime() >= cutoff)) continue;
     const mine = bookingsFor(c, bookings);
-    const b = firstOf(mine);
+    if (row0 && row0.status === 'rearm') { await rearmed(c, row0, mine, out); continue; }
+    if (row0 && row0.status === 'followup') { await deadAfterFill(c, row0, mine, out); continue; }
+    const b = nextLive(mine, '') || firstOf(mine);
     if (!b) continue;
 
     if (!row0) {
@@ -307,13 +326,83 @@ async function check() {
       out.filled++;
     } else if (DEAD_STATUSES.has(cur.statusId)) {
       // 3. Cancelled / unfilled before it was filled
-      await slackDm(own.email, `First booking ${cur.statusId === 7 ? 'unfilled' : 'cancelled'}: ${row.centre_name}`, `:warning: *${esc(row.centre_name)}'s first booking was ${cur.statusId === 7 ? 'marked unfilled' : 'cancelled'}* (${esc(d.when)}). Worth a call to keep them warm.`);
-      await opsPost(`:warning: ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${cur.statusId === 7 ? 'marked unfilled' : 'cancelled'}.`);
-      await db.execute({ sql: "UPDATE first_booking_alerts SET status = 'done', dead_alert_at = now() WHERE centre_key = ?", args: [c.centreKey] });
+      await handleDead(c, row, mine, cur, own, false);
       out.dead++;
     }
   }
   return out;
+}
+
+// A first booking died (cancelled/unfilled). Re-arm the centre and tell the owner.
+async function handleDead(c, row, mine, cur, own, wasFilled) {
+  const db = getDb();
+  const d = describe(cur);
+  const what = cur.statusId === 7 ? 'marked unfilled' : 'cancelled';
+  const why = cancelReason(cur);
+  const tried = [row.tried_booking_ids, row.booking_id].filter(Boolean).join(',');
+  const next = nextLive(mine, tried);
+  const link = `${APP_URL}/go/centre/${encodeURIComponent(c.centreKey)}`;
+  // The shift never happened, so the morning-after call task no longer applies.
+  if (wasFilled && row.task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now(), description = description || ? WHERE id = ? AND status <> 'done'", args: [`\n\nClosed automatically: the booking was ${what} before the shift.`, row.task_id] });
+  let taskId = null;
+  if (!next) {
+    taskId = uuidv4();
+    await db.execute({
+      sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
+            VALUES (?, 'management', ?, ?, ?, 'to_do', 'urgent', ?, ?, 'system@rawtalent.internal', 'Auto — First booking', '[]', '[]', ?)`,
+      args: [taskId, CLIENT_FOLLOW_UP, `URGENT: ${row.centre_name}'s first booking was ${what}, call them today`,
+        `${row.centre_name}'s first ever booking (${d.when}) was ${what}${why ? ` (${why})` : ''}${wasFilled ? ', after it had been filled' : ''}.\n\n` +
+        `They have no other bookings with us right now. Call them today:\n• Find out why, and whether anything on our side went wrong.\n• Help them post their next booking (and offer to post it with them on the call).\n• Log the call on the centre in HeartBeat.\n\n` +
+        `When they book again, HeartBeat treats that as their first booking and runs the full first-booking follow-up again.`,
+        JSON.stringify([own.email]), melNow().day, JSON.stringify([{ centreKey: c.centreKey, name: row.centre_name }])]
+    });
+    try { await require('./slackService').notifyTaskTagged(taskId, [own.email], 'assigned to'); } catch (_) { /* best effort */ }
+  }
+  const nextLine = next ? `They still have another booking (${describe(next).when}); HeartBeat now follows that one as their first booking.` : `They have no other bookings, so there's a task for you to call them today.`;
+  await sendEmail(own.email, `First booking ${what}: ${row.centre_name}`, firstBookingDeadEmail({ ownerName: own.name, centreName: row.centre_name, when: d.when, what, why, wasFilled, nextLine, link: taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link }));
+  await slackDm(own.email, `First booking ${what}: ${row.centre_name}`, `:warning: *${esc(row.centre_name)}'s first booking was ${what}* (${esc(d.when)})${why ? ` · ${esc(why)}` : ''}.\n${esc(nextLine)} <${taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link}|${taskId ? 'Open task' : 'Open in HeartBeat'}>`);
+  await opsPost(`:warning: ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${what}${why ? ` (${esc(why)})` : ''}. ${esc(nextLine)}`);
+  await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'rearm', dead_alert_at = now(), tried_booking_ids = ?, cancel_task_id = ?, last_cancel_reason = ?,
+      task_id = NULL, followup_due = NULL, filled_alert_at = NULL, reminder_sent_at = NULL, escalated_at = NULL WHERE centre_key = ?`, args: [tried, taskId, why || what, c.centreKey] });
+  row.status = 'rearm'; row.tried_booking_ids = tried;
+  if (next) await rearmed(c, row, mine, { created: 0 });
+}
+
+// Filled first booking that is later cancelled before the shift.
+async function deadAfterFill(c, row, mine, out) {
+  const cur = mine.find(x => String(x.clientBookingId) === String(row.booking_id));
+  if (!cur || !isDead(cur)) return;
+  const day = (cur.bookingDate || '').slice(0, 10);
+  if (day && day < melNow().day && cur.statusId !== 6) return; // shift already happened
+  await handleDead(c, row, mine, cur, { name: row.owner_name || 'Liam', email: row.owner_email || 'liam@rawtalent.com.au' }, true);
+  out.dead++;
+}
+
+// Re-armed centre: its next live booking becomes the new first booking.
+async function rearmed(c, row, mine, out) {
+  const b = nextLive(mine, row.tried_booking_ids);
+  if (!b) return;
+  const db = getDb();
+  const own = await owner(c.centreKey);
+  const d = describe(b);
+  const link = `${APP_URL}/go/centre/${encodeURIComponent(c.centreKey)}`;
+  const upd = await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'created', booking_id = ?, booking_date = ?, owner_name = ?, owner_email = ?, created_alert_at = now(), attempt = coalesce(attempt,1) + 1 WHERE centre_key = ? AND status = 'rearm' RETURNING attempt`, args: [String(b.clientBookingId), d.day || null, own.name, own.email, c.centreKey] });
+  if (!upd.rows.length) return;
+  // If they rebooked, the "call them, help them rebook" task is done.
+  if (row.cancel_task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now(), description = description || ? WHERE id = ? AND status <> 'done'", args: [`\n\nClosed automatically: ${row.centre_name} posted a new booking (${d.when}).`, row.cancel_task_id] });
+  await sendEmail(own.email, `First booking (rebooked): ${c.name}`, firstBookingEmail({ ownerName: own.name, centreName: c.name, when: d.when, bookedBy: d.by, status: b.bookingStatus, bookingId: b.clientBookingId, heartbeatLink: link }));
+  await slackDm(own.email, `First booking (rebooked): ${c.name}`, `:tada: *${esc(c.name)} booked again* after their first booking fell through.\nShift: ${esc(d.when)}${d.by ? ` · booked by ${esc(d.by)}` : ''}\nThis is now their first booking: you'll get a message when it's filled. <${link}|Open in HeartBeat>`);
+  await opsPost(`:tada: *${esc(c.name)} rebooked* after their first booking fell through. New first booking ${esc(d.when)}. Let's make sure this one is filled.`);
+  out.created = (out.created || 0) + 1;
+}
+
+function firstBookingDeadEmail({ ownerName, centreName, when, what, why, wasFilled, nextLine, link }) {
+  const p = t => `<p style="margin:0 0 14px;font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a2e">${t}</p>`;
+  return p(`Hi ${esc(ownerName)},`) +
+    p(`<strong>${esc(centreName)}</strong>'s first booking (${esc(when)}) was <strong>${esc(what)}</strong>${wasFilled ? ' after it had been filled' : ''}.${why ? `<br><strong>Reason:</strong> ${esc(why)}` : ''}`) +
+    p(esc(nextLine)) +
+    p(`<a href="${esc(link)}">Open in HeartBeat</a>`) +
+    `<p style="margin:0;font-family:Arial,sans-serif;font-size:12px;color:#888">Sent automatically by HeartBeat. Internal only.</p>`;
 }
 
 let running = null;
