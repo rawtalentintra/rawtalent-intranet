@@ -334,6 +334,38 @@ async function check() {
 }
 
 // A first booking died (cancelled/unfilled). Re-arm the centre and tell the owner.
+// What a dead first booking means depends on who cancelled and why (Joy, 27 Nov 2026).
+//   urgent - we let them down (unfilled, our educator dropped out) or lost it to a competitor:
+//            email + DM + Ops post, urgent call task today if nothing else is booked.
+//   check  - no reason recorded: email + DM, normal-priority "find out why" task.
+//   fyi    - the centre simply didn't need it any more (no longer needed, fewer children, staff
+//            back, internal staff, room/centre changes): a Slack DM only, no task, no email.
+//   silent - housekeeping (added by mistake, duplicate, wrong date/role, admin reassign/test):
+//            no messages at all; the centre's next booking quietly becomes the first booking.
+function deadKind(b) {
+  if (b.statusId === 7) return 'urgent';
+  let r; try { r = require('./cancelReasons').classify(b); } catch (_) { return 'check'; }
+  if (r.group === 'unfilled' || r.group === 'educator') return 'urgent';
+  if (r.group === 'admin') return 'silent';
+  if (r.group === 'centre') {
+    if (r.category === 'Booking error') return 'silent';
+    if ([18, 19].includes(Number(r.code))) return 'urgent';   // another agency / sourced directly
+    return 'fyi';
+  }
+  return 'check';
+}
+const DEAD_PLAYBOOK = {
+  urgent: { icon: ':rotating_light:', email: true, ops: true, task: { priority: 'urgent',
+    title: (n, w) => `URGENT: ${n}'s first booking was ${w}, call them today`,
+    steps: `Call them today:\n• Apologise if it was on our side (unfilled, or our educator dropped out) and find out what we can do better.\n• If they went with another agency, find out why and win the next one.\n• Help them post their next booking (offer to post it with them on the call).` } },
+  check: { icon: ':warning:', email: true, ops: false, task: { priority: 'high',
+    title: (n, w) => `${n}'s first booking was ${w} (no reason given), check in`,
+    steps: `No reason was recorded, so check in:\n• Find out why, and whether anything on our side went wrong.\n• Help them post their next booking.` } },
+  fyi: { icon: ':information_source:', email: false, ops: false, task: null,
+    fyiLine: `Looks like they just didn't need it any more, so there's no task. Their next booking will restart the first-booking follow-up.` },
+  silent: { icon: '', email: false, ops: false, task: null, fyiLine: '' }
+};
+
 async function handleDead(c, row, mine, cur, own, wasFilled) {
   const db = getDb();
   const d = describe(cur);
@@ -344,28 +376,34 @@ async function handleDead(c, row, mine, cur, own, wasFilled) {
   const link = `${APP_URL}/go/centre/${encodeURIComponent(c.centreKey)}`;
   // The shift never happened, so the morning-after call task no longer applies.
   if (wasFilled && row.task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now(), description = description || ? WHERE id = ? AND status <> 'done'", args: [`\n\nClosed automatically: the booking was ${what} before the shift.`, row.task_id] });
+  const kind = deadKind(cur);
+  const P = DEAD_PLAYBOOK[kind];
   let taskId = null;
-  if (!next) {
+  if (!next && P.task) {
     taskId = uuidv4();
     await db.execute({
       sql: `INSERT INTO tasks (id, department_id, classification_id, title, description, status, priority, assigned_to_emails, due_date, created_by, created_by_name, mentioned_emails, linked_candidates, linked_centres)
-            VALUES (?, 'management', ?, ?, ?, 'to_do', 'urgent', ?, ?, 'system@rawtalent.internal', 'Auto — First booking', '[]', '[]', ?)`,
-      args: [taskId, CLIENT_FOLLOW_UP, `URGENT: ${row.centre_name}'s first booking was ${what}, call them today`,
+            VALUES (?, 'management', ?, ?, ?, 'to_do', ?, ?, ?, 'system@rawtalent.internal', 'Auto — First booking', '[]', '[]', ?)`,
+      args: [taskId, CLIENT_FOLLOW_UP, P.task.title(row.centre_name, what),
         `${row.centre_name}'s first ever booking (${d.when}) was ${what}${why ? ` (${why})` : ''}${wasFilled ? ', after it had been filled' : ''}.\n\n` +
-        `They have no other bookings with us right now. Call them today:\n• Find out why, and whether anything on our side went wrong.\n• Help them post their next booking (and offer to post it with them on the call).\n• Log the call on the centre in HeartBeat.\n\n` +
+        `They have no other bookings with us right now. ${P.task.steps}\n• Log the call on the centre in HeartBeat.\n\n` +
         `When they book again, HeartBeat treats that as their first booking and runs the full first-booking follow-up again.`,
-        JSON.stringify([own.email]), melNow().day, JSON.stringify([{ centreKey: c.centreKey, name: row.centre_name }])]
+        P.task.priority, JSON.stringify([own.email]), melNow().day, JSON.stringify([{ centreKey: c.centreKey, name: row.centre_name }])]
     });
     try { await require('./slackService').notifyTaskTagged(taskId, [own.email], 'assigned to'); } catch (_) { /* best effort */ }
   }
-  const nextLine = next ? `They still have another booking (${describe(next).when}); HeartBeat now follows that one as their first booking.` : `They have no other bookings, so there's a task for you to call them today.`;
-  await sendEmail(own.email, `First booking ${what}: ${row.centre_name}`, firstBookingDeadEmail({ ownerName: own.name, centreName: row.centre_name, when: d.when, what, why, wasFilled, nextLine, link: taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link }));
-  await slackDm(own.email, `First booking ${what}: ${row.centre_name}`, `:warning: *${esc(row.centre_name)}'s first booking was ${what}* (${esc(d.when)})${why ? ` · ${esc(why)}` : ''}.\n${esc(nextLine)} <${taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link}|${taskId ? 'Open task' : 'Open in HeartBeat'}>`);
-  await opsPost(`:warning: ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${what}${why ? ` (${esc(why)})` : ''}. ${esc(nextLine)}`);
+  if (kind !== 'silent') {
+    const nextLine = next ? `They still have another booking (${describe(next).when}); HeartBeat now follows that one as their first booking.`
+      : taskId ? `They have no other bookings, so there's a task for you to call them today.` : P.fyiLine;
+    const tgt = taskId ? `${APP_URL}/?tab=tasks&task=${taskId}` : link;
+    if (P.email) await sendEmail(own.email, `First booking ${what}: ${row.centre_name}`, firstBookingDeadEmail({ ownerName: own.name, centreName: row.centre_name, when: d.when, what, why, wasFilled, nextLine, link: tgt }));
+    await slackDm(own.email, `First booking ${what}: ${row.centre_name}`, `${P.icon} *${esc(row.centre_name)}'s first booking was ${what}* (${esc(d.when)})${why ? ` · ${esc(why)}` : ''}.\n${esc(nextLine)} <${tgt}|${taskId ? 'Open task' : 'Open in HeartBeat'}>`);
+    if (P.ops) await opsPost(`${P.icon} ${esc(row.centre_name)}'s first booking (${esc(d.when)}) was ${what}${why ? ` (${esc(why)})` : ''}. ${esc(nextLine)}`);
+  }
   await db.execute({ sql: `UPDATE first_booking_alerts SET status = 'rearm', dead_alert_at = now(), tried_booking_ids = ?, cancel_task_id = ?, last_cancel_reason = ?,
-      task_id = NULL, followup_due = NULL, filled_alert_at = NULL, reminder_sent_at = NULL, escalated_at = NULL WHERE centre_key = ?`, args: [tried, taskId, why || what, c.centreKey] });
-  row.status = 'rearm'; row.tried_booking_ids = tried;
-  if (next) await rearmed(c, row, mine, { created: 0 });
+      cancel_kind = ?, task_id = NULL, followup_due = NULL, filled_alert_at = NULL, reminder_sent_at = NULL, escalated_at = NULL WHERE centre_key = ?`, args: [tried, taskId, why || what, kind, c.centreKey] });
+  row.status = 'rearm'; row.tried_booking_ids = tried; row.cancel_kind = kind; row.cancel_task_id = taskId;
+  if (next) await rearmed(c, row, mine, { created: 0 }, true);
 }
 
 // Filled first booking that is later cancelled before the shift.
@@ -379,7 +417,7 @@ async function deadAfterFill(c, row, mine, out) {
 }
 
 // Re-armed centre: its next live booking becomes the new first booking.
-async function rearmed(c, row, mine, out) {
+async function rearmed(c, row, mine, out, immediate = false) {
   const b = nextLive(mine, row.tried_booking_ids);
   if (!b) return;
   const db = getDb();
@@ -390,6 +428,15 @@ async function rearmed(c, row, mine, out) {
   if (!upd.rows.length) return;
   // If they rebooked, the "call them, help them rebook" task is done.
   if (row.cancel_task_id) await db.execute({ sql: "UPDATE tasks SET status = 'done', completed_at = now(), updated_at = now(), description = description || ? WHERE id = ? AND status <> 'done'", args: [`\n\nClosed automatically: ${row.centre_name} posted a new booking (${d.when}).`, row.cancel_task_id] });
+  // Mistake/duplicate/admin: the switch is housekeeping. Same-moment switch -> say nothing;
+  // a later booking -> a normal "First booking" alert (nothing "fell through").
+  if (row.cancel_kind === 'silent') {
+    if (immediate) { out.created = (out.created || 0); return; }
+    await sendEmail(own.email, `First booking: ${c.name}`, firstBookingEmail({ ownerName: own.name, centreName: c.name, when: d.when, bookedBy: d.by, status: b.bookingStatus, bookingId: b.clientBookingId, heartbeatLink: link }));
+    await slackDm(own.email, `First booking: ${c.name}`, `:tada: *First booking: ${esc(c.name)}*\nShift: ${esc(d.when)}${d.by ? ` · booked by ${esc(d.by)}` : ''}\nYou'll get a message when it's filled. <${link}|Open in HeartBeat>`);
+    await opsPost(`:tada: *First booking:* ${esc(c.name)} (${esc(own.name)}'s centre). Shift ${esc(d.when)}. Let's make sure it's filled.`);
+    out.created = (out.created || 0) + 1; return;
+  }
   await sendEmail(own.email, `First booking (rebooked): ${c.name}`, firstBookingEmail({ ownerName: own.name, centreName: c.name, when: d.when, bookedBy: d.by, status: b.bookingStatus, bookingId: b.clientBookingId, heartbeatLink: link }));
   await slackDm(own.email, `First booking (rebooked): ${c.name}`, `:tada: *${esc(c.name)} booked again* after their first booking fell through.\nShift: ${esc(d.when)}${d.by ? ` · booked by ${esc(d.by)}` : ''}\nThis is now their first booking: you'll get a message when it's filled. <${link}|Open in HeartBeat>`);
   await opsPost(`:tada: *${esc(c.name)} rebooked* after their first booking fell through. New first booking ${esc(d.when)}. Let's make sure this one is filled.`);

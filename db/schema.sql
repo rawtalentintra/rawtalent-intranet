@@ -3397,3 +3397,4 @@ ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS tried_booking_ids TEXT
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 1;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS cancel_task_id TEXT;
 ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS last_cancel_reason TEXT;
+ALTER TABLE first_booking_alerts ADD COLUMN IF NOT EXISTS cancel_kind TEXT;
